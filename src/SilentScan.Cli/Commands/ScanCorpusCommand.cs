@@ -60,7 +60,6 @@ public static class ScanCorpusCommand
         }
 
         var manifest = CorpusManifestLoader.Load(manifestPath);
-        var parser = new SqlScriptParser();
         var reportsByRepo = new SortedDictionary<string, ScanReport>(StringComparer.Ordinal);
         var hadMissingRepo = false;
 
@@ -75,7 +74,7 @@ public static class ScanCorpusCommand
             }
 
             var files = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
-            var parseResults = files.Select(f => ParseCorpusFile(parser, repo, f)).ToList();
+            var parseResults = files.Select(f => ParseCorpusFile(repo, f)).ToList();
             reportsByRepo[repo.Name] = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
         }
 
@@ -84,11 +83,11 @@ public static class ScanCorpusCommand
         return hadMissingRepo ? 1 : 0;
     }
 
-    private static SqlParseResult ParseCorpusFile(SqlScriptParser parser, CorpusRepoEntry repo, string path)
+    private static SqlParseResult ParseCorpusFile(CorpusRepoEntry repo, string path)
     {
         var text = File.ReadAllText(path);
         text = CorpusTemplatePreprocessor.Apply(repo.Name, text);
-        return parser.ParseText(path, text);
+        return SqlScriptParser.ParseText(path, text);
     }
 
     private static string RepoDirectoryName(string url) => url.TrimEnd('/').Split('/')[^1];

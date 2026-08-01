@@ -25,7 +25,7 @@ public sealed class ScanReportBuilderCollationTests
 
     private static ScanReport Build(string? manifestDeclaredCollation)
     {
-        var result = new SqlScriptParser().ParseText("test.sql", Sql);
+        var result = SqlScriptParser.ParseText("test.sql", Sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return ScanReportBuilder.BuildFromParseResults([result], manifestDeclaredCollation);
     }

@@ -7,7 +7,7 @@ public sealed class DynamicSqlScannerTests
 {
     private static DynamicSqlExtractionResult Scan(string sql)
     {
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return DynamicSqlScanner.Scan(result);
     }

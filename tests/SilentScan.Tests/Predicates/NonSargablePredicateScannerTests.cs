@@ -15,7 +15,7 @@ public sealed class NonSargablePredicateScannerTests
     private static IReadOnlyList<SargabilityFinding> ScanFixture(string fileName)
     {
         var path = Path.Combine(FixturesDir, fileName);
-        var result = new SqlScriptParser().ParseFile(path);
+        var result = SqlScriptParser.ParseFile(path);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return NonSargablePredicateScanner.Scan(result);
     }

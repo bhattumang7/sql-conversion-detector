@@ -38,7 +38,7 @@ public sealed class LineageColumnCatalogOracleTests : IAsyncLifetime
         await _provisioner.CreateFreshAsync(DatabaseName);
         await new ScriptDeployer(_options).DeployAsync(script, DatabaseName);
 
-        var parseResult = new SqlScriptParser().ParseFile(FixturePath);
+        var parseResult = SqlScriptParser.ParseFile(FixturePath);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
         _catalog = CatalogBuilder.Build([parseResult]);
         _lineage = LineageResolver.Resolve(_catalog, [parseResult]);

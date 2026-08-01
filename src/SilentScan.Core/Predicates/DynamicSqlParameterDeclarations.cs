@@ -23,7 +23,7 @@ public static class DynamicSqlParameterDeclarations
         }
 
         var wrapped = $"CREATE PROCEDURE dbo.__silentscan_dynamic_params ({declarationText}) AS SELECT 1;";
-        var result = new SqlScriptParser().ParseText("dynamic-sql-params", wrapped);
+        var result = SqlScriptParser.ParseText("dynamic-sql-params", wrapped);
 
         if (result.HasErrors
             || result.Fragment is not TSqlScript { Batches: [{ Statements: [CreateProcedureStatement createProcedure] }] })

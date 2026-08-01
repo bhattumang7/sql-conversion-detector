@@ -17,7 +17,7 @@ public sealed class DynamicSqlPipelineTests
 {
     private static (DatabaseCatalog Catalog, LineageCatalog Lineage) BuildCatalog()
     {
-        var schema = new SqlScriptParser().ParseText(
+        var schema = SqlScriptParser.ParseText(
             "schema.sql",
             "CREATE TABLE dbo.T (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, CreatedAt DATETIME NOT NULL); " +
             "CREATE INDEX IX_T_Col ON dbo.T(Col); \n" +
@@ -42,7 +42,7 @@ public sealed class DynamicSqlPipelineTests
             "    EXEC('SELECT Col FROM dbo.T\n" +
             "WHERE Col = N''x''');\n" +
             "END\n";
-        var parseResult = new SqlScriptParser().ParseText("app.sql", appSql);
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
         var extraction = DynamicSqlScanner.Scan(parseResult);
@@ -68,7 +68,7 @@ public sealed class DynamicSqlPipelineTests
     {
         var (catalog, lineage) = BuildCatalog();
 
-        var parseResult = new SqlScriptParser().ParseText(
+        var parseResult = SqlScriptParser.ParseText(
             "app.sql",
             "EXEC('SELECT Col FROM dbo.T WHERE YEAR(CreatedAt) = 2020');\n" +
             "EXEC('SELECT ColAsInt FROM dbo.vw_T WHERE ColAsInt = 1');");
@@ -100,7 +100,7 @@ public sealed class DynamicSqlPipelineTests
         // conversion, so ScanForced, exactly like the same predicate written statically.
         var (catalog, lineage) = BuildCatalog();
 
-        var parseResult = new SqlScriptParser().ParseText(
+        var parseResult = SqlScriptParser.ParseText(
             "app.sql",
             "EXEC sp_executesql N'SELECT Col FROM dbo.T WHERE Col = @DisplayName', " +
             "N'@DisplayName nvarchar(40)', @DisplayName = N'x';");
@@ -125,7 +125,7 @@ public sealed class DynamicSqlPipelineTests
         // unknowable, so the predicate reports Unknown rather than assuming a match.
         var (catalog, lineage) = BuildCatalog();
 
-        var parseResult = new SqlScriptParser().ParseText(
+        var parseResult = SqlScriptParser.ParseText(
             "app.sql", "EXEC sp_executesql N'SELECT Col FROM dbo.T WHERE Col = @DisplayName';");
         Assert.False(parseResult.HasErrors);
 
@@ -146,7 +146,7 @@ public sealed class DynamicSqlPipelineTests
         // types" case, distinct from a foldable local variable.
         var (catalog, lineage) = BuildCatalog();
 
-        var parseResult = new SqlScriptParser().ParseText(
+        var parseResult = SqlScriptParser.ParseText(
             "app.sql",
             "CREATE PROCEDURE dbo.usp_Test @paramsDecl NVARCHAR(MAX) AS BEGIN " +
             "EXEC sp_executesql N'SELECT Col FROM dbo.T WHERE Col = @DisplayName', @paramsDecl, @DisplayName = N'x'; " +
@@ -178,7 +178,7 @@ public sealed class DynamicSqlPipelineTests
             "    SET @sql = @sql + N'WHERE Col = N''x''';\n" +
             "    EXEC(@sql);\n" +
             "END\n";
-        var parseResult = new SqlScriptParser().ParseText("app.sql", appSql);
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
         var extraction = DynamicSqlScanner.Scan(parseResult);
@@ -229,7 +229,7 @@ public sealed class DynamicSqlPipelineTests
 
         var innermost = "SELECT Col FROM dbo.T WHERE Col = N'x'";
         var appSql = NestExecChain(innermost, levels) + ";";
-        var parseResult = new SqlScriptParser().ParseText("app.sql", appSql);
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
         var topLevelScript = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
@@ -258,7 +258,7 @@ public sealed class DynamicSqlPipelineTests
 
         var innermostTier1 = "SELECT Col FROM dbo.T WHERE YEAR(CreatedAt) = 2020";
         var appSqlTier1 = NestExecChain(innermostTier1, 2) + ";";
-        var tier1ParseResult = new SqlScriptParser().ParseText("app.sql", appSqlTier1);
+        var tier1ParseResult = SqlScriptParser.ParseText("app.sql", appSqlTier1);
         Assert.False(tier1ParseResult.HasErrors);
         var tier1Script = Assert.Single(DynamicSqlScanner.Scan(tier1ParseResult).AnalyzableScripts);
         var tier1Result = DynamicSqlPipeline.Analyze([tier1Script], catalog, lineage);
@@ -271,7 +271,7 @@ public sealed class DynamicSqlPipelineTests
 
         var innermostExpressionDerived = "SELECT ColAsInt FROM dbo.vw_T WHERE ColAsInt = 1";
         var appSqlExpr = NestExecChain(innermostExpressionDerived, 2) + ";";
-        var exprParseResult = new SqlScriptParser().ParseText("app.sql", appSqlExpr);
+        var exprParseResult = SqlScriptParser.ParseText("app.sql", appSqlExpr);
         Assert.False(exprParseResult.HasErrors);
         var exprScript = Assert.Single(DynamicSqlScanner.Scan(exprParseResult).AnalyzableScripts);
         var exprResult = DynamicSqlPipeline.Analyze([exprScript], catalog, lineage);
@@ -291,7 +291,7 @@ public sealed class DynamicSqlPipelineTests
 
         var innermost = "SELECT Col FROM dbo.T WHERE Col = N'x'";
         var appSql = NestExecChain(innermost, 6) + ";";
-        var parseResult = new SqlScriptParser().ParseText("app.sql", appSql);
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
         var topLevelScript = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
@@ -312,7 +312,7 @@ public sealed class DynamicSqlPipelineTests
     {
         var (catalog, lineage) = BuildCatalog();
 
-        var parseResult = new SqlScriptParser().ParseText("app.sql", "EXEC('THIS IS NOT $$$ valid T-SQL (((');");
+        var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('THIS IS NOT $$$ valid T-SQL (((');");
         Assert.False(parseResult.HasErrors);
 
         var extraction = DynamicSqlScanner.Scan(parseResult);
@@ -331,7 +331,7 @@ public sealed class DynamicSqlPipelineTests
     {
         var (catalog, lineage) = BuildCatalog();
 
-        var parseResult = new SqlScriptParser().ParseText("app.sql", "EXEC('SELECT 1');");
+        var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('SELECT 1');");
         var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);

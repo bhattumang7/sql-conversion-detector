@@ -43,6 +43,37 @@ public sealed class ParseHealthReportBuilderTests
     }
 
     [Fact]
+    public void Build_FileWithOneBadBatchAmongGoodOnes_ReportsBatchGranularity()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("silentscan-tests-");
+        try
+        {
+            var mixedFile = Path.Combine(tempDir.FullName, "mixed.sql");
+            File.WriteAllText(
+                mixedFile,
+                """
+                CREATE TABLE dbo.A (Id INT NOT NULL);
+                GO
+                CREATE TABLE dbo.B ((( BAD SYNTAX HERE;
+                GO
+                CREATE TABLE dbo.C (Id INT NOT NULL);
+                GO
+                """);
+
+            var files = SqlFileDiscovery.EnumerateSqlFiles(tempDir.FullName);
+            var report = ParseHealthReportBuilder.Build(files);
+
+            var health = Assert.Single(report.Files);
+            Assert.NotEmpty(health.Errors);
+            Assert.Equal(2, health.BatchCount);
+        }
+        finally
+        {
+            tempDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void Build_EmptyFileList_ReportsFullSuccessRate()
     {
         var report = ParseHealthReportBuilder.Build([]);

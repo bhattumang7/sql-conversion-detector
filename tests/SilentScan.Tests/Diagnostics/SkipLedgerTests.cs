@@ -42,8 +42,8 @@ public sealed class SkipLedgerTests
         // build (every CREATE TABLE across every file first, then everything else) resolves this
         // correctly regardless of file order - this used to be a recorded skip (see git history
         // for the Phase 0.1 version of this test); now it's a real fix; no skip, real data.
-        var alterFirst = new SqlScriptParser().ParseText("02_alter.sql", "ALTER TABLE dbo.Users ADD Email VARCHAR(200) NULL;");
-        var createSecond = new SqlScriptParser().ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL);");
+        var alterFirst = SqlScriptParser.ParseText("02_alter.sql", "ALTER TABLE dbo.Users ADD Email VARCHAR(200) NULL;");
+        var createSecond = SqlScriptParser.ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL);");
 
         var catalog = CatalogBuilder.Build([alterFirst, createSecond]);
 
@@ -54,8 +54,8 @@ public sealed class SkipLedgerTests
     [Fact]
     public void CatalogBuilder_CreateIndexBeforeCreateTable_TwoPhaseBuildResolvesRegardlessOfOrder()
     {
-        var indexFirst = new SqlScriptParser().ParseText("02_index.sql", "CREATE INDEX IX_Users_Email ON dbo.Users(Email);");
-        var createSecond = new SqlScriptParser().ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL, Email VARCHAR(200) NULL);");
+        var indexFirst = SqlScriptParser.ParseText("02_index.sql", "CREATE INDEX IX_Users_Email ON dbo.Users(Email);");
+        var createSecond = SqlScriptParser.ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL, Email VARCHAR(200) NULL);");
 
         var catalog = CatalogBuilder.Build([indexFirst, createSecond]);
 
@@ -68,7 +68,7 @@ public sealed class SkipLedgerTests
     {
         // The two-phase build fixes ordering, not a genuinely missing base table - this must
         // still be recorded, not silently dropped.
-        var alterOnly = new SqlScriptParser().ParseText("test.sql", "ALTER TABLE dbo.Ghost ADD Email VARCHAR(200) NULL;");
+        var alterOnly = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.Ghost ADD Email VARCHAR(200) NULL;");
 
         var catalog = CatalogBuilder.Build([alterOnly]);
 
@@ -80,9 +80,9 @@ public sealed class SkipLedgerTests
     [Fact]
     public void CatalogBuilder_WellOrderedDdl_RecordsNoSkips()
     {
-        var create = new SqlScriptParser().ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL, Email VARCHAR(200) NULL);");
-        var alter = new SqlScriptParser().ParseText("02_alter.sql", "ALTER TABLE dbo.Users ADD Phone VARCHAR(20) NULL;");
-        var index = new SqlScriptParser().ParseText("03_index.sql", "CREATE INDEX IX_Users_Email ON dbo.Users(Email);");
+        var create = SqlScriptParser.ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL, Email VARCHAR(200) NULL);");
+        var alter = SqlScriptParser.ParseText("02_alter.sql", "ALTER TABLE dbo.Users ADD Phone VARCHAR(20) NULL;");
+        var index = SqlScriptParser.ParseText("03_index.sql", "CREATE INDEX IX_Users_Email ON dbo.Users(Email);");
 
         var catalog = CatalogBuilder.Build([create, alter, index]);
 
@@ -94,7 +94,7 @@ public sealed class SkipLedgerTests
     {
         // dbo.Ghost has no DDL anywhere in the scanned set - CLAUDE.md: never guess, but also
         // never silently treat the view as if it had zero problems.
-        var view = new SqlScriptParser().ParseText("view.sql", "CREATE VIEW dbo.vw_Ghost AS SELECT g.Id FROM dbo.Ghost AS g;");
+        var view = SqlScriptParser.ParseText("view.sql", "CREATE VIEW dbo.vw_Ghost AS SELECT g.Id FROM dbo.Ghost AS g;");
 
         var catalog = CatalogBuilder.Build([view]);
         var lineage = LineageResolver.Resolve(catalog, [view]);
@@ -111,8 +111,8 @@ public sealed class SkipLedgerTests
     [Fact]
     public void LineageResolver_CyclicView_RecordsSkip()
     {
-        var viewA = new SqlScriptParser().ParseText("a.sql", "CREATE VIEW dbo.vw_A AS SELECT b.Id FROM dbo.vw_B AS b;");
-        var viewB = new SqlScriptParser().ParseText("b.sql", "CREATE VIEW dbo.vw_B AS SELECT a.Id FROM dbo.vw_A AS a;");
+        var viewA = SqlScriptParser.ParseText("a.sql", "CREATE VIEW dbo.vw_A AS SELECT b.Id FROM dbo.vw_B AS b;");
+        var viewB = SqlScriptParser.ParseText("b.sql", "CREATE VIEW dbo.vw_B AS SELECT a.Id FROM dbo.vw_A AS a;");
 
         var catalog = CatalogBuilder.Build([viewA, viewB]);
         var lineage = LineageResolver.Resolve(catalog, [viewA, viewB]);
@@ -138,7 +138,7 @@ public sealed class SkipLedgerTests
                 UPDATE dbo.Users SET DisplayName = 'x' WHERE Id = @Id;
             END
             """;
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors);
 
         var catalog = CatalogBuilder.Build([result]);
@@ -168,7 +168,7 @@ public sealed class SkipLedgerTests
                 END
             END
             """;
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors);
 
         var catalog = CatalogBuilder.Build([result]);
@@ -183,7 +183,7 @@ public sealed class SkipLedgerTests
     public void TypedPredicateExtractor_OrdinaryWhereClause_RecordsNoSkip()
     {
         var sql = "CREATE TABLE dbo.Users (Id INT NOT NULL);\nGO\nSELECT Id FROM dbo.Users WHERE Id = 1;";
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors);
 
         var catalog = CatalogBuilder.Build([result]);
@@ -211,7 +211,7 @@ public sealed class SkipLedgerTests
                 END
             END
             """;
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors);
 
         var report = ScanReportBuilder.BuildFromParseResults([result]);
@@ -231,7 +231,7 @@ public sealed class SkipLedgerTests
         // instead pins that the code path degrades to a ledger entry rather than a throw by
         // construction (see ToOperatorText's exhaustive-but-defensive switch).
         var sql = "CREATE TABLE dbo.T (Col INT NOT NULL);\nGO\nSELECT Col FROM dbo.T WHERE Col = 1;";
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors);
 
         var catalog = CatalogBuilder.Build([result]);

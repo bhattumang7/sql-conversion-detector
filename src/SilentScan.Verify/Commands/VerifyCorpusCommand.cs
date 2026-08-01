@@ -88,7 +88,7 @@ public static class VerifyCorpusCommand
             return 1;
         }
 
-        var context = new VerifyContext(new SqlScriptParser(), new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), sqlOptions);
+        var context = new VerifyContext(new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), sqlOptions);
         var summaries = new SortedDictionary<string, RepoVerificationSummary>(StringComparer.Ordinal);
         var hadMissingRepo = false;
 
@@ -111,7 +111,7 @@ public static class VerifyCorpusCommand
         return hadMissingRepo ? 1 : 0;
     }
 
-    private sealed record VerifyContext(SqlScriptParser Parser, DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, SqlServerOptions SqlOptions);
+    private sealed record VerifyContext(DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, SqlServerOptions SqlOptions);
 
     private static async Task<RepoVerificationSummary> VerifyRepoAsync(
         CorpusRepoEntry repo,
@@ -123,7 +123,7 @@ public static class VerifyCorpusCommand
         var parseResults = new List<SqlParseResult>(allFiles.Count);
         foreach (var file in allFiles)
         {
-            parseResults.Add(await ParseCorpusFileAsync(context.Parser, repo, file, cancellationToken));
+            parseResults.Add(await ParseCorpusFileAsync(repo, file, cancellationToken));
         }
 
         var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
@@ -176,11 +176,11 @@ public static class VerifyCorpusCommand
         }
     }
 
-    private static async Task<SqlParseResult> ParseCorpusFileAsync(SqlScriptParser parser, CorpusRepoEntry repo, string path, CancellationToken cancellationToken)
+    private static async Task<SqlParseResult> ParseCorpusFileAsync(CorpusRepoEntry repo, string path, CancellationToken cancellationToken)
     {
         var text = await File.ReadAllTextAsync(path, cancellationToken);
         text = CorpusTemplatePreprocessor.Apply(repo.Name, text);
-        return parser.ParseText(path, text);
+        return SqlScriptParser.ParseText(path, text);
     }
 
     private static string RepoDirectoryName(string url) => url.TrimEnd('/').Split('/')[^1];

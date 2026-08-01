@@ -28,7 +28,6 @@ public static class DynamicSqlPipeline
 
     private static DynamicSqlPipelineResult Analyze(IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, int depth)
     {
-        var parser = new SqlScriptParser();
         var findings = new List<DynamicSqlFinding>();
         var tier1 = new List<SargabilityFinding>();
         var typed = new List<TypedPredicateFinding>();
@@ -38,7 +37,7 @@ public static class DynamicSqlPipeline
         foreach (var script in scripts)
         {
             var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}";
-            var innerParseResult = parser.ParseText(virtualPath, script.InnerText);
+            var innerParseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText);
 
             if (innerParseResult.HasErrors)
             {

@@ -17,7 +17,7 @@ public sealed class TypedPredicateExtractorTests
     private static PredicateExtractionResult ExtractAll(params string[] batches)
     {
         var sql = string.Join("\nGO\n", batches);
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         var catalog = CatalogBuilder.Build([result]);
         var lineage = LineageResolver.Resolve(catalog, [result]);

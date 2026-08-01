@@ -7,7 +7,7 @@ public sealed class CatalogBuilderTests
 {
     private static DatabaseCatalog BuildFrom(string sql)
     {
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return CatalogBuilder.Build([result]);
     }
@@ -483,7 +483,7 @@ public sealed class CatalogBuilderTests
 
     private static SqlParseResult Parse(string sql)
     {
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return result;
     }

@@ -11,7 +11,7 @@ public sealed class LineageResolverTests
         // Every CREATE VIEW/FUNCTION must be the only statement in its batch, so callers
         // pass one statement per array element and this joins them with GO separators.
         var sql = string.Join("\nGO\n", batches);
-        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         var catalog = CatalogBuilder.Build([result]);
         var lineage = LineageResolver.Resolve(catalog, [result]);
@@ -218,7 +218,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_MultiStatementTvf_ReturnsDeclaredProvenance()
     {
-        var result = new SqlScriptParser().ParseText("test.sql", """
+        var result = SqlScriptParser.ParseText("test.sql", """
             CREATE FUNCTION dbo.fn_GetOrders()
             RETURNS @Result TABLE (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL)
             AS

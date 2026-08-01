@@ -11,8 +11,7 @@ public static class ScanReportBuilder
 {
     public static ScanReport Build(IReadOnlyList<string> sqlFilePaths)
     {
-        var parser = new SqlScriptParser();
-        return BuildFromParseResults(sqlFilePaths.Select(parser.ParseFile).ToList());
+        return BuildFromParseResults(sqlFilePaths.Select(SqlScriptParser.ParseFile).ToList());
     }
 
     /// <summary>
@@ -27,32 +26,38 @@ public static class ScanReportBuilder
     public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, string? manifestDeclaredCollation = null)
     {
         var fileHealth = new List<FileParseHealth>();
-        var cleanParseResults = new List<SqlParseResult>();
+        var usableParseResults = new List<SqlParseResult>();
 
         foreach (var result in allParseResults)
         {
             var errors = result.Errors
                 .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))
                 .ToList();
-            fileHealth.Add(new FileParseHealth(result.SourcePath, errors));
+            fileHealth.Add(new FileParseHealth(result.SourcePath, errors, result.BatchCount));
 
-            if (errors.Count == 0)
+            // A batch containing a syntax error is dropped by ScriptDOM itself, not the whole
+            // file (docs/audit-remediation-plan.md Phase 4.4, audit finding B4) - excluding the
+            // whole file whenever Errors was non-empty threw away every OTHER batch's tables/
+            // views/procs too, even when they parsed perfectly cleanly. A file contributes
+            // whatever batches it has left; one with zero surviving batches contributes nothing
+            // either way.
+            if (result.BatchCount > 0)
             {
-                cleanParseResults.Add(result);
+                usableParseResults.Add(result);
             }
         }
 
-        var tier1Findings = cleanParseResults.SelectMany(NonSargablePredicateScanner.Scan).ToList();
+        var tier1Findings = usableParseResults.SelectMany(NonSargablePredicateScanner.Scan).ToList();
 
-        var dynamicSqlExtractions = cleanParseResults.Select(DynamicSqlScanner.Scan).ToList();
+        var dynamicSqlExtractions = usableParseResults.Select(DynamicSqlScanner.Scan).ToList();
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
         var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 
         // Catalog/lineage need every cleanly-parsed file together, so views can resolve
         // against tables (and other views) declared in a different file.
-        var catalog = CatalogBuilder.Build(cleanParseResults, manifestDeclaredCollation);
-        var lineage = LineageResolver.Resolve(catalog, cleanParseResults);
-        var extractionResults = cleanParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
+        var catalog = CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation);
+        var lineage = LineageResolver.Resolve(catalog, usableParseResults);
+        var extractionResults = usableParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
         var skippedConstructs = new List<SkippedConstruct>();
