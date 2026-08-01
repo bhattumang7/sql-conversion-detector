@@ -62,6 +62,17 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void FunctionWrappedColumn_IsNullSargableRewrite_DoesNotFire()
+    {
+        // Near-miss sibling: "Age = 0 OR Age IS NULL" is the sargable rewrite of
+        // ISNULL(Age, 0) = 0 from the same Brent Ozar article - Age stays unwrapped on both
+        // branches, so this must NOT fire.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_isnull_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void CastOnColumn_CastOnLiteralBounds_DoesNotFire()
     {
         var findings = ScanFixture("CAST_CONVERT_ON_COLUMN_clean.sql");
@@ -117,6 +128,17 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void LikePattern_LiteralWithoutLeadingWildcard_DoesNotFire()
+    {
+        // Near-miss sibling: once the pattern is a literal instead of a parameter, whether it
+        // has a leading wildcard is statically knowable - this is not the "unanalyzable" case
+        // the sibling fixture pins, and this literal has no leading wildcard either.
+        var findings = ScanFixture("LIKE_PATTERN_NOT_LITERAL_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void WildcardColumnInFunction_HavingCountStar_DoesNotCrashAndDoesNotFire()
     {
         // Regression test for a real NullReferenceException found scanning
@@ -153,6 +175,17 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void FunctionWrappedColumn_HavingDateRange_DoesNotFire()
+    {
+        // Near-miss sibling: the same date-range rewrite as
+        // FunctionWrappedColumn_SargableDateRange_DoesNotFire, but in HAVING over a grouped
+        // raw column instead of WHERE. Must NOT fire.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void FunctionWrappedColumn_InsideSelectListCase_DoesNotFire()
     {
         // docs/audit-remediation-plan.md Phase 3.1: confirmed false positive - a SELECT-list
@@ -174,5 +207,16 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
         Assert.Equal("CreatedAt", finding.ColumnName);
         Assert.Equal("YEAR", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_JoinOnDateRange_DoesNotFire()
+    {
+        // Near-miss sibling: the same date-range rewrite as
+        // FunctionWrappedColumn_SargableDateRange_DoesNotFire, but in a JOIN's ON clause
+        // instead of WHERE. Must NOT fire.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_clean.sql");
+
+        Assert.Empty(findings);
     }
 }
