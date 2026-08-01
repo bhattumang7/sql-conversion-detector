@@ -379,4 +379,60 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void Extract_QualifierNotInScope_NoFinding_NeverFallsBackToNameOnlyMatch()
+    {
+        // docs/audit-remediation-plan.md Phase 2.1: 'x' is not a declared alias in this FROM
+        // scope. The only column named TrackingCode in scope belongs to dbo.Shipments (aliased
+        // 's') - before the fix, an unresolved qualifier fell back to searching every relation
+        // by column name alone, and since exactly one match existed, it silently misattributed
+        // this predicate to dbo.Shipments.TrackingCode. A predicate whose qualifier the query
+        // never actually declares must produce no finding at all, not a wrong one.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
+            "CREATE TABLE dbo.Shipments (Id INT NOT NULL, TrackingCode NVARCHAR(20) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindShipment @p NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT o.Id
+                FROM dbo.Orders AS o
+                JOIN dbo.Shipments AS s ON o.Id = s.Id
+                WHERE x.TrackingCode = @p;
+            END
+            """);
+
+        // The o.Id = s.Id join condition legitimately resolves (both Int, SeekPreserved) - only
+        // the TrackingCode predicate with the bad qualifier must be absent.
+        Assert.DoesNotContain(findings, f => f.Column.ColumnName == "TrackingCode");
+    }
+
+    [Fact]
+    public void Extract_CorrectQualifier_SameShapeAsAboveNearMiss_ProducesFinding()
+    {
+        // The near-miss sibling of the test above: same tables, same predicate, but the
+        // qualifier ('s') is the real alias - this must still resolve and fire normally, proving
+        // the fix rejects only genuinely-unresolvable qualifiers, not qualified references
+        // generally.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
+            "CREATE TABLE dbo.Shipments (Id INT NOT NULL, TrackingCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindShipment @p NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT o.Id
+                FROM dbo.Orders AS o
+                JOIN dbo.Shipments AS s ON o.Id = s.Id
+                WHERE s.TrackingCode = @p;
+            END
+            """);
+
+        // Same join-condition SeekPreserved noise as the near-miss above; the TrackingCode
+        // predicate is the one under test here.
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "TrackingCode");
+        Assert.Equal("dbo.Shipments", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
 }

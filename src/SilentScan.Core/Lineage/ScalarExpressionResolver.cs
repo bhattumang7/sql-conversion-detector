@@ -66,7 +66,15 @@ public static class ScalarExpressionResolver
         }
     }
 
-    private static ColumnProvenance ResolveColumnReference(
+    /// <summary>
+    /// Resolves a column reference against a FROM scope: the one algorithm both Pass 2 (this
+    /// class) and Pass 3 (<see cref="Predicates.TypedPredicateExtractor"/>) use, so a qualified
+    /// reference whose qualifier doesn't resolve is unresolved everywhere, never silently
+    /// falling back to a name-only search across the whole scope (docs/audit-remediation-plan.md
+    /// Phase 2.1 - that fallback could bind a correlated outer-query reference like "o.Id" to an
+    /// unrelated same-named column on a completely different table).
+    /// </summary>
+    internal static ColumnProvenance ResolveColumnReference(
         ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger)
     {
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;

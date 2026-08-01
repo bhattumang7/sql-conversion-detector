@@ -184,37 +184,25 @@ public static class TypedPredicateExtractor
 
         private PredicateOperand ResolveColumnOperand(ColumnReferenceExpression columnRef, Dictionary<string, ScopeEntry> byAlias, List<ScopeEntry> ordered)
         {
-            var identifiers = columnRef.MultiPartIdentifier.Identifiers;
-            var columnName = identifiers[^1].Value;
+            // Same resolver Pass 2 uses (ScalarExpressionResolver) - a qualified reference whose
+            // qualifier doesn't resolve is unresolved here too, never a name-only fallback search
+            // across the whole FROM scope (docs/audit-remediation-plan.md Phase 2.1).
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, byAlias, ordered, sourcePath, ledger);
+            var columnName = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
 
-            ResolvedColumn? resolved;
-            bool isViewLayer;
-            if (identifiers.Count >= 2 && byAlias.TryGetValue(identifiers[^2].Value, out var entry))
-            {
-                resolved = entry.Relation.FindColumn(columnName);
-                isViewLayer = entry.IsViewLayer;
-            }
-            else
-            {
-                var matches = ordered.Select(e => (Entry: e, Column: e.Relation.FindColumn(columnName))).Where(m => m.Column is not null).ToList();
-                resolved = matches.Count == 1 ? matches[0].Column : null;
-                isViewLayer = matches.Count == 1 && matches[0].Entry.IsViewLayer;
-            }
-
-            var provenance = resolved is null ? null : ScalarExpressionResolver.BumpDepthIfViewLayer(resolved.Provenance, isViewLayer);
             if (provenance is ColumnProvenance.BaseColumn baseColumn)
             {
                 var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
                 return new PredicateOperand.Column(baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn);
             }
 
-            if (provenance is not null && ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
+            if (ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
             {
                 RecordExpressionDerivedFinding(columnName, columnRef, provenance);
             }
 
-            // Cast/Expression (reported above)/Union/Unknown/Declared, or unresolved - not
-            // eligible for the type-precedence "indexed column" side of a verdict.
+            // Cast/Expression (reported above)/Union/Unknown/Declared - not eligible for the
+            // type-precedence "indexed column" side of a verdict.
             return new PredicateOperand.Value(Type: null);
         }
 
