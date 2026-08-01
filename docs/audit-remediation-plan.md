@@ -404,6 +404,30 @@ are removed under Phase 3, and findings are added under Phase 4.
   honestly.
 - Rewrite `docs/study.md` numbers; the current ones do not survive this plan.
 
+**Addendum (re-run outcome).** Contrary to the opening claim above, the
+pilot's headline numbers did NOT change: DNN Platform's 76/79 confirmed
+(0 refuted, 3 unconfirmed for the same pre-existing `dbo.Events` deployment-
+ordering reason) and the 1-of-5-repos prevalence figure both reproduced
+exactly, meaning 100% precision on the oracle-confirmed set held throughout -
+none of Phase 1-6's fixes happened to touch the specific predicates that
+number rests on. Hand-verification covered every *distinct* finding shape in
+the confirmed set (2 shapes account for all 76: 74 instances of one
+NVARCHAR-vs-INT join-column pattern repeated across many tables sharing the
+same schema anti-pattern, plus 2 instances of a CHAR-vs-integer-literal
+comparison), each checked against its actual source line, not just trusted
+from the oracle's plan-XML signal alone. What DID change: the First
+Responder Kit now statically flags 22 new `ScanForced` findings (via the
+UPDATE/DELETE/temp-table coverage this plan added) that are all
+structurally unprobeable - every one lives against a `#` temp table declared
+inside the very procedure body Verify's DDL-only deployment never runs. This
+is a real, honestly-reported methodology boundary (see `docs/study.md`), not
+a bug to fix by relaxing the "never execute procPaths" safety rule. Dynamic
+SQL's own call-site/analyzed counts were unaffected (no phase touched
+call-site detection), but reparsing surfaced more downstream typed
+predicates (18 -> 32, still all `UNKNOWN`, still only in
+WideWorldImporters) since the reparse pipeline now shares every Phase 4
+coverage improvement. Full numbers in `docs/study.md`.
+
 ---
 
 ## Ordering summary

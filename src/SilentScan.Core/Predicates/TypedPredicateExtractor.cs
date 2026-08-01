@@ -227,7 +227,7 @@ public static class TypedPredicateExtractor
         {
             if (_scopeStack.Count == 0)
             {
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (bare IF, or UPDATE/DELETE/MERGE WHERE not yet supported)");
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
             }
 
@@ -284,7 +284,7 @@ public static class TypedPredicateExtractor
                 // clause on an UPDATE/DELETE/MERGE statement, which this pass does not yet push
                 // a scope for. Recorded rather than silently dropped, since the second case is a
                 // real coverage gap, not a non-finding, and the two can't be told apart here.
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (bare IF, or UPDATE/DELETE/MERGE WHERE not yet supported)");
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
             }
 

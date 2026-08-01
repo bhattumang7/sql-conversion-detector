@@ -14,7 +14,29 @@ ordering issue, not a verdict error) — **100% precision on the
 oracle-confirmed set**. None of the confirmed findings were inherited through
 a view or TVF layer in this pilot (all were direct base-table predicates,
 depth 0); the "inherited through views" phenomenon the tool is built to catch
-did not appear in this specific 5-repo sample.
+did not appear in this specific 5-repo sample. These numbers are unchanged
+after a substantial correctness pass across the tool (UPDATE/DELETE/MERGE
+predicate coverage, IN-list and BETWEEN handling, inline/multi-statement TVF
+resolution, `sysname`/`CREATE TYPE` alias resolution, and oracle-verified
+fixes to the collation and literal-typing rules themselves) — re-running the
+full pilot against the corrected tool reproduced the identical 76/79/3 split
+for DNN Platform, which is reassuring rather than a coincidence: it means
+none of those fixes happened to touch the specific predicates this pilot's
+headline number rests on.
+
+That correctness pass did surface one new, honestly-reported result: the
+First Responder Kit now statically flags 22 `ScanForced` predicates (all new
+UPDATE/DELETE/temp-table coverage; it had none before), but every one of them
+is against a `#`-prefixed local temp table declared inside the very
+stored-procedure body the Verify pass never deploys (CLAUDE.md: only
+`ddlPaths` are deployed, never `procPaths` — the repo's own procedural logic
+never executes). All 22 come back `ProbeFailed` ("Invalid object name
+'#TraceStatus'", etc.) for that structural reason, not a classifier
+disagreement, so none of them count toward the prevalence figure above. They
+are real, plausible bugs by inspection (e.g. a temp table's `varchar` column
+compared against a bare integer literal), but this pilot's methodology is not
+built to engine-confirm anything living entirely inside a temp table's own
+procedure, so they stay in the appendix below rather than the headline.
 
 **Cost:** at 10M rows, a mismatched-collation `varchar` vs `nvarchar`
 comparison costs **33,572 logical reads vs 3** for the matched case — an
@@ -99,7 +121,7 @@ not a gap in the folder), **25.6%** are disabled by a `GOTO`/label somewhere
 in the same procedure (concentrated in Ola Hallengren's Maintenance Solution
 and the First Responder Kit, both of which lean on `GOTO` for T-SQL error
 handling), and **23.5%** depend on a non-literal expression such as a
-function call. Reparsing the newly-analyzed 272 sites surfaced 18 additional
+function call. Reparsing the newly-analyzed 272 sites surfaced 32 additional
 typed predicates (all in WideWorldImporters) — all `UNKNOWN` verdicts (an
 operand type the reparse couldn't pin down), not new oracle-probeable
 findings in this specific corpus. That's an honest negative result, not a
@@ -134,11 +156,20 @@ Full results: [`bench-results.csv`](bench-results.csv).
 - **3 DNN findings are unconfirmed, not refuted**, due to a DDL
   cross-file foreign-key deployment-ordering limitation in the verifier, not
   a classifier disagreement.
+- **22 First Responder Kit findings are statically flagged but structurally
+  unprobeable**, not refuted: every one resolves to a local `#` temp table
+  declared inside a stored procedure body, and this pilot's Verify pass
+  deploys only `ddlPaths` DDL, never a repo's own procedural logic
+  (`procPaths`) — see the prevalence section above. Reported here rather than
+  silently dropped or, worse, counted toward prevalence on faith.
 - **`UNKNOWN` and unanalyzable rates**, recorded honestly rather than
-  silently dropped: DNN Platform had 1,142 `UNKNOWN` typed comparisons (from
+  silently dropped: DNN Platform had 1,100 `UNKNOWN` typed comparisons (from
   cross-collation same-category comparisons this tool deliberately declines
   to resolve) and 110 dynamic-SQL call sites, of which 31 (28.2%) were
   proven constant and analyzed, 79 stayed unanalyzable; the First Responder
-  Kit had 315 `UNKNOWN` and 735 dynamic-SQL call sites (its monitoring
-  scripts build most queries dynamically, and lean heavily on `GOTO` for
-  error handling), of which only 99 (13.5%) were provably constant.
+  Kit had 1,107 `UNKNOWN` (up from a much smaller count before the
+  UPDATE/DELETE/MERGE predicate-coverage fix - those statements previously
+  contributed no predicates, typed or UNKNOWN, at all) and 735 dynamic-SQL
+  call sites (its monitoring scripts build most queries dynamically, and
+  lean heavily on `GOTO` for error handling), of which only 99 (13.5%) were
+  provably constant.
