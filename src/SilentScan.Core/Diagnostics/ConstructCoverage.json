@@ -264,9 +264,9 @@
     {
       "construct": "CreateTriggerStatement (INSTEAD OF on VIEW)",
       "group": "ProcedureOrTriggerDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "BuildTriggerPseudoTableRelations resolves the target via catalog.Find only; DatabaseCatalog holds no views. Every inserted/deleted predicate is dropped with the misleading reason 'has no known DDL' while the view sits fully resolved in resolvedViews. coverage-remediation-plan.md Phase 3.3."
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Was resolved via catalog.Find only; DatabaseCatalog holds no views, so every inserted/deleted predicate was dropped with the misleading reason 'has no known DDL' while the view sat fully resolved in resolvedViews. Fixed: resolvedViews is checked first. The view-derived relation's BaseColumn provenance is downgraded to Declared (FromScopeResolver.ToPseudoTableRelation(ResolvedRelation, string)) so a column that passes an indexed base column straight through the view still does not claim that index for inserted/deleted, same reasoning as the table case (Phase 1.1). coverage-remediation-plan.md Phase 3.3."
     },
     {
       "construct": "Trigger pseudo-table index attribution",

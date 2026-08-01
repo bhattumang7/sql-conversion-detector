@@ -1221,6 +1221,59 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_InsteadOfTriggerBody_OnView_InsertedPseudoTable_Resolves()
+    {
+        // DatabaseCatalog holds no views - BuildTriggerPseudoTableRelations used to call
+        // catalog.Find only, so an INSTEAD OF trigger on a view dropped every predicate with the
+        // misleading reason "has no known DDL" while the view sat fully resolved in resolvedViews
+        // (coverage-remediation-plan.md Phase 3.3).
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT Code FROM dbo.Orders;",
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.vw_Orders
+            INSTEAD OF INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        // Attributed to the trigger's literal target (the view), not chased through to the
+        // ultimate base table - matches the table case, where TableQualifiedName is already the
+        // trigger's own target.
+        Assert.Equal("dbo.vw_Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InsteadOfTriggerBody_OnView_InsertedPseudoTable_DoesNotClaimTheBaseColumnsIndex()
+    {
+        // Same wrong-answer risk as the table case (Phase 1.1): even though dbo.Orders.Code IS
+        // indexed and the view passes it straight through (a real SELECT against the view could
+        // seek), inserted on this INSTEAD OF trigger is not a query against real rows - it must
+        // not inherit that index.
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE INDEX IX_Orders_Code ON dbo.Orders(Code);
+            """,
+            "CREATE VIEW dbo.vw_Orders AS SELECT Code FROM dbo.Orders;",
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.vw_Orders
+            INSTEAD OF INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.False(finding.Column.Indexed);
+    }
+
+    [Fact]
     public void Extract_TriggerBody_InsertedVisibleInsideNestedSubquery()
     {
         // inserted/deleted are visible throughout the whole trigger body, not just a single

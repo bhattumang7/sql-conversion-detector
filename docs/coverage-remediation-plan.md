@@ -347,26 +347,37 @@ silently inert.
 
 **Size.** M.
 
-### 3.3 INSTEAD OF triggers on views
+### 3.3 INSTEAD OF triggers on views — DONE
 
-**Problem.** `BuildTriggerPseudoTableRelations` resolves the target with
-`catalog.Find` (`TypedPredicateExtractor.cs:216`), and `DatabaseCatalog` holds no
-views — they live in `LineageCatalog.AllRelations`. For `CREATE TRIGGER … ON
-dbo.SomeView INSTEAD OF INSERT`, every `inserted`/`deleted` predicate is dropped
-with the misleading ledger reason `"has no known DDL"` while the view sits fully
-resolved. This is the only relation-building site in the codebase that skips the
-view check `FromScopeResolver.cs:164` performs.
+**Problem.** `BuildTriggerPseudoTableRelations` resolved the target with
+`catalog.Find`, and `DatabaseCatalog` holds no views — they live in
+`LineageCatalog.AllRelations`. For `CREATE TRIGGER … ON dbo.SomeView INSTEAD OF
+INSERT`, every `inserted`/`deleted` predicate was dropped with the misleading
+ledger reason `"has no known DDL"` while the view sat fully resolved. This was the
+only relation-building site in the codebase that skipped the view check
+`FromScopeResolver`'s own `NamedTableReference` case performs.
 
-**Work.** Consult `resolvedViews` — already a constructor field on the same class
-(`TypedPredicateExtractor.cs:26,34`) — before falling back to `catalog.Find`. Fix
-the ledger reason to distinguish "no such object" from "target is a view".
-Interacts with 1.1: a view's `inserted` has no index either, so the pseudo-table
-flag covers both.
+**Work done.** `resolvedViews` (already a constructor field) is consulted first;
+falls back to `catalog.Find` only when the target isn't a resolved view either,
+and the ledger reason now says "no known DDL and is not a resolved view" so the
+two cases are distinguishable. Interacted with 1.1 exactly as predicted: a view's
+`inserted` has no index either, so the same `Declared`-provenance treatment
+applies — but a view relation can carry `ColumnProvenance.BaseColumn` for a column
+that passes an indexed base column straight through (correct for an ordinary
+`SELECT` against the view, wrong for `inserted`/`deleted`), which the table case's
+`ToPseudoTableRelation(CatalogTable?, string)` never had to handle. Added a second
+overload, `ToPseudoTableRelation(ResolvedRelation, string)`, that downgrades any
+top-level `BaseColumn` to `Declared` before reuse - the one new piece of logic this
+item needed beyond wiring.
 
-**Done when.** An INSTEAD OF trigger on a view resolves `inserted.Col` to the view
-column's type with correct lineage depth to the base column.
+**Verified.** An INSTEAD OF trigger on a view resolves `inserted.Col` to the view
+column's type, attributed to the view's own qualified name (the trigger's literal
+target, not chased through to the ultimate base table - consistent with how the
+table case already attributes to its own literal target). A second test confirms
+the fix doesn't just work but stays honest: an indexed base column passed straight
+through the view still reports `Indexed: false` for `inserted`.
 
-**Size.** S.
+**Size.** S, as estimated.
 
 ### 3.4 MSTVF return variable
 

@@ -262,4 +262,25 @@ public static class FromScopeResolver
                 ? new ColumnProvenance.Declared(type, qualifiedName)
                 : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
     }
+
+    /// <summary>
+    /// Overload for an INSTEAD OF trigger whose target is a VIEW rather than a table (coverage-
+    /// remediation-plan.md Phase 3.3) - <paramref name="viewRelation"/> is the view's own already-
+    /// resolved <see cref="ResolvedRelation"/> (from <c>LineageCatalog.AllRelations</c>), which can
+    /// carry <see cref="ColumnProvenance.BaseColumn"/> for any column that passes a base table's
+    /// column straight through the view. That's correct for an ordinary SELECT against the view
+    /// (SQL Server really can seek through a simple view), but inserted/deleted on an INSTEAD OF
+    /// trigger is not a query against the view's rows - same as the table case, it has no index of
+    /// its own, so any BaseColumn provenance is downgraded to Declared here (dropping the index
+    /// claim, keeping the type) before being reused. Cast/Expression/Union/Unknown/Declared
+    /// columns are untouched - only BaseColumn's top-level index lookup in
+    /// <c>TypedPredicateExtractor.ResolveColumnOperand</c> is the thing this must neutralise.
+    /// </summary>
+    internal static ResolvedRelation ToPseudoTableRelation(ResolvedRelation viewRelation, string qualifiedName) =>
+        new(qualifiedName, [.. viewRelation.Columns.Select(c => c.Provenance switch
+        {
+            ColumnProvenance.BaseColumn { Type: { } type } => c with { Provenance = new ColumnProvenance.Declared(type, qualifiedName) },
+            ColumnProvenance.BaseColumn => c with { Provenance = new ColumnProvenance.Unknown("pseudo-table column type could not be resolved") },
+            _ => c,
+        })]);
 }

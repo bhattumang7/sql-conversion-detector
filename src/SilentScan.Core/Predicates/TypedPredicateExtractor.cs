@@ -224,27 +224,38 @@ public static class TypedPredicateExtractor
         }
 
         /// <summary>
-        /// inserted/deleted are shaped exactly like the trigger's own target table (docs/audit-
-        /// remediation-plan.md, trigger inserted/deleted resolution - a gap found auditing this
-        /// pass, not on the original remediation plan): a predicate against inserted.Col reflects
-        /// that real base-table column's type, but NOT its index - inserted/deleted are a version-
+        /// inserted/deleted are shaped exactly like the trigger's own target table or view (docs/
+        /// audit-remediation-plan.md, trigger inserted/deleted resolution - a gap found auditing
+        /// this pass, not on the original remediation plan): a predicate against inserted.Col
+        /// reflects that real column's type, but NOT its index - inserted/deleted are a version-
         /// store rowset with no index of their own (coverage-remediation-plan.md Phase 1.1), so
-        /// this uses <see cref="FromScopeResolver.ToPseudoTableRelation"/> rather than the ordinary
-        /// FROM-clause conversion, which would wrongly inherit the real table's index.
+        /// this uses <see cref="FromScopeResolver.ToPseudoTableRelation(Catalog.CatalogTable?, string)"/> rather than the ordinary
+        /// FROM-clause conversion, which would wrongly inherit a real index. An INSTEAD OF trigger
+        /// can target a VIEW rather than a table (Phase 3.3) - DatabaseCatalog holds no views, so
+        /// resolvedViews (the same lookup FromScopeResolver's own NamedTableReference case checks
+        /// before falling back to the catalog) is consulted first.
         /// </summary>
         private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
-            var table = catalog.Find(qualifiedName);
-            if (table is null)
+
+            ResolvedRelation relation;
+            if (resolvedViews.TryGetValue(qualifiedName, out var viewRelation))
+            {
+                relation = FromScopeResolver.ToPseudoTableRelation(viewRelation, qualifiedName);
+            }
+            else if (catalog.Find(qualifiedName) is { } table)
+            {
+                relation = FromScopeResolver.ToPseudoTableRelation(table, qualifiedName);
+            }
+            else
             {
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
-                    "trigger inserted/deleted", $"trigger target table '{qualifiedName}' has no known DDL - inserted/deleted left unresolved");
+                    "trigger inserted/deleted", $"trigger target '{qualifiedName}' has no known DDL and is not a resolved view - inserted/deleted left unresolved");
                 return EmptyCteRelations;
             }
 
-            var relation = FromScopeResolver.ToPseudoTableRelation(table, qualifiedName);
             return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
             {
                 ["inserted"] = relation,
