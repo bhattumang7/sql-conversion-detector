@@ -664,4 +664,155 @@ public sealed class TypedPredicateExtractorTests
         Assert.Equal("#t", secondFinding.Column.TableQualifiedName);
         Assert.Equal(SqlTypeCategory.VarChar, secondFinding.Column.Type!.Category);
     }
+
+    [Fact]
+    public void Extract_UpdateWhereClause_NoFromExtension_ResolvesAgainstTarget()
+    {
+        // docs/audit-remediation-plan.md Phase 4.1, audit finding B1 ("the single biggest
+        // coverage gap in the tool"): UPDATE's WHERE clause previously had no FROM-scope pushed
+        // at all, so this predicate was invisible to Pass 3 no matter what it contained.
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_RenameUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                UPDATE dbo.Users SET DisplayName = @DisplayName WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_UpdateWithFromExtension_ResolvesJoinedTableAliases()
+    {
+        // UPDATE ... FROM ... JOIN ... WHERE - the extended FROM syntax, where the WHERE clause
+        // references aliases established only in the FROM clause, not the bare target name.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Flags (OrderId INT NOT NULL, IsStale BIT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_MarkStale @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                UPDATE f
+                SET f.IsStale = 1
+                FROM dbo.Flags AS f
+                JOIN dbo.Orders AS o ON o.Id = f.OrderId
+                WHERE o.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_DeleteWhereClause_NoFromExtension_ResolvesAgainstTarget()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Sessions (Token VARCHAR(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_ExpireSession @Token NVARCHAR(64)
+            AS
+            BEGIN
+                DELETE FROM dbo.Sessions WHERE Token = @Token;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Sessions", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_DeleteWithFromExtension_ResolvesJoinedTableAliases()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.OrderLines (OrderId INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_PurgeOrderLines @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                DELETE ol
+                FROM dbo.OrderLines AS ol
+                JOIN dbo.Orders AS o ON o.Id = ol.OrderId
+                WHERE o.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_MergeOnClause_ResolvesTargetAndSourceAliases()
+    {
+        // MergeSpecification's own TableReference property is the USING SOURCE, not the INTO
+        // target (verified empirically against the real parser output while implementing this -
+        // the target's alias lives in the separate TableAlias property). This test pins that
+        // both sides resolve correctly regardless of that naming trap.
+        var findings = Extract(
+            "CREATE TABLE dbo.Target (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Source (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);",
+            """
+            MERGE INTO dbo.Target AS t
+            USING dbo.Source AS s
+            ON t.Code = s.Code
+            WHEN MATCHED THEN UPDATE SET t.Id = s.Id
+            WHEN NOT MATCHED THEN INSERT (Id, Code) VALUES (s.Id, s.Code);
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "Code");
+        Assert.Equal("dbo.Target", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_MergeActionClauseAdditionalCondition_Resolves()
+    {
+        // WHEN MATCHED AND <extra condition> - the additional predicate on the action clause
+        // itself, not just the top-level ON clause, must resolve through the same scope.
+        var findings = Extract(
+            "CREATE TABLE dbo.Target (Id INT NOT NULL, Status VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Source (Id INT NOT NULL);",
+            """
+            MERGE INTO dbo.Target AS t
+            USING dbo.Source AS s
+            ON t.Id = s.Id
+            WHEN MATCHED AND t.Status = N'Active' THEN UPDATE SET t.Id = s.Id;
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "Status");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_CteThenUpdateFrom_CteVisibleInUpdatesFromClause()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, IsFlagged BIT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FlagOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                WITH TargetOrders AS (SELECT Id, CustomerId FROM dbo.Orders)
+                UPDATE o
+                SET o.IsFlagged = 1
+                FROM dbo.Orders AS o
+                JOIN TargetOrders AS t ON t.Id = o.Id
+                WHERE t.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
 }

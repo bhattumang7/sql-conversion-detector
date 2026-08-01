@@ -8,13 +8,25 @@ namespace SilentScan.Core.Lineage;
 public static class FromScopeResolver
 {
     /// <summary>
-    /// <paramref name="procScope"/> is the qualified name of the innermost enclosing
+    /// Bundles the context threaded through every table-reference resolution in this class -
+    /// introduced to keep individual method signatures within a sane parameter count once
+    /// Phase 4.1's UPDATE/DELETE/MERGE entry points added their own table references alongside
+    /// the shared catalog/views/CTE/scope context every one of them still needs.
+    /// <paramref name="ProcScope"/> is the qualified name of the innermost enclosing
     /// procedure/function/trigger, if any (docs/audit-remediation-plan.md Phase 2.5) - temp
     /// tables and table variables declared inside one are cataloged under a key scoped to it, so
     /// resolving a bare "#t"/"@t" reference needs the same scope to find them; a real persistent
     /// table was never stored with a scope, so passing one here is always safe (DatabaseCatalog
     /// falls back to the unscoped lookup automatically).
     /// </summary>
+    internal readonly record struct ResolutionContext(
+        DatabaseCatalog Catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> ResolvedViews,
+        string SourcePath,
+        SkipLedger? Ledger,
+        IReadOnlyDictionary<string, ResolvedRelation>? CteRelations,
+        string? ProcScope);
+
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
         FromClause? fromClause,
         DatabaseCatalog catalog,
@@ -24,6 +36,7 @@ public static class FromScopeResolver
         IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null,
         string? procScope = null)
     {
+        var context = new ResolutionContext(catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<ScopeEntry>();
 
@@ -34,19 +47,68 @@ public static class FromScopeResolver
 
         foreach (var tableReference in fromClause.TableReferences)
         {
-            foreach (var leaf in FlattenJoins(tableReference))
-            {
-                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
-                if (alias is not null)
-                {
-                    byAlias[alias] = entry;
-                }
-
-                ordered.Add(entry);
-            }
+            AddResolved(tableReference, context, aliasOverride: null, byAlias, ordered);
         }
 
         return (byAlias, ordered);
+    }
+
+    /// <summary>
+    /// Resolves the FROM scope for an UPDATE/DELETE statement (docs/audit-remediation-plan.md
+    /// Phase 4.1): if the statement has its own extended FROM clause (UPDATE t SET ... FROM
+    /// Table t JOIN Other o ON ... WHERE ...), that alone defines the scope - it already
+    /// includes the target, by T-SQL convention. With no FROM clause (the common simple case,
+    /// UPDATE dbo.T SET Col = 1 WHERE Id = 5), the target itself is the whole (single-table)
+    /// scope.
+    /// </summary>
+    internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForDataModification(
+        TableReference target, FromClause? extraFromClause, ResolutionContext context)
+    {
+        if (extraFromClause is not null)
+        {
+            return Resolve(extraFromClause, context.Catalog, context.ResolvedViews, context.SourcePath, context.Ledger, context.CteRelations, context.ProcScope);
+        }
+
+        var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<ScopeEntry>();
+        AddResolved(target, context, aliasOverride: null, byAlias, ordered);
+        return (byAlias, ordered);
+    }
+
+    /// <summary>
+    /// Resolves the FROM scope for a MERGE statement's ON clause and WHEN [NOT] MATCHED actions
+    /// (docs/audit-remediation-plan.md Phase 4.1). MergeSpecification is a naming trap verified
+    /// against the real parser output, not assumed: the inherited <c>Target</c> property is the
+    /// INTO target (its alias lives separately in <paramref name="targetAlias"/>, the
+    /// TableAlias property - NamedTableReference.Alias is null there), while the MERGE type's
+    /// own <c>TableReference</c> property is actually the USING source (which does carry its
+    /// own alias normally).
+    /// </summary>
+    internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForMerge(
+        TableReference target, Identifier? targetAlias, TableReference source, ResolutionContext context)
+    {
+        var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<ScopeEntry>();
+
+        AddResolved(target, context, targetAlias?.Value, byAlias, ordered);
+        AddResolved(source, context, aliasOverride: null, byAlias, ordered);
+
+        return (byAlias, ordered);
+    }
+
+    private static void AddResolved(
+        TableReference tableReference, ResolutionContext context, string? aliasOverride, Dictionary<string, ScopeEntry> byAlias, List<ScopeEntry> ordered)
+    {
+        foreach (var leaf in FlattenJoins(tableReference))
+        {
+            var (alias, entry) = ResolveTableReference(leaf, context, aliasOverride);
+            if (alias is not null)
+            {
+                byAlias[alias] = entry;
+            }
+
+            ordered.Add(entry);
+        }
     }
 
     private static IEnumerable<TableReference> FlattenJoins(TableReference tableReference)
@@ -80,15 +142,10 @@ public static class FromScopeResolver
         }
     }
 
-    private static (string? Alias, ScopeEntry Entry) ResolveTableReference(
-        TableReference tableReference,
-        DatabaseCatalog catalog,
-        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
-        string sourcePath,
-        SkipLedger? ledger,
-        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations,
-        string? procScope)
+    private static (string? Alias, ScopeEntry Entry) ResolveTableReference(TableReference tableReference, ResolutionContext context, string? aliasOverride)
     {
+        var (catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope) = context;
+
         switch (tableReference)
         {
             case NamedTableReference named:
@@ -114,7 +171,7 @@ public static class FromScopeResolver
                 }
 
                 var relation = isViewLayer ? view! : ToResolvedRelation(catalogTable, qualifiedName);
-                var alias = named.Alias?.Value ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
+                var alias = named.Alias?.Value ?? aliasOverride ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
                 return (alias, new ScopeEntry(relation, isViewLayer));
 
             case QueryDerivedTable derived:

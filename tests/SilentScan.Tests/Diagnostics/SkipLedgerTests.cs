@@ -4,6 +4,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Tests.Diagnostics;
 
@@ -120,12 +121,14 @@ public sealed class SkipLedgerTests
     }
 
     [Fact]
-    public void TypedPredicateExtractor_UpdateWhereClause_RecordsSkipInsteadOfSilentDrop()
+    public void TypedPredicateExtractor_UpdateWhereClause_ResolvesInsteadOfSkipping()
     {
-        // Phase 4.1 (not yet implemented): UPDATE's WHERE clause has no FROM-scope pushed, so
-        // this predicate is invisible to Pass 3 today. It must show up in the ledger, not
-        // vanish - this test is the regression guard that Phase 4.1 must turn green by
-        // producing a real finding here instead of a skip.
+        // docs/audit-remediation-plan.md Phase 4.1: UPDATE's WHERE clause previously had no
+        // FROM-scope pushed at all, so this predicate was invisible to Pass 3 - it recorded a
+        // "comparison outside FROM scope" skip instead of a real finding (see git history for
+        // the Phase 0.1 version of this test, which pinned that exact gap). Id outranks
+        // NVarChar in T-SQL's precedence list, so the parameter converts, not the column -
+        // SeekPreserved is the correct resolved verdict, not evidence of a remaining gap.
         var sql = """
             CREATE TABLE dbo.Users (Id INT NOT NULL, DisplayName VARCHAR(40) NOT NULL);
             GO
@@ -133,6 +136,36 @@ public sealed class SkipLedgerTests
             AS
             BEGIN
                 UPDATE dbo.Users SET DisplayName = 'x' WHERE Id = @Id;
+            END
+            """;
+        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        Assert.False(result.HasErrors);
+
+        var catalog = CatalogBuilder.Build([result]);
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var extraction = TypedPredicateExtractor.Extract(result, catalog, lineage);
+
+        Assert.Empty(extraction.SkippedConstructs);
+        var finding = Assert.Single(extraction.TypedFindings);
+        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
+        Assert.Equal("Id", finding.Column.ColumnName);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void TypedPredicateExtractor_BareIfComparison_StillRecordsSkip()
+    {
+        // The genuinely scope-less case (Phase 4.1 fixed UPDATE/DELETE/MERGE specifically, not
+        // every possible scope-less comparison) - a bare IF still has no column side to resolve
+        // and must still be recorded, not silently dropped.
+        var sql = """
+            CREATE PROCEDURE dbo.usp_Check @Flag INT
+            AS
+            BEGIN
+                IF @Flag = 1
+                BEGIN
+                    RETURN;
+                END
             END
             """;
         var result = new SqlScriptParser().ParseText("test.sql", sql);
@@ -172,6 +205,10 @@ public sealed class SkipLedgerTests
             AS
             BEGIN
                 UPDATE dbo.Users SET DisplayName = 'x' WHERE Id = @Id;
+                IF @Id = N'0'
+                BEGIN
+                    RETURN;
+                END
             END
             """;
         var result = new SqlScriptParser().ParseText("test.sql", sql);

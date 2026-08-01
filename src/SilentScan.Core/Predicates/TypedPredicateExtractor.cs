@@ -53,9 +53,7 @@ public static class TypedPredicateExtractor
             // statement with no WITH clause of its own still sees any outer statement's CTEs (a
             // derived-table subquery nested inside a CTE-using statement), so this always pushes
             // something - an unchanged copy of the current top when there's nothing new to add.
-            var currentCtes = CurrentCteRelations();
-            var ctes = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, resolvedViews, sourcePath, ledger, _currentProcScope);
-            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
+            PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
             _cteStack.Pop();
         }
@@ -65,6 +63,46 @@ public static class TypedPredicateExtractor
             _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope));
             base.ExplicitVisit(node);
             _scopeStack.Pop();
+        }
+
+        // UPDATE/DELETE/MERGE previously pushed no FROM scope at all, so every predicate in
+        // their WHERE/ON clause hit the empty-scope early return in TryAddFinding and vanished -
+        // in OLTP procedures this is where a large share of index-killing predicates live
+        // (docs/audit-remediation-plan.md Phase 4.1, audit finding B1: "the single biggest
+        // coverage gap in the tool"). Each pushes CTEs the same way ExplicitVisit(SelectStatement)
+        // does - DataModificationStatement shares the same WithCtesAndXmlNamespaces base type.
+        public override void ExplicitVisit(UpdateStatement node)
+        {
+            var spec = node.UpdateSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            base.ExplicitVisit(node);
+            _scopeStack.Pop();
+            _cteStack.Pop();
+        }
+
+        public override void ExplicitVisit(DeleteStatement node)
+        {
+            var spec = node.DeleteSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            base.ExplicitVisit(node);
+            _scopeStack.Pop();
+            _cteStack.Pop();
+        }
+
+        public override void ExplicitVisit(MergeStatement node)
+        {
+            var spec = node.MergeSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+
+            // A single scope push covers the ON clause and every WHEN [NOT] MATCHED action's
+            // own additional condition uniformly, since base.ExplicitVisit walks the whole
+            // MergeSpecification subtree with this scope active.
+            _scopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
+            base.ExplicitVisit(node);
+            _scopeStack.Pop();
+            _cteStack.Pop();
         }
 
         // ScriptDOM's visitor double-dispatches through each concrete node type's own Accept()
@@ -105,8 +143,18 @@ public static class TypedPredicateExtractor
             base.ExplicitVisit(node);
         }
 
+        private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
+        {
+            var currentCtes = CurrentCteRelations();
+            var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger, _currentProcScope);
+            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
+        }
+
         private IReadOnlyDictionary<string, ResolvedRelation> CurrentCteRelations() =>
             _cteStack.Count > 0 ? _cteStack.Peek() : EmptyCteRelations;
+
+        private FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
+            new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
 
