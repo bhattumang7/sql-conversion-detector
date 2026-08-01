@@ -55,13 +55,65 @@ public sealed class VerdictClassifierTests
     [Fact]
     public void Classify_IntColumnVsBigIntValue_OracleVerifiedSameFamilyWidening_SeekPreserved()
     {
-        // Oracle-verified (Phase 4 pilot): int-vs-bigint widening never shows
-        // CONVERT_IMPLICIT, even though int has lower precedence than bigint - same-family
-        // numeric widening is free. See VerdictClassifier's comment for the full probe set.
+        // Oracle-verified (docs/audit-remediation-plan.md Phase 0.2 type-pair matrix): int-vs-
+        // bigint widening never shows CONVERT_IMPLICIT, even though int has lower precedence
+        // than bigint - but this is a per-pair fact, not a blanket "numeric widening is free"
+        // rule (see the IntColumnVsRealValue test below for the pair where it isn't).
         var column = new SqlType(SqlTypeCategory.Int);
         var value = new SqlType(SqlTypeCategory.BigInt);
 
         Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_IntColumnVsRealValue_ExactVsApproximateNumeric_ScanForced()
+    {
+        // The Phase 0.2 type-pair matrix generation found this: unlike int-vs-bigint above,
+        // comparing an INT column against a REAL/FLOAT value DOES produce a column-side
+        // CONVERT_IMPLICIT (int's full domain isn't exactly representable in a 4-byte float,
+        // so the optimizer can't build a safe range without converting the column) - a
+        // same-numeric-family pair that the old "numeric widening is always free" heuristic
+        // would have wrongly called SeekPreserved.
+        var column = new SqlType(SqlTypeCategory.Int);
+        var value = new SqlType(SqlTypeCategory.Real);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_TinyIntColumnVsRealValue_DomainFitsExactly_SeekPreserved()
+    {
+        // The counterpart to the Int-vs-Real case: TinyInt's entire domain (0-255) is exactly
+        // representable in a float, so the optimizer elides the conversion here even though
+        // it does not for Int/BigInt/Money/Decimal against the same Real type - confirming the
+        // matrix is keyed per exact category pair, not a coarse numeric/numeric rule.
+        var column = new SqlType(SqlTypeCategory.TinyInt);
+        var value = new SqlType(SqlTypeCategory.Real);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_TimeColumnVsDateValue_NotComparableAtAll_Unknown()
+    {
+        // The Phase 0.2 probe found TIME and every other date/time category (DATE,
+        // SMALLDATETIME, DATETIME, DATETIME2, DATETIMEOFFSET) are not implicitly comparable at
+        // all - SQL Server rejects the comparison at compile time ("data types time and date
+        // are incompatible"). Not a seek/scan question; UNKNOWN, never guessed.
+        var column = new SqlType(SqlTypeCategory.Time);
+        var value = new SqlType(SqlTypeCategory.Date);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_UnprobedSameFamilyPair_Unknown()
+    {
+        // SmallMoney vs SmallMoney is same-category (handled elsewhere); this constructs a
+        // category pair the matrix has no entry for at all, to prove the "not probed => never
+        // guessed" contract independent of any specific real pair going unprobed by accident.
+        var outcome = TypePairMatrix.Instance.TryGetOutcome(SqlTypeCategory.Bit, SqlTypeCategory.Bit);
+        Assert.Null(outcome);
     }
 
     [Fact]

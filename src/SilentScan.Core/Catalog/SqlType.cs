@@ -30,17 +30,8 @@ public sealed record SqlType(
         or SqlTypeCategory.SmallDateTime or SqlTypeCategory.DateTime or SqlTypeCategory.DateTime2
         or SqlTypeCategory.DateTimeOffset;
 
-    /// <summary>
-    /// Oracle-verified against SQL Server 2022: widening within the numeric-or-bit family
-    /// (e.g. int vs bigint, bit vs int) or within the date/time family (e.g. date vs
-    /// datetime) never produces a CONVERT_IMPLICIT in the plan, regardless of which side's
-    /// precedence is lower - unlike crossing into the string family, which always does.
-    /// See VerdictClassifier for the specific probes this claim rests on.
-    /// </summary>
-    public bool IsWideningCompatibleWith(SqlType other) =>
-        (IsNumericOrBit && other.IsNumericOrBit) || (IsDateTimeFamily && other.IsDateTimeFamily);
-
-    private bool IsNumericOrBit => IsNumericFamily || Category == SqlTypeCategory.Bit;
+    /// <summary>Numeric-or-bit family membership, used by VerdictClassifier to decide whether a cross-category pair should consult the oracle-probed type-pair matrix instead of the raw precedence list.</summary>
+    public bool IsNumericOrBit => IsNumericFamily || Category == SqlTypeCategory.Bit;
 
     public override string ToString()
     {

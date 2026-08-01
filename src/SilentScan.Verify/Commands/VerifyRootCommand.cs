@@ -13,6 +13,7 @@ public static class VerifyRootCommand
     {
         var root = new RootCommand("silentscan-verify — deploys corpus DDL to a disposable SQL Server and confirms findings against sys.columns and plan XML.");
         root.Subcommands.Add(VerifyCorpusCommand.Create());
+        root.Subcommands.Add(GenerateTypeMatrixCommand.Create());
         return root;
     }
 }
