@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
@@ -32,6 +33,7 @@ public static class DynamicSqlPipeline
         var tier1 = new List<SargabilityFinding>();
         var typed = new List<TypedPredicateFinding>();
         var expressionDerived = new List<ExpressionDerivedFinding>();
+        var skipped = new List<SkippedConstruct>();
 
         foreach (var script in scripts)
         {
@@ -65,14 +67,20 @@ public static class DynamicSqlPipeline
                 expressionDerived.Add(Remap(expressionFinding, script));
             }
 
+            foreach (var skippedConstruct in extraction.SkippedConstructs)
+            {
+                skipped.Add(Remap(skippedConstruct, script));
+            }
+
             var nested = AnalyzeNested(innerParseResult, script, catalog, lineage, depth);
             findings.AddRange(nested.Findings);
             tier1.AddRange(nested.Tier1Findings);
             typed.AddRange(nested.TypedFindings);
             expressionDerived.AddRange(nested.ExpressionDerivedFindings);
+            skipped.AddRange(nested.SkippedConstructs);
         }
 
-        return new DynamicSqlPipelineResult(findings, tier1, typed, expressionDerived);
+        return new DynamicSqlPipelineResult(findings, tier1, typed, expressionDerived, skipped);
     }
 
     private static DynamicSqlPipelineResult AnalyzeNested(
@@ -83,7 +91,7 @@ public static class DynamicSqlPipeline
 
         if (nestedExtraction.AnalyzableScripts.Count == 0)
         {
-            return new DynamicSqlPipelineResult(findings, [], [], []);
+            return new DynamicSqlPipelineResult(findings, [], [], [], []);
         }
 
         if (depth >= MaxNestingDepth)
@@ -94,7 +102,7 @@ public static class DynamicSqlPipeline
                 .Select(nestedScript => script.SegmentMap.Map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
                 .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "max-nesting-depth-exceeded")));
 
-            return new DynamicSqlPipelineResult(findings, [], [], []);
+            return new DynamicSqlPipelineResult(findings, [], [], [], []);
         }
 
         var nestedResult = Analyze(nestedExtraction.AnalyzableScripts, catalog, lineage, depth + 1);
@@ -104,7 +112,8 @@ public static class DynamicSqlPipeline
             findings,
             [.. nestedResult.Tier1Findings.Select(f => RemapNested(f, script))],
             [.. nestedResult.TypedFindings.Select(f => RemapNested(f, script))],
-            [.. nestedResult.ExpressionDerivedFindings.Select(f => RemapNested(f, script))]);
+            [.. nestedResult.ExpressionDerivedFindings.Select(f => RemapNested(f, script))],
+            [.. nestedResult.SkippedConstructs.Select(s => Remap(s, script))]);
     }
 
     private static DynamicSqlFinding RemapFinding(DynamicSqlFinding finding, DynamicSqlScript outerScript)
@@ -132,6 +141,12 @@ public static class DynamicSqlPipeline
     {
         var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
+    }
+
+    private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script)
+    {
+        var span = script.SegmentMap.Map(entry.Line, entry.Column);
+        return entry with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column };
     }
 
     /// <summary>
@@ -165,4 +180,5 @@ public sealed record DynamicSqlPipelineResult(
     IReadOnlyList<DynamicSqlFinding> Findings,
     IReadOnlyList<SargabilityFinding> Tier1Findings,
     IReadOnlyList<TypedPredicateFinding> TypedFindings,
-    IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings);
+    IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
+    IReadOnlyList<SkippedConstruct> SkippedConstructs);

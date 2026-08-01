@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
 
@@ -8,26 +9,27 @@ namespace SilentScan.Core.Lineage;
 public static class ScalarExpressionResolver
 {
     public static ColumnProvenance Resolve(
-        ScalarExpression expression, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath) =>
+        ScalarExpression expression, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger = null) =>
         expression switch
         {
-            ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, scope, orderedRelations),
-            CastCall castCall => ResolveCastOrConvert(castCall.DataType, castCall.Parameter, scope, orderedRelations, sourcePath, castCall.StartLine),
-            ConvertCall convertCall => ResolveCastOrConvert(convertCall.DataType, convertCall.Parameter, scope, orderedRelations, sourcePath, convertCall.StartLine),
+            ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, scope, orderedRelations, sourcePath, ledger),
+            CastCall castCall => ResolveCastOrConvert(castCall.DataType, castCall.Parameter, scope, orderedRelations, sourcePath, castCall.StartLine, ledger),
+            ConvertCall convertCall => ResolveCastOrConvert(convertCall.DataType, convertCall.Parameter, scope, orderedRelations, sourcePath, convertCall.StartLine, ledger),
             Literal literal => new ColumnProvenance.Expression(LiteralTypeResolver.Resolve(literal), Inputs: []),
-            _ => ResolveGenericExpression(expression, scope, orderedRelations, sourcePath),
+            _ => ResolveGenericExpression(expression, scope, orderedRelations, sourcePath, ledger),
         };
 
     private static ColumnProvenance ResolveCastOrConvert(
-        DataTypeReference dataType, ScalarExpression parameter, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, int line)
+        DataTypeReference dataType, ScalarExpression parameter, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, int line, SkipLedger? ledger)
     {
         var resolved = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
         if (resolved is not { } type)
         {
+            ledger?.Record(AnalysisPass.Lineage, sourcePath, line, dataType.StartColumn, "CAST/CONVERT", "target type could not be resolved");
             return new ColumnProvenance.Unknown("CAST/CONVERT target type could not be resolved");
         }
 
-        var inner = Resolve(parameter, scope, orderedRelations, sourcePath);
+        var inner = Resolve(parameter, scope, orderedRelations, sourcePath, ledger);
         return new ColumnProvenance.Cast(type, inner, sourcePath, line);
     }
 
@@ -40,11 +42,11 @@ public static class ScalarExpressionResolver
     /// needing to mirror the expression's exact structure.
     /// </summary>
     private static ColumnProvenance.Expression ResolveGenericExpression(
-        ScalarExpression expression, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath)
+        ScalarExpression expression, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger)
     {
         var collector = new ColumnReferenceCollector();
         expression.Accept(collector);
-        var inputs = collector.References.Select(columnRef => ResolveColumnReference(columnRef, scope, orderedRelations)).ToList();
+        var inputs = collector.References.Select(columnRef => ResolveColumnReference(columnRef, scope, orderedRelations, sourcePath, ledger)).ToList();
         return new ColumnProvenance.Expression(InferredType: null, inputs, sourcePath, expression.StartLine);
     }
 
@@ -65,7 +67,7 @@ public static class ScalarExpressionResolver
     }
 
     private static ColumnProvenance ResolveColumnReference(
-        ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations)
+        ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger)
     {
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
         var columnName = identifiers[^1].Value;
@@ -75,13 +77,18 @@ public static class ScalarExpressionResolver
             var qualifier = identifiers[^2].Value;
             if (!scope.TryGetValue(qualifier, out var entry))
             {
+                ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", $"unknown table alias '{qualifier}'");
                 return new ColumnProvenance.Unknown($"unknown table alias '{qualifier}'");
             }
 
             var column = entry.Relation.FindColumn(columnName);
-            return column is null
-                ? new ColumnProvenance.Unknown($"column '{columnName}' not found on '{qualifier}'")
-                : BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer);
+            if (column is null)
+            {
+                ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", $"column '{columnName}' not found on '{qualifier}'");
+                return new ColumnProvenance.Unknown($"column '{columnName}' not found on '{qualifier}'");
+            }
+
+            return BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer);
         }
 
         var matches = orderedRelations
@@ -89,12 +96,16 @@ public static class ScalarExpressionResolver
             .Where(m => m.Column is not null)
             .ToList();
 
-        return matches.Count switch
+        if (matches.Count != 1)
         {
-            0 => new ColumnProvenance.Unknown($"column '{columnName}' not found in FROM scope"),
-            > 1 => new ColumnProvenance.Unknown($"column '{columnName}' is ambiguous across the FROM scope"),
-            _ => BumpDepthIfViewLayer(matches[0].Column!.Provenance, matches[0].Entry.IsViewLayer),
-        };
+            var reason = matches.Count == 0
+                ? $"column '{columnName}' not found in FROM scope"
+                : $"column '{columnName}' is ambiguous across the FROM scope";
+            ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", reason);
+            return new ColumnProvenance.Unknown(reason);
+        }
+
+        return BumpDepthIfViewLayer(matches[0].Column!.Provenance, matches[0].Entry.IsViewLayer);
     }
 
     internal static ColumnProvenance BumpDepthIfViewLayer(ColumnProvenance provenance, bool isViewLayer)

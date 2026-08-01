@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
@@ -21,16 +22,18 @@ public static class TypedPredicateExtractor
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null)
     {
         var resolvedViews = lineage.AllRelations;
-        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables);
+        var ledger = new SkipLedger();
+        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, ledger.Entries);
     }
 
     private sealed class Visitor(
         string sourcePath,
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
-        IReadOnlyDictionary<string, SqlType?>? externalVariables) : TSqlFragmentVisitor
+        IReadOnlyDictionary<string, SqlType?>? externalVariables,
+        SkipLedger ledger) : TSqlFragmentVisitor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
@@ -43,7 +46,7 @@ public static class TypedPredicateExtractor
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath));
+            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger));
             base.ExplicitVisit(node);
             _scopeStack.Pop();
         }
@@ -73,8 +76,17 @@ public static class TypedPredicateExtractor
             base.ExplicitVisit(node);
         }
 
-        public override void Visit(BooleanComparisonExpression node) =>
-            TryAddFinding(node.FirstExpression, node.SecondExpression, ToOperatorText(node.ComparisonType), node);
+        public override void Visit(BooleanComparisonExpression node)
+        {
+            var operatorText = ToOperatorText(node.ComparisonType);
+            if (operatorText is null)
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison operator", $"unrecognized comparison operator '{node.ComparisonType}'");
+                return;
+            }
+
+            TryAddFinding(node.FirstExpression, node.SecondExpression, operatorText, node);
+        }
 
         public override void Visit(BooleanTernaryExpression node)
         {
@@ -87,7 +99,7 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private static string ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
+        private static string? ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
         {
             BooleanComparisonType.Equals => "=",
             BooleanComparisonType.GreaterThan => ">",
@@ -98,7 +110,7 @@ public static class TypedPredicateExtractor
             BooleanComparisonType.LessThanOrEqualTo => "<=",
             BooleanComparisonType.NotEqualToBrackets => "<>",
             BooleanComparisonType.NotEqualToExclamation => "<>",
-            _ => throw new NotImplementedException($"Unrecognized comparison operator: {comparisonType}"),
+            _ => null,
         };
 
         private void RecordParameters(IList<ProcedureParameter> parameters)
@@ -113,8 +125,12 @@ public static class TypedPredicateExtractor
         {
             if (_scopeStack.Count == 0)
             {
-                // A comparison outside any FROM scope (e.g. a bare IF @x = 1) has no column
-                // side to resolve; nothing to classify.
+                // A comparison outside any QuerySpecification's FROM scope: either a genuinely
+                // scope-less comparison (a bare IF @x = 1, nothing to classify), or a WHERE
+                // clause on an UPDATE/DELETE/MERGE statement, which this pass does not yet push
+                // a scope for. Recorded rather than silently dropped, since the second case is a
+                // real coverage gap, not a non-finding, and the two can't be told apart here.
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (bare IF, or UPDATE/DELETE/MERGE WHERE not yet supported)");
                 return;
             }
 

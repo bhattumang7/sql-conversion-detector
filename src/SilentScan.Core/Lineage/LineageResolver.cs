@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
 
@@ -14,6 +15,7 @@ public static class LineageResolver
 {
     public static LineageCatalog Resolve(DatabaseCatalog catalog, IEnumerable<SqlParseResult> parseResults)
     {
+        var ledger = new SkipLedger();
         var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults);
         var (order, cyclicViews) = ViewDependencyGraph.TopologicalSort(views);
 
@@ -32,12 +34,17 @@ public static class LineageResolver
 
         foreach (var view in order)
         {
-            resolved[view.QualifiedName] = cyclicViews.Contains(view.QualifiedName)
-                ? CyclicRelation(view)
-                : ResolveView(view, catalog, resolved);
+            if (cyclicViews.Contains(view.QualifiedName))
+            {
+                ledger.Record(AnalysisPass.Lineage, view.SourcePath, view.SourceLine, 0, "view dependency", $"'{view.QualifiedName}' participates in a cyclic view dependency");
+                resolved[view.QualifiedName] = CyclicRelation(view);
+                continue;
+            }
+
+            resolved[view.QualifiedName] = ResolveView(view, catalog, resolved, ledger);
         }
 
-        return new LineageCatalog(resolved, cyclicViews);
+        return new LineageCatalog(resolved, cyclicViews, ledger);
     }
 
     private static ResolvedRelation CyclicRelation(ViewDefinition view)
@@ -61,9 +68,9 @@ public static class LineageResolver
             .Select(n => n!)];
     }
 
-    private static ResolvedRelation ResolveView(ViewDefinition view, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews)
+    private static ResolvedRelation ResolveView(ViewDefinition view, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, SkipLedger ledger)
     {
-        var columns = QueryExpressionResolver.Resolve(view.SelectStatement.QueryExpression, catalog, resolvedViews, view.SourcePath);
+        var columns = QueryExpressionResolver.Resolve(view.SelectStatement.QueryExpression, catalog, resolvedViews, view.SourcePath, ledger);
 
         if (view.ExplicitColumnNames is { Count: > 0 } explicitNames)
         {

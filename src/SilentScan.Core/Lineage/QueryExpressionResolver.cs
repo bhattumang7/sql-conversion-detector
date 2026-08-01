@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Core.Lineage;
 
@@ -10,20 +11,20 @@ namespace SilentScan.Core.Lineage;
 public static class QueryExpressionResolver
 {
     public static List<ResolvedColumn> Resolve(
-        QueryExpression queryExpression, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath) =>
+        QueryExpression queryExpression, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger = null) =>
         queryExpression switch
         {
-            QuerySpecification spec => ResolveQuerySpecification(spec, catalog, resolvedViews, sourcePath),
-            BinaryQueryExpression binary => ResolveBinary(binary, catalog, resolvedViews, sourcePath),
-            QueryParenthesisExpression parenthesis => Resolve(parenthesis.QueryExpression, catalog, resolvedViews, sourcePath),
+            QuerySpecification spec => ResolveQuerySpecification(spec, catalog, resolvedViews, sourcePath, ledger),
+            BinaryQueryExpression binary => ResolveBinary(binary, catalog, resolvedViews, sourcePath, ledger),
+            QueryParenthesisExpression parenthesis => Resolve(parenthesis.QueryExpression, catalog, resolvedViews, sourcePath, ledger),
             _ => [],
         };
 
     private static List<ResolvedColumn> ResolveBinary(
-        BinaryQueryExpression binary, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath)
+        BinaryQueryExpression binary, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
     {
-        var first = Resolve(binary.FirstQueryExpression, catalog, resolvedViews, sourcePath);
-        var second = Resolve(binary.SecondQueryExpression, catalog, resolvedViews, sourcePath);
+        var first = Resolve(binary.FirstQueryExpression, catalog, resolvedViews, sourcePath, ledger);
+        var second = Resolve(binary.SecondQueryExpression, catalog, resolvedViews, sourcePath, ledger);
 
         // CLAUDE.md: "UNION/UNION ALL output type = highest precedence across branches
         // (record ALL branch types - the mixed-branch case is itself a finding)." The left
@@ -32,9 +33,9 @@ public static class QueryExpressionResolver
     }
 
     private static List<ResolvedColumn> ResolveQuerySpecification(
-        QuerySpecification spec, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath)
+        QuerySpecification spec, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
     {
-        var (byAlias, ordered) = FromScopeResolver.Resolve(spec.FromClause, catalog, resolvedViews, sourcePath);
+        var (byAlias, ordered) = FromScopeResolver.Resolve(spec.FromClause, catalog, resolvedViews, sourcePath, ledger);
         var result = new List<ResolvedColumn>();
 
         foreach (var element in spec.SelectElements)
@@ -42,12 +43,12 @@ public static class QueryExpressionResolver
             switch (element)
             {
                 case SelectStarExpression star:
-                    result.AddRange(ResolveStar(star, byAlias, ordered));
+                    result.AddRange(ResolveStar(star, byAlias, ordered, sourcePath, ledger));
                     break;
 
                 case SelectScalarExpression scalar:
                     var name = scalar.ColumnName?.Value ?? InferName(scalar.Expression);
-                    var provenance = ScalarExpressionResolver.Resolve(scalar.Expression, byAlias, ordered, sourcePath);
+                    var provenance = ScalarExpressionResolver.Resolve(scalar.Expression, byAlias, ordered, sourcePath, ledger);
                     result.Add(new ResolvedColumn(name ?? "?column?", provenance));
                     break;
             }
@@ -57,14 +58,18 @@ public static class QueryExpressionResolver
     }
 
     private static IEnumerable<ResolvedColumn> ResolveStar(
-        SelectStarExpression star, Dictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered)
+        SelectStarExpression star, Dictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered, string sourcePath, SkipLedger? ledger)
     {
         if (star.Qualifier is { Count: > 0 } qualifier)
         {
             var aliasName = qualifier.Identifiers[^1].Value;
-            return byAlias.TryGetValue(aliasName, out var entry)
-                ? BumpAll(entry)
-                : [new ResolvedColumn("*", new ColumnProvenance.Unknown($"unknown table alias '{aliasName}' in SELECT *"))];
+            if (byAlias.TryGetValue(aliasName, out var entry))
+            {
+                return BumpAll(entry);
+            }
+
+            ledger?.Record(AnalysisPass.Lineage, sourcePath, star.StartLine, star.StartColumn, "SELECT *", $"unknown table alias '{aliasName}' in SELECT {aliasName}.*");
+            return [new ResolvedColumn("*", new ColumnProvenance.Unknown($"unknown table alias '{aliasName}' in SELECT *"))];
         }
 
         return ordered.SelectMany(BumpAll);

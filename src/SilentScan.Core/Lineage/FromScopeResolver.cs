@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Core.Lineage;
 
@@ -7,7 +8,7 @@ namespace SilentScan.Core.Lineage;
 public static class FromScopeResolver
 {
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
-        FromClause? fromClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath)
+        FromClause? fromClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger = null)
     {
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<ScopeEntry>();
@@ -21,7 +22,7 @@ public static class FromScopeResolver
         {
             foreach (var leaf in FlattenJoins(tableReference))
             {
-                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath);
+                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath, ledger);
                 if (alias is not null)
                 {
                     byAlias[alias] = entry;
@@ -66,21 +67,29 @@ public static class FromScopeResolver
     }
 
     private static (string? Alias, ScopeEntry Entry) ResolveTableReference(
-        TableReference tableReference, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath)
+        TableReference tableReference, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
     {
         switch (tableReference)
         {
             case NamedTableReference named:
                 var qualifiedName = SchemaObjectNameHelper.Qualify(named.SchemaObject);
                 var isViewLayer = resolvedViews.TryGetValue(qualifiedName, out var view);
-                var relation = isViewLayer ? view! : ToResolvedRelation(catalog.Find(qualifiedName), qualifiedName);
+                var catalogTable = catalog.Find(qualifiedName);
+                if (!isViewLayer && catalogTable is null)
+                {
+                    ledger?.Record(
+                        AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn,
+                        "FROM table reference", $"'{qualifiedName}' has no known DDL and is not a resolved view/TVF");
+                }
+
+                var relation = isViewLayer ? view! : ToResolvedRelation(catalogTable, qualifiedName);
                 var alias = named.Alias?.Value ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
                 return (alias, new ScopeEntry(relation, isViewLayer));
 
             case QueryDerivedTable derived:
                 // A derived-table subquery is inline, local to this statement - not a
                 // persisted view/TVF, so it does not add view-layer depth.
-                var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath);
+                var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath, ledger);
                 if (derived.Columns.Count > 0)
                 {
                     innerColumns = [.. innerColumns.Zip(derived.Columns, (c, id) => c with { Name = id.Value })];
@@ -91,6 +100,9 @@ public static class FromScopeResolver
             default:
                 // OPENQUERY/OPENROWSET/PIVOT/table-valued function calls etc: not yet resolved.
                 // Empty columns means any reference against this alias falls through to "not found".
+                ledger?.Record(
+                    AnalysisPass.Lineage, sourcePath, tableReference.StartLine, tableReference.StartColumn,
+                    "FROM table reference", $"unsupported table reference kind '{tableReference.GetType().Name}' (OPENQUERY/OPENROWSET/PIVOT/table-valued function/etc.)");
                 return ((tableReference as TableReferenceWithAlias)?.Alias?.Value, new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false));
         }
     }
@@ -100,7 +112,8 @@ public static class FromScopeResolver
         if (table is null)
         {
             // Referenced a table/view we have no DDL for - CLAUDE.md precision discipline:
-            // never guess. Column lookups against this relation resolve Unknown.
+            // never guess. Column lookups against this relation resolve Unknown. The caller
+            // already recorded this in the skip ledger.
             return new ResolvedRelation(qualifiedName, []);
         }
 

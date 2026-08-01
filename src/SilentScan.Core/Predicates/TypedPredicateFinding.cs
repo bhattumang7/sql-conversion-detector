@@ -1,3 +1,4 @@
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
@@ -21,4 +22,5 @@ public sealed record TypedPredicateFinding(
 /// <summary>Everything <see cref="TypedPredicateExtractor.Extract"/> found in one parsed file: type-precedence verdicts, and separately, predicates that compare an expression-derived (CAST/computed) column rather than a real one.</summary>
 public sealed record PredicateExtractionResult(
     IReadOnlyList<TypedPredicateFinding> TypedFindings,
-    IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings);
+    IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
+    IReadOnlyList<SkippedConstruct> SkippedConstructs);

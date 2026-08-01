@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Catalog;
@@ -37,10 +38,10 @@ public static class CatalogBuilder
                 VisitCreateTable(createTable, catalog, sourcePath);
                 break;
             case AlterTableAddTableElementStatement alterTable:
-                VisitAlterTableAdd(alterTable, catalog);
+                VisitAlterTableAdd(alterTable, catalog, sourcePath);
                 break;
             case CreateIndexStatement createIndex:
-                VisitCreateIndex(createIndex, catalog);
+                VisitCreateIndex(createIndex, catalog, sourcePath);
                 break;
             case DeclareTableVariableStatement declareTableVar:
                 VisitDeclareTableVariable(declareTableVar, catalog, sourcePath);
@@ -81,14 +82,18 @@ public static class CatalogBuilder
         catalog.AddOrReplace(table);
     }
 
-    private static void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable, DatabaseCatalog catalog)
+    private static void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable, DatabaseCatalog catalog, string sourcePath)
     {
         var qualifiedName = SchemaObjectNameHelper.Qualify(alterTable.SchemaObjectName);
         var existing = catalog.Find(qualifiedName);
         if (existing is null)
         {
             // ALTER TABLE against a table we haven't seen DDL for (e.g. cross-file ordering,
-            // or the base CREATE TABLE failed to parse) - nothing to merge into.
+            // or the base CREATE TABLE failed to parse) - nothing to merge into. Recorded
+            // rather than dropped: this can silently mask indexed/typed columns downstream.
+            catalog.Skipped.Record(
+                AnalysisPass.Catalog, sourcePath, alterTable.StartLine, alterTable.StartColumn,
+                "ALTER TABLE ADD", $"target table '{qualifiedName}' not found in catalog (cross-file ordering or failed base CREATE TABLE)");
             return;
         }
 
@@ -104,12 +109,15 @@ public static class CatalogBuilder
         catalog.AddOrReplace(merged);
     }
 
-    private static void VisitCreateIndex(CreateIndexStatement createIndex, DatabaseCatalog catalog)
+    private static void VisitCreateIndex(CreateIndexStatement createIndex, DatabaseCatalog catalog, string sourcePath)
     {
         var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
         var existing = catalog.Find(qualifiedName);
         if (existing is null)
         {
+            catalog.Skipped.Record(
+                AnalysisPass.Catalog, sourcePath, createIndex.StartLine, createIndex.StartColumn,
+                "CREATE INDEX", $"target table '{qualifiedName}' not found in catalog (cross-file ordering or failed base CREATE TABLE)");
             return;
         }
 
