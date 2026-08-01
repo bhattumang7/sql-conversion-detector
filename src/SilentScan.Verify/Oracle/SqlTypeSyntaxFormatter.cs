@@ -12,7 +12,13 @@ namespace SilentScan.Verify.Oracle;
 /// </summary>
 public static class SqlTypeSyntaxFormatter
 {
-    /// <summary>Returns the DECLARE-able syntax for <paramref name="type"/>, or null if the category has no fixed T-SQL spelling (e.g. a user-defined type we can't safely synthesize).</summary>
+    /// <summary>
+    /// Returns the DECLARE-able syntax for <paramref name="type"/> (never including a COLLATE
+    /// clause - T-SQL rejects COLLATE on a variable declaration outright, verified against the
+    /// Docker oracle; see <see cref="FormatCollateClause"/> for the expression-position form),
+    /// or null if the category has no fixed T-SQL spelling (e.g. a user-defined type we can't
+    /// safely synthesize).
+    /// </summary>
     public static string? Format(SqlType type)
     {
         var keyword = CategoryKeyword(type.Category);
@@ -21,10 +27,16 @@ public static class SqlTypeSyntaxFormatter
             return null;
         }
 
-        var facet = FormatFacet(type);
-        var collation = type.Collation is { } c ? $" COLLATE {c.Name}" : string.Empty;
-        return $"{keyword}{facet}{collation}";
+        return $"{keyword}{FormatFacet(type)}";
     }
+
+    /// <summary>
+    /// Returns " COLLATE &lt;name&gt;" for a type with a resolved collation, or an empty string
+    /// otherwise - apply this to the operand's use site in an expression (e.g. `@p COLLATE
+    /// ...`), never to its DECLARE statement.
+    /// </summary>
+    public static string FormatCollateClause(SqlType type) =>
+        type.Collation is { } c ? $" COLLATE {c.Name}" : string.Empty;
 
     private static string FormatFacet(SqlType type) => type.Category switch
     {

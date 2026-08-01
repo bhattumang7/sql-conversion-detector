@@ -14,8 +14,28 @@ public abstract record PredicateOperand
     {
     }
 
-    /// <summary>A column resolved (however many view layers deep) to a real base table column.</summary>
-    public sealed record Column(string TableQualifiedName, string ColumnName, SqlType? Type, bool Indexed, int Depth, ColumnProvenance Provenance) : PredicateOperand;
+    /// <summary>
+    /// A column resolved (however many view layers deep) to a real base table column.
+    /// <paramref name="TableQualifiedName"/>/<paramref name="ColumnName"/> always name the
+    /// ultimate physical table, even when <paramref name="Depth"/> is nonzero.
+    /// <paramref name="ImmediateRelationQualifiedName"/>/<paramref name="ImmediateColumnName"/>
+    /// instead name the object literally referenced in the predicate's own FROM clause - the
+    /// same thing when Depth is 0, a view/TVF's own name and exposed column name when it's not.
+    /// Null when the predicate reads a base table/CTE/derived table directly (Depth 0 - nothing
+    /// to route differently) or when a real view/TVF layer's own qualified name wasn't resolvable.
+    /// The Verify oracle uses these to compile a probe against what the source actually queried,
+    /// rather than always querying the base table directly and silently skipping the view layer
+    /// a depth&gt;=1 finding claims to be inherited through.
+    /// </summary>
+    public sealed record Column(
+        string TableQualifiedName,
+        string ColumnName,
+        SqlType? Type,
+        bool Indexed,
+        int Depth,
+        ColumnProvenance Provenance,
+        string? ImmediateRelationQualifiedName = null,
+        string? ImmediateColumnName = null) : PredicateOperand;
 
     /// <summary>
     /// A literal, parameter/variable, or non-column expression - typed if we could, untyped

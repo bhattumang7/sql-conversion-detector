@@ -80,5 +80,47 @@ public sealed class ParseHealthReportBuilderTests
 
         Assert.Equal(0, report.TotalFiles);
         Assert.Equal(1.0, report.ParseSuccessRate);
+        Assert.True(report.PassesDialectSniffing);
+    }
+
+    [Fact]
+    public void PassesDialectSniffing_RateAtOrAboveNinetyPercent_IsTrue()
+    {
+        // CLAUDE.md's corpus dialect-sniffing bar: "ScriptDOM parse success >= 90% of files."
+        var report = new ParseHealthReport([
+            new FileParseHealth("a.sql", [], BatchCount: 1),
+            new FileParseHealth("b.sql", [], BatchCount: 1),
+            new FileParseHealth("c.sql", [], BatchCount: 1),
+            new FileParseHealth("d.sql", [], BatchCount: 1),
+            new FileParseHealth("e.sql", [], BatchCount: 1),
+            new FileParseHealth("f.sql", [], BatchCount: 1),
+            new FileParseHealth("g.sql", [], BatchCount: 1),
+            new FileParseHealth("h.sql", [], BatchCount: 1),
+            new FileParseHealth("i.sql", [], BatchCount: 1),
+            new FileParseHealth("j.sql", [new ParseErrorInfo(1, 1, 102, "bad")], BatchCount: 0),
+        ]);
+
+        Assert.Equal(0.9, report.ParseSuccessRate);
+        Assert.True(report.PassesDialectSniffing);
+    }
+
+    [Fact]
+    public void PassesDialectSniffing_RateBelowNinetyPercent_IsFalse()
+    {
+        var report = new ParseHealthReport([
+            new FileParseHealth("a.sql", [], BatchCount: 1),
+            new FileParseHealth("b.sql", [], BatchCount: 1),
+            new FileParseHealth("c.sql", [], BatchCount: 1),
+            new FileParseHealth("d.sql", [], BatchCount: 1),
+            new FileParseHealth("e.sql", [], BatchCount: 1),
+            new FileParseHealth("f.sql", [], BatchCount: 1),
+            new FileParseHealth("g.sql", [], BatchCount: 1),
+            new FileParseHealth("h.sql", [], BatchCount: 1),
+            new FileParseHealth("i.sql", [new ParseErrorInfo(1, 1, 102, "bad")], BatchCount: 0),
+            new FileParseHealth("j.sql", [new ParseErrorInfo(1, 1, 102, "bad")], BatchCount: 0),
+        ]);
+
+        Assert.Equal(0.8, report.ParseSuccessRate);
+        Assert.False(report.PassesDialectSniffing);
     }
 }

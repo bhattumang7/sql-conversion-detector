@@ -4,13 +4,32 @@ Static analyser + corpus study: find index-killing implicit conversions in T-SQL
 including ones inherited through layers of views/TVFs, and quantify their
 prevalence and cost across public open-source codebases.
 
-Two deliverables, one codebase: the **tool** (`silentscan scan`, JSON + SARIF
-findings) and the **study** (`docs/study.md`, `docs/bench-results.csv`).
+The **tool** (`silentscan scan`/`scan-corpus`/`verify-corpus`, JSON + SARIF
+findings) is the durable deliverable. The **study writeup** (a prose narrative
+with prevalence/cost numbers, and its supporting benchmark CSV) is generated
+FROM the tool, on demand, when actually about to be published — not
+maintained as a standing checked-in file. A narrative document with numbers
+goes stale the moment the underlying code changes, and this codebase changes
+often enough that an incrementally-patched writeup reliably drifts out of
+sync with what the tool currently does (concretely: `docs/study.md` did this
+and was deleted for it). When you need the writeup, run the full
+scan-corpus/verify-corpus/bench pipeline fresh and write it from those live
+numbers - never hand-edit a paragraph of a previously-written one.
 Fame goal, not commercial. **Precision beats recall everywhere** — one false
 positive in the published study is worse than ten missed true positives.
 
-Roadmap and phase status live in `plan.md`. Local setup in `docs/local-dev.md`.
-This file is the standing contract; don't turn it back into a build plan.
+Local setup in `docs/local-dev.md`. This file is the standing contract - the
+one thing about this project meant to persist and be read fresh every
+session, updated in place rather than appended to. There is deliberately no
+separate roadmap/plan file: `plan.md` (the original session-0 roadmap) and
+`docs/study.md` (the writeup) were both deleted once their content was either
+superseded by this file and commit history, or went stale from incremental
+cross-session patching (CLAUDE.md doesn't rot the same way a roadmap or a
+narrative-with-numbers does, since it states current rules, not point-in-time
+status). Don't recreate either kind of file as a matter of habit - if a
+future session needs a plan or a report, generate it fresh for that session's
+purpose and let it be genuinely disposable, not a new file this contract has
+to remember to keep alive.
 
 When you have to make code changes and are just moving to the next stage and all that you have to ask from me is yes, never stop for me in such situations - just continue working.
 
@@ -97,10 +116,15 @@ never silently counted as clean. Soundness first: no heuristic string guessing.
 
 `corpus/manifest.json` is checked in and pins repo URL, commit SHA, license, DDL
 vs proc paths, and declared/assumed collation. Only repos whose SQL is plausibly
-SQL Server (GO separators, bracket quoting, `dbo.`, ScriptDOM parse success
-≥ 90%); files failing dialect sniffing are skipped — a MySQL file parsed as
-T-SQL is noise. Do not invent our own corpus or hand-write repros: rule fixtures
-come from real, internet-sourced implicit-conversion bugs.
+SQL Server (GO separators, bracket quoting, `dbo.`) are curated into the manifest
+in the first place. ScriptDOM parse success ≥ 90% of a repo's files is the
+dialect-sniffing bar (`ParseHealthReport.PassesDialectSniffing`) both
+`scan-corpus` and `verify-corpus` check per repo: a repo that falls below it
+gets a loud warning and a non-zero exit code (findings are still reported,
+never silently dropped) rather than scanning as if it were clean — a MySQL
+file parsed as T-SQL is noise, and this is what catches it. Do not invent our
+own corpus or hand-write repros: rule fixtures come from real, internet-sourced
+implicit-conversion bugs.
 
 Ethics: aggregate stats are public, no maintainer outreach required, no GitHub
 issues or PRs filed on scanned repos, never name-and-shame in tone. Nothing gets
@@ -115,6 +139,7 @@ published externally without Umang's explicit go-ahead.
   fire, a near-miss that MUST NOT, and — if verdict-bearing — an oracle test.
   Keep a real balance of unit and integration tests. Fixtures must be repeatable
   and clean up unconditionally; no flaky state across runs. Aim for 99% coverage.
+  Make sure that the tests are meaningful and not sake of doing - assert the real ting.
 * **Zero issues, every category.** `dotnet build` (warnings are errors) and
   `dotnet test` clean, and a Sonar scan at 0 issues, before every commit —
   via `sonar-scan.ps1` then `sonar-check-issues.sh`.

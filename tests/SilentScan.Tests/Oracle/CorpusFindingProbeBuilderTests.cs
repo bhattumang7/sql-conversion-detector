@@ -113,4 +113,55 @@ public sealed class CorpusFindingProbeBuilderTests
             SELECT 1 FROM [dbo].[T] WHERE [Col] = @p;
             """, probe);
     }
+
+    [Fact]
+    public void Build_ColumnHasImmediateRelation_QueriesTheViewNotTheBaseTable()
+    {
+        // A depth>=1 finding's TableQualifiedName/ColumnName always name the ultimate base
+        // table (needed for the plan-matching signal), but the probe itself must query what the
+        // source predicate actually referenced - the view - or it never exercises the view
+        // layer the finding claims the conversion is inherited through at all.
+        var column = new PredicateOperand.Column(
+            "dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 1, Provenance,
+            ImmediateRelationQualifiedName: "dbo.vw_Orders", ImmediateColumnName: "Code");
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("""
+            DECLARE @p NVARCHAR(20);
+            SELECT 1 FROM [dbo].[vw_Orders] WHERE [Code] = @p;
+            """, probe);
+    }
+
+    [Fact]
+    public void Build_ColumnVsColumnBothHaveImmediateRelations_QueriesBothViews()
+    {
+        var column = new PredicateOperand.Column(
+            "dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 1, Provenance,
+            ImmediateRelationQualifiedName: "dbo.vw_Orders", ImmediateColumnName: "Code");
+        var other = new PredicateOperand.Column(
+            "dbo.Users", "UserCode", new SqlType(SqlTypeCategory.NVarChar, Length: 20), Indexed: true, Depth: 1, Provenance,
+            ImmediateRelationQualifiedName: "dbo.vw_Users", ImmediateColumnName: "Code");
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("SELECT 1 FROM [dbo].[vw_Orders] AS t1 CROSS JOIN [dbo].[vw_Users] AS t2 WHERE t1.[Code] = t2.[Code];", probe);
+    }
+
+    [Fact]
+    public void Build_NoImmediateRelation_FallsBackToBaseTable()
+    {
+        // Depth 0 (a direct base-table predicate) never sets ImmediateRelation - falls back to
+        // the same TableQualifiedName/ColumnName every existing test above already exercises.
+        var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10), Indexed: true, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 10));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Contains("FROM [dbo].[T] WHERE [Col]", probe, StringComparison.Ordinal);
+    }
 }

@@ -20,10 +20,12 @@ namespace SilentScan.Verify.Oracle;
 public sealed class CorpusFindingVerifier
 {
     private readonly PlanXmlCapture _planXmlCapture;
+    private readonly IndexDeploymentChecker _indexChecker;
 
     public CorpusFindingVerifier(SqlServerOptions options)
     {
         _planXmlCapture = new PlanXmlCapture(options);
+        _indexChecker = new IndexDeploymentChecker(options);
     }
 
     public async Task<CorpusFindingResult> VerifyAsync(
@@ -33,6 +35,23 @@ public sealed class CorpusFindingVerifier
         if (probe is null)
         {
             return new CorpusFindingResult(finding, CorpusFindingOutcome.NotProbeable, NotProbeableReason(finding));
+        }
+
+        // The plan-shape confirmation below (absence/presence of GetRangeThroughConvert) is
+        // only a meaningful signal if the finding's column actually has a deployed index - a
+        // trivial heap scan produces the identical "no dynamic range seek" shape as a genuine
+        // ScanForced verdict, which would otherwise silently confirm a verdict the environment
+        // never tested (best-effort DDL deployment can drop a CREATE INDEX batch).
+        if (finding.Verdict is Verdict.ScanForced or Verdict.RangeSeek)
+        {
+            var hasIndex = await _indexChecker.HasLeadingKeyIndexAsync(
+                database, finding.Column.TableQualifiedName, finding.Column.ColumnName, cancellationToken);
+            if (!hasIndex)
+            {
+                return new CorpusFindingResult(
+                    finding, CorpusFindingOutcome.IndexNotDeployed,
+                    $"No deployed index has '{finding.Column.ColumnName}' as its leading key on {finding.Column.TableQualifiedName}.");
+            }
         }
 
         string planXml;
@@ -57,7 +76,22 @@ public sealed class CorpusFindingVerifier
         return new CorpusFindingResult(
             finding,
             confirmed ? CorpusFindingOutcome.Confirmed : CorpusFindingOutcome.NotConfirmed,
-            Detail: null);
+            Detail: confirmed ? null : DescribeMismatch(finding.Verdict, columnConverts, planXml, conversions));
+    }
+
+    private static string DescribeMismatch(
+        Verdict verdict, bool columnConverts, string planXml, IReadOnlyList<ConvertImplicitFinding> observedConversions)
+    {
+        if (!columnConverts)
+        {
+            var observed = observedConversions.Count == 0
+                ? "no column-side CONVERT_IMPLICIT at all"
+                : $"CONVERT_IMPLICIT on {string.Join(", ", observedConversions.Select(c => $"{c.Table}.{c.Column}"))} instead";
+            return $"Expected a column-side conversion for verdict {verdict}, observed {observed}.";
+        }
+
+        var hasDynamicRangeSeek = planXml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
+        return $"Column converted as predicted, but GetRangeThroughConvert was {(hasDynamicRangeSeek ? "present" : "absent")}, which does not match verdict {verdict}.";
     }
 
     // docs/audit-remediation-plan.md Phase 5.2: distinguishes "this operand was a literal we

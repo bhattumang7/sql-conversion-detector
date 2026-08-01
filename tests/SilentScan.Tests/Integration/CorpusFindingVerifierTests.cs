@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Integration;
 /// Verification workflow: "for each SCAN_FORCED finding, execute a parameterized probe ...
 /// and confirm CONVERT_IMPLICIT-on-column").
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class CorpusFindingVerifierTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanFindingVerifierTest";
@@ -42,6 +43,10 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
             CREATE TABLE dbo.Customers (CustomerId INT NOT NULL PRIMARY KEY, CustomerCode VARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);
             GO
             CREATE INDEX IX_Customers_CustomerCode ON dbo.Customers(CustomerCode);
+            GO
+            CREATE TABLE dbo.Unindexed (UnindexedId INT NOT NULL, UnindexedCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            GO
+            CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode FROM dbo.Orders;
             GO
             """,
             DatabaseName);
@@ -81,6 +86,40 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
             "file.sql",
             1,
             1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_Depth1FindingThroughView_ProbesTheViewAndConfirmsAgainstTheBaseColumn()
+    {
+        // The core claim this fix exists to make testable at all: a finding whose predicate was
+        // written against a VIEW column (Depth 1) must be probed by actually querying the view
+        // - not synthesized straight against the base table, which would never exercise the
+        // view layer (or the optimizer's inlining of it) at all. dbo.vw_Orders is a real
+        // deployed view over dbo.Orders; the probe queries vw_Orders.OrderCode, and confirmation
+        // still matches on the base column (dbo.Orders.OrderCode) because the optimizer inlines
+        // the view into the plan - proving both that the view was actually queried AND that the
+        // resulting CONVERT_IMPLICIT lands on the real underlying column.
+        var baseColumnType = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"));
+        var column = new PredicateOperand.Column(
+            "dbo.Orders", "OrderCode", baseColumnType, Indexed: true, Depth: 1,
+            new ColumnProvenance.BaseColumn("dbo.Orders", "OrderCode", baseColumnType, Depth: 1),
+            ImmediateRelationQualifiedName: "dbo.vw_Orders", ImmediateColumnName: "OrderCode");
+
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            column,
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+        Assert.Contains("FROM [dbo].[vw_Orders]", probe, StringComparison.Ordinal);
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
@@ -245,12 +284,59 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task VerifyAsync_ColumnNoLongerExistsInDeployedSchema_ReturnsProbeFailed()
+    public async Task VerifyAsync_ScanForcedColumnHasNoDeployedIndex_ReturnsIndexNotDeployedNotConfirmed()
     {
+        // The P0 fix this locks in: a heap table with no index on the finding's column also
+        // shows no GetRangeThroughConvert in its plan - identical to what a genuine ScanForced
+        // finding's plan looks like. Before the index-deployment gate, this would have been
+        // silently Confirmed even though the environment never actually tested a seek/scan
+        // decision for this column at all.
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            ColumnOperand("dbo.Unindexed", "UnindexedCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20), IsLiteral: true, LiteralText: "N'ABC'"),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.IndexNotDeployed, result.Outcome);
+        Assert.NotEqual(CorpusFindingOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ScanForcedColumnNoLongerExistsInDeployedSchema_ReturnsIndexNotDeployed()
+    {
+        // The index-deployment gate runs before the probe for ScanForced/RangeSeek verdicts: a
+        // table that was never deployed at all has, definitionally, no leading-key index for
+        // the finding's column - IndexNotDeployed is the honest outcome (the environment never
+        // tested this finding), not a probe compile failure.
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.DoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
             new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.IndexNotDeployed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ColumnToColumnProbeAgainstUndeployedTable_ReturnsProbeFailed()
+    {
+        // Genuine compile failure in the probe itself, independent of the index-deployment
+        // gate (which only applies to ScanForced/RangeSeek verdicts) - the "other" side
+        // references a table that was never deployed, so the probe SQL fails to compile.
+        var finding = new TypedPredicateFinding(
+            Verdict.Unknown,
+            ColumnOperand("dbo.CodeFrequency", "Code", new SqlType(SqlTypeCategory.Char, Length: 1)),
+            ColumnOperand("dbo.AlsoDoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
             "=",
             "file.sql",
             1,

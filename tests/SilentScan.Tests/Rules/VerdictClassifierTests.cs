@@ -66,18 +66,20 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_IntColumnVsRealValue_ExactVsApproximateNumeric_ScanForced()
+    public void Classify_IntColumnVsRealValue_ExactVsApproximateNumeric_RangeSeek()
     {
-        // The Phase 0.2 type-pair matrix generation found this: unlike int-vs-bigint above,
-        // comparing an INT column against a REAL/FLOAT value DOES produce a column-side
-        // CONVERT_IMPLICIT (int's full domain isn't exactly representable in a 4-byte float,
-        // so the optimizer can't build a safe range without converting the column) - a
-        // same-numeric-family pair that the old "numeric widening is always free" heuristic
-        // would have wrongly called SeekPreserved.
+        // The type-pair matrix found this: unlike int-vs-bigint above, comparing an INT column
+        // against a REAL/FLOAT value DOES produce a column-side CONVERT_IMPLICIT (int's full
+        // domain isn't exactly representable in a 4-byte float, so the optimizer can't build a
+        // safe range without converting the column) - a same-numeric-family pair that the old
+        // "numeric widening is always free" heuristic would have wrongly called SeekPreserved.
+        // The plan also contains a GetRangeThroughConvert node for this pair, so the honest
+        // verdict is RangeSeek (dynamic seek still possible), not the more severe ScanForced -
+        // the matrix's DynamicRangeSeekAvailable flag must not be discarded.
         var column = new SqlType(SqlTypeCategory.Int);
         var value = new SqlType(SqlTypeCategory.Real);
 
-        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]
@@ -248,5 +250,143 @@ public sealed class VerdictClassifierTests
         var value = new SqlType(SqlTypeCategory.NChar, Length: 10);
 
         Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_CharColumnVsVarcharValue_SameComparisonType_SeekPreserved()
+    {
+        // char and varchar (and, symmetrically, nchar and nvarchar) are the SAME comparison
+        // type in SQL Server - no CONVERT_IMPLICIT on either side, seek fully preserved. The
+        // classifier used to answer this from raw precedence + collation alone and disagreed
+        // with its own oracle-probed matrix entry for this exact cell (ColumnConverts=false).
+        var column = new SqlType(SqlTypeCategory.Char, Length: 10, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_NVarcharColumnVsNCharValue_SameComparisonType_SeekPreserved()
+    {
+        var column = new SqlType(SqlTypeCategory.NVarChar, Length: 10, Collation: WindowsCollation);
+        var value = new SqlType(SqlTypeCategory.NChar, Length: 10);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_VarcharColumnVsIntValue_ColumnConverts_ScanForced()
+    {
+        // CLAUDE.md flagship cross-family example: `varcharCol = 5`.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.Int);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_IntColumnVsVarcharValue_ColumnOutranksValue_SeekPreserved()
+    {
+        // The reverse of the flagship example: int outranks varchar, so the VALUE converts.
+        var column = new SqlType(SqlTypeCategory.Int);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_VarcharColumnVsGuidValue_ColumnConverts_ScanForced()
+    {
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 36, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.UniqueIdentifier);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_SqlVariantColumn_NeverParticipatesInPrecedence_Unknown()
+    {
+        var column = new SqlType(SqlTypeCategory.SqlVariant);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: SqlCollation);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_XmlColumn_NotComparable_Unknown()
+    {
+        var column = new SqlType(SqlTypeCategory.Xml);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: SqlCollation);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_XmlColumnVsXmlValue_SameCategoryStillOutOfModel_Unknown()
+    {
+        // Regression: the out-of-model check must run BEFORE the same-category branch. xml
+        // is not comparable with '=' at all, so "same category" must never fall through to
+        // ClassifySameCategory's SeekPreserved default - that would report a seek-preserving
+        // verdict for a comparison the engine doesn't even support.
+        var column = new SqlType(SqlTypeCategory.Xml);
+        var value = new SqlType(SqlTypeCategory.Xml);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_SqlVariantColumnVsSqlVariantValue_SameCategoryStillOutOfModel_Unknown()
+    {
+        var column = new SqlType(SqlTypeCategory.SqlVariant);
+        var value = new SqlType(SqlTypeCategory.SqlVariant);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_TextColumnVsTextValue_SameCategoryStillOutOfModel_Unknown()
+    {
+        var column = new SqlType(SqlTypeCategory.Text);
+        var value = new SqlType(SqlTypeCategory.Text);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllMatrixEntries))]
+    public void Classify_NeverDisagreesWithItsOwnOracleProbedMatrix(TypePairOutcome entry)
+    {
+        // Guard rail for the architectural invariant: the matrix is the SOLE verdict
+        // authority. For every probed cell, feeding the classifier the same category pair
+        // (and collation, for string-family cells) must reproduce exactly what the cell says
+        // - the classifier must never have its own opinion that drifts from the data it is
+        // supposed to be a pure lookup over.
+        var columnType = BuildProbedType(entry.ColumnCategory, entry.CollationName);
+        var otherType = BuildProbedType(entry.OtherCategory, entry.CollationName);
+
+        var actual = VerdictClassifier.Classify(columnType, otherType);
+
+        if (entry.CompileFailed)
+        {
+            Assert.Equal(Verdict.Unknown, actual);
+        }
+        else if (!entry.ColumnConverts)
+        {
+            Assert.Equal(Verdict.SeekPreserved, actual);
+        }
+        else
+        {
+            Assert.Equal(entry.DynamicRangeSeekAvailable ? Verdict.RangeSeek : Verdict.ScanForced, actual);
+        }
+    }
+
+    public static IEnumerable<object[]> AllMatrixEntries() =>
+        TypePairMatrix.Instance.Entries.Select(e => new object[] { e });
+
+    private static SqlType BuildProbedType(SqlTypeCategory category, string? collationName)
+    {
+        var isStringFamily = category is SqlTypeCategory.Char or SqlTypeCategory.VarChar
+            or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar;
+        return new SqlType(category, Length: isStringFamily ? 20 : null, Collation: collationName is null ? null : new Collation(collationName));
     }
 }

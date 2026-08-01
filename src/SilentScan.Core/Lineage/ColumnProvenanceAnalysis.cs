@@ -1,3 +1,5 @@
+using SilentScan.Core.Catalog;
+
 namespace SilentScan.Core.Lineage;
 
 /// <summary>
@@ -23,6 +25,64 @@ public static class ColumnProvenanceAnalysis
         ColumnProvenance.Union union => union.Branches.Any(IsExpressionDerived),
         _ => false,
     };
+
+    /// <summary>
+    /// The single scalar type at this point in a provenance chain, if one is knowable - shared
+    /// by Pass 3/4's own operand typing (<see cref="Predicates.TypedPredicateExtractor"/>) and
+    /// the Verify oracle's environment-parity gate (<c>LineageParityChecker</c>), which both
+    /// need the identical "what type does this column resolve to" answer. Never guesses: a
+    /// Union only yields a type when every branch agrees, and an Expression only when Pass 2
+    /// already inferred one - anything else (Declared with no type, a disagreeing Union, plain
+    /// Unknown) returns null rather than a guess.
+    /// </summary>
+    public static SqlType? TryGetScalarType(ColumnProvenance provenance) => provenance switch
+    {
+        ColumnProvenance.BaseColumn baseColumn => baseColumn.Type,
+        ColumnProvenance.Declared declared => declared.Type,
+        ColumnProvenance.Cast cast => cast.ExplicitType,
+        ColumnProvenance.Expression expression => expression.InferredType,
+        ColumnProvenance.Union union => AllBranchesAgree(union.Branches, out var agreedType) ? agreedType : null,
+        // The compiler's pattern-exhaustiveness check does not treat this sealed-subtype set as
+        // closed even with every concrete case listed - ColumnProvenanceSubtypeCoverageTests is
+        // the real forcing function: it reflects over every nested ColumnProvenance subtype and
+        // fails if one appears here uncovered.
+        _ => null,
+    };
+
+    private static bool AllBranchesAgree(IReadOnlyList<ColumnProvenance> branches, out SqlType? agreedType)
+    {
+        agreedType = null;
+        foreach (var branch in branches)
+        {
+            var branchType = TryGetScalarType(branch);
+            if (branchType is null)
+            {
+                return false;
+            }
+
+            if (agreedType is null)
+            {
+                agreedType = branchType;
+            }
+            else if (agreedType.Category != branchType.Category)
+            {
+                return false;
+            }
+            else if (agreedType.IsStringFamily
+                && !string.Equals(agreedType.Collation?.Name, branchType.Collation?.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                // Categories agree but the branches' collations genuinely differ: real SQL
+                // Server resolves collation-mixed unions by coercibility precedence rules (or
+                // raises a conflict error) this pass does not implement - silently keeping the
+                // first branch's collation would be a guess about exactly the fact (SQL_* vs
+                // Windows) that decides ScanForced vs RangeSeek. Null the collation so the
+                // verdict engine sees collation-unknown, not a wrong one.
+                agreedType = agreedType with { Collation = null };
+            }
+        }
+
+        return agreedType is not null;
+    }
 
     /// <summary>Every base table column reachable underneath this provenance (0, 1, or many - an expression, or a UNION of several branches, can combine several columns).</summary>
     public static IReadOnlyList<ColumnProvenance.BaseColumn> FindUnderlyingBaseColumns(ColumnProvenance provenance) => provenance switch

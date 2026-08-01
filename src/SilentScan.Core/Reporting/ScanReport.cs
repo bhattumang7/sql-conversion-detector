@@ -10,4 +10,15 @@ public sealed record ScanReport(
     IReadOnlyList<DynamicSqlFinding> DynamicSqlFindings,
     IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
-    SkippedConstructSummary SkippedConstructSummary);
+    SkippedConstructSummary SkippedConstructSummary,
+    TypedPredicateSummary TypedPredicateSummary,
+    int SchemaVersion = ScanReport.CurrentSchemaVersion)
+{
+    /// <summary>
+    /// Bumped whenever a breaking change is made to this report's own shape or to any finding
+    /// record it carries (a field renamed/removed, an enum member's meaning changed) - CLAUDE.md:
+    /// "Findings schema is versioned JSON." Before this field existed, nothing in the emitted
+    /// JSON let a consumer tell one tool version's output from another's.
+    /// </summary>
+    public const int CurrentSchemaVersion = 1;
+}

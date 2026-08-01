@@ -6,7 +6,7 @@ namespace SilentScan.Verify.Oracle;
 
 /// <summary>
 /// Regenerates the checked-in oracle-probed type-pair matrix consumed by
-/// <c>SilentScan.Core.Rules.TypePairMatrix</c> (docs/audit-remediation-plan.md Phase 0.2). For
+/// <c>SilentScan.Core.Rules.TypePairMatrix</c>. For
 /// every category pair in a family, deploys an indexed single-column table per category and
 /// probes a column-vs-parameter comparison compile-only under SHOWPLAN_XML, recording whether
 /// the column side converts, whether a dynamic range seek is available, or whether the pair
@@ -51,8 +51,57 @@ public sealed class TypeMatrixGenerator
         (SqlTypeCategory.NVarChar, "NVARCHAR(40)"),
     ];
 
-    /// <summary>The two collation families CLAUDE.md's type rules distinguish: legacy SQL_* (no dynamic range seek) and Windows (dynamic range seek available).</summary>
-    public static readonly IReadOnlyList<string> Collations = ["SQL_Latin1_General_CP1_CI_AS", "Latin1_General_CI_AS"];
+    /// <summary>
+    /// The collation families CLAUDE.md's type rules distinguish: legacy SQL_* (no dynamic
+    /// range seek) vs Windows (dynamic range seek available) - probed across more than one
+    /// representative of the Windows family specifically, since
+    /// SilentScan.Core.Rules.TypePairMatrix.TryGetOutcomeAgreeingAcrossCollations generalizes "every
+    /// probed collation agreed" from however many entries are here: two representatives is a
+    /// thin basis for that claim (an audit finding - the two-collation set couldn't rule out a
+    /// UTF-8 or binary collation disagreeing). A UTF-8 collation (common on SQL Server 2019+
+    /// deployments, Collation.IsWindowsFamily currently classes it as Windows-family since it
+    /// doesn't start with "SQL_") and a _BIN2 binary collation (byte-order comparison semantics,
+    /// also non-"SQL_"-prefixed) are added specifically to stress that classification - both
+    /// were verified empirically (against this same Docker oracle) to behave like the existing
+    /// Windows-family representative (GetRangeThroughConvert present) before being added here,
+    /// so their inclusion is expected to strengthen the existing agreement rather than surface a
+    /// disagreement, but the matrix now has the probe density to actually detect one if a future
+    /// SQL Server build changes that.
+    /// </summary>
+    public static readonly IReadOnlyList<string> Collations =
+    [
+        "SQL_Latin1_General_CP1_CI_AS",
+        "Latin1_General_CI_AS",
+        "Latin1_General_100_CI_AS_SC_UTF8",
+        "Latin1_General_BIN2",
+    ];
+
+    /// <summary>
+    /// Non-string representatives probed against every <see cref="StringFamily"/> category in
+    /// both directions (string column vs numeric/datetime/guid value, and vice versa) - the
+    /// classic "varchar column vs int/date parameter" bug class the blanket
+    /// precedence-list-only heuristic used to guess at instead of probing.
+    /// </summary>
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> CrossFamilyOther =
+    [
+        (SqlTypeCategory.Bit, "BIT"),
+        (SqlTypeCategory.TinyInt, "TINYINT"),
+        (SqlTypeCategory.SmallInt, "SMALLINT"),
+        (SqlTypeCategory.Int, "INT"),
+        (SqlTypeCategory.BigInt, "BIGINT"),
+        (SqlTypeCategory.SmallMoney, "SMALLMONEY"),
+        (SqlTypeCategory.Money, "MONEY"),
+        (SqlTypeCategory.Decimal, "DECIMAL(18,4)"),
+        (SqlTypeCategory.Real, "REAL"),
+        (SqlTypeCategory.Float, "FLOAT"),
+        (SqlTypeCategory.Time, "TIME"),
+        (SqlTypeCategory.Date, "DATE"),
+        (SqlTypeCategory.SmallDateTime, "SMALLDATETIME"),
+        (SqlTypeCategory.DateTime, "DATETIME"),
+        (SqlTypeCategory.DateTime2, "DATETIME2"),
+        (SqlTypeCategory.DateTimeOffset, "DATETIMEOFFSET"),
+        (SqlTypeCategory.UniqueIdentifier, "UNIQUEIDENTIFIER"),
+    ];
 
     private readonly DatabaseProvisioner _provisioner;
     private readonly ScriptDeployer _deployer;
@@ -76,8 +125,10 @@ public sealed class TypeMatrixGenerator
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> dateTimeFamily,
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> stringFamily,
         IReadOnlyList<string> collations,
+        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? crossFamilyOther = null,
         CancellationToken cancellationToken = default)
     {
+        crossFamilyOther ??= [];
         var entries = new List<TypePairProbeResult>();
         string? serverVersion = null;
 
@@ -85,12 +136,31 @@ public sealed class TypeMatrixGenerator
         {
             const string familyDb = "SilentScanTypeMatrixFamily";
             SqlConnection.ClearAllPools();
-            await _provisioner.CreateFreshAsync(familyDb, cancellationToken);
+            await _provisioner.CreateFreshAsync(familyDb, cancellationToken: cancellationToken);
             try
             {
                 await DeployFamilyTablesAsync(familyDb, numericFamily.Concat(dateTimeFamily).ToList(), collationName: null, cancellationToken);
                 await ProbeFamilyAsync(familyDb, numericFamily, collationName: null, entries, v => serverVersion ??= v, cancellationToken);
                 await ProbeFamilyAsync(familyDb, dateTimeFamily, collationName: null, entries, v => serverVersion ??= v, cancellationToken);
+
+                // Non-string column vs a string-typed value (e.g. `WHERE IntColumn = '123'`) is
+                // not collation-sensitive - the target isn't a string, so which collation family
+                // the string literal notionally belongs to has no bearing on whether the column
+                // converts. Probe this direction exactly once (default collation, recorded as
+                // CollationName=null to match how VerdictClassifier looks up non-string columns)
+                // rather than once per collation family, which would both waste probes and
+                // collide on the matrix's (Column, Other, Collation) dictionary key.
+                if (crossFamilyOther.Count > 0 && stringFamily.Count > 0)
+                {
+                    await DeployFamilyTablesAsync(familyDb, stringFamily, collationName: null, cancellationToken);
+                    foreach (var (otherCategory, _) in crossFamilyOther)
+                    {
+                        foreach (var (stringCategory, stringSyntax) in stringFamily)
+                        {
+                            await ProbeOnePairAsync(familyDb, otherCategory, stringCategory, stringSyntax, collationName: null, entries, v => serverVersion ??= v, cancellationToken);
+                        }
+                    }
+                }
             }
             finally
             {
@@ -106,12 +176,27 @@ public sealed class TypeMatrixGenerator
                 break;
             }
 
-            var stringDb = "SilentScanTypeMatrixStr_" + Math.Abs(collation.GetHashCode(StringComparison.Ordinal));
-            await _provisioner.CreateFreshAsync(stringDb, cancellationToken);
+            var stringDb = "SilentScanTypeMatrixStr_" + SanitizeForIdentifier(collation);
+            await _provisioner.CreateFreshAsync(stringDb, collationName: collation, cancellationToken: cancellationToken);
             try
             {
                 await DeployFamilyTablesAsync(stringDb, stringFamily, collation, cancellationToken);
                 await ProbeFamilyAsync(stringDb, stringFamily, collation, entries, v => serverVersion ??= v, cancellationToken);
+
+                // String column vs a non-string value: collation-sensitive because it decides
+                // whether a resulting dynamic seek is available, so this direction IS probed
+                // once per collation family.
+                if (crossFamilyOther.Count > 0)
+                {
+                    await DeployFamilyTablesAsync(stringDb, crossFamilyOther, collationName: null, cancellationToken);
+                    foreach (var (stringCategory, _) in stringFamily)
+                    {
+                        foreach (var (otherCategory, otherSyntax) in crossFamilyOther)
+                        {
+                            await ProbeOnePairAsync(stringDb, stringCategory, otherCategory, otherSyntax, collation, entries, v => serverVersion ??= v, cancellationToken);
+                        }
+                    }
+                }
             }
             finally
             {
@@ -154,24 +239,45 @@ public sealed class TypeMatrixGenerator
                     continue;
                 }
 
-                var probe = $"DECLARE @p {otherSyntax}; SELECT Col FROM dbo.T_{columnCategory} WHERE Col = @p;";
-
-                try
-                {
-                    var xml = await _capture.CaptureAsync(database, probe, cancellationToken);
-                    recordServerVersion(ExtractBuild(xml));
-                    var columnConverts = ConvertImplicitDetector.FindColumnConversions(xml).Count > 0;
-                    var dynamicRangeSeek = xml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
-                    entries.Add(new TypePairProbeResult(columnCategory, otherCategory, collationName, columnConverts, CompileFailed: false, dynamicRangeSeek));
-                }
-                catch (SqlException)
-                {
-                    // The pair is not implicitly comparable at all (e.g. TIME vs DATE) - a real,
-                    // worth-recording outcome, not a probe failure to propagate.
-                    entries.Add(new TypePairProbeResult(columnCategory, otherCategory, collationName, ColumnConverts: false, CompileFailed: true, DynamicRangeSeekAvailable: false));
-                }
+                await ProbeOnePairAsync(database, columnCategory, otherCategory, otherSyntax, collationName, entries, recordServerVersion, cancellationToken);
             }
         }
+    }
+
+    private async Task ProbeOnePairAsync(
+        string database,
+        SqlTypeCategory columnCategory,
+        SqlTypeCategory otherCategory,
+        string otherSyntax,
+        string? collationName,
+        List<TypePairProbeResult> entries,
+        Action<string> recordServerVersion,
+        CancellationToken cancellationToken)
+    {
+        var probe = $"DECLARE @p {otherSyntax}; SELECT Col FROM dbo.T_{columnCategory} WHERE Col = @p;";
+        try
+        {
+            var xml = await _capture.CaptureAsync(database, probe, cancellationToken);
+            recordServerVersion(ExtractBuild(xml));
+            var columnConverts = ConvertImplicitDetector.FindColumnConversions(xml).Count > 0;
+            var dynamicRangeSeek = xml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
+            entries.Add(new TypePairProbeResult(columnCategory, otherCategory, collationName, columnConverts, CompileFailed: false, dynamicRangeSeek));
+        }
+        catch (SqlException)
+        {
+            entries.Add(new TypePairProbeResult(columnCategory, otherCategory, collationName, ColumnConverts: false, CompileFailed: true, DynamicRangeSeekAvailable: false));
+        }
+    }
+
+    private static string SanitizeForIdentifier(string collation)
+    {
+        Span<char> buffer = stackalloc char[collation.Length];
+        for (var i = 0; i < collation.Length; i++)
+        {
+            buffer[i] = char.IsLetterOrDigit(collation[i]) ? collation[i] : '_';
+        }
+
+        return new string(buffer);
     }
 
     private static string ExtractBuild(string planXml)

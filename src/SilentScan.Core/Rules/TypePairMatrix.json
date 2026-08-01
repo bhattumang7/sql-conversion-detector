@@ -964,6 +964,550 @@
       "DynamicRangeSeekAvailable": false
     },
     {
+      "ColumnCategory": "Bit",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Bit",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Bit",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Bit",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "TinyInt",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "TinyInt",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "TinyInt",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "TinyInt",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallInt",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallInt",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallInt",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallInt",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Int",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Int",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Int",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Int",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "BigInt",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "BigInt",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "BigInt",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "BigInt",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallMoney",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallMoney",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallMoney",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallMoney",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Money",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Money",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Money",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Money",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Decimal",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Decimal",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Decimal",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Decimal",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Real",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Real",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Real",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Real",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Float",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Float",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Float",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Float",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Time",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Time",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Time",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Time",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Date",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Date",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Date",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Date",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallDateTime",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallDateTime",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallDateTime",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "SmallDateTime",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime2",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime2",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime2",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTime2",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTimeOffset",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTimeOffset",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTimeOffset",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "DateTimeOffset",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "UniqueIdentifier",
+      "OtherCategory": "Char",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": true,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "UniqueIdentifier",
+      "OtherCategory": "VarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": true,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "UniqueIdentifier",
+      "OtherCategory": "NChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": true,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "UniqueIdentifier",
+      "OtherCategory": "NVarChar",
+      "CollationName": null,
+      "ColumnConverts": false,
+      "CompileFailed": true,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
       "ColumnCategory": "Char",
       "OtherCategory": "VarChar",
       "CollationName": "SQL_Latin1_General_CP1_CI_AS",
@@ -1056,6 +1600,550 @@
       "OtherCategory": "NChar",
       "CollationName": "SQL_Latin1_General_CP1_CI_AS",
       "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Bit",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "TinyInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Int",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "BigInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Money",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Decimal",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Real",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Float",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Time",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Date",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime2",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Int",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Money",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Real",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Float",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Time",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Date",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Bit",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Int",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Money",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Real",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Float",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Time",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Date",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Int",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Money",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Real",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Float",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Time",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Date",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "SQL_Latin1_General_CP1_CI_AS",
+      "ColumnConverts": true,
       "CompileFailed": false,
       "DynamicRangeSeekAvailable": false
     },
@@ -1152,6 +2240,1830 @@
       "OtherCategory": "NChar",
       "CollationName": "Latin1_General_CI_AS",
       "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_CI_AS",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "VarChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "NChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "NVarChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Char",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "NChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "NVarChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Char",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "VarChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "NVarChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Char",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "VarChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "NChar",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_100_CI_AS_SC_UTF8",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "VarChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "NChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "NVarChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Char",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "NChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "NVarChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": true
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Char",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "VarChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "NVarChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Char",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "VarChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "NChar",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": false,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "Char",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "VarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Bit",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "TinyInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Int",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "BigInt",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallMoney",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Money",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Decimal",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Real",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Float",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Time",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "Date",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "SmallDateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTime2",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "DateTimeOffset",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
+      "CompileFailed": false,
+      "DynamicRangeSeekAvailable": false
+    },
+    {
+      "ColumnCategory": "NVarChar",
+      "OtherCategory": "UniqueIdentifier",
+      "CollationName": "Latin1_General_BIN2",
+      "ColumnConverts": true,
       "CompileFailed": false,
       "DynamicRangeSeekAvailable": false
     }

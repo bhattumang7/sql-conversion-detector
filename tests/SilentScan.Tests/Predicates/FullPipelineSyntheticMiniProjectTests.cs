@@ -72,6 +72,22 @@ public sealed class FullPipelineSyntheticMiniProjectTests
     }
 
     [Fact]
+    public void TypedPredicateSummary_ReflectsEveryClassifiedComparisonNotJustSurvivors()
+    {
+        // The clean twin above proves at least one SeekPreserved comparison was classified
+        // and then dropped from TypedFindings - the summary must still count it, or the
+        // report's only base-rate denominator silently loses exactly the comparisons that
+        // prove the classifier isn't just flagging everything.
+        var summary = _report.TypedPredicateSummary;
+
+        Assert.True(summary.SeekPreservedCount > 0);
+        Assert.Equal(
+            summary.SeekPreservedCount + summary.RangeSeekCount + summary.ScanForcedCount + summary.UnknownCount,
+            summary.TotalClassified);
+        Assert.Equal(summary.RangeSeekCount + summary.ScanForcedCount + summary.UnknownCount, _report.TypedFindings.Count);
+    }
+
+    [Fact]
     public void Tier1FunctionWrappedColumn_IsPlantedAndFound()
     {
         var finding = Assert.Single(_report.Tier1Findings);
@@ -79,6 +95,12 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
         Assert.Equal("CreatedAt", finding.ColumnName);
         Assert.Equal("YEAR", finding.Detail);
+
+        // dbo.Users.CreatedAt carries no index in the fixture's schema - the Tier-1 pass must
+        // resolve that through the catalog now, not report an unknowable Indexed=null the way
+        // it did before catalog/lineage were wired in.
+        Assert.Equal("dbo.Users", finding.TableQualifiedName);
+        Assert.False(finding.Indexed);
     }
 
     [Fact]

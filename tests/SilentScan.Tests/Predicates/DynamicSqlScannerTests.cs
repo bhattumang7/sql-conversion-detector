@@ -568,4 +568,71 @@ public sealed class DynamicSqlScannerTests
         Assert.Empty(result.Findings);
         Assert.Empty(result.AnalyzableScripts);
     }
+
+    [Fact]
+    public void Scan_ExecOfVariableMutatedByPriorProcCallWithOutput_Unanalyzable()
+    {
+        // The P0 fix: `EXEC dbo.BuildQuery @sql OUTPUT` can mutate @sql through a mechanism
+        // this scanner has no visibility into. Before this fix, an unrecognized ExecuteEntity
+        // (any ordinary procedure call) fell through HandleExecute doing nothing at all, so the
+        // later EXEC(@sql) folded the STALE pre-call literal and reported AnalyzedLiteral for
+        // SQL that never actually ran.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "EXEC dbo.BuildQuery @sql OUTPUT; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.AnalyzableScripts);
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("unsupported-execute-form", finding.Reason); // the second EXEC(@sql) site
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableMutatedByProcCallWithReturnAssignment_Unanalyzable()
+    {
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE @rc INT; " +
+            "EXEC @rc = dbo.BuildQuery @sql; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.AnalyzableScripts);
+        Assert.Single(result.Findings);
+    }
+
+    [Fact]
+    public void Scan_ExecInsideWhileLoopThatSelfMutatesTheExecutedVariable_Unanalyzable()
+    {
+        // The counterpart to Scan_ExecInsideWhileLoopUsingPreLoopValue_TierC above: here the
+        // loop body itself reassigns @sql AFTER the EXEC reads it, in program order. Folding
+        // this against loop-entry state is only valid for iteration 1 - iteration 2+ runs SQL
+        // this scanner never analyzed, while the site would otherwise still report
+        // AnalyzedLiteral. This is exactly the DynamicSqlScanner audit's "iteration 2+ executes
+        // different SQL under an AnalyzedLiteral claim" finding.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE @i INT = 0; " +
+            "WHILE @i < 3 BEGIN EXEC(@sql); SET @sql += N' AND 1=1'; SET @i += 1; END");
+
+        Assert.Empty(result.AnalyzableScripts);
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("while-loop-body-self-mutates", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfSelectAssignmentWithWhereClause_Unanalyzable()
+    {
+        // `SELECT @x = ... WHERE <cond>` assigns zero or one time depending on the WHERE -
+        // unlike a FROM-less unconditional assignment, this is not certain to run at all, so
+        // it must taint rather than fold as if it always executes.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX); " +
+            "DECLARE @flag BIT = 1; " +
+            "SELECT @sql = N'SELECT 1' WHERE @flag = 1; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.AnalyzableScripts);
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("select-assignment-not-pure", finding.Reason);
+    }
 }

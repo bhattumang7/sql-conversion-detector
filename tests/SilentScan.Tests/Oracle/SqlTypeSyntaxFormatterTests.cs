@@ -38,11 +38,28 @@ public sealed class SqlTypeSyntaxFormatterTests
     }
 
     [Fact]
-    public void Format_WithCollation_AppendsCollateClause()
+    public void Format_WithCollation_NeverAppendsCollateClause()
+    {
+        // T-SQL rejects COLLATE on a variable declaration outright (verified against the
+        // Docker oracle) - Format() must never emit it; FormatCollateClause() is the
+        // expression-position form callers apply to the operand's use site instead.
+        var type = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_CI_AS"));
+
+        Assert.Equal("VARCHAR(10)", SqlTypeSyntaxFormatter.Format(type));
+    }
+
+    [Fact]
+    public void FormatCollateClause_WithCollation_ReturnsCollateSuffix()
     {
         var type = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_CI_AS"));
 
-        Assert.Equal("VARCHAR(10) COLLATE Latin1_General_CI_AS", SqlTypeSyntaxFormatter.Format(type));
+        Assert.Equal(" COLLATE Latin1_General_CI_AS", SqlTypeSyntaxFormatter.FormatCollateClause(type));
+    }
+
+    [Fact]
+    public void FormatCollateClause_NoCollation_ReturnsEmpty()
+    {
+        Assert.Equal(string.Empty, SqlTypeSyntaxFormatter.FormatCollateClause(new SqlType(SqlTypeCategory.Int)));
     }
 
     [Fact]

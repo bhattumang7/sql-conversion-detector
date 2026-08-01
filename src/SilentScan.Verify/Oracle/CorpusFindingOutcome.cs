@@ -22,4 +22,14 @@ public enum CorpusFindingOutcome
 
     /// <summary>The probe failed to compile/execute against the deployed schema (e.g. the column no longer matches the deployed DDL).</summary>
     ProbeFailed,
+
+    /// <summary>
+    /// A ScanForced/RangeSeek verdict's plan-shape confirmation (absence/presence of dynamic
+    /// range-seek machinery) depends on the finding's column actually having a deployed index -
+    /// otherwise a trivial heap scan would produce the same "no GetRangeThroughConvert" signal
+    /// as a real ScanForced verdict and falsely confirm it. This repo's DDL deployment did not
+    /// produce that index (best-effort deployment dropped the CREATE INDEX batch, an ordering
+    /// dependency, or a permission error), so the environment never actually tested this finding.
+    /// </summary>
+    IndexNotDeployed,
 }

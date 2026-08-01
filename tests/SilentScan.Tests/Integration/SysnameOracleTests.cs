@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Integration;
 /// to keep this test focused) a VARCHAR value against a sysname column produces no conversion
 /// at all - the same both-directions behavior an ordinary nvarchar(128) column would show.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SysnameOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanSysnameOracleTest";

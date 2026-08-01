@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Integration;
 /// real SQL Server plan for the exact same predicate shape actually shows CONVERT_IMPLICIT on
 /// the column, matching what the classifier says.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class UpdateDeletePredicateOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanUpdateDeleteOracleTest";

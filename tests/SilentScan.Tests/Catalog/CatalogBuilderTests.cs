@@ -74,6 +74,28 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_CompositeIndex_OnlyLeadingKeyColumnCountsAsIndexed()
+    {
+        // Regression: a non-leading key column of a composite index cannot drive an index
+        // seek on its own - IsIndexedColumn must match IndexDeploymentChecker's
+        // key_ordinal = 1 requirement (the oracle's own precondition for confirming a
+        // ScanForced/RangeSeek verdict), not just "is a key column somewhere in some index".
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.OrderLines
+            (
+                OrderId INT NOT NULL,
+                Amount DECIMAL(9,2) NOT NULL,
+                CONSTRAINT PK_OrderLines PRIMARY KEY (OrderId, Amount)
+            );
+            """);
+
+        var table = catalog.Find("dbo.OrderLines")!;
+
+        Assert.True(table.IsIndexedColumn("OrderId"));
+        Assert.False(table.IsIndexedColumn("Amount"));
+    }
+
+    [Fact]
     public void Build_StandaloneCreateIndex_AttachesToExistingTable()
     {
         var catalog = BuildFrom("""

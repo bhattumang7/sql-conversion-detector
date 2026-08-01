@@ -49,6 +49,24 @@ public static class ScalarExpressionResolver
         }
 
         var inner = Resolve(parameter, context);
+
+        // CAST/CONVERT to a string-family type has no inline COLLATE syntax of its own (T-SQL
+        // requires wrapping the whole CAST in a separate `... COLLATE ...` clause instead, a
+        // distinct expression node this method never sees) - real SQL Server instead propagates
+        // the INPUT expression's own collation into the result when the input is itself a
+        // string, verified directly against the oracle (CAST(varcharCol AS NVARCHAR(n)) keeps
+        // the source column's collation, not the database default). Without this, every
+        // CAST-to-string column silently reported Collation=null regardless of what the real
+        // engine does, understating how often a CAST-derived predicate's collation is actually
+        // knowable - found by LineageParityCheckerTests diffing against a real deployed view.
+        // A non-string input (CAST(intCol AS NVARCHAR(n))) correctly gets the database's
+        // default collation in the real engine, which this pass has no reliable way to know
+        // here - collation stays null (Unknown), not a guess, exactly as before.
+        if (type.IsStringFamily && ColumnProvenanceAnalysis.TryGetScalarType(inner) is { IsStringFamily: true, Collation: { } innerCollation })
+        {
+            type = type with { Collation = innerCollation };
+        }
+
         return new ColumnProvenance.Cast(type, inner, context.SourcePath, line);
     }
 
@@ -160,6 +178,74 @@ public static class ScalarExpressionResolver
         return Unresolved($"column '{columnName}' not found in FROM scope");
     }
 
+    /// <summary>
+    /// Finds the NEAREST view/TVF a column reference resolves through, if any - the object
+    /// literally named in the query's own FROM clause, as opposed to the chain overload of
+    /// <c>ResolveColumnReference</c>'s fully-flattened <see cref="ColumnProvenance.BaseColumn"/>,
+    /// which always names the ultimate physical table regardless of how many view layers sit
+    /// between it and the predicate. Used by the Verify oracle (<c>CorpusFindingProbeBuilder</c>)
+    /// to compile a probe against the SAME object the original predicate queried - a depth&gt;=1
+    /// finding probed against the base table directly never actually exercises the view layer
+    /// the finding claims the conversion is inherited through. Mirrors the same alias/unqualified
+    /// matching rules as that chain overload exactly, but stops at the first scope-entry match
+    /// instead of resolving all the way down,
+    /// and only returns a result for a genuine view/TVF layer (a base table or CTE reference
+    /// returns null - the base table IS already what TableQualifiedName names, nothing to route
+    /// through differently). A qualified relation name here is not a promise it can be queried
+    /// bare (an inline TVF needs call arguments this method has no way to reconstruct) - the
+    /// caller is expected to treat a resulting compile failure as an honest ProbeFailed, not
+    /// retry with a guess.
+    /// </summary>
+    internal static (string RelationQualifiedName, string ExposedColumnName)? TryResolveImmediateRelation(
+        ColumnReferenceExpression columnRef,
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+    {
+        var identifiers = columnRef.MultiPartIdentifier.Identifiers;
+        var columnName = identifiers[^1].Value;
+
+        if (identifiers.Count >= 2)
+        {
+            var qualifier = identifiers[^2].Value;
+            foreach (var (byAlias, _) in scopeChain)
+            {
+                if (!byAlias.TryGetValue(qualifier, out var entry))
+                {
+                    continue;
+                }
+
+                var column = entry.Relation.FindColumn(columnName);
+                return column is not null && entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
+                    ? (qualifiedName, column.Name)
+                    : null;
+            }
+
+            return null;
+        }
+
+        foreach (var (_, ordered) in scopeChain)
+        {
+            var matches = ordered
+                .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName)))
+                .Where(m => m.Column is not null)
+                .ToList();
+
+            if (matches.Count == 1)
+            {
+                var (entry, column) = matches[0];
+                return entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
+                    ? (qualifiedName, column!.Name)
+                    : null;
+            }
+
+            if (matches.Count > 0)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
     internal static ColumnProvenance BumpDepthIfViewLayer(ColumnProvenance provenance, bool isViewLayer)
     {
         if (!isViewLayer)
@@ -172,6 +258,18 @@ public static class ScalarExpressionResolver
             ColumnProvenance.BaseColumn bc => bc with { Depth = bc.Depth + 1 },
             ColumnProvenance.Cast cast => cast with { Depth = cast.Depth + 1, Inner = BumpDepthIfViewLayer(cast.Inner, isViewLayer) },
             ColumnProvenance.Expression expr => expr with { Depth = expr.Depth + 1, Inputs = [.. expr.Inputs.Select(i => BumpDepthIfViewLayer(i, isViewLayer))] },
+            ColumnProvenance.Declared declared => declared with { Depth = declared.Depth + 1 },
+            // A UNION-view column's branches are each their own provenance chain (CLAUDE.md:
+            // "record ALL branch types") - reading it through another view layer bumps every
+            // branch, or depth silently stays 0 forever for any predicate against a union-
+            // backed view read through further layers, skewing the study's depth histogram.
+            ColumnProvenance.Union union => union with { Branches = [.. union.Branches.Select(b => BumpDepthIfViewLayer(b, isViewLayer))] },
+            // Unknown has no depth to bump. The compiler's pattern-exhaustiveness check does
+            // not treat this sealed-subtype set as closed (it still demands a catch-all even
+            // with every concrete case listed), so this `_` can't be removed the way a real
+            // closed-union language feature would allow - ColumnProvenanceSubtypeCoverageTests
+            // is the actual forcing function: it reflects over every nested ColumnProvenance
+            // subtype and fails if one appears here uncovered.
             _ => provenance,
         };
     }

@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Integration;
 /// LineageResolver output against sys.columns - the free ground-truth oracle CLAUDE.md's
 /// Verify workflow calls for ("ANY mismatch is a P0 bug").
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class LineageColumnCatalogOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanLineageOracleTest";

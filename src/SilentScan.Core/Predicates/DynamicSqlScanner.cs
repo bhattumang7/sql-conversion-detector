@@ -187,7 +187,7 @@ public static class DynamicSqlScanner
         /// </summary>
         private void HandleSelectAssignments(SelectStatement select, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
-            if (select.QueryExpression is QuerySpecification { FromClause: null } spec
+            if (select.QueryExpression is QuerySpecification { FromClause: null, WhereClause: null, HavingClause: null, TopRowFilter: null } spec
                 && spec.SelectElements.Count > 0
                 && spec.SelectElements.All(e => e is SelectSetVariable))
             {
@@ -251,14 +251,39 @@ public static class DynamicSqlScanner
 
         private void HandleWhile(WhileStatement whileStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
+            var bodyStatements = NormalizeToStatementList(whileStatement.Statement);
             var bodyDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
-            WalkStatements(NormalizeToStatementList(whileStatement.Statement), bodyDict, foldingEnabled);
+
+            // Any variable the loop body assigns ANYWHERE within it - even after an EXEC that
+            // reads it in program order - cannot be trusted at that EXEC either: the value is
+            // only "as of loop entry" on iteration 1, and this scanner walks the body exactly
+            // once, so an EXEC folded against entry-state would silently analyze different SQL
+            // than what runs on iteration 2+ while still reporting AnalyzedLiteral. Taint those
+            // variables BEFORE walking so any EXEC inside the body referencing one comes out
+            // Unanalyzable instead. A variable the body never assigns is untouched here and can
+            // still fold normally using the state as of loop entry.
+            var assignedInBody = CollectAssignedVariableNames(bodyStatements);
+            foreach (var name in assignedInBody)
+            {
+                bodyDict[name] = FoldState.Tainted("while-loop-body-self-mutates", Span(whileStatement));
+            }
+
+            WalkStatements(bodyStatements, bodyDict, foldingEnabled);
 
             // A while body may run zero, one, or many times, so nothing it touches can be
-            // trusted after the loop - but statements *inside* the body (already walked into
-            // bodyDict above, which is where any EXEC inside the loop was evaluated) may still
-            // fold using the state as of loop entry, since that's valid on the first iteration.
+            // trusted after the loop either.
             MergeTaintingDivergent(folded, bodyDict, folded, whileStatement, "while-loop-body");
+        }
+
+        private static HashSet<string> CollectAssignedVariableNames(IList<TSqlStatement> statements)
+        {
+            var collector = new AssignedVariableCollector();
+            foreach (var statement in statements)
+            {
+                statement.Accept(collector);
+            }
+
+            return collector.Names;
         }
 
         private void HandleTryCatch(TryCatchStatement tryCatch, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -310,7 +335,33 @@ public static class DynamicSqlScanner
                     when string.Equals(name, "sp_executesql", StringComparison.OrdinalIgnoreCase):
                     HandleSpExecuteSql(procRef, node, folded, foldingEnabled);
                     break;
+
+                default:
+                    // An ordinary `EXEC dbo.SomeProc @sql OUTPUT` (or `EXEC @rc = proc ...`) -
+                    // this scanner has no visibility into what the called procedure does to an
+                    // OUTPUT argument or the return-value variable. Without this, such a call
+                    // fell through doing nothing at all (unlike every other unrecognized
+                    // construct, which taints via the WalkStatement default case) - a variable
+                    // later folded as "constant" could actually hold whatever the proc just
+                    // wrote to it, and a subsequent EXEC(@sql) would analyze SQL that never
+                    // runs while reporting AnalyzedLiteral. Taint every variable this call
+                    // could plausibly have mutated (all OUTPUT/return-assigned arguments, or
+                    // conservatively everything tracked when we can't tell which).
+                    TaintExecuteMutatedVariables(node, folded);
+                    break;
             }
+        }
+
+        /// <summary>
+        /// Taints the return-value variable (<c>EXEC @rc = proc</c>) and every argument passed
+        /// with OUTPUT, plus - conservatively, since this scanner does not model what an
+        /// arbitrary called procedure does internally - every other variable currently tracked,
+        /// matching the same fail-safe the WalkStatement default case already uses for any
+        /// other statement kind it doesn't specifically model.
+        /// </summary>
+        private void TaintExecuteMutatedVariables(ExecuteStatement node, Dictionary<string, FoldState> folded)
+        {
+            TaintAll(folded, node, "unsupported-execute-form");
         }
 
         private void HandleStringList(ExecutableStringList stringList, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -342,7 +393,14 @@ public static class DynamicSqlScanner
                 return;
             }
 
-            var queryAttempt = TryFoldExpression(procRef.Parameters[0].ParameterValue, folded, foldingEnabled);
+            var statementArg = ResolveNamedOrPositionalArgument(procRef.Parameters, index: 0, "@stmt", "@statement");
+            if (statementArg is null)
+            {
+                Findings.Add(Unanalyzable(node, "non-literal-argument"));
+                return;
+            }
+
+            var queryAttempt = TryFoldExpression(statementArg, folded, foldingEnabled);
             if (!queryAttempt.Success)
             {
                 Findings.Add(Unanalyzable(node, queryAttempt.Reason!));
@@ -361,12 +419,13 @@ public static class DynamicSqlScanner
         /// </summary>
         private IReadOnlyDictionary<string, SqlType?> ResolveDeclaredParameters(ExecutableProcedureReference procRef, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
-            if (procRef.Parameters.Count < 2)
+            var paramsArg = ResolveNamedOrPositionalArgument(procRef.Parameters, index: 1, "@params", "@parameters");
+            if (paramsArg is null)
             {
                 return NoDeclaredParameters;
             }
 
-            var attempt = TryFoldExpression(procRef.Parameters[1].ParameterValue, folded, foldingEnabled);
+            var attempt = TryFoldExpression(paramsArg, folded, foldingEnabled);
             if (!attempt.Success)
             {
                 return NoDeclaredParameters;
@@ -374,6 +433,36 @@ public static class DynamicSqlScanner
 
             var declarationText = string.Concat(attempt.Segments!.Select(s => s.Value));
             return DynamicSqlParameterDeclarations.TryParse(declarationText) ?? NoDeclaredParameters;
+        }
+
+        /// <summary>
+        /// sp_executesql's own @stmt/@params arguments can be passed by name
+        /// (<c>EXEC sp_executesql @params = @paramDecl, @stmt = @sql</c>, order-independent) -
+        /// the same T-SQL calling convention any procedure supports. Note this is distinct
+        /// from - and must not be confused with - the very common pattern where @stmt/@params
+        /// ARE positional but LATER arguments are named after the query's own declared
+        /// parameters (<c>EXEC sp_executesql @sql, N'@DisplayName nvarchar(40)', @DisplayName
+        /// = @x</c>): the presence of ANY named argument does not mean every argument is named,
+        /// so this always tries a formal-name match first and falls back to positional
+        /// regardless of what other arguments in the call happen to be named. Treating the
+        /// argument list as purely positional would silently mis-assign the statement/params
+        /// roles whenever @stmt/@params themselves are named or reordered - the params-
+        /// declaration text would be parsed as if it were the SQL to execute (and vice versa),
+        /// misreported as a parse failure instead of resolved correctly.
+        /// </summary>
+        private static ScalarExpression? ResolveNamedOrPositionalArgument(
+            IList<ExecuteParameter> parameters, int index, params ReadOnlySpan<string> formalNames)
+        {
+            foreach (var parameter in parameters)
+            {
+                if (parameter.Variable is { } variable
+                    && formalNames.Contains(variable.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    return parameter.ParameterValue;
+                }
+            }
+
+            return index < parameters.Count ? parameters[index].ParameterValue : null;
         }
 
         private DynamicSqlScript BuildScript(ExecuteStatement node, IReadOnlyList<LiteralSegment> segments, IReadOnlyDictionary<string, SqlType?> declaredParameters)
@@ -493,6 +582,16 @@ public static class DynamicSqlScanner
         private sealed class SelectSetVariableCollector : TSqlFragmentVisitor
         {
             public List<string> Names { get; } = [];
+
+            public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
+        }
+
+        /// <summary>Every variable name a SET or SELECT-assignment statement anywhere in the visited subtree assigns - used to pre-taint a loop body's self-mutated variables before walking it.</summary>
+        private sealed class AssignedVariableCollector : TSqlFragmentVisitor
+        {
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public override void Visit(SetVariableStatement node) => Names.Add(node.Variable.Name);
 
             public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
         }

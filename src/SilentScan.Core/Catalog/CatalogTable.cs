@@ -26,11 +26,19 @@ public sealed record CatalogTable(
         Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// True only if a genuinely seekable index covers this column as a key column - a filtered
-    /// index (only covers rows matching its own predicate) or a columnstore index (no B-tree to
-    /// seek) does not count, even though the column is technically "in an index"
-    /// (docs/audit-remediation-plan.md Phase 2.5).
+    /// True only if a genuinely seekable index has this column as its LEADING key column - a
+    /// filtered index (only covers rows matching its own predicate) or a columnstore index (no
+    /// B-tree to seek) does not count, even though the column is technically "in an index"
+    /// (docs/audit-remediation-plan.md Phase 2.5). A column that is only a non-leading key
+    /// column (e.g. the second column of a composite index) cannot drive an index seek on its
+    /// own regardless of an implicit conversion, so it does not count either - matching
+    /// SilentScan.Verify.Oracle.IndexDeploymentChecker's identical key_ordinal = 1 requirement,
+    /// so the static ranking and the oracle's confirmation precondition agree on what "indexed"
+    /// means (an earlier version counted ANY key-column position, which ranked composite-index
+    /// second-key predicates as indexed even though the oracle correctly refuses to confirm
+    /// them at all).
     /// </summary>
     public bool IsIndexedColumn(string columnName) =>
-        Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Any(k => string.Equals(k, columnName, StringComparison.OrdinalIgnoreCase)));
+        Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0
+            && string.Equals(i.KeyColumns[0], columnName, StringComparison.OrdinalIgnoreCase));
 }

@@ -38,7 +38,22 @@ public static class CteResolver
 
             if (cte.Columns.Count > 0)
             {
-                columns = [.. columns.Zip(cte.Columns, (c, id) => c with { Name = id.Value })];
+                if (columns.Count == cte.Columns.Count)
+                {
+                    columns = [.. columns.Zip(cte.Columns, (c, id) => c with { Name = id.Value })];
+                }
+                else
+                {
+                    // Same wrong-base-column risk as the view column-list case in
+                    // LineageResolver: a position-based Zip on a count mismatch silently
+                    // shifts every later declared name onto a different resolved column.
+                    ledger?.Record(
+                        AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "CTE column list",
+                        $"'{name}' declares {cte.Columns.Count} column name(s) but its query resolved {columns.Count} - column identity can't be trusted");
+                    columns = [.. columns.Select((c, i) => new ResolvedColumn(
+                        i < cte.Columns.Count ? cte.Columns[i].Value : c.Name,
+                        new ColumnProvenance.Unknown("CTE's declared column count does not match its resolved query")))];
+                }
             }
 
             ctes[name] = new ResolvedRelation(QualifiedName: null, columns);

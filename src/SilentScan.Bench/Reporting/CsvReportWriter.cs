@@ -8,19 +8,25 @@ public static class CsvReportWriter
 {
     public static string Write(IReadOnlyList<BenchmarkResult> results)
     {
+        // Explicit "\n" (not AppendLine's platform-dependent Environment.NewLine) and
+        // lowercase booleans (not bool.ToString()'s "True"/"False") so the CSV is byte-
+        // identical regardless of what platform generated it - this file feeds a published
+        // study's charts, not just a human reading it in a terminal.
         var builder = new StringBuilder();
-        builder.AppendLine("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,MedianLogicalReads,MedianCpuMs,MedianElapsedMs");
+        builder.Append("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs\n");
 
         foreach (var r in results)
         {
-            builder.AppendLine(string.Join(',',
+            builder.Append(string.Join(',',
                 r.ScenarioName,
                 r.RowCount.ToString(CultureInfo.InvariantCulture),
-                r.LegacyCardinalityEstimation,
-                r.Matched,
+                r.LegacyCardinalityEstimation ? "true" : "false",
+                r.Matched ? "true" : "false",
+                r.Selectivity.ToString(),
                 r.MedianLogicalReads.ToString(CultureInfo.InvariantCulture),
                 r.MedianCpuMs.ToString(CultureInfo.InvariantCulture),
                 r.MedianElapsedMs.ToString(CultureInfo.InvariantCulture)));
+            builder.Append('\n');
         }
 
         return builder.ToString();

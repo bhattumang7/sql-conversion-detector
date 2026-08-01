@@ -22,13 +22,31 @@ public sealed partial class DatabaseProvisioner
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex ValidIdentifier();
 
-    /// <summary>Drops <paramref name="databaseName"/> if it exists, then creates it fresh at the pinned compat level.</summary>
-    public async Task CreateFreshAsync(string databaseName, CancellationToken cancellationToken = default)
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]{2,127}$")]
+    private static partial Regex ValidCollationName();
+
+    /// <summary>
+    /// Drops <paramref name="databaseName"/> if it exists, then creates it fresh at the pinned
+    /// compat level. When <paramref name="collationName"/> is supplied, the database is created
+    /// WITH that collation rather than the instance default - the static classifier types
+    /// corpus columns using the manifest's declared collation (CLAUDE.md corpus rules), so the
+    /// deployed environment must agree with it or the oracle probes a different collation family
+    /// than the one the verdict was reasoned about, which can silently confirm the wrong
+    /// direction (e.g. a Windows-collation RangeSeek finding probed against a SQL_* instance
+    /// default reads back as a false ScanForced confirmation).
+    /// </summary>
+    public async Task CreateFreshAsync(string databaseName, string? collationName = null, CancellationToken cancellationToken = default)
     {
+        if (collationName is not null && !ValidCollationName().IsMatch(collationName))
+        {
+            throw new ArgumentException($"'{collationName}' is not a safe SQL Server collation name.", nameof(collationName));
+        }
+
         await using var connection = await OpenMasterConnectionAsync(databaseName, cancellationToken);
 
         await DropIfExistsCoreAsync(connection, databaseName, cancellationToken);
-        await ExecuteAsync(connection, $"CREATE DATABASE [{databaseName}];", cancellationToken);
+        var collateClause = collationName is null ? string.Empty : $" COLLATE {collationName}";
+        await ExecuteAsync(connection, $"CREATE DATABASE [{databaseName}]{collateClause};", cancellationToken);
         await ExecuteAsync(connection, $"ALTER DATABASE [{databaseName}] SET COMPATIBILITY_LEVEL = {PinnedCompatibilityLevel};", cancellationToken);
     }
 

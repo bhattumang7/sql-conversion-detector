@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Integration;
 /// `WHERE IsPermittedToLogon = 0` (bit vs int) and `WHERE ExpectedDeliveryDate >= @StartingWhen`
 /// (date vs datetime).
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SameFamilyWideningOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanWideningOracleTest";

@@ -26,7 +26,27 @@ public sealed class TypePairMatrixTests
 
     [Fact]
     public void Instance_HasAllExpectedEntries() =>
-        Assert.Equal(144, TypePairMatrix.Instance.Entries.Count);
+        Assert.Equal(508, TypePairMatrix.Instance.Entries.Count);
+
+    [Fact]
+    public void Instance_ProbesEveryDeclaredCollationWithTheSameEntryCount()
+    {
+        // Guards the two-collation-generalization concern directly (an audit finding: only two
+        // Windows-family representatives made TryGetOutcomeAgreeingAcrossCollations' "every
+        // probed collation agreed" claim a thin one) - every collation TypeMatrixGenerator
+        // declares must actually have landed in the checked-in matrix, with the SAME per-
+        // collation entry count, or a future regeneration silently dropping one collation's
+        // probes would slip through unnoticed.
+        var entries = TypePairMatrix.Instance.Entries;
+        var byCollation = entries.Where(e => e.CollationName is not null).ToLookup(e => e.CollationName);
+
+        Assert.Equal(SilentScan.Verify.Oracle.TypeMatrixGenerator.Collations.Count, byCollation.Count);
+        foreach (var collation in SilentScan.Verify.Oracle.TypeMatrixGenerator.Collations)
+        {
+            Assert.True(byCollation.Contains(collation), $"matrix has no entries for collation '{collation}'");
+            Assert.Equal(80, byCollation[collation].Count());
+        }
+    }
 
     [Theory]
     [InlineData(SqlTypeCategory.Int, SqlTypeCategory.Real, true)]
@@ -89,4 +109,70 @@ public sealed class TypePairMatrixTests
         // The matrix key includes collation for string pairs; omitting it must not accidentally
         // match an entry that was only ever probed under a specific collation.
         Assert.Null(TypePairMatrix.Instance.TryGetOutcome(SqlTypeCategory.VarChar, SqlTypeCategory.NVarChar));
+
+    [Theory]
+    [InlineData(SqlTypeCategory.Char, SqlTypeCategory.VarChar, "SQL_Latin1_General_CP1_CI_AS", false)]
+    [InlineData(SqlTypeCategory.NChar, SqlTypeCategory.NVarChar, "Latin1_General_CI_AS", false)]
+    public void TryGetOutcome_CharVsVarcharFamilyPairs_NeverConvertTheColumn(
+        SqlTypeCategory column, SqlTypeCategory other, string collation, bool expectedColumnConverts)
+    {
+        // The bug this guards: char/varchar (and nchar/nvarchar) are the same comparison type
+        // in SQL Server - no CONVERT_IMPLICIT on either side. VerdictClassifier used to bypass
+        // the matrix for string pairs entirely and report ScanForced here, contradicting this
+        // very entry.
+        var outcome = TypePairMatrix.Instance.TryGetOutcome(column, other, collation);
+
+        Assert.NotNull(outcome);
+        Assert.Equal(expectedColumnConverts, outcome.ColumnConverts);
+    }
+
+    [Theory]
+    [InlineData(SqlTypeCategory.VarChar, SqlTypeCategory.Int, "SQL_Latin1_General_CP1_CI_AS", true)]
+    [InlineData(SqlTypeCategory.VarChar, SqlTypeCategory.UniqueIdentifier, "Latin1_General_CI_AS", true)]
+    [InlineData(SqlTypeCategory.VarChar, SqlTypeCategory.DateTime2, "SQL_Latin1_General_CP1_CI_AS", true)]
+    public void TryGetOutcome_CrossFamilyStringColumnVsValue_MatchesOracleProbe(
+        SqlTypeCategory column, SqlTypeCategory other, string collation, bool expectedColumnConverts)
+    {
+        var outcome = TypePairMatrix.Instance.TryGetOutcome(column, other, collation);
+
+        Assert.NotNull(outcome);
+        Assert.Equal(expectedColumnConverts, outcome.ColumnConverts);
+    }
+
+    [Theory]
+    [InlineData(SqlTypeCategory.Int, SqlTypeCategory.VarChar, false)]
+    [InlineData(SqlTypeCategory.Bit, SqlTypeCategory.VarChar, false)]
+    [InlineData(SqlTypeCategory.UniqueIdentifier, SqlTypeCategory.VarChar, false)]
+    public void TryGetOutcome_CrossFamilyNonStringColumnVsStringValue_IsNotCollationKeyed(
+        SqlTypeCategory column, SqlTypeCategory other, bool expectedColumnConverts)
+    {
+        // Non-string columns aren't collation-sensitive, so this direction is probed once and
+        // recorded with a null collation key - matching how VerdictClassifier looks these up.
+        var outcome = TypePairMatrix.Instance.TryGetOutcome(column, other, collationName: null);
+
+        Assert.NotNull(outcome);
+        Assert.Equal(expectedColumnConverts, outcome.ColumnConverts);
+    }
+
+    [Fact]
+    public void TryGetOutcomeAgreeingAcrossCollations_PairWhereEveryCollationAgrees_ReturnsThatOutcome()
+    {
+        // nvarchar column vs varchar value never converts the column regardless of collation -
+        // a precedence-direction fact, not a collation-dependent one. This lets a column with
+        // unresolved collation still get a real (non-guessed) verdict for pairs like this one.
+        var outcome = TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory.NVarChar, SqlTypeCategory.VarChar);
+
+        Assert.NotNull(outcome);
+        Assert.False(outcome.ColumnConverts);
+    }
+
+    [Fact]
+    public void TryGetOutcomeAgreeingAcrossCollations_PairWhereCollationChangesTheOutcome_ReturnsNull()
+    {
+        // varchar column vs nvarchar value: ScanForced under SQL_*, RangeSeek under Windows -
+        // collation genuinely changes the answer, so this must NOT silently pick one.
+        var outcome = TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory.VarChar, SqlTypeCategory.NVarChar);
+
+        Assert.Null(outcome);
+    }
 }

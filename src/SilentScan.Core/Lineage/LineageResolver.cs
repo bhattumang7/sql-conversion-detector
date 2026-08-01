@@ -78,7 +78,25 @@ public static class LineageResolver
 
         if (view.ExplicitColumnNames is { Count: > 0 } explicitNames)
         {
-            columns = [.. columns.Zip(explicitNames, (col, name) => col with { Name = name })];
+            if (columns.Count == explicitNames.Count)
+            {
+                columns = [.. columns.Zip(explicitNames, (col, name) => col with { Name = name })];
+            }
+            else
+            {
+                // A count mismatch means position-based Zip would silently attribute an
+                // explicit name to the WRONG resolved column - e.g. `SELECT *` over an
+                // unknown-DDL table yields fewer columns than declared, and Zip then shifts
+                // every later name onto a different table's provenance entirely. That's a
+                // wrong-base-column finding with a real type attached, not just an Unknown -
+                // exactly the false positive CLAUDE.md forbids. Degrade every column instead.
+                ledger.Record(
+                    AnalysisPass.Lineage, view.SourcePath, view.SourceLine, 0, "view column list",
+                    $"'{view.QualifiedName}' declares {explicitNames.Count} column name(s) but its SELECT resolved {columns.Count} - column identity can't be trusted");
+                columns = [.. columns.Select((c, i) => new ResolvedColumn(
+                    i < explicitNames.Count ? explicitNames[i] : c.Name,
+                    new ColumnProvenance.Unknown("view's declared column count does not match its resolved SELECT list")))];
+            }
         }
 
         return new ResolvedRelation(view.QualifiedName, columns);

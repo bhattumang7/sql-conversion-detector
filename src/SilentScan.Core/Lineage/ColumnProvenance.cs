@@ -36,7 +36,7 @@ public abstract record ColumnProvenance
     /// verdict for it (docs/audit-remediation-plan.md Phase 4.2) rather than treating it as an
     /// untyped, unreportable value the way an Expression with no inferred type is.
     /// </summary>
-    public sealed record Declared(SqlType Type, string? TableQualifiedName = null) : ColumnProvenance;
+    public sealed record Declared(SqlType Type, string? TableQualifiedName = null, int Depth = 0) : ColumnProvenance;
 
     /// <summary>
     /// An explicit CAST/CONVERT to a named type, wrapping <see cref="Inner"/> - the wrapped

@@ -14,7 +14,13 @@ namespace SilentScan.Core.Reporting.Sarif;
 public static class SarifReportWriter
 {
     private const string ToolName = "SilentScan";
-    private const string ToolVersion = "0.1.0";
+
+    // Read from the assembly's own version (Directory.Build.props' <Version>) rather than a
+    // hardcoded literal - a hardcoded string silently stops tracking the tool's actual version
+    // the moment someone forgets to update it by hand, which defeats SARIF's whole purpose of
+    // letting CI baselining/suppression key off driver.version.
+    private static readonly string ToolVersion =
+        typeof(SarifReportWriter).Assembly.GetName().Version?.ToString() ?? "0.0.0";
 
     private const string LevelError = "error";
     private const string LevelWarning = "warning";
@@ -48,9 +54,21 @@ public static class SarifReportWriter
     private static SarifResult ToResult(SargabilityFinding finding)
     {
         var ruleId = SarifRuleCatalog.Tier1RuleId(finding.Kind);
-        var level = finding.Kind == SargabilityFindingKind.LikePatternNotLiteral ? LevelNote : LevelWarning;
+
+        // A syntactic pattern is only worth a reader's full attention when it's confirmed on a
+        // real, leading-key-indexed column - one where there was an actual seek to lose. finding
+        // .Indexed is null (unresolved) far more often than it's false (resolved-and-confirmed-
+        // unindexed) in real corpora, so both demote the same way: only Indexed == true keeps
+        // the kind's normal severity. Without this, every syntactic hit on an unindexed or
+        // unresolvable column reported at the same "warning" level as a genuine index-defeating
+        // one - the single largest source of unranked noise this pass produced.
+        var isConfirmedIndexed = finding.Indexed == true;
+        var level = isConfirmedIndexed && finding.Kind != SargabilityFindingKind.LikePatternNotLiteral ? LevelWarning : LevelNote;
         var detail = finding.Detail is null ? string.Empty : $" ({finding.Detail})";
-        var message = $"Column '{finding.ColumnName}' is used in a non-sargable predicate{detail}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
+        var indexNote = finding.TableQualifiedName is { } table
+            ? $" [{table}.{finding.ColumnName}, indexed={IndexedDisplay(finding.Indexed)}]"
+            : string.Empty;
+        var message = $"Column '{finding.ColumnName}' is used in a non-sargable predicate{detail}.{indexNote}{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
@@ -100,6 +118,8 @@ public static class SarifReportWriter
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
+    private static string IndexedDisplay(bool? indexed) => indexed is { } value ? value.ToString() : "unknown";
+
     private static string DynamicSqlOriginNote(SourceSpan? callSite) =>
         callSite is { } span ? $" (via dynamic SQL executed at {span.SourcePath}:{span.Line})" : string.Empty;
 
@@ -124,5 +144,22 @@ public static class SarifReportWriter
             new SarifMessage(message),
             [new SarifLocation(new SarifPhysicalLocation(new SarifArtifactLocation(ToUri(sourcePath)), new SarifRegion(line, startColumn)))]);
 
-    private static string ToUri(string sourcePath) => sourcePath.Replace('\\', '/').Replace(" ", "%20", StringComparison.Ordinal);
+    /// <summary>
+    /// Emits a real <c>file://</c> URI for an absolute path, or a percent-encoded relative
+    /// reference otherwise - not the previous ad-hoc "swap backslashes, escape spaces" scheme,
+    /// which produced a scheme-less string like <c>/home/user/repo/file.sql</c> that strict
+    /// SARIF consumers (GitHub code scanning included) reject as an invalid
+    /// artifactLocation.uri, and left every other reserved URI character (<c>#</c>, <c>?</c>,
+    /// <c>%</c> itself, ...) unescaped.
+    /// </summary>
+    private static string ToUri(string sourcePath)
+    {
+        var normalized = sourcePath.Replace('\\', '/');
+        if (Path.IsPathRooted(sourcePath))
+        {
+            return new Uri(normalized).AbsoluteUri;
+        }
+
+        return string.Join('/', normalized.Split('/').Select(Uri.EscapeDataString));
+    }
 }

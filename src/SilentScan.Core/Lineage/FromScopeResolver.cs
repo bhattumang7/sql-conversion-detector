@@ -104,7 +104,24 @@ public static class FromScopeResolver
             var (alias, entry) = ResolveTableReference(leaf, context, aliasOverride);
             if (alias is not null)
             {
-                byAlias[alias] = entry;
+                if (byAlias.ContainsKey(alias))
+                {
+                    // A legal, if unusual, query: `FROM dbo.T JOIN audit.T ON ...` exposes two
+                    // leaves under the same unqualified name (T). Silently last-wins here would
+                    // make every later `T.Col` reference - including star expansion - resolve
+                    // against whichever leaf happened to be flattened last, a wrong-base-column
+                    // risk identical in kind to the column-list Zip misalignment above. Neither
+                    // leaf's identity can be trusted once this happens, so poison the entry
+                    // rather than guess which one a bare reference meant.
+                    context.Ledger?.Record(
+                        AnalysisPass.Lineage, context.SourcePath, tableReference.StartLine, tableReference.StartColumn,
+                        "FROM alias", $"'{alias}' is exposed by more than one table reference in this FROM clause - ambiguous, references to it resolve Unknown");
+                    byAlias[alias] = new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false);
+                }
+                else
+                {
+                    byAlias[alias] = entry;
+                }
             }
 
             ordered.Add(entry);
@@ -181,7 +198,20 @@ public static class FromScopeResolver
                 var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
                 if (derived.Columns.Count > 0)
                 {
-                    innerColumns = [.. innerColumns.Zip(derived.Columns, (c, id) => c with { Name = id.Value })];
+                    if (innerColumns.Count == derived.Columns.Count)
+                    {
+                        innerColumns = [.. innerColumns.Zip(derived.Columns, (c, id) => c with { Name = id.Value })];
+                    }
+                    else
+                    {
+                        // Same wrong-base-column risk as the view/CTE column-list cases.
+                        ledger?.Record(
+                            AnalysisPass.Lineage, sourcePath, derived.StartLine, derived.StartColumn, "derived table column list",
+                            $"declares {derived.Columns.Count} column name(s) but its query resolved {innerColumns.Count} - column identity can't be trusted");
+                        innerColumns = [.. innerColumns.Select((c, i) => new ResolvedColumn(
+                            i < derived.Columns.Count ? derived.Columns[i].Value : c.Name,
+                            new ColumnProvenance.Unknown("derived table's declared column count does not match its resolved query")))];
+                    }
                 }
 
                 return (derived.Alias?.Value, new ScopeEntry(new ResolvedRelation(QualifiedName: null, innerColumns), IsViewLayer: false));

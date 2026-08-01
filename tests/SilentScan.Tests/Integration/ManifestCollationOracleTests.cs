@@ -15,6 +15,7 @@ namespace SilentScan.Tests.Integration;
 /// fallback wiring itself (manifest hint -&gt; DatabaseCatalog.DefaultCollation -&gt; an uncollated
 /// column) is covered statically by ScanReportBuilderCollationTests.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ManifestCollationOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanManifestCollationOracleTest";

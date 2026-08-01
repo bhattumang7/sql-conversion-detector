@@ -9,14 +9,26 @@ namespace SilentScan.Verify.Oracle;
 /// column"). The probe never runs the repo's own SQL - it reconstructs an equivalent minimal
 /// comparison from the finding's resolved column and operand types, so only tables/columns
 /// are borrowed from the corpus, never its logic.
+///
+/// Queries the column's <see cref="PredicateOperand.Column.ImmediateRelationQualifiedName"/>
+/// (the view/TVF the source predicate was actually written against) when one is set, rather
+/// than always the ultimate base table - a depth&gt;=1 finding probed straight against the base
+/// table never exercises the view layer it claims to be inherited through at all, which made
+/// the oracle structurally unable to confirm the tool's own core differentiator. Both views
+/// and the underlying base table produce the SAME plan-level signal once the optimizer inlines
+/// the view (CONVERT_IMPLICIT still appears against the base column, not the view's), so <see
+/// cref="CorpusFindingVerifier"/>'s confirmation matching (against TableQualifiedName/
+/// ColumnName) needs no change. Falls back to the base table when there's no immediate relation
+/// (Depth 0) or it isn't queryable bare - a resulting compile failure surfaces honestly as
+/// ProbeFailed rather than silently substituting a guess.
 /// </summary>
 public static class CorpusFindingProbeBuilder
 {
     /// <summary>Returns the probe SQL for <paramref name="finding"/>, or null if the finding lacks enough type information to synthesize one (reported as not-probeable, never guessed).</summary>
     public static string? Build(TypedPredicateFinding finding)
     {
-        var table = BracketQualifiedName(finding.Column.TableQualifiedName);
-        var column = Bracket(finding.Column.ColumnName);
+        var table = BracketQualifiedName(finding.Column.ImmediateRelationQualifiedName ?? finding.Column.TableQualifiedName);
+        var column = Bracket(finding.Column.ImmediateColumnName ?? finding.Column.ColumnName);
         var op = NormalizeOperatorForProbe(finding.Operator);
 
         return finding.OtherOperand switch
@@ -54,16 +66,20 @@ public static class CorpusFindingProbeBuilder
             return null;
         }
 
+        // COLLATE belongs on the operand's use site, not its DECLARE - T-SQL rejects
+        // `DECLARE @p VARCHAR(n) COLLATE ...` outright (verified against the oracle).
+        var collateClause = SqlTypeSyntaxFormatter.FormatCollateClause(operand.Type!);
+
         return $"""
             DECLARE @p {typeSyntax};
-            SELECT 1 FROM {table} WHERE {column} {op} @p;
+            SELECT 1 FROM {table} WHERE {column} {op} @p{collateClause};
             """;
     }
 
     private static string? BuildColumnProbe(string table, string column, string op, PredicateOperand.Column otherColumn)
     {
-        var otherTable = BracketQualifiedName(otherColumn.TableQualifiedName);
-        var otherColumnName = Bracket(otherColumn.ColumnName);
+        var otherTable = BracketQualifiedName(otherColumn.ImmediateRelationQualifiedName ?? otherColumn.TableQualifiedName);
+        var otherColumnName = Bracket(otherColumn.ImmediateColumnName ?? otherColumn.ColumnName);
 
         return $"SELECT 1 FROM {table} AS t1 CROSS JOIN {otherTable} AS t2 WHERE t1.{column} {op} t2.{otherColumnName};";
     }

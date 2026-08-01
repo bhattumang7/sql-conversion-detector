@@ -1,4 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -10,18 +13,22 @@ namespace SilentScan.Core.Predicates;
 /// clause, or HAVING's own filter - never a SELECT list, ORDER BY, or GROUP BY
 /// (docs/audit-remediation-plan.md Phase 3.1: a function/arithmetic wrap on a column that's
 /// never used to filter rows isn't a sargability concern at all, since there's no seek to lose).
+///
+/// A Tier-1 pattern is purely syntactic by construction - it never needed types to FIRE - but
+/// whether it's worth a reader's attention still depends on whether the column is even indexed:
+/// `UPPER(Notes) = 'X'` on an unindexed nvarchar(max) costs nothing extra beyond the wrap
+/// itself, there was no seek to lose. <see cref="SargabilityFinding.Indexed"/> resolves the
+/// column through the same catalog/lineage machinery Pass 3/4 uses for typed findings
+/// (<see cref="FromScopeResolver"/>, <see cref="ScalarExpressionResolver"/>), so a consumer can
+/// tell "this predicate is on a real, indexed column" from "this predicate is on a column we
+/// have no evidence is indexed" - the largest source of unranked noise this pass had before.
 /// </summary>
 public static class NonSargablePredicateScanner
 {
-    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult)
-    {
-        var visitor = new Visitor(parseResult.SourcePath);
-        parseResult.Fragment.Accept(visitor);
-        return visitor.Findings;
-    }
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
     /// <summary>
-    /// T-SQL aggregate functions never lose "sargability" the way a scalar function wrap does -
+    /// Real-world aggregate functions never lose "sargability" the way a scalar function wrap does -
     /// COUNT/SUM/AVG/etc. wrapping a column in a HAVING clause (the only place they can appear
     /// alongside a column reference) reflects per-group aggregation, not an avoidable index-
     /// defeating transform (docs/audit-remediation-plan.md Phase 3.1).
@@ -33,8 +40,22 @@ public static class NonSargablePredicateScanner
         "GROUPING", "GROUPING_ID", "STRING_AGG", "CHECKSUM_AGG", "APPROX_COUNT_DISTINCT",
     };
 
-    private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
+    /// <summary>Scans with no catalog/lineage context available - every finding's <see cref="SargabilityFinding.Indexed"/> stays null (unresolved), never guessed. Used by callers that only need the syntactic pattern itself (Tier-1's own fixture tests) or that run before a catalog exists.</summary>
+    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult) =>
+        Scan(parseResult, new DatabaseCatalog(), new LineageCatalog(new Dictionary<string, ResolvedRelation>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), new SkipLedger()));
+
+    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage)
     {
+        var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations);
+        parseResult.Fragment.Accept(visitor);
+        return visitor.Findings;
+    }
+
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews) : TSqlFragmentVisitor
+    {
+        private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
+        private string? _currentProcScope;
         private bool _inFilterContext;
 
         public List<SargabilityFinding> Findings { get; } = [];
@@ -48,6 +69,8 @@ public static class NonSargablePredicateScanner
         /// </summary>
         public override void ExplicitVisit(QuerySpecification node)
         {
+            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger: null, CurrentCteRelations(), _currentProcScope));
+
             var previous = _inFilterContext;
             _inFilterContext = false;
 
@@ -65,7 +88,68 @@ public static class NonSargablePredicateScanner
             node.WindowClause?.Accept(this);
 
             _inFilterContext = previous;
+            _scopeStack.Pop();
         }
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            base.ExplicitVisit(node);
+            _cteStack.Pop();
+        }
+
+        /// <summary>UPDATE/DELETE/MERGE predicates get the same FROM-scope resolution SELECT gets (docs/audit-remediation-plan.md Phase 4.1's coverage gap, mirrored here for index resolution).</summary>
+        public override void ExplicitVisit(UpdateStatement node)
+        {
+            var spec = node.UpdateSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            base.ExplicitVisit(node);
+            _scopeStack.Pop();
+            _cteStack.Pop();
+        }
+
+        public override void ExplicitVisit(DeleteStatement node)
+        {
+            var spec = node.DeleteSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            base.ExplicitVisit(node);
+            _scopeStack.Pop();
+            _cteStack.Pop();
+        }
+
+        public override void ExplicitVisit(MergeStatement node)
+        {
+            var spec = node.MergeSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            _scopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
+
+            var previousFilterContext = _inFilterContext;
+            _inFilterContext = true;
+            base.ExplicitVisit(node);
+            _inFilterContext = previousFilterContext;
+
+            _scopeStack.Pop();
+            _cteStack.Pop();
+        }
+
+        // Mirrors TypedPredicateExtractor's identical overrides (ScriptDOM's visitor binds
+        // ExplicitVisit at compile time to the most specific node type, so a base-type-only
+        // override never fires for e.g. AlterProcedureStatement) - needed here so a temp
+        // table/table variable declared inside a procedure body resolves through the same
+        // scoped catalog key TypedPredicateExtractor and CatalogBuilder use.
+        public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+
+        public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+
+        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
+
+        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
+
+        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
+
+        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
         public override void ExplicitVisit(WhereClause node)
         {
@@ -96,6 +180,14 @@ public static class NonSargablePredicateScanner
             _inFilterContext = true;
             node.SearchCondition?.Accept(this);
             _inFilterContext = previous;
+        }
+
+        private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
+        {
+            var previousScope = _currentProcScope;
+            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+            node.AcceptChildren(this);
+            _currentProcScope = previousScope;
         }
 
         public override void Visit(BooleanComparisonExpression node)
@@ -139,8 +231,8 @@ public static class NonSargablePredicateScanner
 
             switch (node.SecondExpression)
             {
-                case StringLiteral { Value: [ '%', ..] } literal:
-                    Add(SargabilityFindingKind.LeadingWildcardLike, columnName, literal.Value, node);
+                case StringLiteral { Value: ['%', ..] } literal:
+                    Add(SargabilityFindingKind.LeadingWildcardLike, columnName, literal.Value, node, columnRef);
                     break;
                 case StringLiteral:
                     // A literal pattern with no leading wildcard is sargable; nothing to report.
@@ -148,7 +240,7 @@ public static class NonSargablePredicateScanner
                 default:
                     // The pattern isn't a literal (a parameter/variable/expression) - we can't
                     // rule out a leading wildcard statically. CLAUDE.md: "LIKE @p marked conditional".
-                    Add(SargabilityFindingKind.LikePatternNotLiteral, columnName, detail: null, node);
+                    Add(SargabilityFindingKind.LikePatternNotLiteral, columnName, detail: null, node, columnRef);
                     break;
             }
         }
@@ -159,15 +251,15 @@ public static class NonSargablePredicateScanner
             {
                 case FunctionCall { Parameters.Count: > 0 } functionCall
                     when !AggregateFunctionNames.Contains(functionCall.FunctionName.Value) && FirstNamedColumn(functionCall.Parameters) is { } named:
-                    Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall);
+                    Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
                     break;
 
                 case CastCall { Parameter: ColumnReferenceExpression columnRef } castCall when ColumnName(columnRef) is { } name:
-                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CAST", castCall);
+                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CAST", castCall, columnRef);
                     break;
 
                 case ConvertCall { Parameter: ColumnReferenceExpression columnRef } convertCall when ColumnName(columnRef) is { } name:
-                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CONVERT", convertCall);
+                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CONVERT", convertCall, columnRef);
                     break;
 
                 case BinaryExpression binary:
@@ -180,11 +272,11 @@ public static class NonSargablePredicateScanner
         {
             if (binary.FirstExpression is ColumnReferenceExpression leftColumn && ColumnName(leftColumn) is { } leftName)
             {
-                Add(SargabilityFindingKind.ColumnArithmetic, leftName, binary.BinaryExpressionType.ToString(), binary);
+                Add(SargabilityFindingKind.ColumnArithmetic, leftName, binary.BinaryExpressionType.ToString(), binary, leftColumn);
             }
             else if (binary.SecondExpression is ColumnReferenceExpression rightColumn && ColumnName(rightColumn) is { } rightName)
             {
-                Add(SargabilityFindingKind.ColumnArithmetic, rightName, binary.BinaryExpressionType.ToString(), binary);
+                Add(SargabilityFindingKind.ColumnArithmetic, rightName, binary.BinaryExpressionType.ToString(), binary, rightColumn);
             }
         }
 
@@ -205,7 +297,68 @@ public static class NonSargablePredicateScanner
         private static string? ColumnName(ColumnReferenceExpression columnRef) =>
             columnRef.MultiPartIdentifier?.Identifiers is { Count: > 0 } identifiers ? identifiers[^1].Value : null;
 
-        private void Add(SargabilityFindingKind kind, string columnName, string? detail, TSqlFragment node) =>
-            Findings.Add(new SargabilityFinding(kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn));
+        private void Add(SargabilityFindingKind kind, string columnName, string? detail, TSqlFragment node, ColumnReferenceExpression columnRef)
+        {
+            var (tableQualifiedName, indexed) = ResolveIndexInfo(columnRef);
+            Findings.Add(new SargabilityFinding(kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn, TableQualifiedName: tableQualifiedName, Indexed: indexed));
+        }
+
+        /// <summary>
+        /// Resolves <paramref name="columnRef"/> through the current scope chain to find out
+        /// whether it's a real, leading-key-indexed catalog column - the same resolution
+        /// TypedPredicateExtractor performs for typed findings, reused here so a syntactic
+        /// finding carries the same "is this actually worth a reader's attention" signal. Never
+        /// guesses: any provenance other than a direct BaseColumn/Declared passthrough (a
+        /// CAST-derived column, a UNION branch, an unresolvable reference) reports
+        /// TableQualifiedName=null/Indexed=null rather than assuming either answer.
+        /// </summary>
+        private (string? TableQualifiedName, bool? Indexed) ResolveIndexInfo(ColumnReferenceExpression columnRef)
+        {
+            if (_scopeStack.Count == 0)
+            {
+                return (null, null);
+            }
+
+            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
+
+            return provenance switch
+            {
+                ColumnProvenance.BaseColumn baseColumn => (
+                    baseColumn.TableQualifiedName,
+                    catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false),
+
+                // A multi-statement TVF's own RETURNS TABLE(...) column - a real type, but never
+                // backed by a real catalog table/index (CLAUDE.md never guesses an index for it).
+                ColumnProvenance.Declared => (null, false),
+
+                _ => (null, null),
+            };
+        }
+
+        private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
+        {
+            var currentCtes = CurrentCteRelations();
+            var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger: null, _currentProcScope);
+            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
+        }
+
+        private IReadOnlyDictionary<string, ResolvedRelation> CurrentCteRelations() =>
+            _cteStack.Count > 0 ? _cteStack.Peek() : EmptyResolvedViews;
+
+        private FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
+            new(catalog, resolvedViews, sourcePath, Ledger: null, CurrentCteRelations(), _currentProcScope);
+
+        private static Dictionary<string, ResolvedRelation> MergeCtes(
+            IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
+        {
+            var merged = new Dictionary<string, ResolvedRelation>(outer, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, relation) in inner)
+            {
+                merged[name] = relation;
+            }
+
+            return merged;
+        }
     }
 }

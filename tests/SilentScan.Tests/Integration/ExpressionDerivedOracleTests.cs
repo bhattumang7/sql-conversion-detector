@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Integration;
 /// -&gt; int round trip across two views and a proc? It didn't (a real gap, fixed by this rule) -
 /// this test is the oracle proof the fix is real, not just theoretically plausible.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ExpressionDerivedOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanExpressionDerivedOracleTest";

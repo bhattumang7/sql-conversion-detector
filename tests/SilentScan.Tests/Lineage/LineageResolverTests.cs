@@ -36,6 +36,40 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
+    public void Resolve_CastOfStringColumnToStringType_PropagatesSourceCollation()
+    {
+        // Verified against the real oracle: CAST(varcharCol AS NVARCHAR(n)) with no explicit
+        // COLLATE keeps the SOURCE column's own collation, not a null/database-default one -
+        // T-SQL has no inline COLLATE syntax inside a CAST's target type at all. Before this
+        // fix, every CAST-to-string column reported Collation=null regardless.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT CAST(OrderCode AS NVARCHAR(50)) AS OrderCodeWide FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var cast = Assert.IsType<ColumnProvenance.Cast>(view.FindColumn("OrderCodeWide")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.NVarChar, cast.ExplicitType.Category);
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", cast.ExplicitType.Collation?.Name);
+    }
+
+    [Fact]
+    public void Resolve_CastOfNonStringColumnToStringType_LeavesCollationNull()
+    {
+        // A non-string source (INT) has no collation to propagate - real SQL Server applies
+        // the database's own default collation here, which this pass has no reliable way to
+        // know at this point, so it stays Unknown (null) rather than a guess.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT CAST(OrderId AS NVARCHAR(20)) AS OrderIdText FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var cast = Assert.IsType<ColumnProvenance.Cast>(view.FindColumn("OrderIdText")!.Provenance);
+
+        Assert.Null(cast.ExplicitType.Collation);
+    }
+
+    [Fact]
     public void Resolve_CastInsideView_RecordsCastOriginAndDepthAtWhereItAppears()
     {
         var (_, lineage) = Build(
@@ -279,6 +313,57 @@ public sealed class LineageResolverTests
 
         Assert.Equal(["Id", "Code"], view.Columns.Select(c => c.Name));
         Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("Code")!.Provenance);
+    }
+
+    [Fact]
+    public void Resolve_ExplicitViewColumnListCountMismatch_DegradesEveryColumnToUnknownRatherThanMisattributing()
+    {
+        // The bug this guards: `SELECT *` over a table with no known DDL resolves to zero
+        // columns, so a 3-name explicit column list zipped positionally against a 1-column
+        // resolved SELECT would silently shift names onto the WRONG table's provenance - a
+        // real type attached to the wrong base column, not just an Unknown. Any count mismatch
+        // must degrade every column instead of guessing an alignment.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Known (KnownCol INT NOT NULL);",
+            "CREATE VIEW dbo.vw_Mismatched (A, B, C) AS SELECT * FROM dbo.Unknown, dbo.Known;");
+
+        var view = lineage.Find("dbo.vw_Mismatched")!;
+
+        Assert.All(view.Columns, c => Assert.IsType<ColumnProvenance.Unknown>(c.Provenance));
+    }
+
+    [Fact]
+    public void Resolve_DuplicateFromAliasAcrossSchemas_ResolvesAmbiguousRatherThanLastWins()
+    {
+        // `FROM dbo.T JOIN audit.T ON ...` is legal T-SQL - both leaves expose the same
+        // unqualified name "T". Silently letting the second overwrite the first in the alias
+        // map would make every `T.Col` reference resolve against whichever leaf was flattened
+        // last, a wrong-base-column risk identical in kind to the column-list case above.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE SCHEMA audit;",
+            "CREATE TABLE audit.T (Col VARCHAR(10) NOT NULL);",
+            "CREATE VIEW dbo.vw_Ambiguous AS SELECT T.Col FROM dbo.T JOIN audit.T ON 1 = 1;");
+
+        var view = lineage.Find("dbo.vw_Ambiguous")!;
+
+        Assert.IsType<ColumnProvenance.Unknown>(view.FindColumn("Col")!.Provenance);
+    }
+
+    [Fact]
+    public void Resolve_UnionViewReadThroughAnotherView_BumpsDepthOnEveryBranch()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.T1 (Code VARCHAR(10) NOT NULL);",
+            "CREATE TABLE dbo.T2 (Code VARCHAR(10) NOT NULL);",
+            "CREATE VIEW dbo.vw_Union AS SELECT Code FROM dbo.T1 UNION ALL SELECT Code FROM dbo.T2;",
+            "CREATE VIEW dbo.vw_OuterOverUnion AS SELECT Code FROM dbo.vw_Union;");
+
+        var outer = lineage.Find("dbo.vw_OuterOverUnion")!;
+        var union = Assert.IsType<ColumnProvenance.Union>(outer.FindColumn("Code")!.Provenance);
+
+        Assert.Equal(2, union.Branches.Count);
+        Assert.All(union.Branches, b => Assert.Equal(1, Assert.IsType<ColumnProvenance.BaseColumn>(b).Depth));
     }
 
     [Fact]

@@ -7,7 +7,7 @@ namespace SilentScan.Verify.Commands;
 
 /// <summary>
 /// `silentscan-verify generate-type-matrix` — regenerates the checked-in oracle-probed
-/// type-pair matrix (docs/audit-remediation-plan.md Phase 0.2) that
+/// type-pair matrix that
 /// `SilentScan.Core.Rules.TypePairMatrix` loads at runtime. Run this after upgrading the Docker
 /// SQL Server image, since the matrix records empirical facts about a specific optimizer build,
 /// not something derivable from the T-SQL precedence list alone.
@@ -48,6 +48,7 @@ public static class GenerateTypeMatrixCommand
             TypeMatrixGenerator.DateTimeFamily,
             TypeMatrixGenerator.StringFamily,
             TypeMatrixGenerator.Collations,
+            TypeMatrixGenerator.CrossFamilyOther,
             cancellationToken);
 
         var document = new

@@ -160,6 +160,138 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(findings);
         Assert.Equal(1, finding.Column.Depth);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // TableQualifiedName/ColumnName always name the ultimate base column (needed for the
+        // oracle's plan-matching signal), but ImmediateRelation* must name the VIEW the source
+        // predicate actually queried - the Verify oracle probes this, not the base table
+        // directly, or a depth>=1 finding is never actually tested through the view layer it
+        // claims to be inherited through.
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal("dbo.vw_Orders", finding.Column.ImmediateRelationQualifiedName);
+        Assert.Equal("OrderCode", finding.Column.ImmediateColumnName);
+    }
+
+    [Fact]
+    public void Extract_DirectBaseTablePredicate_LeavesImmediateRelationNull()
+    {
+        // Depth 0 - the predicate already queries the base table directly, so there's no
+        // separate "immediate relation" to route a probe through differently.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);",
+            "SELECT OrderCode FROM dbo.Orders WHERE OrderCode = N'x';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(0, finding.Column.Depth);
+        Assert.Null(finding.Column.ImmediateRelationQualifiedName);
+        Assert.Null(finding.Column.ImmediateColumnName);
+    }
+
+    [Fact]
+    public void Extract_PredicateThroughViewWithRenamedColumn_ImmediateColumnNameIsTheViewsOwnAlias()
+    {
+        // The view exposes the base column under a DIFFERENT name than the base table's own -
+        // the probe must query the view using the view's own exposed name, not the base
+        // column's name (which wouldn't exist as a selectable column on the view at all).
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT Code AS OrderCode FROM dbo.Orders;",
+            "SELECT OrderCode FROM dbo.vw_Orders WHERE OrderCode = N'x';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal("dbo.vw_Orders", finding.Column.ImmediateRelationQualifiedName);
+        Assert.Equal("OrderCode", finding.Column.ImmediateColumnName);
+    }
+
+    [Fact]
+    public void Extract_LikeColumnVsNvarcharPattern_ColumnConverts_ScanForced()
+    {
+        // The classic ORM-generated pattern: `varcharCol LIKE @nvarcharPattern`. LIKE was
+        // previously invisible to the typed pipeline entirely - only Tier-1's wildcard-shape
+        // check ran against it, never the type-conversion question.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.Orders WHERE Code LIKE N'ABC%';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("LIKE", finding.Operator);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_LikeColumnVsVarcharLiteralPattern_NoConversion_SeekPreserved()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);",
+            "SELECT Code FROM dbo.Orders WHERE Code LIKE 'ABC%';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_ComparisonInSelectListCaseExpression_ProducesNoFinding()
+    {
+        // The false-positive this guards: a comparison that never filters rows (a SELECT-list
+        // CASE branch) has no seek to lose, so it must not be reported as a verdict-bearing
+        // finding at all - before filter-context tracking existed, TypedPredicateExtractor
+        // reported EVERY comparison anywhere in the tree, filter or not.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT CASE WHEN Code = N'X' THEN 1 ELSE 0 END AS Flag FROM dbo.Orders;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_ComparisonInOrderByExpression_ProducesNoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.Orders ORDER BY CASE WHEN Code = N'X' THEN 1 ELSE 0 END;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_SameComparisonMovedFromSelectListIntoWhere_NowProducesAFinding()
+    {
+        // The positive control for the two tests above: the identical comparison, in a genuine
+        // filter position, must still fire - proving the gate is scoped to non-filter positions
+        // specifically, not a blanket regression.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.Orders WHERE Code = N'X';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_ComparisonInSelectListButQueryAlsoHasWhereClause_SelectListStillExcluded()
+    {
+        // Filter-context must reset per query part, not leak from WHERE into the SELECT list of
+        // the SAME query specification.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Status VARCHAR(10) NOT NULL);",
+            "SELECT CASE WHEN Code = N'X' THEN 1 ELSE 0 END AS Flag FROM dbo.Orders WHERE Status = 'A';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Status", finding.Column.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_BareIfComparisonOutsideAnyQuery_StillLedgeredAsSkip()
+    {
+        // Regression guard: the filter-context gate must not swallow the pre-existing "no FROM
+        // scope in effect" ledger path for a genuinely scope-less comparison (a bare IF/WHILE
+        // condition in procedural code) - that's a distinct case from a SELECT-list comparison
+        // and must still be honestly accounted for, not silently dropped.
+        var result = ExtractAll(
+            "CREATE PROCEDURE dbo.usp_Test @Id INT AS BEGIN IF @Id = 1 BEGIN RETURN; END END;");
+
+        Assert.Contains(result.SkippedConstructs, c => c.Reason.Contains("no FROM scope in effect", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -174,9 +306,15 @@ public sealed class TypedPredicateExtractorTests
             JOIN dbo.Customers c ON o.CustomerCode = c.CustomerCode;
             """);
 
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        // Both directions of the join predicate are now classified (the join-direction fix):
+        // the varchar side genuinely converts (ScanForced), and the nvarchar side - reported
+        // separately - never converts regardless of collation (its own outcome, correctly
+        // SeekPreserved, not swallowed by only checking the other column).
+        Assert.Equal(2, findings.Count);
+        var varcharSide = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Orders");
+        Assert.Equal(Verdict.ScanForced, varcharSide.Verdict);
+        var nvarcharSide = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Customers");
+        Assert.Equal(Verdict.SeekPreserved, nvarcharSide.Verdict);
     }
 
     [Fact]
@@ -226,12 +364,17 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnVsColumnSameType_NoConversionAnywhere_SeekPreserved()
     {
+        // A column-vs-column comparison is classified in BOTH directions (the join-predicate
+        // fix: `ON a.x = b.y` can convert either side depending on which one has lower
+        // precedence, so only checking one side silently misses the other's verdict).
         var findings = Extract(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, CustomerId INT NOT NULL);",
             "SELECT OrderId FROM dbo.Orders WHERE OrderId = CustomerId;");
 
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
+        Assert.Equal("OrderId", findings[0].Column.ColumnName);
+        Assert.Equal("CustomerId", findings[1].Column.ColumnName);
     }
 
     [Fact]
@@ -859,9 +1002,11 @@ public sealed class TypedPredicateExtractorTests
             WHEN NOT MATCHED THEN INSERT (Id, Code) VALUES (s.Id, s.Code);
             """);
 
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "Code");
-        Assert.Equal("dbo.Target", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        // Both directions of the ON clause's column-vs-column comparison are now reported.
+        var targetSide = Assert.Single(findings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.Target");
+        Assert.Equal(Verdict.ScanForced, targetSide.Verdict);
+        var sourceSide = Assert.Single(findings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.Source");
+        Assert.Equal(Verdict.SeekPreserved, sourceSide.Verdict);
     }
 
     [Fact]

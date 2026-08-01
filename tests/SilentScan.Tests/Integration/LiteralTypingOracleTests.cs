@@ -9,6 +9,7 @@ namespace SilentScan.Tests.Integration;
 /// relies on, queried via sys.dm_exec_describe_first_result_set (no deployed schema needed -
 /// it type-checks a literal SELECT without executing it against any table).
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class LiteralTypingOracleTests
 {
     private readonly SqlServerOptions _options = SqlServerOptions.LocalDocker;

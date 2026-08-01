@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Integration;
 /// mock or skip path here per CLAUDE.md's testing-standards note that unit tests are not
 /// sufficient and this class of behavior needs a real integration test.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class LineageOracleIntegrationTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanIntegrationTest";

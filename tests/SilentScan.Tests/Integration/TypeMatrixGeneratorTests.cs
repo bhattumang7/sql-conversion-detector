@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Integration;
 /// found: an INT column converts against a REAL value, and TIME is not comparable to DATE at
 /// all - the two discoveries that motivated replacing the old family-wide heuristic.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class TypeMatrixGeneratorTests
 {
     private static readonly SqlServerOptions Options = SqlServerOptions.LocalDocker;

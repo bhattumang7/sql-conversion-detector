@@ -16,44 +16,64 @@ public static class VerdictClassifier
             return Verdict.Unknown;
         }
 
+        // sql_variant / xml / CLR user-defined types do not participate in the standard
+        // conversion/precedence machinery (xml is not even comparable with '='; sql_variant
+        // uses its own base-type hierarchy at compare time; text/ntext/image are legacy LOB
+        // types with their own comparison quirks). Reporting a confident verdict here would
+        // be a guess - CLAUDE.md's hard-cases list calls these out explicitly. Checked BEFORE
+        // the same-category branch below: two xml columns being the "same category" does not
+        // make `xml = xml` a real, seek-preserving comparison - it isn't comparable with '='
+        // at all, and reporting SeekPreserved for it would be actively wrong, not just a
+        // missed classification.
+        if (IsOutOfModelCategory(columnType.Category) || IsOutOfModelCategory(otherType.Category))
+        {
+            return Verdict.Unknown;
+        }
+
         if (columnType.Category == otherType.Category)
         {
             return ClassifySameCategory(columnType, otherType);
         }
 
-        // Same coarse family, different category (int vs bigint, bit vs int, real vs float,
-        // date vs datetime, ...): the official precedence-list direction is not reliable here
-        // on its own - the Phase 0.2 oracle matrix (docs/audit-remediation-plan.md) found the
-        // optimizer silently elides the conversion for some pairs (e.g. tinyint/smallint vs
-        // real survive un-converted, because their whole domain is exactly representable in
-        // float) but not others (int/bigint/money/decimal vs real DO convert the column - a
-        // confirmed false negative in the family-wide heuristic this replaced). A pair with no
-        // recorded probe is UNKNOWN, never guessed.
-        if (columnType.IsNumericOrBit && otherType.IsNumericOrBit || columnType.IsDateTimeFamily && otherType.IsDateTimeFamily)
-        {
-            var familyOutcome = TypePairMatrix.Instance.TryGetOutcome(columnType.Category, otherType.Category);
-            if (familyOutcome is null || familyOutcome.CompileFailed)
-            {
-                return Verdict.Unknown;
-            }
+        // Every other cross-category pair - same family (int vs bigint, char vs nvarchar,
+        // date vs datetime, ...) or cross-family (varchar column vs int/datetime/guid value,
+        // and the reverse) - is decided by ONE authority: the Docker-oracle-probed matrix.
+        // The official precedence list is not reliable enough on its own to report a verdict
+        // from: the matrix has found cases where the optimizer silently elides the conversion
+        // (tinyint/smallint vs real survive un-converted - their whole domain is exactly
+        // representable in float) and cases where same-category-looking pairs never convert
+        // the column at all (char vs varchar). A cell with no recorded probe is UNKNOWN, never
+        // guessed from precedence direction - the precedence list is used elsewhere only to
+        // decide operand *typing* (e.g. literal widening), never a verdict.
+        var collationName = columnType.IsStringFamily ? columnType.Collation?.Name : null;
 
-            return familyOutcome.ColumnConverts ? Verdict.ScanForced : Verdict.SeekPreserved;
+        var outcome = columnType.IsStringFamily && collationName is null
+            // Collation is unresolved on the column, but not every string-family pair's
+            // outcome actually depends on it: e.g. an nvarchar column vs a varchar value never
+            // converts the column regardless of collation - a precedence-direction fact, not a
+            // collation-dependent one. Only reuse an answer that every probed collation for
+            // this pair agreed on; a pair where collation genuinely changes the outcome (e.g.
+            // varchar column vs nvarchar value: ScanForced vs RangeSeek) still falls through to
+            // UNKNOWN (CLAUDE.md: "collation unknown and unpinned by the manifest -> UNKNOWN").
+            ? TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(columnType.Category, otherType.Category)
+            : TypePairMatrix.Instance.TryGetOutcome(columnType.Category, otherType.Category, collationName);
+
+        if (outcome is null || outcome.CompileFailed)
+        {
+            return Verdict.Unknown;
         }
 
-        var convertedSide = DataTypePrecedence.DetermineConvertedSide(columnType.Category, otherType.Category);
-        if (convertedSide != ComparisonSide.Left)
+        if (!outcome.ColumnConverts)
         {
-            // The OTHER side converts (or, defensively, neither) - harmless to the seek.
             return Verdict.SeekPreserved;
         }
 
-        // The column converts. String-family conversions get the collation-aware nuance
-        // (CLAUDE.md); every other cross-category column-side conversion is conservatively
-        // SCAN_FORCED - OPERAND_CLASH (genuinely incompatible pairs) is not yet implemented.
-        return columnType.IsStringFamily && otherType.IsStringFamily
-            ? ClassifyByColumnCollation(columnType)
-            : Verdict.ScanForced;
+        return outcome.DynamicRangeSeekAvailable ? Verdict.RangeSeek : Verdict.ScanForced;
     }
+
+    private static bool IsOutOfModelCategory(SqlTypeCategory category) =>
+        category is SqlTypeCategory.SqlVariant or SqlTypeCategory.Xml or SqlTypeCategory.UserDefined
+            or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image;
 
     private static Verdict ClassifySameCategory(SqlType columnType, SqlType otherType)
     {
@@ -73,20 +93,7 @@ public static class VerdictClassifier
         // Same string category, genuinely different collations: T-SQL's coercibility
         // precedence rules for resolving which collation wins are a distinct, non-trivial
         // rule set this pass does not implement (CLAUDE.md precision discipline: never
-        // guess). Scope note, not a bug: only the documented cross-category (varchar vs
-        // nvarchar) collation rule is implemented in ClassifyByColumnCollation.
+        // guess).
         return Verdict.Unknown;
-    }
-
-    private static Verdict ClassifyByColumnCollation(SqlType columnType)
-    {
-        if (columnType.Collation is null)
-        {
-            // CLAUDE.md: "If column collation unknown ... verdict UNKNOWN unless the
-            // manifest pins a collation. Never guess silently."
-            return Verdict.Unknown;
-        }
-
-        return columnType.Collation.IsSqlFamily ? Verdict.ScanForced : Verdict.RangeSeek;
     }
 }

@@ -47,16 +47,18 @@ public static class ScanReportBuilder
             }
         }
 
-        var tier1Findings = usableParseResults.SelectMany(NonSargablePredicateScanner.Scan).ToList();
-
         var dynamicSqlExtractions = usableParseResults.Select(DynamicSqlScanner.Scan).ToList();
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
         var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 
         // Catalog/lineage need every cleanly-parsed file together, so views can resolve
-        // against tables (and other views) declared in a different file.
+        // against tables (and other views) declared in a different file. Built before Tier-1
+        // scanning (which used to run catalog-blind) so a syntactic finding's column can be
+        // resolved through the same machinery Pass 3/4 use, carrying real Indexed/
+        // TableQualifiedName information instead of none at all.
         var catalog = CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation);
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
+        var tier1Findings = usableParseResults.SelectMany(r => NonSargablePredicateScanner.Scan(r, catalog, lineage)).ToList();
         var extractionResults = usableParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
@@ -74,6 +76,12 @@ public static class ScanReportBuilder
         typedFindings = [.. typedFindings, .. dynamicSqlResult.TypedFindings];
         expressionDerivedFindings = [.. expressionDerivedFindings, .. dynamicSqlResult.ExpressionDerivedFindings];
         skippedConstructs.AddRange(dynamicSqlResult.SkippedConstructs);
+
+        // Captured before SeekPreserved findings are dropped below - the report's only
+        // denominator for "N flagged out of M comparisons classified" (CLAUDE.md precision
+        // discipline: a bare finding count with no base rate can't be checked against
+        // anything).
+        var typedPredicateSummary = TypedPredicateSummary.From(typedFindings);
 
         typedFindings = [.. typedFindings.Where(f => f.Verdict != Verdict.SeekPreserved)];
 
@@ -97,7 +105,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings,
-            orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs));
+            orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary);
     }
 
     private static int VerdictRank(Verdict verdict) => verdict switch

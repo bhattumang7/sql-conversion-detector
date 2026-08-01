@@ -7,11 +7,22 @@ namespace SilentScan.Core.Reporting;
 /// </summary>
 public sealed record ParseHealthReport(IReadOnlyList<FileParseHealth> Files)
 {
+    /// <summary>CLAUDE.md's own corpus-admission threshold: "ScriptDOM parse success >= 90% of files". Exposed here so every consumer of this rate (currently `scan-corpus`/`verify-corpus`) checks against the SAME number CLAUDE.md documents, rather than each hand-rolling its own.</summary>
+    public const double MinimumAcceptableParseSuccessRate = 0.90;
+
     public int TotalFiles => Files.Count;
 
     public int FilesWithErrors => Files.Count(f => f.Errors.Count > 0);
 
     public double ParseSuccessRate => TotalFiles == 0 ? 1.0 : (double)(TotalFiles - FilesWithErrors) / TotalFiles;
+
+    /// <summary>
+    /// CLAUDE.md's corpus dialect-sniffing criterion, finally actually consulted (an audit
+    /// finding: this rate was computed and displayed, but nothing ever gated on it - a repo
+    /// whose SQL was mostly a different dialect entirely would scan exactly as "successfully"
+    /// as a clean one). True for an empty file set - nothing to fail sniffing on.
+    /// </summary>
+    public bool PassesDialectSniffing => ParseSuccessRate >= MinimumAcceptableParseSuccessRate;
 }
 
 /// <summary>

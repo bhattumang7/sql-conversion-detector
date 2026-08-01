@@ -50,7 +50,7 @@ public static class DynamicSqlPipeline
             findings.Add(new DynamicSqlFinding(
                 script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
 
-            foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult))
+            foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage))
             {
                 tier1.Add(Remap(tier1Finding, script));
             }

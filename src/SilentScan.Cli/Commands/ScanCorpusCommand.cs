@@ -60,8 +60,9 @@ public static class ScanCorpusCommand
         }
 
         var manifest = CorpusManifestLoader.Load(manifestPath);
-        var reportsByRepo = new SortedDictionary<string, ScanReport>(StringComparer.Ordinal);
+        var reportsByRepo = new SortedDictionary<string, CorpusRepoScanResult>(StringComparer.Ordinal);
         var hadMissingRepo = false;
+        var hadDialectSniffingFailure = false;
 
         foreach (var repo in manifest.Repos)
         {
@@ -75,12 +76,41 @@ public static class ScanCorpusCommand
 
             var files = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
             var parseResults = files.Select(f => ParseCorpusFile(repo, f)).ToList();
-            reportsByRepo[repo.Name] = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
+            var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
+
+            // CLAUDE.md's corpus-admission criterion, actually consulted rather than merely
+            // computed and displayed (an audit finding: ParseHealthReport.ParseSuccessRate
+            // existed and was even documented as "the corpus dialect-sniffing signal," but
+            // nothing checked it against the >= 90% bar it names) - a repo whose SQL turned out
+            // to be mostly a different dialect would previously scan exactly as "successfully"
+            // as a clean one, silently. This warns rather than skips the repo outright: the
+            // repo was still deliberately curated into corpus/manifest.json, so its findings
+            // are reported either way, but a reader now gets the same honest signal CLAUDE.md
+            // promises instead of having to notice a low ParseSuccessRate buried in the JSON.
+            if (!report.ParseHealth.PassesDialectSniffing)
+            {
+                stderr.WriteLine(
+                    $"warning: '{repo.Name}' parse success rate {report.ParseHealth.ParseSuccessRate:P1} is below the " +
+                    $"{ParseHealthReport.MinimumAcceptableParseSuccessRate:P0} dialect-sniffing threshold ({report.ParseHealth.FilesWithErrors} of {report.ParseHealth.TotalFiles} files had parse errors) - findings are still reported, but treat them with reduced confidence.");
+                hadDialectSniffingFailure = true;
+            }
+
+            // A repo with no declaredCollation makes the flagship varchar-vs-nvarchar rule
+            // structurally unreachable (VerdictClassifier: unresolved collation -> UNKNOWN,
+            // never a guess) - re-running under both collation-family assumptions turns that
+            // silent UNKNOWN into an honest "here's what it would be either way" (CLAUDE.md
+            // precision discipline: an unqualified UNKNOWN looks identical to "nothing here,"
+            // which is a different and stronger claim than what was actually established).
+            var collationSensitivity = repo.DeclaredCollation is null
+                ? CollationSensitivityReport.Analyze(parseResults)
+                : null;
+
+            reportsByRepo[repo.Name] = new CorpusRepoScanResult(report, collationSensitivity);
         }
 
         stdout.WriteLine(JsonSerializer.Serialize(reportsByRepo, JsonOptions));
 
-        return hadMissingRepo ? 1 : 0;
+        return hadMissingRepo || hadDialectSniffingFailure ? 1 : 0;
     }
 
     private static SqlParseResult ParseCorpusFile(CorpusRepoEntry repo, string path)
@@ -92,3 +122,6 @@ public static class ScanCorpusCommand
 
     private static string RepoDirectoryName(string url) => url.TrimEnd('/').Split('/')[^1];
 }
+
+/// <summary>One repo's ordinary scan report, plus a collation-sensitivity re-run when the manifest pinned no collation for it (null when one was pinned - there's nothing to be sensitive to).</summary>
+public sealed record CorpusRepoScanResult(ScanReport Report, CollationSensitivityReport? CollationSensitivity);

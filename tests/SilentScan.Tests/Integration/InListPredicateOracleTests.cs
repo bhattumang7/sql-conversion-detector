@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Integration;
 /// homogeneous IN list is enough to force the real optimizer to convert the column for the
 /// whole comparison, not just element-by-element.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class InListPredicateOracleTests : IAsyncLifetime
 {
     private const string DatabaseName = "SilentScanInListOracleTest";

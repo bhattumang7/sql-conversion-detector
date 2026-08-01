@@ -38,6 +38,14 @@ public static class TypedPredicateExtractor
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
         private string? _currentProcScope;
+
+        // Mirrors NonSargablePredicateScanner's identical tracker (CLAUDE.md Tier-1 scope note:
+        // "never a SELECT list, ORDER BY, or GROUP BY - there's no seek to lose"): a comparison
+        // that never filters rows isn't a verdict-bearing finding either, e.g. a CASE expression
+        // in a SELECT list comparing a column to a literal. Before this, TypedPredicateExtractor
+        // had no such gating at all and reported a ScanForced/RangeSeek verdict for ANY
+        // comparison anywhere in the tree, filter or not.
+        private bool _inFilterContext;
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
@@ -61,8 +69,57 @@ public static class TypedPredicateExtractor
         public override void ExplicitVisit(QuerySpecification node)
         {
             _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope));
-            base.ExplicitVisit(node);
+
+            // Reset to false for every part of this query specification except its own WHERE/
+            // HAVING (whose own overrides below turn it back on) - without this, an outer
+            // WHERE's own nested subquery (an EXISTS/IN (SELECT ...)) would inherit "filter
+            // context = true" for that subquery's unrelated SELECT list, and a top-level SELECT
+            // list would inherit whatever the enclosing scope happened to be.
+            var previousFilterContext = _inFilterContext;
+            _inFilterContext = false;
+
+            node.FromClause?.Accept(this);
+            foreach (var element in node.SelectElements)
+            {
+                element.Accept(this);
+            }
+
+            node.WhereClause?.Accept(this);
+            node.GroupByClause?.Accept(this);
+            node.HavingClause?.Accept(this);
+            node.OrderByClause?.Accept(this);
+            node.WindowClause?.Accept(this);
+
+            _inFilterContext = previousFilterContext;
             _scopeStack.Pop();
+        }
+
+        public override void ExplicitVisit(WhereClause node)
+        {
+            var previous = _inFilterContext;
+            _inFilterContext = true;
+            node.AcceptChildren(this);
+            _inFilterContext = previous;
+        }
+
+        public override void ExplicitVisit(HavingClause node)
+        {
+            var previous = _inFilterContext;
+            _inFilterContext = true;
+            node.AcceptChildren(this);
+            _inFilterContext = previous;
+        }
+
+        /// <summary>A JOIN's ON clause is a filter context exactly like WHERE; the table references it joins are not (a derived-table subquery there has its own SELECT list to protect).</summary>
+        public override void ExplicitVisit(QualifiedJoin node)
+        {
+            node.FirstTableReference?.Accept(this);
+            node.SecondTableReference?.Accept(this);
+
+            var previous = _inFilterContext;
+            _inFilterContext = true;
+            node.SearchCondition?.Accept(this);
+            _inFilterContext = previous;
         }
 
         // UPDATE/DELETE/MERGE previously pushed no FROM scope at all, so every predicate in
@@ -98,9 +155,17 @@ public static class TypedPredicateExtractor
 
             // A single scope push covers the ON clause and every WHEN [NOT] MATCHED action's
             // own additional condition uniformly, since base.ExplicitVisit walks the whole
-            // MergeSpecification subtree with this scope active.
+            // MergeSpecification subtree with this scope active. MergeSpecification's ON
+            // condition (and each action clause's own extra condition) is a raw BooleanExpression,
+            // not wrapped in a WhereClause node the way SELECT/UPDATE/DELETE's WHERE is - there is
+            // no SELECT-list analog anywhere inside a MergeSpecification for filter-context = true
+            // to wrongly leak into, so it's safe to hold it for the whole subtree; any nested
+            // subquery still resets it via the QuerySpecification override above.
             _scopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
+            var previousFilterContext = _inFilterContext;
+            _inFilterContext = true;
             base.ExplicitVisit(node);
+            _inFilterContext = previousFilterContext;
             _scopeStack.Pop();
             _cteStack.Pop();
         }
@@ -290,11 +355,31 @@ public static class TypedPredicateExtractor
             }
         }
 
+        public override void Visit(LikePredicate node)
+        {
+            // `varcharCol LIKE @nvarcharPattern` converts the column exactly like `=` does -
+            // one of the most common real-world instances of this bug class (ORM-generated N''
+            // patterns compared against a non-unicode column), and previously invisible to the
+            // verdict engine entirely: Tier-1's LikePredicate visitor only inspects the
+            // pattern's wildcard shape, never the column's or pattern's TYPE. Routes through the
+            // same TryAddFinding machinery as every other comparison operator - direction,
+            // both-column handling, and ledgering all apply identically.
+            TryAddFinding(node.FirstExpression, node.SecondExpression, "LIKE", node);
+        }
+
         public override void Visit(InPredicate node)
         {
             if (_scopeStack.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
+                return;
+            }
+
+            if (!_inFilterContext)
+            {
+                // Inside a query, just not in a filtering position (a SELECT-list CASE branch,
+                // an ORDER BY expression) - no seek to lose, not a predicate at all, so this is
+                // excluded silently exactly like Tier-1 already excludes it, not ledgered.
                 return;
             }
 
@@ -355,6 +440,14 @@ public static class TypedPredicateExtractor
                 return;
             }
 
+            if (!_inFilterContext)
+            {
+                // Inside a query, just not in a filtering position (a SELECT-list CASE branch,
+                // an ORDER BY expression) - no seek to lose, not a predicate at all, so this is
+                // excluded silently exactly like Tier-1 already excludes it, not ledgered.
+                return;
+            }
+
             // Innermost scope first, then progressively outer ones - a correlated subquery's
             // predicate can legitimately reference an enclosing query's alias
             // (docs/audit-remediation-plan.md Phase 2.2).
@@ -362,15 +455,29 @@ public static class TypedPredicateExtractor
             var left = ResolveOperand(first, scopeChain);
             var right = ResolveOperand(second, scopeChain);
 
+            if (left is PredicateOperand.Column leftColumn && right is PredicateOperand.Column rightColumn)
+            {
+                // `ON a.x = b.y`: classifying only one side (as this used to, always picking
+                // the left operand) misses whichever column is actually on the LOWER-precedence
+                // side - a join predicate implicitly converting the right-hand join key is one
+                // of the most common real-world instances of this bug class, and the old code
+                // silently reported it as SeekPreserved by construction, never even looking at
+                // the right column's own verdict. Classify and report BOTH directions; a column
+                // that doesn't convert reports SeekPreserved for itself exactly as it should.
+                AddFinding(leftColumn, rightColumn, operatorText, node);
+                AddFinding(rightColumn, leftColumn, operatorText, node);
+                return;
+            }
+
             PredicateOperand.Column? column;
             PredicateOperand? other;
-            if (left is PredicateOperand.Column leftColumn)
+            if (left is PredicateOperand.Column singleLeftColumn)
             {
-                (column, other) = (leftColumn, right);
+                (column, other) = (singleLeftColumn, right);
             }
-            else if (right is PredicateOperand.Column rightColumn)
+            else if (right is PredicateOperand.Column singleRightColumn)
             {
-                (column, other) = (rightColumn, left);
+                (column, other) = (singleRightColumn, left);
             }
             else
             {
@@ -382,6 +489,11 @@ public static class TypedPredicateExtractor
                 return;
             }
 
+            AddFinding(column, other, operatorText, node);
+        }
+
+        private void AddFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        {
             var otherType = other is PredicateOperand.Value value ? value.Type : ((PredicateOperand.Column)other).Type;
             var verdict = VerdictClassifier.Classify(column.Type, otherType);
 
@@ -460,44 +572,7 @@ public static class TypedPredicateExtractor
         {
             var innerCtes = CurrentCteRelations();
             var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, _currentProcScope);
-            return columns.Count == 0 ? null : ExtractScalarType(columns[0].Provenance);
-        }
-
-        // Never guesses: a Union only yields a usable type when every branch agrees, and an
-        // Expression only when Pass 2 already inferred one - anything else (Unknown, a
-        // disagreeing Union) surfaces as an unresolvable element to the caller.
-        private static SqlType? ExtractScalarType(ColumnProvenance provenance) => provenance switch
-        {
-            ColumnProvenance.BaseColumn baseColumn => baseColumn.Type,
-            ColumnProvenance.Declared declared => declared.Type,
-            ColumnProvenance.Cast cast => cast.ExplicitType,
-            ColumnProvenance.Expression expression => expression.InferredType,
-            ColumnProvenance.Union union => AllBranchesAgree(union.Branches, out var agreedType) ? agreedType : null,
-            _ => null,
-        };
-
-        private static bool AllBranchesAgree(IReadOnlyList<ColumnProvenance> branches, out SqlType? agreedType)
-        {
-            agreedType = null;
-            foreach (var branch in branches)
-            {
-                var branchType = ExtractScalarType(branch);
-                if (branchType is null)
-                {
-                    return false;
-                }
-
-                if (agreedType is null)
-                {
-                    agreedType = branchType;
-                }
-                else if (agreedType.Category != branchType.Category)
-                {
-                    return false;
-                }
-            }
-
-            return agreedType is not null;
+            return columns.Count == 0 ? null : ColumnProvenanceAnalysis.TryGetScalarType(columns[0].Provenance);
         }
 
         private PredicateOperand ResolveColumnOperand(
@@ -520,7 +595,10 @@ public static class TypedPredicateExtractor
                 // object - a real table was never stored with a scope, so passing one is always
                 // safe (DatabaseCatalog falls back to the unscoped lookup automatically).
                 var indexed = catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
-                return new PredicateOperand.Column(baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn);
+                var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
+                return new PredicateOperand.Column(
+                    baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn,
+                    immediateRelation?.RelationQualifiedName, immediateRelation?.ExposedColumnName);
             }
 
             if (provenance is ColumnProvenance.Declared declared)
@@ -528,16 +606,30 @@ public static class TypedPredicateExtractor
                 // A multi-statement TVF's own RETURNS TABLE(...) column (docs/audit-remediation-
                 // plan.md Phase 4.2) - a real, known type, but never traceable to a real catalog
                 // table or index (there is none - it's the function's internal table variable).
-                return new PredicateOperand.Column(declared.TableQualifiedName ?? "?", columnName, declared.Type, Indexed: false, Depth: 0, declared);
+                return new PredicateOperand.Column(declared.TableQualifiedName ?? "?", columnName, declared.Type, Indexed: false, declared.Depth, declared);
             }
 
             if (ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
             {
                 RecordExpressionDerivedFinding(columnName, columnRef, provenance);
             }
+            else if (provenance is ColumnProvenance.Union)
+            {
+                // A UNION-view column (the common partitioned-view pattern) is genuinely not
+                // eligible for a verdict here - branches can resolve to different base columns
+                // entirely, so there is no single "the column" to classify. Ledgering this
+                // (unlike the Cast/Expression case above, whose non-eligibility is already
+                // reported as its own ExpressionDerivedFinding) closes a silent-clean gap:
+                // before this, a predicate against a union-backed column produced no finding
+                // AND no ledger entry at all, contradicting the "never silently counted as
+                // clean" contract every other unresolvable path in this file honors.
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, columnRef.StartLine, columnRef.StartColumn,
+                    "predicate operand", $"column '{columnName}' resolves through a UNION view - branches are not eligible for a single verdict, never guessed");
+            }
 
-            // Cast/Expression (reported above)/Union/Unknown/Declared - not eligible for the
-            // type-precedence "indexed column" side of a verdict.
+            // Cast/Expression (reported above)/Union (reported above)/Unknown/Declared - not
+            // eligible for the type-precedence "indexed column" side of a verdict.
             return new PredicateOperand.Value(Type: null);
         }
 

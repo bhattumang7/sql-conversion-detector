@@ -1,6 +1,11 @@
 <Project>
 
   <PropertyGroup>
+    <!-- The single source of truth for the tool's own version - SarifReportWriter reads this
+         back via Assembly.GetName().Version rather than a hardcoded literal, so SARIF's
+         driver.version (what CI baselining keys findings against) actually changes when the
+         tool does, instead of staying frozen at whatever string was typed in once. -->
+    <Version>0.2.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
