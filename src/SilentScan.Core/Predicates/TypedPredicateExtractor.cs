@@ -322,6 +322,14 @@ public static class TypedPredicateExtractor
                 return new PredicateOperand.Column(baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn);
             }
 
+            if (provenance is ColumnProvenance.Declared declared)
+            {
+                // A multi-statement TVF's own RETURNS TABLE(...) column (docs/audit-remediation-
+                // plan.md Phase 4.2) - a real, known type, but never traceable to a real catalog
+                // table or index (there is none - it's the function's internal table variable).
+                return new PredicateOperand.Column(declared.TableQualifiedName ?? "?", columnName, declared.Type, Indexed: false, Depth: 0, declared);
+            }
+
             if (ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
             {
                 RecordExpressionDerivedFinding(columnName, columnRef, provenance);

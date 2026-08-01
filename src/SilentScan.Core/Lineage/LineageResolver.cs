@@ -28,7 +28,7 @@ public static class LineageResolver
                 [.. tvf.Columns.Select(c => new ResolvedColumn(
                     c.Name,
                     c.Type is { } type
-                        ? new ColumnProvenance.Declared(type)
+                        ? new ColumnProvenance.Declared(type, tvf.QualifiedName)
                         : new ColumnProvenance.Unknown("multi-statement TVF column type could not be resolved")))]);
         }
 

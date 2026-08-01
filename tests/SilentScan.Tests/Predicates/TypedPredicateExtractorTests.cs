@@ -815,4 +815,79 @@ public sealed class TypedPredicateExtractorTests
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
+
+    [Fact]
+    public void Extract_InlineTvfInFromClause_PredicateResolvesToBaseColumnWithDepth()
+    {
+        // docs/audit-remediation-plan.md Phase 4.2, audit finding B2: FromScopeResolver only
+        // handled NamedTableReference and QueryDerivedTable - a table-valued function call in a
+        // FROM clause (SchemaObjectFunctionTableReference) fell to the unhandled default and
+        // resolved to an empty relation, so a predicate over one of its columns could never
+        // trace back to the real base column at all. "Done when": resolves to the base column
+        // with depth >= 1, exactly like reading through a view.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE FUNCTION dbo.fn_GetOrders(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.Orders);",
+            """
+            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Id FROM dbo.fn_GetOrders(1) WHERE CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal("CustomerId", finding.Column.ColumnName);
+        Assert.True(finding.Column.Depth >= 1);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InlineTvfWithAlias_QualifiedColumnResolves()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE FUNCTION dbo.fn_GetOrders(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.Orders);",
+            """
+            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT f.Id FROM dbo.fn_GetOrders(1) AS f WHERE f.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.True(finding.Column.Depth >= 1);
+    }
+
+    [Fact]
+    public void Extract_MultiStatementTvfInFromClause_UsesDeclaredReturnColumnType()
+    {
+        // A multi-statement TVF's columns are Declared provenance (its RETURNS @t TABLE(...)
+        // shape), not a chain back to a base column - this is the complementary case to the
+        // inline-TVF test above, proving both TVF kinds resolve through the FROM clause now.
+        var findings = Extract(
+            """
+            CREATE FUNCTION dbo.fn_GetCodes(@Ignored INT)
+            RETURNS @t TABLE (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL)
+            AS
+            BEGIN
+                RETURN;
+            END
+            """,
+            """
+            CREATE PROCEDURE dbo.usp_FindCodes @Code NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Id FROM dbo.fn_GetCodes(1) WHERE Code = @Code;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(SqlTypeCategory.VarChar, finding.Column.Type!.Category);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
 }

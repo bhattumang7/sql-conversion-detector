@@ -28,8 +28,15 @@ public abstract record ColumnProvenance
     /// </summary>
     public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0) : ColumnProvenance;
 
-    /// <summary>A declared type that isn't traced further - e.g. a multi-statement TVF's RETURNS TABLE(...) column.</summary>
-    public sealed record Declared(SqlType Type) : ColumnProvenance;
+    /// <summary>
+    /// A declared type that isn't traced further - e.g. a multi-statement TVF's RETURNS
+    /// TABLE(...) column. TableQualifiedName is the TVF's own qualified name (not a real
+    /// catalog table - CLAUDE.md never guesses an index for it, so predicates against a
+    /// Declared column are always Indexed=false), carried so Pass 3 can still classify a
+    /// verdict for it (docs/audit-remediation-plan.md Phase 4.2) rather than treating it as an
+    /// untyped, unreportable value the way an Expression with no inferred type is.
+    /// </summary>
+    public sealed record Declared(SqlType Type, string? TableQualifiedName = null) : ColumnProvenance;
 
     /// <summary>
     /// An explicit CAST/CONVERT to a named type, wrapping <see cref="Inner"/> - the wrapped

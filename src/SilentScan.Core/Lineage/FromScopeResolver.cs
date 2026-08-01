@@ -186,6 +186,26 @@ public static class FromScopeResolver
 
                 return (derived.Alias?.Value, new ScopeEntry(new ResolvedRelation(QualifiedName: null, innerColumns), IsViewLayer: false));
 
+            case SchemaObjectFunctionTableReference tvf:
+                // A table-valued function invoked in a FROM clause (docs/audit-remediation-
+                // plan.md Phase 4.2, audit finding B2). LineageResolver already resolves both
+                // inline and multi-statement TVFs into the same resolvedViews dictionary a
+                // regular view lands in (keyed by qualified name), so this is the same lookup
+                // as the NamedTableReference view-layer case above, not a separate mechanism -
+                // an inline TVF's own SELECT is exactly a view for lineage purposes, and a
+                // multi-statement TVF's declared RETURNS shape is exactly Declared provenance.
+                var tvfQualifiedName = SchemaObjectNameHelper.Qualify(tvf.SchemaObject);
+                if (!resolvedViews.TryGetValue(tvfQualifiedName, out var tvfRelation))
+                {
+                    ledger?.Record(
+                        AnalysisPass.Lineage, sourcePath, tvf.StartLine, tvf.StartColumn,
+                        "FROM table-valued function", $"'{tvfQualifiedName}' is not a resolved inline/multi-statement TVF");
+                    tvfRelation = ResolvedRelation.Empty;
+                }
+
+                var tvfAlias = tvf.Alias?.Value ?? SchemaObjectNameHelper.Resolve(tvf.SchemaObject).Name;
+                return (tvfAlias, new ScopeEntry(tvfRelation, IsViewLayer: true));
+
             default:
                 // OPENQUERY/OPENROWSET/PIVOT/table-valued function calls etc: not yet resolved.
                 // Empty columns means any reference against this alias falls through to "not found".
