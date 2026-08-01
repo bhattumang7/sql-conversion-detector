@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 
@@ -28,6 +29,7 @@ public static class SarifReportWriter
         results.AddRange(report.Tier1Findings.Select(ToResult));
         results.AddRange(report.TypedFindings.Select(ToResult));
         results.AddRange(report.DynamicSqlFindings.Select(ToResult));
+        results.AddRange(report.ExpressionDerivedFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -66,6 +68,17 @@ public static class SarifReportWriter
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
+    private static SarifResult ToResult(ExpressionDerivedFinding finding)
+    {
+        var chain = string.Join(" <- ", finding.TransformationChain.Select(DescribeTransformationSite));
+        var underlying = finding.UnderlyingBaseColumns.Count == 0
+            ? "no traceable base column"
+            : string.Join(", ", finding.UnderlyingBaseColumns.Select(bc => $"{bc.TableQualifiedName}.{bc.ColumnName}{(bc.Indexed ? " (indexed)" : " (not indexed)")}"));
+        var message = $"Column '{finding.ColumnName}' is a computed expression by the time it reaches this predicate ({chain}); underlying: {underlying}.";
+
+        return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, "error", message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+    }
+
     private static SarifResult ToResult(DynamicSqlFinding finding)
     {
         var ruleId = finding.IsLiteralOnly ? SarifRuleCatalog.DynamicSqlLiteralRuleId : SarifRuleCatalog.DynamicSqlUnanalyzableRuleId;
@@ -76,6 +89,9 @@ public static class SarifReportWriter
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
+
+    private static string DescribeTransformationSite(TransformationSite site) =>
+        site.SourcePath is null ? site.Description : $"{site.Description} at {site.SourcePath}:{site.Line}";
 
     private static string DescribeDepth(int depth)
     {

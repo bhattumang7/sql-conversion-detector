@@ -45,10 +45,12 @@ public static class ScanReportBuilder
         // against tables (and other views) declared in a different file.
         var catalog = CatalogBuilder.Build(cleanParseResults);
         var lineage = LineageResolver.Resolve(catalog, cleanParseResults);
-        var typedFindings = cleanParseResults
-            .SelectMany(r => TypedPredicateExtractor.Extract(r, catalog, lineage))
+        var extractionResults = cleanParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
+        var typedFindings = extractionResults
+            .SelectMany(r => r.TypedFindings)
             .Where(f => f.Verdict != Verdict.SeekPreserved)
             .ToList();
+        var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
         // SCAN_FORCED + indexed + depth>=1 first.
@@ -60,8 +62,9 @@ public static class ScanReportBuilder
             .ThenByDescending(f => f.Column.Depth)
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
             .ThenBy(f => f.Line)];
+        expressionDerivedFindings = [.. expressionDerivedFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
 
-        return new ScanReport(new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings);
+        return new ScanReport(new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings);
     }
 
     private static int VerdictRank(Verdict verdict) => verdict switch

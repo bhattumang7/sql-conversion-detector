@@ -8,7 +8,13 @@ namespace SilentScan.Tests.Predicates;
 
 public sealed class TypedPredicateExtractorTests
 {
-    private static IReadOnlyList<TypedPredicateFinding> Extract(params string[] batches)
+    private static IReadOnlyList<TypedPredicateFinding> Extract(params string[] batches) =>
+        ExtractAll(batches).TypedFindings;
+
+    private static IReadOnlyList<ExpressionDerivedFinding> ExtractExpressionDerived(params string[] batches) =>
+        ExtractAll(batches).ExpressionDerivedFindings;
+
+    private static PredicateExtractionResult ExtractAll(params string[] batches)
     {
         var sql = string.Join("\nGO\n", batches);
         var result = new SqlScriptParser().ParseText("test.sql", sql);
@@ -174,5 +180,158 @@ public sealed class TypedPredicateExtractorTests
 
         var finding = Assert.Single(findings);
         Assert.Equal(Verdict.Unknown, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_IntRoundTrippedThroughTwoViewsAndAProc_ReportsExpressionDerivedNotTyped()
+    {
+        // The exact case a direct question surfaced: a table has CustomerId INT (indexed),
+        // vw_OrdersStr casts it to VARCHAR, vw_OrdersRoundTrip casts it back to INT, and a
+        // proc filters on the round-tripped column. Both sides of the final predicate are
+        // INT, so there's no type-precedence mismatch to report - but the column is a
+        // computed expression by then, so no index seek is possible regardless. Before this
+        // rule existed, this produced zero findings of any kind (silently dropped).
+        var findings = ExtractExpressionDerived(
+            """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CustomerId INT NOT NULL);
+            """,
+            "CREATE INDEX IX_Orders_CustomerId ON dbo.Orders(CustomerId);",
+            """
+            CREATE VIEW dbo.vw_OrdersStr AS
+            SELECT OrderId, CAST(CustomerId AS VARCHAR(20)) AS CustomerIdStr
+            FROM dbo.Orders;
+            """,
+            """
+            CREATE VIEW dbo.vw_OrdersRoundTrip AS
+            SELECT OrderId, CAST(CustomerIdStr AS INT) AS CustomerIdAgain
+            FROM dbo.vw_OrdersStr;
+            """,
+            """
+            CREATE PROCEDURE dbo.usp_GetOrdersByCustomer @CustomerId INT
+            AS
+            BEGIN
+                SELECT OrderId FROM dbo.vw_OrdersRoundTrip WHERE CustomerIdAgain = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("CustomerIdAgain", finding.ColumnName);
+        Assert.Equal(2, finding.TransformationChain.Count);
+        var underlying = Assert.Single(finding.UnderlyingBaseColumns);
+        Assert.Equal("dbo.Orders", underlying.TableQualifiedName);
+        Assert.Equal("CustomerId", underlying.ColumnName);
+        Assert.True(underlying.Indexed);
+
+        // And no ordinary typed finding was produced for it either - it's reported exactly once.
+        Assert.Empty(Extract(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CustomerId INT NOT NULL);",
+            "CREATE INDEX IX_Orders_CustomerId ON dbo.Orders(CustomerId);",
+            "CREATE VIEW dbo.vw_OrdersStr AS SELECT OrderId, CAST(CustomerId AS VARCHAR(20)) AS CustomerIdStr FROM dbo.Orders;",
+            "CREATE VIEW dbo.vw_OrdersRoundTrip AS SELECT OrderId, CAST(CustomerIdStr AS INT) AS CustomerIdAgain FROM dbo.vw_OrdersStr;",
+            """
+            CREATE PROCEDURE dbo.usp_GetOrdersByCustomer @CustomerId INT
+            AS
+            BEGIN
+                SELECT OrderId FROM dbo.vw_OrdersRoundTrip WHERE CustomerIdAgain = @CustomerId;
+            END
+            """));
+    }
+
+    [Fact]
+    public void Extract_PlainPassthroughThroughTwoViews_NoExpressionDerivedFinding()
+    {
+        // Negative case: a column that passes through two views unchanged must not be
+        // flagged - only an actual CAST/expression layer should trigger this rule.
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL);",
+            "CREATE VIEW dbo.vw_A AS SELECT CustomerId FROM dbo.Orders;",
+            "CREATE VIEW dbo.vw_B AS SELECT CustomerId FROM dbo.vw_A;",
+            "SELECT CustomerId FROM dbo.vw_B WHERE CustomerId = 5;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_CastHiddenInLocalDerivedTable_ReportsExpressionDerived()
+    {
+        // Same phenomenon, no named view at all - the CAST is hidden inside an inline
+        // derived table within the very statement being scanned. Tier-1's syntactic scanner
+        // can't see this (the predicate itself is just "sub.X = @p"); only lineage-aware
+        // resolution catches it.
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            """
+            SELECT sub.X
+            FROM (SELECT CAST(Col AS VARCHAR(10)) AS X FROM dbo.T) sub
+            WHERE sub.X = 'abc';
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("X", finding.ColumnName);
+        var underlying = Assert.Single(finding.UnderlyingBaseColumns);
+        Assert.Equal("Col", underlying.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_ArithmeticExpressionCombiningTwoColumnsInView_ReportsBothUnderlyingColumns()
+    {
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.LineItems (Price INT NOT NULL, Quantity INT NOT NULL);",
+            "CREATE VIEW dbo.vw_LineTotals AS SELECT Price * Quantity AS Total FROM dbo.LineItems;",
+            "SELECT Total FROM dbo.vw_LineTotals WHERE Total = 100;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(2, finding.UnderlyingBaseColumns.Count);
+        Assert.Contains(finding.UnderlyingBaseColumns, c => c.ColumnName == "Price");
+        Assert.Contains(finding.UnderlyingBaseColumns, c => c.ColumnName == "Quantity");
+    }
+
+    [Fact]
+    public void Extract_WildcardCountInViewFeedingAPredicate_DoesNotCrashAndIsNotReported()
+    {
+        // Regression: COUNT(*)'s `*` is a ColumnReferenceExpression with no
+        // MultiPartIdentifier. The generic expression-column-collector used to resolve
+        // expression-derived provenance must skip it rather than null-refing, the same class
+        // of bug NonSargablePredicateScanner hit earlier for the same construct. And since
+        // COUNT(*) has no traceable underlying base column, it's correctly filtered out as
+        // non-actionable rather than reported with an empty UnderlyingBaseColumns list.
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL);",
+            "CREATE VIEW dbo.vw_OrderCounts AS SELECT CustomerId, COUNT(*) AS OrderCount FROM dbo.Orders GROUP BY CustomerId;",
+            "SELECT CustomerId FROM dbo.vw_OrderCounts WHERE OrderCount = 5;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_OpaqueExpressionWithNoTraceableColumn_NotReported()
+    {
+        // Real corpus case (SQL Server First Responder Kit): a derived-table column built
+        // from a niladic function call with no column reference anywhere inside it -
+        // technically expression-derived, but nothing actionable (no real column/index to
+        // point at), so a downstream predicate against it should not be reported.
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.T (Id INT NOT NULL);",
+            """
+            SELECT * FROM (
+                SELECT Id, NEWID() AS Token FROM dbo.T
+            ) sub
+            WHERE sub.Token = '00000000-0000-0000-0000-000000000000';
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_FunctionWrappedColumnInView_ReportsExpressionDerived()
+    {
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.Users (Name VARCHAR(50) NOT NULL);",
+            "CREATE VIEW dbo.vw_UpperNames AS SELECT UPPER(Name) AS UpperName FROM dbo.Users;",
+            "SELECT UpperName FROM dbo.vw_UpperNames WHERE UpperName = 'ALICE';");
+
+        var finding = Assert.Single(findings);
+        var underlying = Assert.Single(finding.UnderlyingBaseColumns);
+        Assert.Equal("Name", underlying.ColumnName);
     }
 }

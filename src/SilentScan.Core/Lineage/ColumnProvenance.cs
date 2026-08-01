@@ -32,14 +32,22 @@ public abstract record ColumnProvenance
     public sealed record Declared(SqlType Type) : ColumnProvenance;
 
     /// <summary>
-    /// An explicit CAST/CONVERT to a named type. Origin is where the CAST itself appears -
-    /// CLAUDE.md's "origin: file/line of the layer that introduced the mismatch (e.g., the
-    /// CAST inside vw_X)" - distinct from the predicate's own location.
+    /// An explicit CAST/CONVERT to a named type, wrapping <see cref="Inner"/> - the wrapped
+    /// expression's own provenance, so a chain of CASTs stacked across several view layers
+    /// stays walkable end-to-end instead of going opaque at the first CAST. Origin is where
+    /// the CAST itself appears - CLAUDE.md's "origin: file/line of the layer that introduced
+    /// the mismatch (e.g., the CAST inside vw_X)" - distinct from the predicate's own location.
     /// </summary>
-    public sealed record Cast(SqlType ExplicitType, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
+    public sealed record Cast(SqlType ExplicitType, ColumnProvenance Inner, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
 
-    /// <summary>Any other scalar expression (function call, arithmetic, CASE, literal, ...). InferredType is null when we didn't attempt to type it.</summary>
-    public sealed record Expression(SqlType? InferredType) : ColumnProvenance;
+    /// <summary>
+    /// Any other scalar expression (function call, arithmetic, CASE, ...) or a literal.
+    /// InferredType is null when we didn't attempt to type it. Inputs holds the provenance of
+    /// every column reference found anywhere inside the expression (empty for a literal) -
+    /// this is what lets a predicate see past a view's `UPPER(col)` or `col1 + col2` in its
+    /// SELECT list down to the real base column(s) underneath.
+    /// </summary>
+    public sealed record Expression(SqlType? InferredType, IReadOnlyList<ColumnProvenance> Inputs, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
 
     /// <summary>
     /// A UNION/UNION ALL/EXCEPT/INTERSECT output column. CLAUDE.md: "record ALL branch

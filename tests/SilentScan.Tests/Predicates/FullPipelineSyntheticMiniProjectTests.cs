@@ -34,7 +34,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         var catalog = CatalogBuilder.Build(parseResults);
         var lineage = LineageResolver.Resolve(catalog, parseResults);
 
-        _typedFindings = [.. parseResults.SelectMany(r => TypedPredicateExtractor.Extract(r, catalog, lineage))];
+        _typedFindings = [.. parseResults.SelectMany(r => TypedPredicateExtractor.Extract(r, catalog, lineage).TypedFindings)];
         _tier1Findings = [.. parseResults.SelectMany(NonSargablePredicateScanner.Scan)];
         _dynamicSqlFindings = [.. parseResults.SelectMany(DynamicSqlScanner.Scan)];
     }

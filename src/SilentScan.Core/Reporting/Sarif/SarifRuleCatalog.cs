@@ -8,6 +8,7 @@ public static class SarifRuleCatalog
 {
     public const string DynamicSqlLiteralRuleId = "silentscan/dynamic-sql/literal";
     public const string DynamicSqlUnanalyzableRuleId = "silentscan/dynamic-sql/unanalyzable";
+    public const string ExpressionDerivedRuleId = "silentscan/lineage/expression-derived-column";
 
     public static string Tier1RuleId(SargabilityFindingKind kind) => kind switch
     {
@@ -41,6 +42,7 @@ public static class SarifRuleCatalog
         Rule(VerdictRuleId(Verdict.SeekPreserved), "A predicate compares types where the seek is preserved (reported for completeness; not filtered into ScanReportBuilder's actionable findings)."),
         Rule(DynamicSqlLiteralRuleId, "A dynamic SQL call site with a literal-only argument."),
         Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose contents could not be statically analyzed."),
+        Rule(ExpressionDerivedRuleId, "A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement's own derived table, or upstream in a view/TVF's SELECT list) - no index seek is possible regardless of the comparison's types."),
     ];
 
     private static SarifRule Rule(string id, string description) => new(id, new SarifMessage(description));

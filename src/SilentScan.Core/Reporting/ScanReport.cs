@@ -6,4 +6,5 @@ public sealed record ScanReport(
     ParseHealthReport ParseHealth,
     IReadOnlyList<SargabilityFinding> Tier1Findings,
     IReadOnlyList<TypedPredicateFinding> TypedFindings,
-    IReadOnlyList<DynamicSqlFinding> DynamicSqlFindings);
+    IReadOnlyList<DynamicSqlFinding> DynamicSqlFindings,
+    IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings);

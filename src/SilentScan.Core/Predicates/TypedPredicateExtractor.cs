@@ -13,13 +13,13 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class TypedPredicateExtractor
 {
-    public static IReadOnlyList<TypedPredicateFinding> Extract(
+    public static PredicateExtractionResult Extract(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage)
     {
         var resolvedViews = lineage.AllRelations;
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews);
         parseResult.Fragment.Accept(visitor);
-        return visitor.Findings;
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings);
     }
 
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews) : TSqlFragmentVisitor
@@ -28,6 +28,8 @@ public static class TypedPredicateExtractor
         private readonly Dictionary<string, SqlType?> _variables = new(StringComparer.OrdinalIgnoreCase);
 
         public List<TypedPredicateFinding> Findings { get; } = [];
+
+        public List<ExpressionDerivedFinding> ExpressionDerivedFindings { get; } = [];
 
         public override void ExplicitVisit(QuerySpecification node)
         {
@@ -174,15 +176,39 @@ public static class TypedPredicateExtractor
             }
 
             var provenance = resolved is null ? null : ScalarExpressionResolver.BumpDepthIfViewLayer(resolved.Provenance, isViewLayer);
-            if (provenance is not ColumnProvenance.BaseColumn baseColumn)
+            if (provenance is ColumnProvenance.BaseColumn baseColumn)
             {
-                // Not a traceable base-table column (Cast/Expression/Union/Unknown/Declared,
-                // or unresolved) - not eligible for the "indexed column" side of a verdict.
-                return new PredicateOperand.Value(Type: null);
+                var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
+                return new PredicateOperand.Column(baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn);
             }
 
-            var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
-            return new PredicateOperand.Column(baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn);
+            if (provenance is not null && ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
+            {
+                RecordExpressionDerivedFinding(columnName, columnRef, provenance);
+            }
+
+            // Cast/Expression (reported above)/Union/Unknown/Declared, or unresolved - not
+            // eligible for the type-precedence "indexed column" side of a verdict.
+            return new PredicateOperand.Value(Type: null);
+        }
+
+        private void RecordExpressionDerivedFinding(string columnName, ColumnReferenceExpression columnRef, ColumnProvenance provenance)
+        {
+            var underlyingBaseColumns = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(provenance)
+                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName)?.IsIndexedColumn(bc.ColumnName) ?? false))
+                .ToList();
+
+            if (underlyingBaseColumns.Count == 0)
+            {
+                // No traceable base column underneath (e.g. ROW_NUMBER(), a derived-table
+                // alias over another expression, an XML .value() shred) - true that it's
+                // expression-derived, but nothing actionable to point at, so not reported.
+                return;
+            }
+
+            var transformationChain = ColumnProvenanceAnalysis.DescribeTransformationChain(provenance);
+            ExpressionDerivedFindings.Add(new ExpressionDerivedFinding(
+                columnName, sourcePath, columnRef.StartLine, columnRef.StartColumn, transformationChain, underlyingBaseColumns));
         }
     }
 }
