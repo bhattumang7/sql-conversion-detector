@@ -61,6 +61,37 @@ BEGIN
 END
 GO
 
+-- PLANTED: dynamic SQL, literal-only, whose inner predicate is itself a ScanForced finding -
+-- proves Tier A actually reparses and analyzes the folded text, not just detects the call site.
+CREATE PROCEDURE dbo.usp_DynamicLiteralWithFinding_Fires
+AS
+BEGIN
+    EXEC('SELECT UserId FROM dbo.Users WHERE Email = N''x''');
+END
+GO
+
+-- PLANTED: dynamic SQL via sp_executesql with a declared parameter type (Tier B) - the
+-- classic ORM-generated shape: nvarchar param declared against a varchar/SQL_* column.
+CREATE PROCEDURE dbo.usp_DynamicSpExecuteSqlDeclaredParam_Fires
+    @Phone NVARCHAR(20)
+AS
+BEGIN
+    EXEC sp_executesql N'SELECT UserId FROM dbo.Users WHERE Phone = @Phone',
+        N'@Phone nvarchar(20)', @Phone = @Phone;
+END
+GO
+
+-- PLANTED: dynamic SQL built via straight-line DECLARE/SET accumulation (Tier C) - no
+-- branches between the assignments and the EXEC, so the folded text is provably constant.
+CREATE PROCEDURE dbo.usp_DynamicTierCAccumulated_Fires
+AS
+BEGIN
+    DECLARE @sql NVARCHAR(MAX) = N'SELECT UserId FROM dbo.Users ';
+    SET @sql = @sql + N'WHERE AccountCode = N''x''';
+    EXEC(@sql);
+END
+GO
+
 -- PLANTED: dynamic SQL, variable-driven (the unanalyzable case).
 CREATE PROCEDURE dbo.usp_DynamicVariable_Fires
     @Sql NVARCHAR(MAX)

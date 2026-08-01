@@ -66,6 +66,46 @@ finding's own column. Only findings with this signature are counted in the
 oracle-confirmed set; anything else (not probeable, or the deployed schema
 didn't match) is reported honestly rather than assumed.
 
+### Dynamic SQL: partial resolution, not a black box
+
+`EXEC(@sql)`/`sp_executesql` hides its query text from any purely syntactic
+scanner. Rather than lump every dynamic SQL call site into one "unanalyzable"
+bucket, SilentScan proves each one constant where it honestly can:
+
+- **Tier A** — the argument is already a literal, or a concatenation of bare
+  literals.
+- **Tier B** — `sp_executesql`'s own params-declaration argument gives exact
+  parameter types (the classic ORM-generated shape: an `nvarchar` parameter
+  bound against a `varchar`/`SQL_*` column).
+- **Tier C** — the argument traces back through a straight-line chain of
+  `DECLARE`/`SET`/`SELECT` assignments with no intervening branch, loop,
+  `GOTO`, or function call, including nesting (dynamic SQL that itself
+  contains dynamic SQL, resolved up to 5 levels deep).
+
+A site proved constant this way is reparsed and run back through the same
+catalog/lineage/predicate pipeline as static SQL, and any finding inside it
+is attributed to its true source line — not the `EXEC` call site, which for
+a multi-line folded string would make the location useless. Everything else
+is still reported, with a specific machine-readable reason
+(`diverges-across-if-branches`, `goto-or-label-in-scope`,
+`non-literal-expression`, ...), never silently dropped.
+
+Rerunning the same 5-repo corpus through this pass: of **1,041** dynamic SQL
+call sites, **272 (26.1%)** were proven constant and fully analyzed like
+static SQL; the remaining **769 (73.9%)** stayed honestly unanalyzable. The
+unanalyzable reasons themselves are a finding: **46.8%** diverge across an
+`IF` branch (the query text itself varies by condition — genuinely ambiguous,
+not a gap in the folder), **25.6%** are disabled by a `GOTO`/label somewhere
+in the same procedure (concentrated in Ola Hallengren's Maintenance Solution
+and the First Responder Kit, both of which lean on `GOTO` for T-SQL error
+handling), and **23.5%** depend on a non-literal expression such as a
+function call. Reparsing the newly-analyzed 272 sites surfaced 18 additional
+typed predicates (all in WideWorldImporters) — all `UNKNOWN` verdicts (an
+operand type the reparse couldn't pin down), not new oracle-probeable
+findings in this specific corpus. That's an honest negative result, not a
+gap: this pass exists to make dynamic SQL visible to the same rigor as static
+SQL, not to guarantee it surfaces new bugs in every corpus.
+
 ### Corpus
 
 Five open-source projects with real DDL and stored procedures/views checked
@@ -97,6 +137,8 @@ Full results: [`bench-results.csv`](bench-results.csv).
 - **`UNKNOWN` and unanalyzable rates**, recorded honestly rather than
   silently dropped: DNN Platform had 1,142 `UNKNOWN` typed comparisons (from
   cross-collation same-category comparisons this tool deliberately declines
-  to resolve) and 110 unanalyzable dynamic-SQL statements; the First
-  Responder Kit had 315 `UNKNOWN` and 735 dynamic-SQL statements (its
-  monitoring scripts build most queries dynamically).
+  to resolve) and 110 dynamic-SQL call sites, of which 31 (28.2%) were
+  proven constant and analyzed, 79 stayed unanalyzable; the First Responder
+  Kit had 315 `UNKNOWN` and 735 dynamic-SQL call sites (its monitoring
+  scripts build most queries dynamically, and lean heavily on `GOTO` for
+  error handling), of which only 99 (13.5%) were provably constant.

@@ -13,19 +13,29 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class TypedPredicateExtractor
 {
+    // externalVariables: variable/parameter types known before parsing even starts - used by
+    // DynamicSqlPipeline to seed sp_executesql's declared parameter types (CLAUDE.md dynamic
+    // SQL policy, Tier B), since those are declared at the call site, not inside the reparsed
+    // query text itself. Null/empty for ordinary static SQL.
     public static PredicateExtractionResult Extract(
-        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage)
+        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null)
     {
         var resolvedViews = lineage.AllRelations;
-        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables);
         parseResult.Fragment.Accept(visitor);
         return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings);
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews) : TSqlFragmentVisitor
+    private sealed class Visitor(
+        string sourcePath,
+        DatabaseCatalog catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
+        IReadOnlyDictionary<string, SqlType?>? externalVariables) : TSqlFragmentVisitor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
-        private readonly Dictionary<string, SqlType?> _variables = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
+            ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
 
         public List<TypedPredicateFinding> Findings { get; } = [];
 

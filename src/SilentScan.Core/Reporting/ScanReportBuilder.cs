@@ -39,18 +39,29 @@ public static class ScanReportBuilder
         }
 
         var tier1Findings = cleanParseResults.SelectMany(NonSargablePredicateScanner.Scan).ToList();
-        var dynamicSqlFindings = cleanParseResults.SelectMany(DynamicSqlScanner.Scan).ToList();
+
+        var dynamicSqlExtractions = cleanParseResults.Select(DynamicSqlScanner.Scan).ToList();
+        var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
+        var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 
         // Catalog/lineage need every cleanly-parsed file together, so views can resolve
         // against tables (and other views) declared in a different file.
         var catalog = CatalogBuilder.Build(cleanParseResults);
         var lineage = LineageResolver.Resolve(catalog, cleanParseResults);
         var extractionResults = cleanParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
-        var typedFindings = extractionResults
-            .SelectMany(r => r.TypedFindings)
-            .Where(f => f.Verdict != Verdict.SeekPreserved)
-            .ToList();
+        var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
+
+        // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/
+        // sp_executesql arguments through the same pipeline and fold their findings in,
+        // remapped back to their true source location.
+        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage);
+        dynamicSqlFindings = [.. dynamicSqlFindings, .. dynamicSqlResult.Findings];
+        tier1Findings = [.. tier1Findings, .. dynamicSqlResult.Tier1Findings];
+        typedFindings = [.. typedFindings, .. dynamicSqlResult.TypedFindings];
+        expressionDerivedFindings = [.. expressionDerivedFindings, .. dynamicSqlResult.ExpressionDerivedFindings];
+
+        typedFindings = [.. typedFindings.Where(f => f.Verdict != Verdict.SeekPreserved)];
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
         // SCAN_FORCED + indexed + depth>=1 first.

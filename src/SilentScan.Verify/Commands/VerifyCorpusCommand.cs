@@ -167,7 +167,8 @@ public static class VerifyCorpusCommand
                 Confirmed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.Confirmed)],
                 NotConfirmed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.NotConfirmed)],
                 NotProbeable: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.NotProbeable)],
-                ProbeFailed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ProbeFailed)]);
+                ProbeFailed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ProbeFailed)],
+                DynamicSql: DynamicSqlSummary.From(report.DynamicSqlFindings));
         }
         finally
         {
@@ -191,7 +192,7 @@ public static class VerifyCorpusCommand
     }
 }
 
-/// <summary>Per-repo oracle-confirmation outcome (CLAUDE.md: "Study reports only oracle-confirmed findings; static-only findings go in an appendix").</summary>
+/// <summary>Per-repo oracle-confirmation outcome (CLAUDE.md: "Study reports only oracle-confirmed findings; static-only findings go in an appendix"), plus how much of the repo's dynamic SQL could be analyzed at all (CLAUDE.md dynamic SQL policy: "X% of procs contain dynamic SQL we could not analyze" - reported, never silently dropped).</summary>
 public sealed record RepoVerificationSummary(
     int TotalDdlFiles,
     IReadOnlyList<string> DeploymentErrors,
@@ -199,4 +200,5 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<CorpusFindingResult> Confirmed,
     IReadOnlyList<CorpusFindingResult> NotConfirmed,
     IReadOnlyList<CorpusFindingResult> NotProbeable,
-    IReadOnlyList<CorpusFindingResult> ProbeFailed);
+    IReadOnlyList<CorpusFindingResult> ProbeFailed,
+    DynamicSqlSummary DynamicSql);

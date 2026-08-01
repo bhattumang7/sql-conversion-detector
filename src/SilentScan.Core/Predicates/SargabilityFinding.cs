@@ -6,4 +6,5 @@ public sealed record SargabilityFinding(
     string? Detail,
     string SourcePath,
     int Line,
-    int Column);
+    int Column,
+    SourceSpan? DynamicSqlCallSite = null);

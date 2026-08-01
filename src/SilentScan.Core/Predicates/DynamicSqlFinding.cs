@@ -1,10 +1,21 @@
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
-/// An EXEC(@sql)/EXEC('...')/sp_executesql call site. CLAUDE.md dynamic SQL policy: never
-/// silently count these as clean - IsLiteralOnly distinguishes the (rare) case we could in
-/// principle parse (a single string literal, no concatenation/variables) from the general
-/// unanalyzable case, which must be reported ("X% of procs contain dynamic SQL we could not
-/// analyze"), not swallowed.
+/// How a dynamic SQL call site's argument was (or wasn't) resolved. CLAUDE.md's dynamic SQL
+/// policy: never silently count a call site as clean - every outcome here is either a real
+/// analysis result or an honest, specific reason it couldn't be one.
 /// </summary>
-public sealed record DynamicSqlFinding(string SourcePath, int Line, bool IsLiteralOnly);
+public enum DynamicSqlOutcome
+{
+    /// <summary>The argument was provably constant (a literal, or a concatenation of bare literals) and its reassembled text was successfully reparsed and run through the normal pipeline.</summary>
+    AnalyzedLiteral,
+
+    /// <summary>The argument depends on a variable, parameter, or expression - tracing its runtime value would mean guessing, which this tool never does.</summary>
+    Unanalyzable,
+
+    /// <summary>The argument was provably constant, but the reassembled text did not parse as T-SQL (e.g. it targets a different dialect, or is itself malformed).</summary>
+    InnerParseFailed,
+}
+
+/// <summary>An EXEC(@sql)/EXEC('...')/sp_executesql call site, and how its argument was resolved.</summary>
+public sealed record DynamicSqlFinding(string SourcePath, int Line, int Column, DynamicSqlOutcome Outcome, string? Reason);

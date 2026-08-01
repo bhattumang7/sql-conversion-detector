@@ -6,9 +6,18 @@ namespace SilentScan.Core.Reporting.Sarif;
 /// <summary>Stable SARIF rule IDs/descriptions, one per finding kind this tool produces.</summary>
 public static class SarifRuleCatalog
 {
-    public const string DynamicSqlLiteralRuleId = "silentscan/dynamic-sql/literal";
+    public const string DynamicSqlAnalyzedRuleId = "silentscan/dynamic-sql/analyzed";
     public const string DynamicSqlUnanalyzableRuleId = "silentscan/dynamic-sql/unanalyzable";
+    public const string DynamicSqlInnerParseFailedRuleId = "silentscan/dynamic-sql/inner-parse-failed";
     public const string ExpressionDerivedRuleId = "silentscan/lineage/expression-derived-column";
+
+    public static string DynamicSqlRuleId(DynamicSqlOutcome outcome) => outcome switch
+    {
+        DynamicSqlOutcome.AnalyzedLiteral => DynamicSqlAnalyzedRuleId,
+        DynamicSqlOutcome.Unanalyzable => DynamicSqlUnanalyzableRuleId,
+        DynamicSqlOutcome.InnerParseFailed => DynamicSqlInnerParseFailedRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unhandled DynamicSqlOutcome."),
+    };
 
     public static string Tier1RuleId(SargabilityFindingKind kind) => kind switch
     {
@@ -40,8 +49,9 @@ public static class SarifRuleCatalog
         Rule(VerdictRuleId(Verdict.RangeSeek), "An implicit type conversion on the column side permits only a dynamic range seek, not a direct seek."),
         Rule(VerdictRuleId(Verdict.Unknown), "A predicate's sargability could not be determined (e.g. unresolved collation) - never guessed."),
         Rule(VerdictRuleId(Verdict.SeekPreserved), "A predicate compares types where the seek is preserved (reported for completeness; not filtered into ScanReportBuilder's actionable findings)."),
-        Rule(DynamicSqlLiteralRuleId, "A dynamic SQL call site with a literal-only argument."),
-        Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose contents could not be statically analyzed."),
+        Rule(DynamicSqlAnalyzedRuleId, "A dynamic SQL call site with a provably-constant argument; its contents were reparsed and analyzed like static SQL."),
+        Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed."),
+        Rule(DynamicSqlInnerParseFailedRuleId, "A dynamic SQL call site's argument was provably constant but its reassembled text did not parse as T-SQL."),
         Rule(ExpressionDerivedRuleId, "A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement's own derived table, or upstream in a view/TVF's SELECT list) - no index seek is possible regardless of the comparison's types."),
     ];
 

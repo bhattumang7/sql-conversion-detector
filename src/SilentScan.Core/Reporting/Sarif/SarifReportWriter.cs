@@ -16,6 +16,10 @@ public static class SarifReportWriter
     private const string ToolName = "SilentScan";
     private const string ToolVersion = "0.1.0";
 
+    private const string LevelError = "error";
+    private const string LevelWarning = "warning";
+    private const string LevelNote = "note";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -44,9 +48,9 @@ public static class SarifReportWriter
     private static SarifResult ToResult(SargabilityFinding finding)
     {
         var ruleId = SarifRuleCatalog.Tier1RuleId(finding.Kind);
-        var level = finding.Kind == SargabilityFindingKind.LikePatternNotLiteral ? "note" : "warning";
+        var level = finding.Kind == SargabilityFindingKind.LikePatternNotLiteral ? LevelNote : LevelWarning;
         var detail = finding.Detail is null ? string.Empty : $" ({finding.Detail})";
-        var message = $"Column '{finding.ColumnName}' is used in a non-sargable predicate{detail}.";
+        var message = $"Column '{finding.ColumnName}' is used in a non-sargable predicate{detail}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
@@ -56,14 +60,14 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.VerdictRuleId(finding.Verdict);
         var level = finding.Verdict switch
         {
-            Verdict.ScanForced => "error",
-            Verdict.RangeSeek => "warning",
-            _ => "note",
+            Verdict.ScanForced => LevelError,
+            Verdict.RangeSeek => LevelWarning,
+            _ => LevelNote,
         };
 
         var depthNote = DescribeDepth(finding.Column.Depth);
         var indexNote = finding.Column.Indexed ? ", indexed" : ", not indexed";
-        var message = $"{finding.Verdict}: '{finding.Column.TableQualifiedName}.{finding.Column.ColumnName}'{indexNote}{depthNote}.";
+        var message = $"{finding.Verdict}: '{finding.Column.TableQualifiedName}.{finding.Column.ColumnName}'{indexNote}{depthNote}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
@@ -74,21 +78,30 @@ public static class SarifReportWriter
         var underlying = finding.UnderlyingBaseColumns.Count == 0
             ? "no traceable base column"
             : string.Join(", ", finding.UnderlyingBaseColumns.Select(bc => $"{bc.TableQualifiedName}.{bc.ColumnName}{(bc.Indexed ? " (indexed)" : " (not indexed)")}"));
-        var message = $"Column '{finding.ColumnName}' is a computed expression by the time it reaches this predicate ({chain}); underlying: {underlying}.";
+        var message = $"Column '{finding.ColumnName}' is a computed expression by the time it reaches this predicate ({chain}); underlying: {underlying}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
-        return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, "error", message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+        return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, LevelError, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
     private static SarifResult ToResult(DynamicSqlFinding finding)
     {
-        var ruleId = finding.IsLiteralOnly ? SarifRuleCatalog.DynamicSqlLiteralRuleId : SarifRuleCatalog.DynamicSqlUnanalyzableRuleId;
-        var level = finding.IsLiteralOnly ? "note" : "warning";
-        var message = finding.IsLiteralOnly
-            ? "Dynamic SQL call with a literal-only argument (analyzable in principle, not yet traced by this pass)."
-            : "Dynamic SQL call with a non-literal argument; contents could not be analyzed.";
+        var ruleId = SarifRuleCatalog.DynamicSqlRuleId(finding.Outcome);
+        var level = finding.Outcome == DynamicSqlOutcome.AnalyzedLiteral ? LevelNote : LevelWarning;
 
-        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+        var message = finding.Outcome switch
+        {
+            DynamicSqlOutcome.AnalyzedLiteral =>
+                "Dynamic SQL call with a provably-constant argument; its contents were reparsed and analyzed like static SQL.",
+            DynamicSqlOutcome.InnerParseFailed =>
+                $"Dynamic SQL call's argument was provably constant but did not parse as T-SQL ({finding.Reason}).",
+            _ => $"Dynamic SQL call's argument could not be statically analyzed ({finding.Reason}).",
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
+
+    private static string DynamicSqlOriginNote(SourceSpan? callSite) =>
+        callSite is { } span ? $" (via dynamic SQL executed at {span.SourcePath}:{span.Line})" : string.Empty;
 
     private static string DescribeTransformationSite(TransformationSite site) =>
         site.SourcePath is null ? site.Description : $"{site.Description} at {site.SourcePath}:{site.Line}";

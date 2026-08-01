@@ -17,7 +17,8 @@ public sealed record ExpressionDerivedFinding(
     int Line,
     int ColumnPosition,
     IReadOnlyList<TransformationSite> TransformationChain,
-    IReadOnlyList<UnderlyingBaseColumn> UnderlyingBaseColumns);
+    IReadOnlyList<UnderlyingBaseColumn> UnderlyingBaseColumns,
+    SourceSpan? DynamicSqlCallSite = null);
 
 /// <summary>A real base table column found underneath an expression-derived provenance chain, and whether it's indexed (which is what makes the finding worth fixing).</summary>
 public sealed record UnderlyingBaseColumn(string TableQualifiedName, string ColumnName, bool Indexed);

@@ -80,6 +80,96 @@ public sealed class SarifReportWriterTests
     }
 
     [Fact]
+    public void Write_DynamicSqlAnalyzedFinding_MapsToNoteLevel()
+    {
+        var report = new ScanReport(
+            new ParseHealthReport([]),
+            [],
+            [],
+            [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)],
+            []);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
+        Assert.Equal("note", result.GetProperty("level").GetString());
+        Assert.Equal("silentscan/dynamic-sql/analyzed", result.GetProperty("ruleId").GetString());
+    }
+
+    [Fact]
+    public void Write_DynamicSqlUnanalyzableFinding_MapsToWarningLevelWithReasonInMessage()
+    {
+        var report = new ScanReport(
+            new ParseHealthReport([]),
+            [],
+            [],
+            [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")],
+            []);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
+        Assert.Equal("warning", result.GetProperty("level").GetString());
+        Assert.Equal("silentscan/dynamic-sql/unanalyzable", result.GetProperty("ruleId").GetString());
+        Assert.Contains("non-literal-argument", result.GetProperty("message").GetProperty("text").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Write_DynamicSqlInnerParseFailedFinding_MapsToWarningLevelWithDistinctRuleId()
+    {
+        var report = new ScanReport(
+            new ParseHealthReport([]),
+            [],
+            [],
+            [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.InnerParseFailed, "Incorrect syntax near '$$$'.")],
+            []);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
+        Assert.Equal("warning", result.GetProperty("level").GetString());
+        Assert.Equal("silentscan/dynamic-sql/inner-parse-failed", result.GetProperty("ruleId").GetString());
+    }
+
+    [Fact]
+    public void Write_TypedFindingViaDynamicSql_IncludesCallSiteInMessage()
+    {
+        var report = new ScanReport(
+            new ParseHealthReport([]),
+            [],
+            [new TypedPredicateFinding(
+                Verdict.ScanForced,
+                new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
+                new PredicateOperand.Value(null),
+                "=",
+                "test.sql",
+                5,
+                7,
+                new SourceSpan("test.sql", 4, 10))],
+            [],
+            []);
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var message = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0].GetProperty("message").GetProperty("text").GetString();
+        Assert.Contains("via dynamic SQL executed at test.sql:4", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Write_RuleCatalog_CoversEveryDynamicSqlOutcome()
+    {
+        foreach (var outcome in Enum.GetValues<DynamicSqlOutcome>())
+        {
+            var ruleId = SarifRuleCatalog.DynamicSqlRuleId(outcome);
+            Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
+        }
+    }
+
+    [Fact]
     public void Write_RuleCatalog_CoversEveryTier1FindingKind()
     {
         foreach (var kind in Enum.GetValues<SargabilityFindingKind>())
