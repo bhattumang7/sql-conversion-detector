@@ -8,7 +8,21 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, CatalogTable> _tablesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, SqlType> _typeAliasesByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
+
+    /// <summary>
+    /// CREATE TYPE ... FROM aliases discovered across every scanned file, keyed by qualified
+    /// name (docs/audit-remediation-plan.md Phase 6.2) - lets a column/variable/CAST target
+    /// declared with a user-defined alias resolve through to the real underlying type instead
+    /// of staying permanently UNKNOWN.
+    /// </summary>
+    public IReadOnlyDictionary<string, SqlType> TypeAliases => _typeAliasesByQualifiedName;
+
+    public void AddTypeAlias(string qualifiedName, SqlType underlyingType) =>
+        _typeAliasesByQualifiedName[qualifiedName] = underlyingType;
 
     public Collation? DefaultCollation { get; set; }
 

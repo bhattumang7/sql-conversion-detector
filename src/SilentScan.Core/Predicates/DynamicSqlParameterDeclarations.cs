@@ -31,6 +31,12 @@ public static class DynamicSqlParameterDeclarations
             return null;
         }
 
+        // No DatabaseCatalog is available here - DynamicSqlScanner (this method's only caller)
+        // runs before CatalogBuilder in ScanReportBuilder's pipeline, so a sp_executesql
+        // parameter declared with a CREATE TYPE ... FROM alias (docs/audit-remediation-plan.md
+        // Phase 6.2) still resolves via SqlTypeReferenceResolver's sysname special-case, but not
+        // via a user-declared alias - a deliberate, narrow scope boundary rather than
+        // restructuring pass ordering for a rare case (aliased sp_executesql parameters).
         var declared = new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase);
         foreach (var parameter in createProcedure.Parameters)
         {

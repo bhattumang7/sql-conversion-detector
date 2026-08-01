@@ -137,7 +137,7 @@ public static class TypedPredicateExtractor
         {
             foreach (var declaration in node.Declarations)
             {
-                _variables[declaration.VariableName.Value] = SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null);
+                _variables[declaration.VariableName.Value] = SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null, catalog.TypeAliases);
             }
 
             base.ExplicitVisit(node);
@@ -271,7 +271,7 @@ public static class TypedPredicateExtractor
         {
             foreach (var parameter in parameters)
             {
-                _variables[parameter.VariableName.Value] = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null);
+                _variables[parameter.VariableName.Value] = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, catalog.TypeAliases);
             }
         }
 

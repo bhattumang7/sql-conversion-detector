@@ -29,6 +29,15 @@ public static class CatalogBuilder
 
         catalog.DefaultCollation = ResolveDefaultCollation(results, manifestDeclaredCollation);
 
+        // CREATE TYPE ... FROM aliases must be known before ANY column resolves its type
+        // (docs/audit-remediation-plan.md Phase 6.2) - the same cross-file-ordering problem
+        // CollectTables solves for tables applies here too (a repo's type aliases routinely
+        // live in their own file, sorted before or after the tables that use them).
+        foreach (var result in results)
+        {
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTypeAliases));
+        }
+
         // Two-phase build (docs/audit-remediation-plan.md Phase 2.5): every CREATE TABLE across
         // every scanned file is cataloged before any ALTER TABLE/CREATE INDEX/SELECT INTO is
         // applied, so cross-file ordering (an index or ALTER declared in a file that sorts
@@ -115,6 +124,7 @@ public static class CatalogBuilder
 
     private enum BuildPhase
     {
+        CollectTypeAliases,
         CollectTables,
         ApplyEverythingElse,
     }
@@ -129,6 +139,16 @@ public static class CatalogBuilder
     private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
     {
         private string? _currentScope;
+
+        public override void ExplicitVisit(CreateTypeUddtStatement node)
+        {
+            if (phase == BuildPhase.CollectTypeAliases)
+            {
+                VisitCreateTypeAlias(node);
+            }
+
+            node.AcceptChildren(this);
+        }
 
         public override void ExplicitVisit(CreateTableStatement node)
         {
@@ -239,6 +259,26 @@ public static class CatalogBuilder
             _currentScope = previous;
         }
 
+        private void VisitCreateTypeAlias(CreateTypeUddtStatement createType)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(createType.Name);
+
+            // CREATE TYPE ... FROM only ever references a built-in type (SQL Server doesn't
+            // allow aliasing an alias), so the existing resolver handles it with no alias
+            // lookup of its own - typeAliases: null here is not a missed case, just "this
+            // resolution never needs one."
+            var underlyingType = SqlTypeReferenceResolver.Resolve(createType.DataType, columnCollation: null, typeAliases: null);
+            if (underlyingType is null)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, createType.StartLine, createType.StartColumn,
+                    "CREATE TYPE ... FROM", $"'{qualifiedName}': underlying type could not be resolved");
+                return;
+            }
+
+            catalog.AddTypeAlias(qualifiedName, underlyingType);
+        }
+
         private void VisitCreateTable(CreateTableStatement createTable)
         {
             if (createTable.Definition is null)
@@ -251,7 +291,7 @@ public static class CatalogBuilder
             var isTemp = schema is null;
             var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation);
+            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation, catalog.TypeAliases);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
             var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
             columns = ApplyPrimaryKeyNotNull(columns, allIndexes);
@@ -281,7 +321,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation);
+            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases);
             var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
@@ -320,7 +360,7 @@ public static class CatalogBuilder
             // ORIGINAL type in the catalog forever, producing wrong-direction findings on
             // precisely the pattern this tool exists to catch. An unresolvable target type nulls
             // the column so downstream goes UNKNOWN rather than keeping the stale value.
-            var newType = SqlTypeReferenceResolver.Resolve(alterColumn.DataType, alterColumn.Collation);
+            var newType = SqlTypeReferenceResolver.Resolve(alterColumn.DataType, alterColumn.Collation, catalog.TypeAliases);
             if (newType is { IsStringFamily: true, Collation: null } && catalog.DefaultCollation is not null)
             {
                 newType = newType with { Collation = catalog.DefaultCollation };
@@ -416,7 +456,7 @@ public static class CatalogBuilder
             // same simplification SchemaObjectNameHelper makes), so the scanned database's
             // default is the closest available signal rather than leaving every unqualified
             // column UNKNOWN.
-            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation);
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation, catalog.TypeAliases);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
             var table = new CatalogTable(
@@ -502,10 +542,12 @@ public static class CatalogBuilder
     /// RETURNS @t TABLE(...) is column-definition syntax identical to a table variable, and
     /// its declared columns become <see cref="Lineage.ColumnProvenance.Declared"/> provenance.
     /// </summary>
-    public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(TableDefinition definition, Collation? defaultCollation) =>
-        BuildColumns(definition, defaultCollation).Columns;
+    public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
+        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null) =>
+        BuildColumns(definition, defaultCollation, typeAliases).Columns;
 
-    private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(TableDefinition definition, Collation? defaultCollation)
+    private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(
+        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
         var columns = new List<CatalogColumn>();
         var inlineIndexes = new List<CatalogIndex>();
@@ -520,7 +562,7 @@ public static class CatalogBuilder
                 inlineIndexes.Add(BuildInlineIndex(inlineIndex, name));
             }
 
-            var resolvedType = SqlTypeReferenceResolver.Resolve(columnDefinition.DataType, columnDefinition.Collation);
+            var resolvedType = SqlTypeReferenceResolver.Resolve(columnDefinition.DataType, columnDefinition.Collation, typeAliases);
             if (resolvedType is { IsStringFamily: true, Collation: null } && defaultCollation is not null)
             {
                 // CLAUDE.md Pass 1: "database default collation from any CREATE DATABASE/

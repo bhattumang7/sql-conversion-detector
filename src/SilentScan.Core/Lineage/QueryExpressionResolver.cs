@@ -66,7 +66,7 @@ public static class QueryExpressionResolver
 
                 case SelectScalarExpression scalar:
                     var name = scalar.ColumnName?.Value ?? InferName(scalar.Expression);
-                    var provenance = ScalarExpressionResolver.Resolve(scalar.Expression, byAlias, ordered, sourcePath, ledger);
+                    var provenance = ScalarExpressionResolver.Resolve(scalar.Expression, byAlias, ordered, sourcePath, ledger, catalog.TypeAliases);
                     result.Add(new ResolvedColumn(name ?? "?column?", provenance));
                     break;
             }

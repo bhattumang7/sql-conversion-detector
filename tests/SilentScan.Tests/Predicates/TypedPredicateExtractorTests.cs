@@ -110,6 +110,40 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_SysnameVariableVsVarcharColumn_ScanForced()
+    {
+        // docs/audit-remediation-plan.md Phase 6.2: sysname (nvarchar(128)) outranks varchar in
+        // precedence exactly like an ordinary nvarchar parameter would - oracle-verified in
+        // SysnameOracleTests.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find
+            AS
+            BEGIN
+                DECLARE @p sysname = N'x';
+                SELECT Code FROM dbo.T WHERE Code = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_CatalogedTypeAliasColumn_ResolvesThroughToUnderlyingType()
+    {
+        var findings = Extract(
+            "CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;",
+            "CREATE TABLE dbo.Orders (OrderId dbo.MyIntAlias NOT NULL);",
+            "SELECT OrderId FROM dbo.Orders WHERE OrderId = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.Equal(SqlTypeCategory.Int, finding.Column.Type!.Category);
+    }
+
+    [Fact]
     public void Extract_PredicateThroughViewLayer_CarriesDepthFromLineage()
     {
         var findings = Extract(

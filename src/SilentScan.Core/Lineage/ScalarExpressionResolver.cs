@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
@@ -8,29 +9,47 @@ namespace SilentScan.Core.Lineage;
 /// <summary>Resolves a single SELECT-list scalar expression to its <see cref="ColumnProvenance"/>.</summary>
 public static class ScalarExpressionResolver
 {
-    public static ColumnProvenance Resolve(
-        ScalarExpression expression, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger = null) =>
-        expression switch
-        {
-            ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, scope, orderedRelations, sourcePath, ledger),
-            CastCall castCall => ResolveCastOrConvert(castCall.DataType, castCall.Parameter, scope, orderedRelations, sourcePath, castCall.StartLine, ledger),
-            ConvertCall convertCall => ResolveCastOrConvert(convertCall.DataType, convertCall.Parameter, scope, orderedRelations, sourcePath, convertCall.StartLine, ledger),
-            Literal literal => new ColumnProvenance.Expression(LiteralTypeResolver.Resolve(literal), Inputs: []),
-            _ => ResolveGenericExpression(expression, scope, orderedRelations, sourcePath, ledger),
-        };
+    /// <summary>
+    /// Bundles the context every recursive call in this class threads along - introduced so
+    /// adding CAST/CONVERT's type-alias lookup (docs/audit-remediation-plan.md Phase 6.2)
+    /// didn't push an already-4-parameter recursion past a sane parameter count.
+    /// </summary>
+    internal readonly record struct ExpressionContext(
+        IReadOnlyDictionary<string, ScopeEntry> Scope,
+        IReadOnlyList<ScopeEntry> OrderedRelations,
+        string SourcePath,
+        SkipLedger? Ledger,
+        IReadOnlyDictionary<string, SqlType>? TypeAliases);
 
-    private static ColumnProvenance ResolveCastOrConvert(
-        DataTypeReference dataType, ScalarExpression parameter, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, int line, SkipLedger? ledger)
+    public static ColumnProvenance Resolve(
+        ScalarExpression expression,
+        IReadOnlyDictionary<string, ScopeEntry> scope,
+        IReadOnlyList<ScopeEntry> orderedRelations,
+        string sourcePath,
+        SkipLedger? ledger = null,
+        IReadOnlyDictionary<string, SqlType>? typeAliases = null) =>
+        Resolve(expression, new ExpressionContext(scope, orderedRelations, sourcePath, ledger, typeAliases));
+
+    private static ColumnProvenance Resolve(ScalarExpression expression, ExpressionContext context) => expression switch
     {
-        var resolved = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
+        ColumnReferenceExpression columnRef => ResolveColumnReference(columnRef, context.Scope, context.OrderedRelations, context.SourcePath, context.Ledger),
+        CastCall castCall => ResolveCastOrConvert(castCall.DataType, castCall.Parameter, context, castCall.StartLine),
+        ConvertCall convertCall => ResolveCastOrConvert(convertCall.DataType, convertCall.Parameter, context, convertCall.StartLine),
+        Literal literal => new ColumnProvenance.Expression(LiteralTypeResolver.Resolve(literal), Inputs: []),
+        _ => ResolveGenericExpression(expression, context),
+    };
+
+    private static ColumnProvenance ResolveCastOrConvert(DataTypeReference dataType, ScalarExpression parameter, ExpressionContext context, int line)
+    {
+        var resolved = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, context.TypeAliases);
         if (resolved is not { } type)
         {
-            ledger?.Record(AnalysisPass.Lineage, sourcePath, line, dataType.StartColumn, "CAST/CONVERT", "target type could not be resolved");
+            context.Ledger?.Record(AnalysisPass.Lineage, context.SourcePath, line, dataType.StartColumn, "CAST/CONVERT", "target type could not be resolved");
             return new ColumnProvenance.Unknown("CAST/CONVERT target type could not be resolved");
         }
 
-        var inner = Resolve(parameter, scope, orderedRelations, sourcePath, ledger);
-        return new ColumnProvenance.Cast(type, inner, sourcePath, line);
+        var inner = Resolve(parameter, context);
+        return new ColumnProvenance.Cast(type, inner, context.SourcePath, line);
     }
 
     /// <summary>
@@ -41,13 +60,12 @@ public static class ScalarExpressionResolver
     /// enough to tell whether a real, possibly-indexed base column sits underneath, without
     /// needing to mirror the expression's exact structure.
     /// </summary>
-    private static ColumnProvenance.Expression ResolveGenericExpression(
-        ScalarExpression expression, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger)
+    private static ColumnProvenance.Expression ResolveGenericExpression(ScalarExpression expression, ExpressionContext context)
     {
         var collector = new ColumnReferenceCollector();
         expression.Accept(collector);
-        var inputs = collector.References.Select(columnRef => ResolveColumnReference(columnRef, scope, orderedRelations, sourcePath, ledger)).ToList();
-        return new ColumnProvenance.Expression(InferredType: null, inputs, sourcePath, expression.StartLine);
+        var inputs = collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.Scope, context.OrderedRelations, context.SourcePath, context.Ledger)).ToList();
+        return new ColumnProvenance.Expression(InferredType: null, inputs, context.SourcePath, expression.StartLine);
     }
 
     private sealed class ColumnReferenceCollector : TSqlFragmentVisitor

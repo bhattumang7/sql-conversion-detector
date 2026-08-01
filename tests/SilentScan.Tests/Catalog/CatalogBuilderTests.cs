@@ -308,6 +308,68 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_ColumnDeclaredWithSysname_ResolvesToNVarChar128()
+    {
+        // docs/audit-remediation-plan.md Phase 6.2: sysname is pervasive in admin-script repos
+        // for object/schema names.
+        var catalog = BuildFrom("CREATE TABLE dbo.Objects (ObjectName sysname NOT NULL);");
+
+        var column = catalog.Find("dbo.Objects")!.FindColumn("ObjectName")!;
+
+        Assert.Equal(SqlTypeCategory.NVarChar, column.Type!.Category);
+        Assert.Equal(128, column.Type.Length);
+    }
+
+    [Fact]
+    public void Build_ColumnDeclaredWithCatalogedTypeAlias_ResolvesThroughToUnderlyingType()
+    {
+        var catalog = BuildFrom("""
+            CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;
+            CREATE TABLE dbo.Orders (OrderId dbo.MyIntAlias NOT NULL);
+            """);
+
+        var column = catalog.Find("dbo.Orders")!.FindColumn("OrderId")!;
+
+        Assert.Equal(SqlTypeCategory.Int, column.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_TypeAliasDeclaredInLaterFile_StillResolvesForEarlierFilesTable()
+    {
+        // Same cross-file-ordering guarantee Build_AlterColumnAcrossFiles_
+        // AppliesRegardlessOfFileOrder locks in for ALTER COLUMN - a repo's type-alias file
+        // routinely sorts after the tables that use it.
+        var catalog = CatalogBuilder.Build(
+        [
+            Parse("CREATE TABLE dbo.Orders (OrderId dbo.MyIntAlias NOT NULL);"),
+            Parse("CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;"),
+        ]);
+
+        var column = catalog.Find("dbo.Orders")!.FindColumn("OrderId")!;
+
+        Assert.Equal(SqlTypeCategory.Int, column.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ColumnDeclaredWithUnknownUserType_StaysUnresolved()
+    {
+        var catalog = BuildFrom("CREATE TABLE dbo.Orders (OrderId dbo.NotARealAlias NOT NULL);");
+
+        var column = catalog.Find("dbo.Orders")!.FindColumn("OrderId")!;
+
+        Assert.Null(column.Type);
+    }
+
+    [Fact]
+    public void Build_CreateTypeAliasWithUnresolvableUnderlyingType_RecordsSkip()
+    {
+        var catalog = BuildFrom("CREATE TYPE dbo.BadAlias FROM dbo.SomeOtherUnknownType;");
+
+        Assert.Empty(catalog.TypeAliases);
+        Assert.Contains(catalog.Skipped.Entries, s => s.ConstructKind == "CREATE TYPE ... FROM");
+    }
+
+    [Fact]
     public void Build_DropColumn_RemovesColumnFromCatalog()
     {
         var catalog = CatalogBuilder.Build(

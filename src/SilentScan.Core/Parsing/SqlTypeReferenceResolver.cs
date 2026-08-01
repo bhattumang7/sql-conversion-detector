@@ -7,14 +7,30 @@ namespace SilentScan.Core.Parsing;
 /// <summary>Resolves a ScriptDOM <see cref="DataTypeReference"/> (as written in DDL) to a <see cref="SqlType"/>.</summary>
 public static class SqlTypeReferenceResolver
 {
+    private const string SysnameTypeName = "sysname";
+
     /// <param name="dataType">The type as written in DDL.</param>
     /// <param name="columnCollation">The COLUMN's own COLLATE clause, if any is present on the declaration.</param>
-    public static SqlType? Resolve(DataTypeReference dataType, Identifier? columnCollation)
+    /// <param name="typeAliases">
+    /// CREATE TYPE ... FROM aliases discovered elsewhere in the scan (<see
+    /// cref="Catalog.DatabaseCatalog.TypeAliases"/>), keyed by qualified name - resolves
+    /// <paramref name="dataType"/> through to its underlying built-in type when it references
+    /// one (docs/audit-remediation-plan.md Phase 6.2). Null when the caller has no catalog
+    /// available at this point in the pipeline (an alias reference there still resolves via the
+    /// sysname special-case below, just not via a user-declared alias).
+    /// </param>
+    public static SqlType? Resolve(DataTypeReference dataType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null)
     {
+        if (dataType is UserDataTypeReference userType)
+        {
+            return ResolveUserType(userType, columnCollation, typeAliases);
+        }
+
         if (dataType is not SqlDataTypeReference sqlDataType)
         {
-            // User-defined types (ColumnType/user schema types) are out of scope for v1's
-            // type-precedence reasoning; callers should treat this as SqlTypeCategory.UserDefined.
+            // Table types (ColumnType) and CLR UDTs (assembly-backed types) are out of scope
+            // for v1's type-precedence reasoning; callers should treat this as
+            // SqlTypeCategory.UserDefined.
             return null;
         }
 
@@ -33,6 +49,40 @@ public static class SqlTypeReferenceResolver
             _ => new SqlType(category.Value),
         };
     }
+
+    private static SqlType? ResolveUserType(UserDataTypeReference userType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    {
+        // sysname is a system-provided alias for nvarchar(128) (SQL Server always parses it as
+        // a UserDataTypeReference, never a built-in SqlDataTypeOption - verified directly
+        // against the parser) - pervasive in admin-script repos for object/schema names, so
+        // this is worth a direct special-case rather than depending on the catalog knowing
+        // about it (docs/audit-remediation-plan.md Phase 6.2, audit finding "sysname...
+        // pervasive in the admin-script repos this study targets").
+        if (string.Equals(userType.Name.BaseIdentifier.Value, SysnameTypeName, StringComparison.OrdinalIgnoreCase))
+        {
+            return ApplyColumnCollation(new SqlType(SqlTypeCategory.NVarChar, Length: 128), columnCollation);
+        }
+
+        if (typeAliases is null)
+        {
+            return null;
+        }
+
+        var qualifiedName = SchemaObjectNameHelper.Qualify(userType.Name);
+        return typeAliases.TryGetValue(qualifiedName, out var aliasedType)
+            ? ApplyColumnCollation(aliasedType, columnCollation)
+            : null;
+    }
+
+    /// <summary>
+    /// A column/variable declared with a string-family alias can still carry its own explicit
+    /// COLLATE clause layered on top (the same as any built-in string type) - the column's own
+    /// collation always wins, matching every other collation resolution in this codebase.
+    /// </summary>
+    private static SqlType ApplyColumnCollation(SqlType type, Identifier? columnCollation) =>
+        type.IsStringFamily && columnCollation is { Value.Length: > 0 }
+            ? type with { Collation = new Collation(columnCollation.Value) }
+            : type;
 
     private static bool IsStringOrBinaryFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
