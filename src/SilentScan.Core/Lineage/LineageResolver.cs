@@ -70,7 +70,11 @@ public static class LineageResolver
 
     private static ResolvedRelation ResolveView(ViewDefinition view, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, SkipLedger ledger)
     {
-        var columns = QueryExpressionResolver.Resolve(view.SelectStatement.QueryExpression, catalog, resolvedViews, view.SourcePath, ledger);
+        // A view's own WITH clause (docs/audit-remediation-plan.md Phase 2.4) is resolved once
+        // and stays visible for the whole view body - CTEs are visible throughout their
+        // containing statement, not scoped per nested subquery.
+        var cteRelations = CteResolver.Resolve(view.SelectStatement.WithCtesAndXmlNamespaces, catalog, resolvedViews, view.SourcePath, ledger);
+        var columns = QueryExpressionResolver.Resolve(view.SelectStatement.QueryExpression, catalog, resolvedViews, view.SourcePath, ledger, cteRelations);
 
         if (view.ExplicitColumnNames is { Count: > 0 } explicitNames)
         {

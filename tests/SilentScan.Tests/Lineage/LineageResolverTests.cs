@@ -268,4 +268,125 @@ public sealed class LineageResolverTests
 
         Assert.Equal(["OrderId", "OrderCode", "Notes"], view.Columns.Select(c => c.Name));
     }
+
+    [Fact]
+    public void Resolve_CteShadowsRealTableOfSameName_ResolvesToCte()
+    {
+        // docs/audit-remediation-plan.md Phase 2.4: a CTE named the same as a real table is a
+        // DIFFERENT object for the lifetime of the statement - before the fix, FromScopeResolver
+        // had no concept of CTEs at all, so "Orders" here would have resolved through the
+        // catalog to the real dbo.Orders table, producing wrong provenance (Int, not the CTE's
+        // actual VarChar OrderCode-as-Id shape).
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
+            """
+            CREATE VIEW dbo.vw_FromCte AS
+            WITH Orders AS (SELECT OrderCode AS Id FROM dbo.Orders)
+            SELECT Id FROM Orders;
+            """);
+
+        var view = lineage.Find("dbo.vw_FromCte")!;
+        var baseColumn = Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("Id")!.Provenance);
+
+        Assert.Equal("dbo.Orders", baseColumn.TableQualifiedName);
+        Assert.Equal("OrderCode", baseColumn.ColumnName);
+        Assert.Equal(SqlTypeCategory.VarChar, baseColumn.Type!.Category);
+    }
+
+    [Fact]
+    public void Resolve_NearMissWithoutCte_StillResolvesToRealTable()
+    {
+        // The sibling of the shadowing test above: with no WITH clause at all, "Orders" must
+        // still resolve to the real table exactly as before.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
+            "CREATE VIEW dbo.vw_NoCte AS SELECT OrderCode AS Id FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_NoCte")!;
+        var baseColumn = Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("Id")!.Provenance);
+
+        Assert.Equal("dbo.Orders", baseColumn.TableQualifiedName);
+        Assert.Equal("OrderCode", baseColumn.ColumnName);
+    }
+
+    [Fact]
+    public void Resolve_CteWithExplicitColumnList_RenamesOutputColumns()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
+            """
+            CREATE VIEW dbo.vw_FromCte AS
+            WITH Renamed (X, Y) AS (SELECT OrderId, OrderCode FROM dbo.Orders)
+            SELECT X, Y FROM Renamed;
+            """);
+
+        var view = lineage.Find("dbo.vw_FromCte")!;
+
+        Assert.Equal(["X", "Y"], view.Columns.Select(c => c.Name));
+        var xColumn = Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("X")!.Provenance);
+        Assert.Equal("OrderId", xColumn.ColumnName);
+    }
+
+    [Fact]
+    public void Resolve_LaterCteReferencesEarlierCteInSameWithClause_Chains()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
+            """
+            CREATE VIEW dbo.vw_Chained AS
+            WITH First AS (SELECT OrderId, OrderCode FROM dbo.Orders),
+                 Second AS (SELECT OrderCode FROM First)
+            SELECT OrderCode FROM Second;
+            """);
+
+        var view = lineage.Find("dbo.vw_Chained")!;
+        var baseColumn = Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("OrderCode")!.Provenance);
+
+        Assert.Equal("dbo.Orders", baseColumn.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Resolve_RecursiveCte_AnchorResolvesRecursiveMemberIsUnknown()
+    {
+        // docs/audit-remediation-plan.md Phase 2.4: resolving a recursive CTE's own final
+        // output as if visible to its recursive member would be a guess - only the anchor
+        // (non-self-referencing) branch is resolved; the recursive branch is recorded as an
+        // explicit Unknown sibling in a Union, never silently dropped or guessed.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Employees (EmployeeId INT NOT NULL, ManagerId INT NULL);",
+            """
+            CREATE VIEW dbo.vw_OrgChart AS
+            WITH OrgChart AS (
+                SELECT EmployeeId FROM dbo.Employees WHERE ManagerId IS NULL
+                UNION ALL
+                SELECT e.EmployeeId FROM dbo.Employees AS e JOIN OrgChart AS o ON e.ManagerId = o.EmployeeId
+            )
+            SELECT EmployeeId FROM OrgChart;
+            """);
+
+        var view = lineage.Find("dbo.vw_OrgChart")!;
+        var union = Assert.IsType<ColumnProvenance.Union>(view.FindColumn("EmployeeId")!.Provenance);
+
+        Assert.Equal(2, union.Branches.Count);
+        Assert.IsType<ColumnProvenance.BaseColumn>(union.Branches[0]);
+        Assert.IsType<ColumnProvenance.Unknown>(union.Branches[1]);
+    }
+
+    [Fact]
+    public void Resolve_RecursiveCte_RecordsSkipInLedger()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Employees (EmployeeId INT NOT NULL, ManagerId INT NULL);",
+            """
+            CREATE VIEW dbo.vw_OrgChart AS
+            WITH OrgChart AS (
+                SELECT EmployeeId FROM dbo.Employees WHERE ManagerId IS NULL
+                UNION ALL
+                SELECT e.EmployeeId FROM dbo.Employees AS e JOIN OrgChart AS o ON e.ManagerId = o.EmployeeId
+            )
+            SELECT EmployeeId FROM OrgChart;
+            """);
+
+        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "recursive CTE");
+    }
 }

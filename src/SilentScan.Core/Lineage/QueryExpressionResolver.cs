@@ -11,20 +11,30 @@ namespace SilentScan.Core.Lineage;
 public static class QueryExpressionResolver
 {
     public static List<ResolvedColumn> Resolve(
-        QueryExpression queryExpression, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger = null) =>
+        QueryExpression queryExpression,
+        DatabaseCatalog catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
+        string sourcePath,
+        SkipLedger? ledger = null,
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null) =>
         queryExpression switch
         {
-            QuerySpecification spec => ResolveQuerySpecification(spec, catalog, resolvedViews, sourcePath, ledger),
-            BinaryQueryExpression binary => ResolveBinary(binary, catalog, resolvedViews, sourcePath, ledger),
-            QueryParenthesisExpression parenthesis => Resolve(parenthesis.QueryExpression, catalog, resolvedViews, sourcePath, ledger),
+            QuerySpecification spec => ResolveQuerySpecification(spec, catalog, resolvedViews, sourcePath, ledger, cteRelations),
+            BinaryQueryExpression binary => ResolveBinary(binary, catalog, resolvedViews, sourcePath, ledger, cteRelations),
+            QueryParenthesisExpression parenthesis => Resolve(parenthesis.QueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations),
             _ => [],
         };
 
     private static List<ResolvedColumn> ResolveBinary(
-        BinaryQueryExpression binary, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
+        BinaryQueryExpression binary,
+        DatabaseCatalog catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
+        string sourcePath,
+        SkipLedger? ledger,
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations)
     {
-        var first = Resolve(binary.FirstQueryExpression, catalog, resolvedViews, sourcePath, ledger);
-        var second = Resolve(binary.SecondQueryExpression, catalog, resolvedViews, sourcePath, ledger);
+        var first = Resolve(binary.FirstQueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations);
+        var second = Resolve(binary.SecondQueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations);
 
         // CLAUDE.md: "UNION/UNION ALL output type = highest precedence across branches
         // (record ALL branch types - the mixed-branch case is itself a finding)." The left
@@ -33,9 +43,14 @@ public static class QueryExpressionResolver
     }
 
     private static List<ResolvedColumn> ResolveQuerySpecification(
-        QuerySpecification spec, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
+        QuerySpecification spec,
+        DatabaseCatalog catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
+        string sourcePath,
+        SkipLedger? ledger,
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations)
     {
-        var (byAlias, ordered) = FromScopeResolver.Resolve(spec.FromClause, catalog, resolvedViews, sourcePath, ledger);
+        var (byAlias, ordered) = FromScopeResolver.Resolve(spec.FromClause, catalog, resolvedViews, sourcePath, ledger, cteRelations);
         var result = new List<ResolvedColumn>();
 
         foreach (var element in spec.SelectElements)

@@ -36,6 +36,7 @@ public static class TypedPredicateExtractor
         SkipLedger ledger) : TSqlFragmentVisitor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
@@ -44,9 +45,23 @@ public static class TypedPredicateExtractor
 
         public List<ExpressionDerivedFinding> ExpressionDerivedFindings { get; } = [];
 
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            // A WITH clause's CTEs are visible for the whole statement they're declared in, not
+            // scoped per nested QuerySpecification (docs/audit-remediation-plan.md Phase 2.4). A
+            // statement with no WITH clause of its own still sees any outer statement's CTEs (a
+            // derived-table subquery nested inside a CTE-using statement), so this always pushes
+            // something - an unchanged copy of the current top when there's nothing new to add.
+            var currentCtes = CurrentCteRelations();
+            var ctes = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, resolvedViews, sourcePath, ledger);
+            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
+            base.ExplicitVisit(node);
+            _cteStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger));
+            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations()));
             base.ExplicitVisit(node);
             _scopeStack.Pop();
         }
@@ -84,6 +99,26 @@ public static class TypedPredicateExtractor
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private IReadOnlyDictionary<string, ResolvedRelation> CurrentCteRelations() =>
+            _cteStack.Count > 0 ? _cteStack.Peek() : EmptyCteRelations;
+
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
+
+        private static Dictionary<string, ResolvedRelation> MergeCtes(
+            IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
+        {
+            // Inner (this statement's own) CTEs take precedence over an outer statement's
+            // same-named CTE, matching how an inner scope shadows an outer one everywhere else
+            // in this pass.
+            var merged = new Dictionary<string, ResolvedRelation>(outer, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, relation) in inner)
+            {
+                merged[name] = relation;
+            }
+
+            return merged;
         }
 
         private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node)

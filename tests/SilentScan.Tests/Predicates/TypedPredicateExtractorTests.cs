@@ -558,4 +558,73 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Strings");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
+
+    [Fact]
+    public void Extract_PredicateInsideCte_ResolvesToRealBaseColumn()
+    {
+        // docs/audit-remediation-plan.md Phase 2.4: the predicate lives inside the CTE body
+        // itself, not the outer query - proves CteResolver's own resolution (not just the outer
+        // SELECT referencing the finished CTE) goes through the normal typed-predicate pipeline.
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                WITH Matches AS (SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName)
+                SELECT DisplayName FROM Matches;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_CteNameShadowsRealTable_PredicateAgainstOuterQueryResolvesThroughCte()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Region VARCHAR(10) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                WITH Users AS (SELECT DisplayName FROM dbo.Users WHERE Region = 'US')
+                SELECT DisplayName FROM Users WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        // Region = 'US' inside the CTE body resolves against the real dbo.Users (VarChar vs a
+        // literal - SeekPreserved, filtered out below); the outer DisplayName predicate is
+        // against the CTE's own single-column shape, still tracing back to dbo.Users.DisplayName.
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "DisplayName");
+        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_CteVisibleInsideNestedSubquery_ResolvesCorrelatedReference()
+    {
+        // A CTE is visible for the whole containing statement, including a correlated subquery
+        // nested inside the main query - not just the top-level FROM clause.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Flags (OrderId INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Check @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                WITH RecentOrders AS (SELECT Id, CustomerId FROM dbo.Orders)
+                SELECT Id
+                FROM RecentOrders AS ro
+                WHERE ro.CustomerId = @CustomerId
+                    AND EXISTS (SELECT 1 FROM dbo.Flags AS f WHERE f.OrderId = ro.Id);
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
 }

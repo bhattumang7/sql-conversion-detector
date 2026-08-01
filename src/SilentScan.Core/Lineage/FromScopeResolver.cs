@@ -8,7 +8,12 @@ namespace SilentScan.Core.Lineage;
 public static class FromScopeResolver
 {
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
-        FromClause? fromClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger = null)
+        FromClause? fromClause,
+        DatabaseCatalog catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
+        string sourcePath,
+        SkipLedger? ledger = null,
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null)
     {
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<ScopeEntry>();
@@ -22,7 +27,7 @@ public static class FromScopeResolver
         {
             foreach (var leaf in FlattenJoins(tableReference))
             {
-                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath, ledger);
+                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath, ledger, cteRelations);
                 if (alias is not null)
                 {
                     byAlias[alias] = entry;
@@ -67,11 +72,27 @@ public static class FromScopeResolver
     }
 
     private static (string? Alias, ScopeEntry Entry) ResolveTableReference(
-        TableReference tableReference, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
+        TableReference tableReference,
+        DatabaseCatalog catalog,
+        IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
+        string sourcePath,
+        SkipLedger? ledger,
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations)
     {
         switch (tableReference)
         {
             case NamedTableReference named:
+                // CTE names shadow catalog tables/views of the same name (docs/audit-
+                // remediation-plan.md Phase 2.4) - a CTE is never schema-qualified, so a
+                // schema-qualified reference can never mean one regardless of a name collision.
+                if (named.SchemaObject.SchemaIdentifier is null
+                    && cteRelations is not null
+                    && cteRelations.TryGetValue(named.SchemaObject.BaseIdentifier.Value, out var cteRelation))
+                {
+                    var cteAlias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
+                    return (cteAlias, new ScopeEntry(cteRelation, IsViewLayer: false));
+                }
+
                 var qualifiedName = SchemaObjectNameHelper.Qualify(named.SchemaObject);
                 var isViewLayer = resolvedViews.TryGetValue(qualifiedName, out var view);
                 var catalogTable = catalog.Find(qualifiedName);
@@ -88,8 +109,9 @@ public static class FromScopeResolver
 
             case QueryDerivedTable derived:
                 // A derived-table subquery is inline, local to this statement - not a
-                // persisted view/TVF, so it does not add view-layer depth.
-                var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath, ledger);
+                // persisted view/TVF, so it does not add view-layer depth. The enclosing
+                // statement's CTEs stay visible inside it.
+                var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations);
                 if (derived.Columns.Count > 0)
                 {
                     innerColumns = [.. innerColumns.Zip(derived.Columns, (c, id) => c with { Name = id.Value })];
