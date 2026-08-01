@@ -134,9 +134,25 @@ public sealed class TypedPredicateExtractorTests
             "CREATE TABLE dbo.Orders (OrderDate DATETIME NOT NULL);",
             "SELECT OrderDate FROM dbo.Orders WHERE OrderDate BETWEEN '20240101' AND '20240201';");
 
-        var finding = Assert.Single(findings);
+        // BETWEEN decomposes into two independent comparisons (col >= lower AND col <= upper) -
+        // both bounds are reported.
+        Assert.Equal(2, findings.Count);
         // datetime outranks varchar in T-SQL precedence, so the literal bounds convert.
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
+    }
+
+    [Fact]
+    public void Extract_BetweenPredicate_UpperBoundAloneForcesConversion_IsReported()
+    {
+        // Only the upper bound carries a higher-precedence literal (nvarchar) - a scanner that
+        // only checked the lower bound would miss this entirely.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.Orders WHERE Code BETWEEN 'A' AND N'Z';");
+
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(Verdict.SeekPreserved, findings[0].Verdict);
+        Assert.Equal(Verdict.ScanForced, findings[1].Verdict);
     }
 
     [Fact]
@@ -162,11 +178,17 @@ public sealed class TypedPredicateExtractorTests
             WHERE o.OrderId IN (SELECT l.OrderId FROM dbo.Lines l WHERE l.Qty = 5);
             """);
 
-        // Two independent, correctly-scoped predicates: outer o.OrderId isn't touched here,
-        // but the inner l.Qty = 5 must resolve against Lines, not bleed into Orders' scope.
-        var finding = Assert.Single(findings);
-        Assert.Equal("dbo.Lines", finding.Column.TableQualifiedName);
-        Assert.Equal("Qty", finding.Column.ColumnName);
+        // Two independent, correctly-scoped predicates: the outer o.OrderId IN (...) resolves
+        // against Orders (Phase 4.3 added IN-subquery coverage), and the inner l.Qty = 5 must
+        // resolve against Lines, not bleed into Orders' scope.
+        Assert.Equal(2, findings.Count);
+        var outer = Assert.Single(findings, f => f.Operator == "IN");
+        Assert.Equal("dbo.Orders", outer.Column.TableQualifiedName);
+        Assert.Equal("OrderId", outer.Column.ColumnName);
+
+        var inner = Assert.Single(findings, f => f.Operator == "=");
+        Assert.Equal("dbo.Lines", inner.Column.TableQualifiedName);
+        Assert.Equal("Qty", inner.Column.ColumnName);
     }
 
     [Fact]
@@ -888,6 +910,102 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(findings);
         Assert.Equal("Code", finding.Column.ColumnName);
         Assert.Equal(SqlTypeCategory.VarChar, finding.Column.Type!.Category);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InListHomogeneousVarchar_SqlCollation_SeekPreserved()
+    {
+        // Oracle-verified (docs/audit-remediation-plan.md Phase 4.3): a homogeneous varchar IN
+        // list against a varchar column produces no conversion at all.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col IN ('a', 'b', 'c');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("IN", finding.Operator);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InListOneNvarcharLiteralAmongVarchar_SqlCollation_ScanForced()
+    {
+        // Oracle-verified: a SINGLE higher-precedence literal anywhere in an otherwise-
+        // homogeneous list is enough to force the column to convert for the whole comparison -
+        // this is the case a naive "type the first element only" implementation would miss.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col IN ('a', N'b', 'c');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InListHomogeneousNvarchar_AgainstVarcharColumn_ScanForced()
+    {
+        // Oracle-verified: matches ordinary single-comparison precedence (nvarchar outranks
+        // varchar), just applied across the whole list.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col IN (N'a', N'b', N'c');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InListWithParameter_ResolvesParameterType()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find @A VARCHAR(20), @B NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Col FROM dbo.T WHERE Col IN (@A, @B);
+            END
+            """);
+
+        // nvarchar outranks varchar, so Col converts.
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
+    {
+        var findings = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL, Other INT NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col IN (1, Other + 1);");
+
+        Assert.Empty(findings.TypedFindings);
+        Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "IN predicate");
+    }
+
+    [Fact]
+    public void Extract_InSubquery_ResolvesSubqueryOutputColumnThroughLineage()
+    {
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.Orders (CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.Customers (Id NVARCHAR(20) NOT NULL);
+            """,
+            "SELECT CustomerId FROM dbo.Orders WHERE CustomerId IN (SELECT Id FROM dbo.Customers);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("CustomerId", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_NotInList_IsAlsoClassified()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col NOT IN (N'a', N'b');");
+
+        var finding = Assert.Single(findings);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 }

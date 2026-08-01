@@ -212,11 +212,45 @@ public static class TypedPredicateExtractor
         {
             if (node.TernaryExpressionType is BooleanTernaryExpressionType.Between or BooleanTernaryExpressionType.NotBetween)
             {
-                // BETWEEN decomposes into `>= lower AND <= upper`; the lower bound's
-                // operator exercises the same column-side conversion behavior as the
-                // predicate as a whole, so it stands in for oracle probing purposes.
+                // BETWEEN decomposes into `col >= lower AND col <= upper` - both bounds are
+                // independent comparisons against the same column and either one alone can
+                // force the conversion (docs/audit-remediation-plan.md Phase 4.3), e.g.
+                // `Col BETWEEN 1 AND N'x'` where only the upper bound carries the
+                // higher-precedence literal. Reporting only the lower bound (as this used to)
+                // silently dropped that case.
                 TryAddFinding(node.FirstExpression, node.SecondExpression, ">=", node);
+                TryAddFinding(node.FirstExpression, node.ThirdExpression, "<=", node);
             }
+        }
+
+        public override void Visit(InPredicate node)
+        {
+            if (_scopeStack.Count == 0)
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (bare IF, or UPDATE/DELETE/MERGE WHERE not yet supported)");
+                return;
+            }
+
+            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
+            {
+                // The tested expression isn't a real column (an expression, a CAST result,
+                // etc.) - nothing to classify against an index.
+                return;
+            }
+
+            var otherType = node.Subquery is not null
+                ? ResolveInSubqueryType(node.Subquery)
+                : CombineListElementTypes(node.Values, scopeChain);
+
+            if (otherType is null)
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "IN predicate", "list contains a non-literal/unresolvable element, or the subquery's output column type could not be resolved");
+                return;
+            }
+
+            var verdict = VerdictClassifier.Classify(column.Type, otherType);
+            Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
         private static string? ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
@@ -304,6 +338,91 @@ public static class TypedPredicateExtractor
                 default:
                     return new PredicateOperand.Value(Type: null);
             }
+        }
+
+        // T-SQL applies data type precedence once across the WHOLE IN list, not element by
+        // element: a single higher-precedence literal anywhere in the list forces the column to
+        // convert for the comparison as a whole, even when every other element matches the
+        // column's own type (docs/audit-remediation-plan.md Phase 4.3 - empirically confirmed
+        // against the real oracle: `Col IN ('a', N'b', 'c')` converts Col exactly like
+        // `Col IN (N'a', N'b', N'c')` does). SqlTypeCategory's declaration order already encodes
+        // T-SQL precedence rank (see DataTypePrecedence), so the highest-ranked element's own
+        // type stands in for the list as a whole. Any unresolvable element (a sub-expression, an
+        // untyped variable) means the true effective type can't be known, so the whole list is
+        // never guessed at (CLAUDE.md precision discipline) - returns null, caller records a
+        // ledger skip.
+        private SqlType? CombineListElementTypes(
+            IList<ScalarExpression> values, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            SqlType? best = null;
+            foreach (var value in values)
+            {
+                var type = ResolveOperand(value, scopeChain) switch
+                {
+                    PredicateOperand.Value v => v.Type,
+                    PredicateOperand.Column c => c.Type,
+                    _ => null,
+                };
+
+                if (type is null)
+                {
+                    return null;
+                }
+
+                if (best is null || type.Category > best.Category)
+                {
+                    best = type;
+                }
+            }
+
+            return best;
+        }
+
+        // `col IN (SELECT X FROM ...)` - resolves the subquery's single output column through
+        // the same lineage machinery a view's SELECT list uses (CLAUDE.md: "resolve the
+        // subquery's single output column through lineage"), rather than treating it as opaque.
+        private SqlType? ResolveInSubqueryType(ScalarSubquery subquery)
+        {
+            var innerCtes = CurrentCteRelations();
+            var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, _currentProcScope);
+            return columns.Count == 0 ? null : ExtractScalarType(columns[0].Provenance);
+        }
+
+        // Never guesses: a Union only yields a usable type when every branch agrees, and an
+        // Expression only when Pass 2 already inferred one - anything else (Unknown, a
+        // disagreeing Union) surfaces as an unresolvable element to the caller.
+        private static SqlType? ExtractScalarType(ColumnProvenance provenance) => provenance switch
+        {
+            ColumnProvenance.BaseColumn baseColumn => baseColumn.Type,
+            ColumnProvenance.Declared declared => declared.Type,
+            ColumnProvenance.Cast cast => cast.ExplicitType,
+            ColumnProvenance.Expression expression => expression.InferredType,
+            ColumnProvenance.Union union => AllBranchesAgree(union.Branches, out var agreedType) ? agreedType : null,
+            _ => null,
+        };
+
+        private static bool AllBranchesAgree(IReadOnlyList<ColumnProvenance> branches, out SqlType? agreedType)
+        {
+            agreedType = null;
+            foreach (var branch in branches)
+            {
+                var branchType = ExtractScalarType(branch);
+                if (branchType is null)
+                {
+                    return false;
+                }
+
+                if (agreedType is null)
+                {
+                    agreedType = branchType;
+                }
+                else if (agreedType.Category != branchType.Category)
+                {
+                    return false;
+                }
+            }
+
+            return agreedType is not null;
         }
 
         private PredicateOperand ResolveColumnOperand(
