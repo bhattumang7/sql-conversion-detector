@@ -55,10 +55,15 @@ public sealed class ManifestCollationOracleTests : IAsyncLifetime
     {
         await DeployWithDatabaseCollationAsync("SQL_Latin1_General_CP1_CI_AS");
 
-        var converts = await HasColumnConversion(
-            "DECLARE @p NVARCHAR(40) = N'Alice'; SELECT Id FROM dbo.Users WHERE DisplayName = @p;");
+        var planXml = await new PlanXmlCapture(_options).CaptureAsync(
+            DatabaseName, "DECLARE @p NVARCHAR(40) = N'Alice'; SELECT Id FROM dbo.Users WHERE DisplayName = @p;");
 
-        Assert.True(converts);
+        Assert.True(ConvertImplicitDetector.FindColumnConversions(planXml).Count > 0);
+
+        // docs/audit-remediation-plan.md Phase 5.1, audit finding C1: conversion presence alone
+        // doesn't distinguish ScanForced from RangeSeek - both produce it. A genuine ScanForced
+        // plan must ALSO lack the dynamic-seek machinery a RangeSeek verdict would show.
+        Assert.DoesNotContain("GetRangeThroughConvert", planXml, StringComparison.Ordinal);
     }
 
     [Fact]

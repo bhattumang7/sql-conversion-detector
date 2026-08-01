@@ -39,6 +39,10 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
             GO
             CREATE INDEX IX_Orders_OrderCode ON dbo.Orders(OrderCode);
             GO
+            CREATE TABLE dbo.Customers (CustomerId INT NOT NULL PRIMARY KEY, CustomerCode VARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);
+            GO
+            CREATE INDEX IX_Customers_CustomerCode ON dbo.Customers(CustomerCode);
+            GO
             """,
             DatabaseName);
     }
@@ -81,6 +85,69 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
         Assert.Equal(CorpusFindingOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WindowsCollationVarcharColumnVsNVarcharValue_RangeSeekVerdict_IsConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 5.1: a Windows-collation column genuinely
+        // produces the dynamic-range-seek plan shape a RangeSeek verdict predicts - verified
+        // directly against the real engine (GetRangeThroughConvert present, Index Seek used).
+        var finding = new TypedPredicateFinding(
+            Verdict.RangeSeek,
+            ColumnOperand("dbo.Customers", "CustomerCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS")), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_SqlCollationColumn_RangeSeekVerdictButPlanIsActuallyScanForced_IsNotConfirmed()
+    {
+        // Same column-side conversion as VerifyAsync_SqlCollationVarcharColumnVsNVarcharValue_
+        // ConfirmsColumnSideConversion, but with a RangeSeek verdict attached instead of
+        // ScanForced - a SQL_* collation plan never shows the dynamic-seek machinery a
+        // RangeSeek verdict predicts, so this must NOT be confirmed even though the column
+        // does convert. Proves conversion presence alone is no longer sufficient to confirm a
+        // RangeSeek/ScanForced finding (audit finding C1).
+        var finding = new TypedPredicateFinding(
+            Verdict.RangeSeek,
+            ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.NotConfirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WindowsCollationColumn_ScanForcedVerdictButPlanIsActuallyRangeSeek_IsNotConfirmed()
+    {
+        // The mirror-image mismatch: a Windows-collation column DOES seek via
+        // GetRangeThroughConvert, so a ScanForced verdict against it is wrong and must not be
+        // confirmed just because the column happened to convert.
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            ColumnOperand("dbo.Customers", "CustomerCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS")), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.NotConfirmed, result.Outcome);
     }
 
     [Fact]
