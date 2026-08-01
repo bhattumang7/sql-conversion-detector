@@ -92,4 +92,68 @@ public sealed class LiteralTypeResolverTests
 
         Assert.Null(type);
     }
+
+    [Fact]
+    public void Resolve_EmptyStringLiteral_ResolvesToLengthOneNotZero()
+    {
+        // Oracle-verified (sys.dm_exec_describe_first_result_set): '' types as varchar(1), not
+        // varchar(0) - a zero-length string type isn't real T-SQL (docs/audit-remediation-
+        // plan.md Phase 5.3, audit finding C4).
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("''"));
+
+        Assert.Equal(SqlTypeCategory.VarChar, type!.Category);
+        Assert.Equal(1, type.Length);
+    }
+
+    [Fact]
+    public void Resolve_EmptyNationalStringLiteral_ResolvesToLengthOneNotZero()
+    {
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("N''"));
+
+        Assert.Equal(SqlTypeCategory.NVarChar, type!.Category);
+        Assert.Equal(1, type.Length);
+    }
+
+    [Fact]
+    public void Resolve_ScientificNotationLiteral_ResolvesToFloat()
+    {
+        // Oracle-verified: 1.5e10 types as float(53), not real and not decimal
+        // (docs/audit-remediation-plan.md Phase 5.3, audit finding C4 - this was the one part
+        // of C4 that did hold up: RealLiteral previously fell through to null/untyped).
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("1.5e10"));
+
+        Assert.Equal(SqlTypeCategory.Float, type!.Category);
+    }
+
+    [Fact]
+    public void Resolve_NegativeExponentScientificNotationLiteral_ResolvesToFloat()
+    {
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("1.5E-10"));
+
+        Assert.Equal(SqlTypeCategory.Float, type!.Category);
+    }
+
+    [Fact]
+    public void Resolve_IntMaxValuePlusOneIntegerValuedLiteral_ResolvesToDecimalNotBigInt()
+    {
+        // Oracle-verified (sys.dm_exec_describe_first_result_set against the real engine): this
+        // types as decimal(10,0), NOT bigint - contrary to the commonly-cited "int -> bigint ->
+        // decimal" precedence folklore the original audit finding assumed. Locks in that the
+        // existing no-dot ResolveNumeric branch was already correct.
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("2147483648"));
+
+        Assert.Equal(SqlTypeCategory.Decimal, type!.Category);
+        Assert.Equal(10, type.Precision);
+        Assert.Equal(0, type.Scale);
+    }
+
+    [Fact]
+    public void Resolve_BigIntMaxValueIntegerValuedLiteral_ResolvesToDecimalNotBigInt()
+    {
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("9223372036854775807"));
+
+        Assert.Equal(SqlTypeCategory.Decimal, type!.Category);
+        Assert.Equal(19, type.Precision);
+        Assert.Equal(0, type.Scale);
+    }
 }
