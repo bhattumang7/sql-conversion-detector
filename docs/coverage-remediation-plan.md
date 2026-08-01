@@ -379,16 +379,38 @@ through the view still reports `Indexed: false` for `inserted`.
 
 **Size.** S, as estimated.
 
-### 3.4 MSTVF return variable
+### 3.4 MSTVF return variable — DONE
 
 **Problem.** `RETURNS @t TABLE(…)` is a `DeclareTableVariableBody` hanging off the
-return type, not a `DeclareTableVariableStatement`, so `CatalogBuilder.cs:213-221`
-never registers `@t`. Predicates inside the body over `FROM @t` are unresolvable.
+return type, not a `DeclareTableVariableStatement`, so it was never registered.
+Predicates inside the body over `FROM @t` were unresolvable.
 
-**Work.** Register the return variable in the function's own temp-object scope,
-reusing the scoping `CatalogBuilder.cs:239-249` already applies.
+**Work done.** Registered the return variable in the function's own scope, the
+same scoping an ordinary body-declared table variable already uses - before the
+body is walked, since a predicate against `@t` anywhere in the body needs it to
+already exist. A CLR TVF's `RETURNS TABLE(...)` shares the same
+`TableValuedFunctionReturnType` node but has no `@variable` name at all
+(`VariableName` is null) - reproduced as a genuine `NullReferenceException` while
+building this, guarded, and pinned with a regression test.
 
-**Size.** S.
+Turned out to be necessary but not sufficient: `FROM @t` parses to
+`VariableTableReference`, a distinct ScriptDOM node kind `FromScopeResolver` never
+matched at all - it fell through to the same default arm as OPENROWSET/PIVOT,
+counted but unresolved. Registering the catalog entry alone was inert without
+also handling that node kind, so this item absorbed what was scoped as a piece of
+3.5's neighboring gap: added a `VariableTableReference` case that looks the
+variable up via the same scoped `catalog.Find` every temp table uses. Unlike a
+trigger pseudo-table, a real table variable's inline index is genuine, so the
+ordinary `ToResolvedRelation` (BaseColumn) applies, not the pseudo-table
+treatment from 1.1/3.3.
+
+**Verified.** A predicate inside an MSTVF body against its own `FROM @t` resolves
+and classifies correctly. A separate test proves the ordinary
+`DECLARE @t TABLE(...)` case (not just the MSTVF return variable) now resolves
+too, since both share the same `VariableTableReference` fix.
+
+**Size.** Larger than estimated (S) - the `VariableTableReference` gap it
+surfaced was the actual blocker, not a footnote.
 
 ### 3.5 TVF-to-TVF dependency edges
 

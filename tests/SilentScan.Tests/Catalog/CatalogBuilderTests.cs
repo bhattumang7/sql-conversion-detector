@@ -461,6 +461,43 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_MultiStatementTvfReturnVariable_CatalogedUnderFunctionScope()
+    {
+        // RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a
+        // DeclareTableVariableStatement, so this was never registered before (coverage-
+        // remediation-plan.md Phase 3.4) - unlike an ordinary body-declared table variable.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE FUNCTION dbo.fn_GetCodes()
+                RETURNS @t TABLE (Code VARCHAR(20) NOT NULL)
+                AS
+                BEGIN
+                    RETURN;
+                END
+                """)]);
+
+        var returnVar = catalog.Find("@t", "dbo.fn_GetCodes");
+
+        Assert.NotNull(returnVar);
+        Assert.Equal(SqlTypeCategory.VarChar, returnVar!.FindColumn("Code")!.Type!.Category);
+        Assert.Null(catalog.Find("@t"));
+    }
+
+    [Fact]
+    public void Build_ClrTableValuedFunction_NoVariableNameToRegister_DoesNotThrow()
+    {
+        // A CLR TVF's RETURNS TABLE(...) has the same TableValuedFunctionReturnType shape as a
+        // multi-statement TVF's RETURNS @t TABLE(...), but no @variable name at all - reproduced
+        // as a real NullReferenceException while adding the MSTVF return-variable registration
+        // above (coverage-remediation-plan.md Phase 3.4), from body.VariableName.Value on a null
+        // VariableName.
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];")]);
+
+        Assert.Null(catalog.Find("@t", "dbo.fn_Clr"));
+    }
+
+    [Fact]
     public void Build_CrossDatabaseReference_DoesNotMergeWithSameSchemaTableInCurrentDatabase()
     {
         var catalog = CatalogBuilder.Build(

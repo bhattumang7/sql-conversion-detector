@@ -982,6 +982,53 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_DeclaredTableVariableInFromClause_Resolves()
+    {
+        // FROM @t parses as VariableTableReference, a distinct ScriptDOM node kind
+        // FromScopeResolver never matched at all - it fell through to the same default arm as
+        // OPENROWSET/PIVOT (coverage-remediation-plan.md Phase 3.4/3.5's neighbor). This is the
+        // ordinary DECLARE @t TABLE(...) case, not the MSTVF return-variable case below.
+        var findings = Extract(
+            """
+            CREATE PROCEDURE dbo.usp_UseTableVar
+            AS
+            BEGIN
+                DECLARE @t TABLE (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+                SELECT Code FROM @t WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_MultiStatementTvfBody_PredicateAgainstOwnReturnVariable_Resolves()
+    {
+        // RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a
+        // DeclareTableVariableStatement, so @t was never cataloged and a predicate inside the
+        // body over FROM @t resolved to no known table (coverage-remediation-plan.md Phase 3.4).
+        var findings = Extract(
+            """
+            CREATE FUNCTION dbo.fn_GetCodes()
+            RETURNS @t TABLE (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL)
+            AS
+            BEGIN
+                INSERT INTO @t (Code) SELECT Code FROM dbo.Orders;
+                DELETE FROM @t WHERE Code = N'x';
+                RETURN;
+            END
+            """,
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("@t", finding.Column.TableQualifiedName);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
     public void Extract_InListHomogeneousVarchar_SqlCollation_SeekPreserved()
     {
         // Oracle-verified (docs/audit-remediation-plan.md Phase 4.3): a homogeneous varchar IN

@@ -206,6 +206,26 @@ public static class FromScopeResolver
                 var tvfAlias = tvf.Alias?.Value ?? SchemaObjectNameHelper.Resolve(tvf.SchemaObject).Name;
                 return (tvfAlias, new ScopeEntry(tvfRelation, IsViewLayer: true));
 
+            case VariableTableReference variableTable:
+                // FROM @t - a table variable, declared either by an ordinary DECLARE @t TABLE(...)
+                // in the enclosing body or by a multi-statement TVF's own RETURNS @t TABLE(...)
+                // (coverage-remediation-plan.md Phase 3.4) - both are cataloged under the same
+                // scope-keyed lookup a temp table uses, so this is the identical NamedTableReference
+                // resolution path, keyed by the variable's own name instead of a schema object name.
+                // A real inline/PK/UNIQUE index on the table variable is a genuine index, unlike a
+                // trigger pseudo-table, so the ordinary ToResolvedRelation (BaseColumn) applies.
+                var variableName = variableTable.Variable.Name;
+                var variableTableCatalog = catalog.Find(variableName, procScope);
+                if (variableTableCatalog is null)
+                {
+                    ledger?.Record(
+                        AnalysisPass.Lineage, sourcePath, variableTable.StartLine, variableTable.StartColumn,
+                        "FROM table reference", $"table variable '{variableName}' has no known DECLARE/RETURNS in scope");
+                }
+
+                var variableTableAlias = variableTable.Alias?.Value ?? variableName;
+                return (variableTableAlias, new ScopeEntry(ToResolvedRelation(variableTableCatalog, variableName), IsViewLayer: false));
+
             default:
                 // OPENQUERY/OPENROWSET/PIVOT/table-valued function calls etc: not yet resolved.
                 // Empty columns means any reference against this alias falls through to "not found".

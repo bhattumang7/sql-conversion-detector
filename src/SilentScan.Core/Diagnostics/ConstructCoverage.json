@@ -131,9 +131,9 @@
     {
       "construct": "MultiStatementTvfReturnVariable",
       "group": "ColumnDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a DeclareTableVariableStatement, so @t is never cataloged; predicates inside the body over FROM @t are unresolvable. coverage-remediation-plan.md Phase 3.4."
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a DeclareTableVariableStatement, so @t was never cataloged and predicates inside the body over FROM @t were unresolvable. Fixed: registered under the function's own scope before the body is walked. A CLR TVF's RETURNS TABLE(...) has no @variable name at all (VariableName is null) - reproduced as a real NullReferenceException while building this fix, guarded, and covered by a dedicated regression test. coverage-remediation-plan.md Phase 3.4."
     },
     {
       "construct": "CreateViewStatement",
@@ -381,11 +381,18 @@
       "rationale": "Works by construction - the reparsed dynamic-SQL fragment goes through the identical TypedPredicateExtractor visitor and CteResolver, no separate code path exists (coverage-remediation-plan.md Phase 4.3)."
     },
     {
-      "construct": "VariableTableReference / OpenRowsetTableReference / OpenQueryTableReference / PivotedTableReference / UnpivotedTableReference",
+      "construct": "VariableTableReference (FROM @t)",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Previously fell through FromScopeResolver's default arm alongside OPENROWSET/PIVOT, ledgered but unresolved - unlike those, a table variable is fully resolvable (it's cataloged, just needed a matching FROM-clause case), so it doesn't belong lumped in with the genuinely out-of-scope external/reshaping sources. Fixed as part of coverage-remediation-plan.md Phase 3.4 (the MSTVF return-variable fix needed this to actually be reachable from FROM @t)."
+    },
+    {
+      "construct": "OpenRowsetTableReference / OpenQueryTableReference / PivotedTableReference / UnpivotedTableReference",
       "group": "ScopeIntroducer",
       "status": "Ledgered",
       "verifiedBy": null,
-      "rationale": "FromScopeResolver's default arm already records these to the ledger with the construct's real type name and resolves to an empty relation - the one pass in this codebase that ledgers unhandled node kinds by default rather than needing a dedicated fix per kind."
+      "rationale": "FromScopeResolver's default arm already records these to the ledger with the construct's real type name and resolves to an empty relation - the one pass in this codebase that ledgers unhandled node kinds by default rather than needing a dedicated fix per kind. Genuinely out of scope (external/reshaping sources), unlike VariableTableReference."
     },
     {
       "construct": "ExecuteStatement / sp_executesql (proven-constant dynamic SQL)",

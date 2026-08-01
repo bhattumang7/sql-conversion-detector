@@ -316,11 +316,11 @@ public static class CatalogBuilder
 
         public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitScopedBody(node, node.ProcedureReference.Name);
 
-        public override void ExplicitVisit(CreateFunctionStatement node) => VisitScopedBody(node, node.Name);
+        public override void ExplicitVisit(CreateFunctionStatement node) => VisitFunctionBody(node, node.Name, node.ReturnType);
 
-        public override void ExplicitVisit(AlterFunctionStatement node) => VisitScopedBody(node, node.Name);
+        public override void ExplicitVisit(AlterFunctionStatement node) => VisitFunctionBody(node, node.Name, node.ReturnType);
 
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitScopedBody(node, node.Name);
+        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitFunctionBody(node, node.Name, node.ReturnType);
 
         public override void ExplicitVisit(CreateTriggerStatement node) => VisitScopedBody(node, node.Name);
 
@@ -334,6 +334,42 @@ public static class CatalogBuilder
             _currentScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
             _currentScope = previous;
+        }
+
+        /// <summary>
+        /// A multi-statement TVF's <c>RETURNS @t TABLE(...)</c> is a <see cref="DeclareTableVariableBody"/>
+        /// hanging off the return type, not a <see cref="DeclareTableVariableStatement"/> - so unlike
+        /// an ordinary <c>DECLARE @t TABLE(...)</c> inside the body, it was never registered, and a
+        /// predicate inside the body over <c>FROM @t</c> resolved to no known table (coverage-
+        /// remediation-plan.md Phase 3.4). Registered under the function's own scope, the identical
+        /// key <see cref="VisitDeclareTableVariable"/> uses for a body-declared temp object, before
+        /// entering the body - a predicate against @t anywhere in the body needs it to already exist.
+        /// A CLR TVF's <c>RETURNS TABLE(...)</c> has the same <see cref="TableValuedFunctionReturnType"/>
+        /// shape but no <c>@variable</c> name at all (<c>VariableName</c> is null, <c>AsDefined</c> is
+        /// false) - nothing to register under, and its EXTERNAL NAME body could never reference one
+        /// anyway, so that case is skipped rather than guessed at.
+        /// </summary>
+        private void VisitFunctionBody(TSqlFragment node, SchemaObjectName name, FunctionReturnType returnType)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse
+                && returnType is TableValuedFunctionReturnType { DeclareTableVariableBody: { VariableName: { } variableName, Definition: { } definition } body })
+            {
+                var (columns, indexesFromColumns) = BuildColumns(definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+                var indexesFromConstraints = BuildIndexesFromTableConstraints(definition.TableConstraints);
+
+                var returnTable = new CatalogTable(
+                    SchemaName: null,
+                    variableName.Value,
+                    CatalogTableKind.TableVariable,
+                    columns,
+                    [.. indexesFromColumns, .. indexesFromConstraints],
+                    sourcePath,
+                    body.StartLine);
+
+                catalog.AddOrReplace(returnTable, SchemaObjectNameHelper.Qualify(name));
+            }
+
+            VisitScopedBody(node, name);
         }
 
         private void VisitCreateTypeAlias(CreateTypeUddtStatement createType)
