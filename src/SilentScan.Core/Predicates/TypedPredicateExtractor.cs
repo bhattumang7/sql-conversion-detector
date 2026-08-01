@@ -333,7 +333,7 @@ public static class TypedPredicateExtractor
                     return new PredicateOperand.Value(_variables.GetValueOrDefault(variableRef.Name));
 
                 case Literal literal:
-                    return new PredicateOperand.Value(Rules.LiteralTypeResolver.Resolve(literal));
+                    return new PredicateOperand.Value(Rules.LiteralTypeResolver.Resolve(literal), IsLiteral: true, Rules.LiteralTextRenderer.Render(literal));
 
                 default:
                     return new PredicateOperand.Value(Type: null);

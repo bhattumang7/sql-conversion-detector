@@ -76,6 +76,40 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_LiteralComparison_CarriesLiteralTextForProbeReconstruction()
+    {
+        // docs/audit-remediation-plan.md Phase 5.2: the finding must carry enough to
+        // reconstruct the exact literal later during oracle verification, not just its type.
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);",
+            "SELECT DisplayName FROM dbo.Users WHERE DisplayName = N'Alice';");
+
+        var finding = Assert.Single(findings);
+        var value = Assert.IsType<PredicateOperand.Value>(finding.OtherOperand);
+        Assert.True(value.IsLiteral);
+        Assert.Equal("N'Alice'", value.LiteralText);
+    }
+
+    [Fact]
+    public void Extract_ParameterComparison_IsNotMarkedAsLiteral()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find @Id INT
+            AS
+            BEGIN
+                SELECT OrderId FROM dbo.Orders WHERE OrderId = @Id;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        var value = Assert.IsType<PredicateOperand.Value>(finding.OtherOperand);
+        Assert.False(value.IsLiteral);
+        Assert.Null(value.LiteralText);
+    }
+
+    [Fact]
     public void Extract_PredicateThroughViewLayer_CarriesDepthFromLineage()
     {
         var findings = Extract(

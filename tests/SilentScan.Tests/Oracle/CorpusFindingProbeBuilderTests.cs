@@ -69,4 +69,48 @@ public sealed class CorpusFindingProbeBuilderTests
 
         Assert.Null(CorpusFindingProbeBuilder.Build(finding));
     }
+
+    [Fact]
+    public void Build_LiteralOperand_RendersTheLiteralInsteadOfADeclare()
+    {
+        // docs/audit-remediation-plan.md Phase 5.2, audit finding C2: a DECLARE @p probe can be
+        // constant-folded differently than the original literal comparison, so a literal-
+        // sourced operand reconstructs the literal text exactly rather than substituting a
+        // same-typed variable.
+        var column = new PredicateOperand.Column("dbo.Users", "DisplayName", new SqlType(SqlTypeCategory.VarChar, Length: 40), Indexed: true, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 5), IsLiteral: true, LiteralText: "N'Alice'");
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("SELECT 1 FROM [dbo].[Users] WHERE [DisplayName] = N'Alice';", probe);
+    }
+
+    [Fact]
+    public void Build_LiteralOperandThatCouldNotBeRendered_FailsClosedInsteadOfSubstitutingAVariable()
+    {
+        var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.Int), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int), IsLiteral: true, LiteralText: null);
+        var finding = new TypedPredicateFinding(Verdict.Unknown, column, other, "=", "file.sql", 1, 1);
+
+        Assert.Null(CorpusFindingProbeBuilder.Build(finding));
+    }
+
+    [Fact]
+    public void Build_InOperator_NormalizesToEqualityForProbeSyntax()
+    {
+        // `Col IN (@p)` isn't valid SQL for a single scalar operand - the IN-list classifier
+        // already collapsed the list to one effective type (docs/audit-remediation-plan.md
+        // Phase 4.3), so an equality probe against that same type is a faithful stand-in.
+        var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "IN", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("""
+            DECLARE @p NVARCHAR(20);
+            SELECT 1 FROM [dbo].[T] WHERE [Col] = @p;
+            """, probe);
+    }
 }

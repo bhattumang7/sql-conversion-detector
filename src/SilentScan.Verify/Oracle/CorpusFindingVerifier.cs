@@ -32,7 +32,7 @@ public sealed class CorpusFindingVerifier
         var probe = CorpusFindingProbeBuilder.Build(finding);
         if (probe is null)
         {
-            return new CorpusFindingResult(finding, CorpusFindingOutcome.NotProbeable, "Other operand's type could not be rendered as T-SQL syntax.");
+            return new CorpusFindingResult(finding, CorpusFindingOutcome.NotProbeable, NotProbeableReason(finding));
         }
 
         string planXml;
@@ -59,6 +59,15 @@ public sealed class CorpusFindingVerifier
             confirmed ? CorpusFindingOutcome.Confirmed : CorpusFindingOutcome.NotConfirmed,
             Detail: null);
     }
+
+    // docs/audit-remediation-plan.md Phase 5.2: distinguishes "this operand was a literal we
+    // couldn't reconstruct as SQL text" (a real probe-fidelity caveat - substituting a variable
+    // here would silently misrepresent the probe as equivalent to the original comparison) from
+    // the ordinary "operand's type doesn't have T-SQL syntax to render" case.
+    private static string NotProbeableReason(TypedPredicateFinding finding) =>
+        finding.OtherOperand is PredicateOperand.Value { IsLiteral: true, LiteralText: null }
+            ? "Literal operand could not be reconstructed as SQL text; declined to substitute a parameter, which would misrepresent probe fidelity."
+            : "Other operand's type could not be rendered as T-SQL syntax.";
 
     private static bool MatchesPredictedPlanShape(Verdict verdict, bool columnConverts, string planXml)
     {

@@ -17,18 +17,38 @@ public static class CorpusFindingProbeBuilder
     {
         var table = BracketQualifiedName(finding.Column.TableQualifiedName);
         var column = Bracket(finding.Column.ColumnName);
+        var op = NormalizeOperatorForProbe(finding.Operator);
 
         return finding.OtherOperand switch
         {
-            PredicateOperand.Value { Type: { } valueType } => BuildValueProbe(table, column, finding.Operator, valueType),
-            PredicateOperand.Column otherColumn => BuildColumnProbe(table, column, finding.Operator, otherColumn),
+            PredicateOperand.Value { Type: not null } value => BuildValueProbe(table, column, op, value),
+            PredicateOperand.Column otherColumn => BuildColumnProbe(table, column, op, otherColumn),
             _ => null,
         };
     }
 
-    private static string? BuildValueProbe(string table, string column, string op, Core.Catalog.SqlType valueType)
+    // IN-list findings collapse the whole list to one effective "other type" for classification
+    // (docs/audit-remediation-plan.md Phase 4.3) - `Col IN (@p)` isn't valid syntax for a single
+    // scalar operand, but `Col = @p` exercises the identical CONVERT_IMPLICIT behavior the
+    // classifier actually reasoned about, so it stands in for probing purposes.
+    private static string NormalizeOperatorForProbe(string op) => op == "IN" ? "=" : op;
+
+    private static string? BuildValueProbe(string table, string column, string op, PredicateOperand.Value operand)
     {
-        var typeSyntax = SqlTypeSyntaxFormatter.Format(valueType);
+        if (operand.IsLiteral)
+        {
+            // Reconstructs the literal exactly rather than substituting a same-typed variable
+            // (docs/audit-remediation-plan.md Phase 5.2, audit finding C2) - verified against
+            // the real engine that these are NOT always equivalent (a bare string literal like
+            // N'x' types as nvarchar(8000), not the parameterized probe's content-length
+            // nvarchar(n)). A literal kind LiteralTextRenderer doesn't cover fails closed (null)
+            // instead of silently falling back to a variable, which would misrepresent fidelity.
+            return operand.LiteralText is { } literalText
+                ? $"SELECT 1 FROM {table} WHERE {column} {op} {literalText};"
+                : null;
+        }
+
+        var typeSyntax = SqlTypeSyntaxFormatter.Format(operand.Type!);
         if (typeSyntax is null)
         {
             return null;

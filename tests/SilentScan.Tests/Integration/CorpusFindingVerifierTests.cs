@@ -151,6 +151,46 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerifyAsync_LiteralOperand_ProbesTheReconstructedLiteralNotAVariable()
+    {
+        // docs/audit-remediation-plan.md Phase 5.2, audit finding C2: end-to-end proof that a
+        // literal-sourced finding's probe actually uses the finding's IsLiteral/LiteralText
+        // fields, not a same-typed DECLARE - both still confirm here (same collation family
+        // conclusion either way for this pair), but this locks in that the literal path is
+        // wired all the way through Verify, not just present on the finding record.
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 5), IsLiteral: true, LiteralText: "N'Alice'"),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_LiteralOperandThatCannotBeReconstructed_ReturnsNotProbeableWithFidelityCaveat()
+    {
+        var finding = new TypedPredicateFinding(
+            Verdict.Unknown,
+            ColumnOperand("dbo.Orders", "OrderId", new SqlType(SqlTypeCategory.Int), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int), IsLiteral: true, LiteralText: null),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.NotProbeable, result.Outcome);
+        Assert.Contains("misrepresent probe fidelity", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task VerifyAsync_IntColumnVsBigIntValue_SameFamilyWidening_IsNotConfirmed()
     {
         // A static classifier bug would have called this ScanForced before the same-family
