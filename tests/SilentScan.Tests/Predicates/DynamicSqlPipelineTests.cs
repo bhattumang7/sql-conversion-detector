@@ -343,4 +343,50 @@ public sealed class DynamicSqlPipelineTests
         Assert.Empty(result.Tier1Findings);
         Assert.Empty(result.ExpressionDerivedFindings);
     }
+
+    [Fact]
+    public void Analyze_LiteralWithCte_ResolvesCteColumnThroughToBaseTable()
+    {
+        // A reparsed dynamic-SQL fragment goes through the identical TypedPredicateExtractor
+        // visitor and CteResolver static SQL uses (docs/coverage-remediation-plan.md Phase
+        // 4.3) - there is no separate CTE-handling code path for dynamic SQL, so this was true
+        // by construction before this test existed. It just wasn't checked.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "EXEC('WITH cte AS (SELECT Col FROM dbo.T) SELECT Col FROM cte WHERE Col = N''x''');");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("dbo.T", typedFinding.Column.TableQualifiedName);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.True(typedFinding.Column.Indexed);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+    }
+
+    [Fact]
+    public void Analyze_LiteralWithCteShadowingRealTable_ResolvesToCteNotTheTable()
+    {
+        // CTE names shadow catalog objects within their statement's scope (audit-remediation-
+        // plan.md Phase 2.4) - proving that shadowing rule also holds inside dynamic SQL, not
+        // just static SQL.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "EXEC('WITH T AS (SELECT CAST(Col AS INT) AS Col FROM dbo.T) SELECT Col FROM T WHERE Col = 1');");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        // The CTE's Col is an expression (CAST), not the base dbo.T.Col - so it must not resolve
+        // to a BaseColumn typed finding at all; it can only ever surface (if anywhere) as an
+        // expression-derived finding, never as a direct column-side verdict against dbo.T.
+        Assert.Empty(result.TypedFindings);
+    }
 }

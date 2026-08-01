@@ -9,6 +9,8 @@
     <!-- Checked-in oracle-probed data (Phase 0.2 of docs/audit-remediation-plan.md), embedded
          so TypePairMatrix works regardless of the process's working directory. -->
     <EmbeddedResource Include="Rules/TypePairMatrix.json" />
+    <!-- Checked-in top-down construct coverage matrix (Phase 0.1 of docs/coverage-remediation-plan.md). -->
+    <EmbeddedResource Include="Diagnostics/ConstructCoverage.json" />
   </ItemGroup>
 
 </Project>

@@ -1135,6 +1135,30 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_InsteadOfTriggerBody_OnTable_InsertedPseudoTable_Resolves()
+    {
+        // INSTEAD OF triggers on a table target take the identical resolution path AFTER
+        // triggers do - TriggerType is never read anywhere in this pass, so this only works by
+        // omission rather than by design (docs/coverage-remediation-plan.md Phase 5). This test
+        // is what turns that "works by omission" claim into something checked, so a future
+        // change that starts branching on TriggerType cannot silently break it.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.Orders
+            INSTEAD OF INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
     public void Extract_TriggerBody_InsertedVisibleInsideNestedSubquery()
     {
         // inserted/deleted are visible throughout the whole trigger body, not just a single

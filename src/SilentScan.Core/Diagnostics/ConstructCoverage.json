@@ -1,0 +1,398 @@
+{
+  "$schema": "./construct-coverage.schema.json",
+  "generatedAtUtc": "2026-08-02T00:00:00Z",
+  "entries": [
+    {
+      "construct": "CreateTableStatement",
+      "group": "ColumnDefiner",
+      "status": "Handled",
+      "verifiedBy": "tests/SilentScan.Tests/fixtures/mini_project/01_schema.sql",
+      "rationale": null
+    },
+    {
+      "construct": "AlterTableAddTableElementStatement",
+      "group": "ColumnDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": null
+    },
+    {
+      "construct": "AlterTableAlterColumnStatement",
+      "group": "ColumnDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": null
+    },
+    {
+      "construct": "AlterTableDropTableElementStatement",
+      "group": "ColumnDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateTypeUddtStatement",
+      "group": "ColumnDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "CREATE TYPE ... FROM aliases resolve to the underlying type (commit 21762ca)."
+    },
+    {
+      "construct": "CreateTypeTableStatement",
+      "group": "ColumnDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "CREATE TYPE ... AS TABLE (table types / TVP shapes) has no visitor anywhere. WWI's manifest lists a User Defined Types path with four such files consumed as TVPs by four procs - coverage-remediation-plan.md Phase 3.2."
+    },
+    {
+      "construct": "CreateTypeUdtStatement",
+      "group": "ColumnDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "CLR UDT. No visitor; a column of this type resolves Type=null - safe (UNKNOWN, never a wrong verdict) but was uncounted until this ledgering pass. coverage-remediation-plan.md Phase 0.2/3.6."
+    },
+    {
+      "construct": "CreateAssemblyStatement",
+      "group": "ColumnDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "CLR assembly registration. Deliberately not modeled - coverage-remediation-plan.md decision: count and decline, never analyze CLR."
+    },
+    {
+      "construct": "CreateAggregateStatement",
+      "group": "ColumnDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "CLR aggregate. Same as CreateAssemblyStatement - counted, not analyzed."
+    },
+    {
+      "construct": "CreateExternalTableStatement",
+      "group": "ColumnDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "PolyBase/external table. Column shapes live outside the scanned repo (in the external data source); resolving them would require connecting to that source, which this tool never does. Absent from the pilot corpus."
+    },
+    {
+      "construct": "CreateIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateColumnStoreIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateSpatialIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "Spatial indexes support spatial predicates (STIntersects etc.), not the equality/range comparisons this tool classifies - out of scope by construction, not an oversight."
+    },
+    {
+      "construct": "CreateXmlIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "XML indexes support XQuery, not scalar comparisons - out of scope by construction."
+    },
+    {
+      "construct": "CreateFullTextIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "Full-text indexes support CONTAINS/FREETEXT, not the comparison operators this tool classifies - out of scope by construction."
+    },
+    {
+      "construct": "DeclareTableVariableStatement",
+      "group": "ColumnDefiner",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": null
+    },
+    {
+      "construct": "MultiStatementTvfReturnVariable",
+      "group": "ColumnDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a DeclareTableVariableStatement, so @t is never cataloged; predicates inside the body over FROM @t are unresolvable. coverage-remediation-plan.md Phase 3.4."
+    },
+    {
+      "construct": "CreateViewStatement",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Handled",
+      "verifiedBy": "tests/SilentScan.Tests/fixtures/mini_project/02_views.sql",
+      "rationale": null
+    },
+    {
+      "construct": "AlterViewStatement",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "ViewDefinitionExtractor matches only CreateViewStatement. An ALTER VIEW body is invisible to lineage - the view-inheritance analysis this study is built around silently does not run. coverage-remediation-plan.md Phase 2.1."
+    },
+    {
+      "construct": "CreateOrAlterViewStatement",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "Same gap as AlterViewStatement - the modern SSDT idiom for redefining a view is entirely invisible to lineage. coverage-remediation-plan.md Phase 2.1."
+    },
+    {
+      "construct": "CreateFunctionStatement (inline TVF)",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateFunctionStatement (multi-statement TVF)",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "Declared RETURNS @t TABLE(...) shape resolved as Declared provenance. See MultiStatementTvfReturnVariable for the separate body-scope gap."
+    },
+    {
+      "construct": "CreateFunctionStatement (scalar)",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "No return-type registry exists (ScalarFunctionReturnType is matched nowhere). WHERE VarcharCol = dbo.fn_ReturnsNvarchar(@x) types the right side null and resolves Unknown - a guaranteed false negative on the classic pattern. coverage-remediation-plan.md Phase 3.1, highest-value single gap."
+    },
+    {
+      "construct": "AlterFunctionStatement (view-layer forms)",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "Handled for catalog scoping and predicate-body walking, but not by ViewDefinitionExtractor - an ALTER FUNCTION redefining an iTVF/MSTVF is invisible to lineage. coverage-remediation-plan.md Phase 2.1."
+    },
+    {
+      "construct": "CreateOrAlterFunctionStatement (view-layer forms)",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "Same gap as AlterFunctionStatement. coverage-remediation-plan.md Phase 2.1."
+    },
+    {
+      "construct": "CreateExternalFunctionStatement",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "Azure ML / language-extension external function. No local body to analyze - out of scope by construction."
+    },
+    {
+      "construct": "TVF-to-TVF dependency edge",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "ViewDependencyGraph's TableReferenceCollector collects only NamedTableReference. An iTVF selecting FROM another iTVF creates no dependency edge, so topo order can resolve the outer function before the inner one and its columns degrade to Unknown; TVF cycles go undetected. coverage-remediation-plan.md Phase 3.5."
+    },
+    {
+      "construct": "CreateProcedureStatement",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Handled",
+      "verifiedBy": "tests/SilentScan.Tests/fixtures/mini_project/03_procs.sql",
+      "rationale": null
+    },
+    {
+      "construct": "AlterProcedureStatement",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateOrAlterProcedureStatement",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateTriggerStatement",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "AFTER/FOR DML triggers on tables, inserted/deleted resolved to the target table (commit 6534feb)."
+    },
+    {
+      "construct": "AlterTriggerStatement",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": null
+    },
+    {
+      "construct": "CreateOrAlterTriggerStatement",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "Missing from both CatalogBuilder and TypedPredicateExtractor while procedures and functions both got all three variants - coverage-remediation-plan.md Phase 2.1."
+    },
+    {
+      "construct": "CreateTriggerStatement (INSTEAD OF on TABLE)",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Works because TriggerType is never read - the table-target path is identical for AFTER and INSTEAD OF. Correct by omission, not by design (coverage-remediation-plan.md Phase 5)."
+    },
+    {
+      "construct": "CreateTriggerStatement (INSTEAD OF on VIEW)",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "BuildTriggerPseudoTableRelations resolves the target via catalog.Find only; DatabaseCatalog holds no views. Every inserted/deleted predicate is dropped with the misleading reason 'has no known DDL' while the view sits fully resolved in resolvedViews. coverage-remediation-plan.md Phase 3.3."
+    },
+    {
+      "construct": "Trigger pseudo-table index attribution",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "WRONG ANSWER, not a missing one. inserted/deleted resolve to the target table's ResolvedRelation and inherit Indexed=true from it, but inserted/deleted have no index of their own - a ScanForced+indexed finding here would rank first under the CLAUDE.md ranking rule while not being a real index-killing conversion. coverage-remediation-plan.md Phase 1.1, highest-priority item in the whole plan."
+    },
+    {
+      "construct": "CreateTriggerStatement (DDL: ON DATABASE / ON ALL SERVER)",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "TriggerObject.Name is dereferenced unconditionally; a DDL trigger has no target object name. Suspected NullReferenceException that would abort an entire corpus scan with no isolation - unreproduced as of this entry. coverage-remediation-plan.md Phase 0.3."
+    },
+    {
+      "construct": "CreateTriggerStatement (LOGON)",
+      "group": "ProcedureOrTriggerDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "Same nameless-TriggerObject shape as the DDL-trigger case. coverage-remediation-plan.md Phase 0.3."
+    },
+    {
+      "construct": "SelectStatement / QuerySpecification (WHERE/HAVING)",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": null
+    },
+    {
+      "construct": "UpdateStatement",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Integration.UpdateDeletePredicateOracleTests",
+      "rationale": null
+    },
+    {
+      "construct": "DeleteStatement",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Integration.UpdateDeletePredicateOracleTests",
+      "rationale": null
+    },
+    {
+      "construct": "MergeStatement",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": null
+    },
+    {
+      "construct": "InsertStatement (INSERT ... SELECT / SET-clause type-check)",
+      "group": "PredicateCarrier",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "The tool only ever types comparison predicates (=, <, IN, BETWEEN). INSERT target-column/source-column mismatches and SET/assignment expressions are never type-checked - deliberately out of scope: assignment implicit conversion is a correctness concern, not the index-seek-loss concern this tool exists for."
+    },
+    {
+      "construct": "WhileStatement / IfStatement boolean guard (no FROM scope)",
+      "group": "PredicateCarrier",
+      "status": "Ledgered",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "A bare IF @x = @y guard with no enclosing QuerySpecification/UPDATE/DELETE/MERGE scope is dropped with a ledger entry - correct, since such a comparison can never be index-relevant."
+    },
+    {
+      "construct": "NamedTableReference",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": null
+    },
+    {
+      "construct": "QueryDerivedTable",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": null
+    },
+    {
+      "construct": "JoinTableReference / JoinParenthesisTableReference",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": null
+    },
+    {
+      "construct": "SchemaObjectFunctionTableReference (TVF call in FROM)",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "Resolved as a view layer for depth purposes (commit 70bdc65 / audit-remediation-plan.md Phase 4.2)."
+    },
+    {
+      "construct": "WithCtesAndXmlNamespaces (CTE, non-recursive)",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": null
+    },
+    {
+      "construct": "WithCtesAndXmlNamespaces (recursive branch)",
+      "group": "ScopeIntroducer",
+      "status": "Ledgered",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "Anchor branch resolved; recursive branch's contribution deliberately marked Unknown rather than guessed, and ledgered."
+    },
+    {
+      "construct": "WithCtesAndXmlNamespaces inside dynamic SQL",
+      "group": "ScopeIntroducer",
+      "status": "Handled",
+      "verifiedBy": "Predicates.DynamicSqlPipelineTests",
+      "rationale": "Works by construction - the reparsed dynamic-SQL fragment goes through the identical TypedPredicateExtractor visitor and CteResolver, no separate code path exists (coverage-remediation-plan.md Phase 4.3)."
+    },
+    {
+      "construct": "VariableTableReference / OpenRowsetTableReference / OpenQueryTableReference / PivotedTableReference / UnpivotedTableReference",
+      "group": "ScopeIntroducer",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "FromScopeResolver's default arm already records these to the ledger with the construct's real type name and resolves to an empty relation - the one pass in this codebase that ledgers unhandled node kinds by default rather than needing a dedicated fix per kind."
+    },
+    {
+      "construct": "ExecuteStatement / sp_executesql (proven-constant dynamic SQL)",
+      "group": "DynamicSql",
+      "status": "Handled",
+      "verifiedBy": "Predicates.DynamicSqlPipelineTests",
+      "rationale": "Reparsed script shares the same DatabaseCatalog/LineageCatalog as static SQL - full depth/origin/indexed attribution preserved."
+    },
+    {
+      "construct": "ExecuteStatement / sp_executesql (enclosing proc/trigger scope propagation)",
+      "group": "DynamicSql",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "The reparsed fragment has no enclosing CREATE PROCEDURE/TRIGGER wrapper, so ProcScope stays null - a #temp table declared in the calling procedure, or a trigger's inserted/deleted, does not resolve inside dynamic SQL even though it resolves in the static body. coverage-remediation-plan.md Phase 4.1."
+    },
+    {
+      "construct": "ExecuteStatement / sp_executesql (nested declared-parameter propagation)",
+      "group": "DynamicSql",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "Recursion into nested dynamic SQL passes only the nested script's own AnalyzableScripts; an outer sp_executesql parameter used two levels down types as Unknown. coverage-remediation-plan.md Phase 4.2."
+    },
+    {
+      "construct": "Objects created inside dynamic SQL (EXEC('CREATE TABLE #x ...'))",
+      "group": "DynamicSql",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "Deliberately not resolved - feeding dynamically-created objects back into a catalog later passes have already consumed is a re-entrancy problem out of proportion to its value, and would require guessing which EXEC calls run before which. coverage-remediation-plan.md Phase 4.4."
+    }
+  ]
+}
