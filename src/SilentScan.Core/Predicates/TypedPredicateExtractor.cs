@@ -134,9 +134,12 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var (byAlias, ordered) = _scopeStack.Peek();
-            var left = ResolveOperand(first, byAlias, ordered);
-            var right = ResolveOperand(second, byAlias, ordered);
+            // Innermost scope first, then progressively outer ones - a correlated subquery's
+            // predicate can legitimately reference an enclosing query's alias
+            // (docs/audit-remediation-plan.md Phase 2.2).
+            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var left = ResolveOperand(first, scopeChain);
+            var right = ResolveOperand(second, scopeChain);
 
             PredicateOperand.Column? column;
             PredicateOperand? other;
@@ -164,12 +167,13 @@ public static class TypedPredicateExtractor
             Findings.Add(new TypedPredicateFinding(verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn));
         }
 
-        private PredicateOperand ResolveOperand(ScalarExpression expression, Dictionary<string, ScopeEntry> byAlias, List<ScopeEntry> ordered)
+        private PredicateOperand ResolveOperand(
+            ScalarExpression expression, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             switch (expression)
             {
                 case ColumnReferenceExpression columnRef:
-                    return ResolveColumnOperand(columnRef, byAlias, ordered);
+                    return ResolveColumnOperand(columnRef, scopeChain);
 
                 case VariableReference variableRef:
                     return new PredicateOperand.Value(_variables.GetValueOrDefault(variableRef.Name));
@@ -182,12 +186,14 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private PredicateOperand ResolveColumnOperand(ColumnReferenceExpression columnRef, Dictionary<string, ScopeEntry> byAlias, List<ScopeEntry> ordered)
+        private PredicateOperand ResolveColumnOperand(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             // Same resolver Pass 2 uses (ScalarExpressionResolver) - a qualified reference whose
-            // qualifier doesn't resolve is unresolved here too, never a name-only fallback search
-            // across the whole FROM scope (docs/audit-remediation-plan.md Phase 2.1).
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, byAlias, ordered, sourcePath, ledger);
+            // qualifier doesn't resolve anywhere in the chain is unresolved here too, never a
+            // name-only fallback search across the whole FROM scope (Phase 2.1), but a reference
+            // to an outer query's alias correctly resolves there (Phase 2.2).
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger);
             var columnName = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
 
             if (provenance is ColumnProvenance.BaseColumn baseColumn)

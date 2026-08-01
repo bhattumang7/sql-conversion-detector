@@ -435,4 +435,55 @@ public sealed class TypedPredicateExtractorTests
         Assert.Equal("dbo.Shipments", finding.Column.TableQualifiedName);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
+
+    [Fact]
+    public void Extract_CorrelatedExistsSubquery_OuterAliasResolvesThroughScopeChain()
+    {
+        // docs/audit-remediation-plan.md Phase 2.2: the EXISTS subquery's own FROM scope (d)
+        // is innermost when its WHERE clause is visited; "o.CustomerId" refers to the *outer*
+        // query's alias, one level up the scope chain, not anything in the subquery's own FROM
+        // clause. Before this fix only the innermost scope was ever consulted, so the outer
+        // reference could never resolve at all (Phase 2.1 made that failure produce no finding
+        // instead of a wrong one - this test proves it now correctly produces the right one).
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.OrderDetails (OrderId INT NOT NULL, Sku VARCHAR(20) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT o.Id
+                FROM dbo.Orders AS o
+                WHERE o.CustomerId = @CustomerId
+                    AND EXISTS (SELECT 1 FROM dbo.OrderDetails AS d WHERE d.OrderId = o.Id);
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_InnerScopeAliasShadowsOuterOfSameName_ResolvesToInnerFirst()
+    {
+        // The scope chain must try the INNERMOST level first - a self-referencing correlated
+        // subquery that reuses the outer alias name for a different table should resolve to the
+        // inner one, matching real SQL name-resolution order, not silently prefer the outer scope.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
+            "CREATE TABLE dbo.Archive (Id INT NOT NULL, CustomerId NVARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Check @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT o.Id
+                FROM dbo.Orders AS o
+                WHERE EXISTS (SELECT 1 FROM dbo.Archive AS o WHERE o.CustomerId = @CustomerId);
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.Archive", finding.Column.TableQualifiedName);
+    }
 }

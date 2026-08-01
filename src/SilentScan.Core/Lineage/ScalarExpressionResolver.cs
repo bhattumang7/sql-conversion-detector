@@ -67,53 +67,79 @@ public static class ScalarExpressionResolver
     }
 
     /// <summary>
-    /// Resolves a column reference against a FROM scope: the one algorithm both Pass 2 (this
-    /// class) and Pass 3 (<see cref="Predicates.TypedPredicateExtractor"/>) use, so a qualified
-    /// reference whose qualifier doesn't resolve is unresolved everywhere, never silently
-    /// falling back to a name-only search across the whole scope (docs/audit-remediation-plan.md
-    /// Phase 2.1 - that fallback could bind a correlated outer-query reference like "o.Id" to an
-    /// unrelated same-named column on a completely different table).
+    /// Resolves a column reference against a single FROM scope: the one algorithm both Pass 2
+    /// (this class) and Pass 3 (<see cref="Predicates.TypedPredicateExtractor"/>) use, so a
+    /// qualified reference whose qualifier doesn't resolve is unresolved everywhere, never
+    /// silently falling back to a name-only search across the whole scope
+    /// (docs/audit-remediation-plan.md Phase 2.1 - that fallback could bind a correlated
+    /// outer-query reference like "o.Id" to an unrelated same-named column on a completely
+    /// different table). Equivalent to the chain overload with a single-level chain.
     /// </summary>
     internal static ColumnProvenance ResolveColumnReference(
-        ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger)
+        ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger) =>
+        ResolveColumnReference(columnRef, [(scope, orderedRelations)], sourcePath, ledger);
+
+    /// <summary>
+    /// Resolves a column reference against a chain of nested FROM scopes, innermost first
+    /// (docs/audit-remediation-plan.md Phase 2.2): a qualifier or unqualified column name is
+    /// looked up in the innermost scope first, then progressively outer scopes, matching SQL's
+    /// own correlated-subquery name resolution rule. An ambiguous match WITHIN one scope level
+    /// stops the search there rather than skipping past it to an outer level - that ambiguity is
+    /// real, not a reason to guess the query meant an enclosing query's column instead.
+    /// </summary>
+    internal static ColumnProvenance ResolveColumnReference(
+        ColumnReferenceExpression columnRef,
+        IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+        string sourcePath,
+        SkipLedger? ledger)
     {
         var identifiers = columnRef.MultiPartIdentifier.Identifiers;
         var columnName = identifiers[^1].Value;
 
-        if (identifiers.Count >= 2)
+        ColumnProvenance.Unknown Unresolved(string reason)
         {
-            var qualifier = identifiers[^2].Value;
-            if (!scope.TryGetValue(qualifier, out var entry))
-            {
-                ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", $"unknown table alias '{qualifier}'");
-                return new ColumnProvenance.Unknown($"unknown table alias '{qualifier}'");
-            }
-
-            var column = entry.Relation.FindColumn(columnName);
-            if (column is null)
-            {
-                ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", $"column '{columnName}' not found on '{qualifier}'");
-                return new ColumnProvenance.Unknown($"column '{columnName}' not found on '{qualifier}'");
-            }
-
-            return BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer);
-        }
-
-        var matches = orderedRelations
-            .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName)))
-            .Where(m => m.Column is not null)
-            .ToList();
-
-        if (matches.Count != 1)
-        {
-            var reason = matches.Count == 0
-                ? $"column '{columnName}' not found in FROM scope"
-                : $"column '{columnName}' is ambiguous across the FROM scope";
             ledger?.Record(AnalysisPass.Lineage, sourcePath, columnRef.StartLine, columnRef.StartColumn, "column reference", reason);
             return new ColumnProvenance.Unknown(reason);
         }
 
-        return BumpDepthIfViewLayer(matches[0].Column!.Provenance, matches[0].Entry.IsViewLayer);
+        if (identifiers.Count >= 2)
+        {
+            var qualifier = identifiers[^2].Value;
+            foreach (var (byAlias, _) in scopeChain)
+            {
+                if (!byAlias.TryGetValue(qualifier, out var entry))
+                {
+                    continue;
+                }
+
+                var column = entry.Relation.FindColumn(columnName);
+                return column is null
+                    ? Unresolved($"column '{columnName}' not found on '{qualifier}'")
+                    : BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer);
+            }
+
+            return Unresolved($"unknown table alias '{qualifier}'");
+        }
+
+        foreach (var (_, ordered) in scopeChain)
+        {
+            var matches = ordered
+                .Select(entry => (Entry: entry, Column: entry.Relation.FindColumn(columnName)))
+                .Where(m => m.Column is not null)
+                .ToList();
+
+            if (matches.Count == 1)
+            {
+                return BumpDepthIfViewLayer(matches[0].Column!.Provenance, matches[0].Entry.IsViewLayer);
+            }
+
+            if (matches.Count > 1)
+            {
+                return Unresolved($"column '{columnName}' is ambiguous across the FROM scope");
+            }
+        }
+
+        return Unresolved($"column '{columnName}' not found in FROM scope");
     }
 
     internal static ColumnProvenance BumpDepthIfViewLayer(ColumnProvenance provenance, bool isViewLayer)
