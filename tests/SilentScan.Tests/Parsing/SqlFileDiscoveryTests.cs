@@ -35,4 +35,65 @@ public sealed class SqlFileDiscoveryTests
             tempDir.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void EnumerateSqlFiles_CustomExtension_FindsFilesSqlWouldMiss()
+    {
+        // docs/audit-remediation-plan.md Phase 6.1: DNN Platform ships DDL as .SqlDataProvider,
+        // not .sql - the default-only lookup finds nothing in a repo shaped like that.
+        var tempDir = Directory.CreateTempSubdirectory("silentscan-discovery-");
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir.FullName, "a.SqlDataProvider"), "SELECT 1;");
+            File.WriteAllText(Path.Combine(tempDir.FullName, "b.sql"), "SELECT 1;");
+
+            var files = SqlFileDiscovery.EnumerateSqlFiles(tempDir.FullName, [".SqlDataProvider"]);
+
+            Assert.Equal([Path.Combine(tempDir.FullName, "a.SqlDataProvider")], files);
+        }
+        finally
+        {
+            tempDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnumerateSqlFiles_ExtensionWithoutLeadingDot_IsNormalized()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("silentscan-discovery-");
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir.FullName, "a.SqlDataProvider"), "SELECT 1;");
+
+            var files = SqlFileDiscovery.EnumerateSqlFiles(tempDir.FullName, ["SqlDataProvider"]);
+
+            Assert.Equal([Path.Combine(tempDir.FullName, "a.SqlDataProvider")], files);
+        }
+        finally
+        {
+            tempDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnumerateSqlFiles_MultipleExtensions_FindsFilesMatchingAnyOfThem()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("silentscan-discovery-");
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir.FullName, "a.sql"), "SELECT 1;");
+            File.WriteAllText(Path.Combine(tempDir.FullName, "b.SqlDataProvider"), "SELECT 1;");
+            File.WriteAllText(Path.Combine(tempDir.FullName, "c.txt"), "not sql");
+
+            var files = SqlFileDiscovery.EnumerateSqlFiles(tempDir.FullName, [".sql", ".SqlDataProvider"]);
+
+            Assert.Equal(
+                [Path.Combine(tempDir.FullName, "a.sql"), Path.Combine(tempDir.FullName, "b.SqlDataProvider")],
+                files);
+        }
+        finally
+        {
+            tempDir.Delete(recursive: true);
+        }
+    }
 }

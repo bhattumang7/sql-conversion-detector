@@ -13,7 +13,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(FixturePath, "json", stdout, stderr);
+        var exitCode = ScanCommand.Run(FixturePath, "json", ".sql", stdout, stderr);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\"TotalFiles\": 1", stdout.ToString());
@@ -27,7 +27,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(path, "json", stdout, stderr);
+        var exitCode = ScanCommand.Run(path, "json", ".sql", stdout, stderr);
 
         Assert.Equal(0, exitCode);
         var output = stdout.ToString();
@@ -42,7 +42,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(path, "sarif", stdout, stderr);
+        var exitCode = ScanCommand.Run(path, "sarif", ".sql", stdout, stderr);
 
         Assert.Equal(0, exitCode);
         var output = stdout.ToString();
@@ -56,7 +56,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(FixturePath, "xml", stdout, stderr);
+        var exitCode = ScanCommand.Run(FixturePath, "xml", ".sql", stdout, stderr);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --format", stderr.ToString());
@@ -68,7 +68,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run("/no/such/path/at/all.sql", "json", stdout, stderr);
+        var exitCode = ScanCommand.Run("/no/such/path/at/all.sql", "json", ".sql", stdout, stderr);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not found", stderr.ToString());
@@ -84,7 +84,7 @@ public sealed class ScanCommandTests
             var stdout = new StringWriter();
             var stderr = new StringWriter();
 
-            var exitCode = ScanCommand.Run(tempDir.FullName, "json", stdout, stderr);
+            var exitCode = ScanCommand.Run(tempDir.FullName, "json", ".sql", stdout, stderr);
 
             Assert.Equal(1, exitCode);
         }

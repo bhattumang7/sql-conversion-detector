@@ -86,7 +86,7 @@ public static class ScanCorpusCommand
     private static SqlParseResult ParseCorpusFile(CorpusRepoEntry repo, string path)
     {
         var text = File.ReadAllText(path);
-        text = CorpusTemplatePreprocessor.Apply(repo.Name, text);
+        text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, text);
         return SqlScriptParser.ParseText(path, text);
     }
 

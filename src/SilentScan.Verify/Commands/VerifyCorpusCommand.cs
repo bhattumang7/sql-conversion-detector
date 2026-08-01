@@ -141,7 +141,7 @@ public static class VerifyCorpusCommand
             {
                 try
                 {
-                    var text = CorpusTemplatePreprocessor.Apply(repo.Name, await File.ReadAllTextAsync(ddlFile, cancellationToken));
+                    var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, await File.ReadAllTextAsync(ddlFile, cancellationToken));
                     await deployer.DeployAsync(text, databaseName, cancellationToken);
                 }
                 catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
@@ -179,7 +179,7 @@ public static class VerifyCorpusCommand
     private static async Task<SqlParseResult> ParseCorpusFileAsync(CorpusRepoEntry repo, string path, CancellationToken cancellationToken)
     {
         var text = await File.ReadAllTextAsync(path, cancellationToken);
-        text = CorpusTemplatePreprocessor.Apply(repo.Name, text);
+        text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, text);
         return SqlScriptParser.ParseText(path, text);
     }
 

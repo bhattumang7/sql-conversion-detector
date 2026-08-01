@@ -46,6 +46,11 @@
           "notes": {
             "type": "string",
             "description": "Anything else worth recording: dialect-sniffing caveats, excluded subpaths, etc."
+          },
+          "templateSubstitutions": {
+            "type": ["object", "null"],
+            "additionalProperties": { "type": "string" },
+            "description": "Literal text tokens this repo's DDL/proc files use as template placeholders (e.g. DNN Platform's {databaseOwner}) mapped to their conventional substitution value, applied before ScriptDOM parses each file. Omit or null if the repo needs no substitution."
           }
         }
       }

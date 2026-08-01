@@ -48,6 +48,58 @@ public sealed class CorpusManifestLoaderTests
     }
 
     [Fact]
+    public void Parse_TemplateSubstitutions_RoundTrips()
+    {
+        // docs/audit-remediation-plan.md Phase 6.1: the substitution map lives in the manifest,
+        // not a hardcoded repo-name switch in CorpusTemplatePreprocessor.
+        var json = """
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"],
+                  "templateSubstitutions": {
+                    "{databaseOwner}": "dbo.",
+                    "{objectQualifier}": ""
+                  }
+                }
+              ]
+            }
+            """;
+
+        var manifest = CorpusManifestLoader.Parse(json);
+
+        var repo = Assert.Single(manifest.Repos);
+        Assert.Equal("dbo.", repo.TemplateSubstitutions!["{databaseOwner}"]);
+        Assert.Equal(string.Empty, repo.TemplateSubstitutions!["{objectQualifier}"]);
+    }
+
+    [Fact]
+    public void Parse_NoTemplateSubstitutions_DefaultsToNull()
+    {
+        var json = """
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"]
+                }
+              ]
+            }
+            """;
+
+        var manifest = CorpusManifestLoader.Parse(json);
+
+        Assert.Null(Assert.Single(manifest.Repos).TemplateSubstitutions);
+    }
+
+    [Fact]
     public void Parse_MissingProcPathsAndCollation_DefaultsGracefully()
     {
         var json = """

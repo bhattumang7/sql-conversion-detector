@@ -78,7 +78,8 @@ public static partial class CorpusManifestLoader
             dto.DdlPaths,
             dto.ProcPaths ?? [],
             dto.DeclaredCollation,
-            dto.Notes);
+            dto.Notes,
+            dto.TemplateSubstitutions);
     }
 
     private sealed record ManifestDto([property: JsonPropertyName("repos")] IReadOnlyList<RepoDto> Repos);
@@ -91,5 +92,6 @@ public static partial class CorpusManifestLoader
         IReadOnlyList<string>? DdlPaths,
         IReadOnlyList<string>? ProcPaths,
         string? DeclaredCollation,
-        string? Notes);
+        string? Notes,
+        IReadOnlyDictionary<string, string>? TemplateSubstitutions);
 }

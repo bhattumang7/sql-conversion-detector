@@ -31,7 +31,11 @@
         "**/*.SqlDataProvider"
       ],
       "declaredCollation": null,
-      "notes": "339 .SqlDataProvider files (DNN Platform/Website/Providers/DataProviders/SqlDataProvider/ plus per-module Providers/DataProviders/SqlDataProvider/ under DNN Platform/Modules/*). DDL and stored procedures are interleaved in the same incremental-upgrade files, not split into separate table/proc paths, hence the identical globs. IMPORTANT: files use {databaseOwner}/{objectQualifier} template tokens (by convention 'dbo.' and '' respectively) that must be substituted before ScriptDOM can parse them - this is a preprocessing step the scan tooling must apply, not a dialect failure."
+      "notes": "339 .SqlDataProvider files (DNN Platform/Website/Providers/DataProviders/SqlDataProvider/ plus per-module Providers/DataProviders/SqlDataProvider/ under DNN Platform/Modules/*). DDL and stored procedures are interleaved in the same incremental-upgrade files, not split into separate table/proc paths, hence the identical globs. IMPORTANT: files use {databaseOwner}/{objectQualifier} template tokens (by convention 'dbo.' and '' respectively) that must be substituted before ScriptDOM can parse them - see templateSubstitutions below.",
+      "templateSubstitutions": {
+        "{databaseOwner}": "dbo.",
+        "{objectQualifier}": ""
+      }
     },
     {
       "name": "sql-server-first-responder-kit",
