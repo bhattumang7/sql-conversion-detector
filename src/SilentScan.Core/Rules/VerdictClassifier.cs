@@ -21,6 +21,23 @@ public static class VerdictClassifier
             return ClassifySameCategory(columnType, otherType);
         }
 
+        // Oracle-verified against SQL Server 2022 (Phase 4 corpus pilot): widening WITHIN the
+        // numeric-or-bit family (int vs bigint, bit vs int, real vs float, decimal vs money,
+        // ...) or WITHIN the date/time family (date vs datetime, datetime vs datetime2, ...)
+        // never produces a CONVERT_IMPLICIT in the real plan, regardless of which side's
+        // precedence rank is lower. Probed directly: int/bigint, smallint/int, real/float,
+        // decimal/money, smalldatetime/datetime, datetime/datetime2, and bit against an int
+        // literal, an int param, a bigint param, a float param, and an out-of-domain literal
+        // (2) - none produced a Convert scalar operator. Only crossing into the STRING family
+        // (from either numeric/date side) produced a real conversion. This rule's absence
+        // produced two confirmed false positives during the pilot: WideWorldImporters'
+        // `WHERE IsPermittedToLogon = 0` (bit vs int) and `WHERE ExpectedDeliveryDate >=
+        // @StartingWhen` (date vs datetime).
+        if (columnType.IsWideningCompatibleWith(otherType))
+        {
+            return Verdict.SeekPreserved;
+        }
+
         var convertedSide = DataTypePrecedence.DetermineConvertedSide(columnType.Category, otherType.Category);
         if (convertedSide != ComparisonSide.Left)
         {

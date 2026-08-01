@@ -1,4 +1,81 @@
 {
   "$schema": "./manifest.schema.json",
-  "repos": []
+  "repos": [
+    {
+      "name": "wide-world-importers",
+      "url": "https://github.com/microsoft/sql-server-samples",
+      "commitSha": "1ab31bc560415b570d57bb5ff9896f4698891321",
+      "license": "MIT",
+      "ddlPaths": [
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/**/Tables/*.sql",
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Sequences/Sequences/*.sql",
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Website/User Defined Types/*.sql"
+      ],
+      "procPaths": [
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/**/Stored Procedures/*.sql",
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/**/Functions/*.sql",
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/**/Views/*.sql"
+      ],
+      "declaredCollation": null,
+      "notes": "Only the wide-world-importers/wwi-ssdt subtree of the sql-server-samples monorepo is cloned locally (the full monorepo is unrelated samples and far larger than needed). Full multi-schema business-app DDL: tables, views, functions, procs across Application/Sales/Purchasing/Warehouse/Security schemas. No CREATE DATABASE statement seen in the SSDT project, so default collation is unknown - CLAUDE.md: never guess."
+    },
+    {
+      "name": "dnn-platform",
+      "url": "https://github.com/dnnsoftware/Dnn.Platform",
+      "commitSha": "205b0825693f4aeda7c439a97ad8a6d31d9b1b1c",
+      "license": "MIT",
+      "ddlPaths": [
+        "**/*.SqlDataProvider"
+      ],
+      "procPaths": [
+        "**/*.SqlDataProvider"
+      ],
+      "declaredCollation": null,
+      "notes": "339 .SqlDataProvider files (DNN Platform/Website/Providers/DataProviders/SqlDataProvider/ plus per-module Providers/DataProviders/SqlDataProvider/ under DNN Platform/Modules/*). DDL and stored procedures are interleaved in the same incremental-upgrade files, not split into separate table/proc paths, hence the identical globs. IMPORTANT: files use {databaseOwner}/{objectQualifier} template tokens (by convention 'dbo.' and '' respectively) that must be substituted before ScriptDOM can parse them - this is a preprocessing step the scan tooling must apply, not a dialect failure."
+    },
+    {
+      "name": "sql-server-first-responder-kit",
+      "url": "https://github.com/BrentOzarULTD/SQL-Server-First-Responder-Kit",
+      "commitSha": "44015b80d2c821ac5dc956f047a875f1db9eeb22",
+      "license": "MIT",
+      "ddlPaths": [
+        "*.sql"
+      ],
+      "procPaths": [
+        "*.sql"
+      ],
+      "declaredCollation": null,
+      "notes": "Root-level scripts, each a single large stored procedure (sp_Blitz, sp_BlitzCache, sp_BlitzIndex, sp_BlitzFirst, sp_BlitzWho, sp_BlitzLock, sp_DatabaseRestore, etc.) built with idempotent IF OBJECT_ID(...) IS NULL EXEC('CREATE PROCEDURE ... AS RETURN 0;') then ALTER PROCEDURE pattern, plus heavy dynamic SQL construction. Same glob for ddl/proc paths since scripts mix incidental table creation with the procedure body."
+    },
+    {
+      "name": "ola-hallengren-maintenance-solution",
+      "url": "https://github.com/olahallengren/SQL-Server-Maintenance-Solution",
+      "commitSha": "660acca46cecc9e94f1078ec4c24442e3f309e0c",
+      "license": "MIT",
+      "ddlPaths": [
+        "*.sql"
+      ],
+      "procPaths": [
+        "*.sql"
+      ],
+      "declaredCollation": null,
+      "notes": "Root-level scripts (CommandLog.sql, Queue.sql, QueueDatabase.sql, DatabaseBackup.sql, DatabaseIntegrityCheck.sql, IndexOptimize.sql, MaintenanceSolution.sql). CommandLog.sql/Queue.sql/QueueDatabase.sql contain real CREATE TABLE DDL; the rest are large parameterized stored procedures. Widely deployed in production DBA shops."
+    },
+    {
+      "name": "mojoportal",
+      "url": "https://github.com/i7MEDIA/mojoportal",
+      "commitSha": "dc3f5a6e1dc69b99e1804703edfe4d3c6ecd7dbe",
+      "license": "EPL-1.0",
+      "ddlPaths": [
+        "mojoPortal.Data.MSSQL/dev2CreateTables.sql",
+        "mojoPortal.Data.MSSQL/devSiteOfficeTables.sql"
+      ],
+      "procPaths": [
+        "mojoPortal.Data.MSSQL/dev3CreateStoredProcedures.sql",
+        "mojoPortal.Data.MSSQL/devSiteOfficeProcs.sql"
+      ],
+      "declaredCollation": null,
+      "notes": "Fork of the original mojoPortal.org CMS, still maintained. dev3CreateStoredProcedures.sql wraps its CREATE PROCEDURE statements as string literal arguments to EXEC dbo.sp_executesql (idempotent-create pattern), which CLAUDE.md's dynamic SQL policy says is parseable in principle (single string literal, no concatenation) - a good real-world exercise of that rule, distinct from the other 4 repos' plain top-level DDL. mojoPortal.Data.MSSQL/legacyscripts/ contains older upgrade deltas, intentionally excluded here in favor of the dev*.sql full-install scripts."
+    }
+  ]
 }

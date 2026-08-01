@@ -22,7 +22,15 @@ public static class ConvertImplicitDetector
             .Select(convert => new
             {
                 Convert = convert,
-                ColumnRef = convert.Descendants(ShowPlanNs + "ColumnReference").FirstOrDefault(),
+                // Showplan XML represents BOTH real table columns and local
+                // variables/parameters as <ColumnReference> - the only distinguishing
+                // signal is that a genuine table column has a non-empty Table attribute,
+                // while a parameter (e.g. Column="@p") does not. Found during the Phase 4
+                // corpus pilot: without this check, a Convert applied to a @parameter
+                // (the harmless, correct-direction case) was misreported as a column-side
+                // conversion.
+                ColumnRef = convert.Descendants(ShowPlanNs + "ColumnReference")
+                    .FirstOrDefault(c => !string.IsNullOrEmpty((string?)c.Attribute("Table"))),
             })
             .Where(x => x.ColumnRef is not null)
             .Select(x => new ConvertImplicitFinding(

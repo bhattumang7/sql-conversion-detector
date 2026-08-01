@@ -53,12 +53,26 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_IntColumnVsBigIntValue_ColumnConverts_ScanForced()
+    public void Classify_IntColumnVsBigIntValue_OracleVerifiedSameFamilyWidening_SeekPreserved()
     {
+        // Oracle-verified (Phase 4 pilot): int-vs-bigint widening never shows
+        // CONVERT_IMPLICIT, even though int has lower precedence than bigint - same-family
+        // numeric widening is free. See VerdictClassifier's comment for the full probe set.
         var column = new SqlType(SqlTypeCategory.Int);
         var value = new SqlType(SqlTypeCategory.BigInt);
 
-        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_DateColumnVsDateTimeValue_OracleVerifiedSameFamilyWidening_SeekPreserved()
+    {
+        // Real false positive found scanning WideWorldImporters (Phase 4 pilot):
+        // WHERE ExpectedDeliveryDate >= @StartingWhen (date column, datetime param).
+        var column = new SqlType(SqlTypeCategory.Date);
+        var value = new SqlType(SqlTypeCategory.DateTime);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]
@@ -130,6 +144,49 @@ public sealed class VerdictClassifierTests
         var value = new SqlType(SqlTypeCategory.DateTime);
 
         Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BitColumnVsIntLiteral_OracleVerifiedNoConversion_SeekPreserved()
+    {
+        // Real false positive found scanning WideWorldImporters (Phase 4 pilot):
+        // WHERE IsPermittedToLogon = 0 against a BIT column. Confirmed against the real
+        // SQL Server oracle that this produces no CONVERT_IMPLICIT at all - see
+        // VerdictClassifier's comment for the full set of oracle probes.
+        var column = new SqlType(SqlTypeCategory.Bit);
+        var value = new SqlType(SqlTypeCategory.Int);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BitColumnVsBigIntValue_SeekPreserved()
+    {
+        var column = new SqlType(SqlTypeCategory.Bit);
+        var value = new SqlType(SqlTypeCategory.BigInt);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BitColumnVsFloatValue_SeekPreserved()
+    {
+        var column = new SqlType(SqlTypeCategory.Bit);
+        var value = new SqlType(SqlTypeCategory.Float);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BitColumnVsVarcharValue_ValueConvertsNotColumn_SeekPreserved()
+    {
+        // Bit outranks the string family, so the VALUE converts here - and this is a genuine
+        // conversion (confirmed CONVERT_IMPLICIT on the parameter side against the oracle),
+        // just not one that affects the column's seekability.
+        var column = new SqlType(SqlTypeCategory.Bit);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 5);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]

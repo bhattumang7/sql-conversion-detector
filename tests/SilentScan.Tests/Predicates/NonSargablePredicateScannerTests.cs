@@ -115,4 +115,15 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Equal(SargabilityFindingKind.LikePatternNotLiteral, finding.Kind);
         Assert.Equal("DisplayName", finding.ColumnName);
     }
+
+    [Fact]
+    public void WildcardColumnInFunction_HavingCountStar_DoesNotCrashAndDoesNotFire()
+    {
+        // Regression test for a real NullReferenceException found scanning
+        // olahallengren/SQL-Server-Maintenance-Solution during the Phase 4 pilot - see the
+        // fixture file header for the exact source line.
+        var findings = ScanFixture("WILDCARD_COLUMN_IN_FUNCTION_clean.sql");
+
+        Assert.Empty(findings);
+    }
 }

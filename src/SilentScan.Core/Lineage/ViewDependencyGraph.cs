@@ -14,15 +14,26 @@ public static class ViewDependencyGraph
     public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicViews) TopologicalSort(
         IReadOnlyList<ViewDefinition> views)
     {
-        var byName = views.ToDictionary(v => v.QualifiedName, StringComparer.OrdinalIgnoreCase);
-        var edges = views.ToDictionary(
+        // A corpus scan can see the same view name defined more than once - e.g. incremental
+        // upgrade scripts that each re-issue CREATE VIEW for the same object across a
+        // project's version history. Last one wins, consistent with CatalogBuilder's
+        // AddOrReplace semantics for tables (real deployments apply scripts in order, so the
+        // last CREATE is the one that's actually live).
+        var byName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var view in views)
+        {
+            byName[view.QualifiedName] = view;
+        }
+
+        var dedupedViews = byName.Values.ToList();
+        var edges = dedupedViews.ToDictionary(
             v => v.QualifiedName,
             v => FindReferencedViewNames(v.SelectStatement, byName.Keys),
             StringComparer.OrdinalIgnoreCase);
 
         var state = new TraversalState(byName, edges);
 
-        foreach (var view in views)
+        foreach (var view in dedupedViews)
         {
             VisitNode(view.QualifiedName, state);
         }

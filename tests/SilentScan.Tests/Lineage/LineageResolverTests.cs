@@ -248,4 +248,24 @@ public sealed class LineageResolverTests
         Assert.Equal(["Id", "Code"], view.Columns.Select(c => c.Name));
         Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("Code")!.Provenance);
     }
+
+    [Fact]
+    public void Resolve_ViewRedefinedAcrossFiles_LastDefinitionWinsRatherThanCrashing()
+    {
+        // Regression test for a real crash found scanning DNN Platform's corpus during the
+        // Phase 4 pilot: incremental upgrade scripts each re-issue CREATE VIEW for the same
+        // object across a project's version history, so ViewDependencyGraph.TopologicalSort
+        // saw the same qualified name twice and threw ArgumentException("An item with the
+        // same key has already been added"). Real deployments apply scripts in order, so the
+        // last CREATE is the one that's actually live - matches CatalogBuilder's
+        // AddOrReplace semantics for tables.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL, Notes VARCHAR(100) NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode FROM dbo.Orders;",
+            "CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode, Notes FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+
+        Assert.Equal(["OrderId", "OrderCode", "Notes"], view.Columns.Select(c => c.Name));
+    }
 }

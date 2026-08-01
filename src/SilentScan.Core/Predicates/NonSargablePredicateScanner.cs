@@ -41,12 +41,10 @@ public static class NonSargablePredicateScanner
 
         public override void Visit(LikePredicate node)
         {
-            if (node.FirstExpression is not ColumnReferenceExpression columnRef)
+            if (node.FirstExpression is not ColumnReferenceExpression columnRef || ColumnName(columnRef) is not { } columnName)
             {
                 return;
             }
-
-            var columnName = ColumnName(columnRef);
 
             switch (node.SecondExpression)
             {
@@ -69,16 +67,16 @@ public static class NonSargablePredicateScanner
             switch (expression)
             {
                 case FunctionCall { Parameters.Count: > 0 } functionCall
-                    when functionCall.Parameters.OfType<ColumnReferenceExpression>().FirstOrDefault() is { } columnRef:
-                    Add(SargabilityFindingKind.FunctionWrappedColumn, ColumnName(columnRef), functionCall.FunctionName.Value, functionCall);
+                    when FirstNamedColumn(functionCall.Parameters) is { } named:
+                    Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall);
                     break;
 
-                case CastCall { Parameter: ColumnReferenceExpression columnRef } castCall:
-                    Add(SargabilityFindingKind.CastOrConvertOnColumn, ColumnName(columnRef), "CAST", castCall);
+                case CastCall { Parameter: ColumnReferenceExpression columnRef } castCall when ColumnName(columnRef) is { } name:
+                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CAST", castCall);
                     break;
 
-                case ConvertCall { Parameter: ColumnReferenceExpression columnRef } convertCall:
-                    Add(SargabilityFindingKind.CastOrConvertOnColumn, ColumnName(columnRef), "CONVERT", convertCall);
+                case ConvertCall { Parameter: ColumnReferenceExpression columnRef } convertCall when ColumnName(columnRef) is { } name:
+                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CONVERT", convertCall);
                     break;
 
                 case BinaryExpression binary:
@@ -89,18 +87,32 @@ public static class NonSargablePredicateScanner
 
         private void InspectArithmetic(BinaryExpression binary)
         {
-            if (binary.FirstExpression is ColumnReferenceExpression leftColumn)
+            if (binary.FirstExpression is ColumnReferenceExpression leftColumn && ColumnName(leftColumn) is { } leftName)
             {
-                Add(SargabilityFindingKind.ColumnArithmetic, ColumnName(leftColumn), binary.BinaryExpressionType.ToString(), binary);
+                Add(SargabilityFindingKind.ColumnArithmetic, leftName, binary.BinaryExpressionType.ToString(), binary);
             }
-            else if (binary.SecondExpression is ColumnReferenceExpression rightColumn)
+            else if (binary.SecondExpression is ColumnReferenceExpression rightColumn && ColumnName(rightColumn) is { } rightName)
             {
-                Add(SargabilityFindingKind.ColumnArithmetic, ColumnName(rightColumn), binary.BinaryExpressionType.ToString(), binary);
+                Add(SargabilityFindingKind.ColumnArithmetic, rightName, binary.BinaryExpressionType.ToString(), binary);
             }
         }
 
-        private static string ColumnName(ColumnReferenceExpression columnRef) =>
-            columnRef.MultiPartIdentifier.Identifiers[^1].Value;
+        /// <summary>The first parameter that's a genuine named column reference - COUNT(*) etc. have a Wildcard ColumnReferenceExpression with no MultiPartIdentifier, which isn't "a column" for this rule's purposes.</summary>
+        private static (ColumnReferenceExpression Ref, string Name)? FirstNamedColumn(IList<ScalarExpression> parameters)
+        {
+            foreach (var parameter in parameters.OfType<ColumnReferenceExpression>())
+            {
+                if (ColumnName(parameter) is { } name)
+                {
+                    return (parameter, name);
+                }
+            }
+
+            return null;
+        }
+
+        private static string? ColumnName(ColumnReferenceExpression columnRef) =>
+            columnRef.MultiPartIdentifier?.Identifiers is { Count: > 0 } identifiers ? identifiers[^1].Value : null;
 
         private void Add(SargabilityFindingKind kind, string columnName, string? detail, TSqlFragment node) =>
             Findings.Add(new SargabilityFinding(kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn));

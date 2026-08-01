@@ -11,31 +11,41 @@ public static class ScanReportBuilder
     public static ScanReport Build(IReadOnlyList<string> sqlFilePaths)
     {
         var parser = new SqlScriptParser();
-        var fileHealth = new List<FileParseHealth>();
-        var parseResults = new List<SqlParseResult>();
+        return BuildFromParseResults(sqlFilePaths.Select(parser.ParseFile).ToList());
+    }
 
-        foreach (var path in sqlFilePaths)
+    /// <summary>
+    /// Builds a report from already-parsed sources. Exists separately from <see cref="Build"/>
+    /// so callers that need to preprocess text before parsing (e.g. the corpus scanner
+    /// substituting DNN's {databaseOwner}/{objectQualifier} template tokens) can parse in
+    /// memory via <see cref="SqlScriptParser.ParseText"/> instead of writing temp files.
+    /// </summary>
+    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults)
+    {
+        var fileHealth = new List<FileParseHealth>();
+        var cleanParseResults = new List<SqlParseResult>();
+
+        foreach (var result in allParseResults)
         {
-            var result = parser.ParseFile(path);
             var errors = result.Errors
                 .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))
                 .ToList();
-            fileHealth.Add(new FileParseHealth(path, errors));
+            fileHealth.Add(new FileParseHealth(result.SourcePath, errors));
 
             if (errors.Count == 0)
             {
-                parseResults.Add(result);
+                cleanParseResults.Add(result);
             }
         }
 
-        var tier1Findings = parseResults.SelectMany(NonSargablePredicateScanner.Scan).ToList();
-        var dynamicSqlFindings = parseResults.SelectMany(DynamicSqlScanner.Scan).ToList();
+        var tier1Findings = cleanParseResults.SelectMany(NonSargablePredicateScanner.Scan).ToList();
+        var dynamicSqlFindings = cleanParseResults.SelectMany(DynamicSqlScanner.Scan).ToList();
 
         // Catalog/lineage need every cleanly-parsed file together, so views can resolve
         // against tables (and other views) declared in a different file.
-        var catalog = CatalogBuilder.Build(parseResults);
-        var lineage = LineageResolver.Resolve(catalog, parseResults);
-        var typedFindings = parseResults
+        var catalog = CatalogBuilder.Build(cleanParseResults);
+        var lineage = LineageResolver.Resolve(catalog, cleanParseResults);
+        var typedFindings = cleanParseResults
             .SelectMany(r => TypedPredicateExtractor.Extract(r, catalog, lineage))
             .Where(f => f.Verdict != Verdict.SeekPreserved)
             .ToList();
