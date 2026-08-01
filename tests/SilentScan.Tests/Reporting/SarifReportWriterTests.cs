@@ -36,6 +36,7 @@ public sealed class SarifReportWriterTests
                 Verdict.ScanForced,
                 new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
                 new PredicateOperand.Value(null),
+                "=",
                 "test.sql",
                 1,
                 1)],

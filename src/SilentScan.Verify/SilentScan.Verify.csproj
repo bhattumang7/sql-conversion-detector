@@ -11,4 +11,8 @@
     <ProjectReference Include="../SilentScan.Core/SilentScan.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SilentScan.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -62,15 +62,32 @@ public static class TypedPredicateExtractor
         }
 
         public override void Visit(BooleanComparisonExpression node) =>
-            TryAddFinding(node.FirstExpression, node.SecondExpression, node);
+            TryAddFinding(node.FirstExpression, node.SecondExpression, ToOperatorText(node.ComparisonType), node);
 
         public override void Visit(BooleanTernaryExpression node)
         {
             if (node.TernaryExpressionType is BooleanTernaryExpressionType.Between or BooleanTernaryExpressionType.NotBetween)
             {
-                TryAddFinding(node.FirstExpression, node.SecondExpression, node);
+                // BETWEEN decomposes into `>= lower AND <= upper`; the lower bound's
+                // operator exercises the same column-side conversion behavior as the
+                // predicate as a whole, so it stands in for oracle probing purposes.
+                TryAddFinding(node.FirstExpression, node.SecondExpression, ">=", node);
             }
         }
+
+        private static string ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
+        {
+            BooleanComparisonType.Equals => "=",
+            BooleanComparisonType.GreaterThan => ">",
+            BooleanComparisonType.NotGreaterThan => "!>",
+            BooleanComparisonType.LessThan => "<",
+            BooleanComparisonType.NotLessThan => "!<",
+            BooleanComparisonType.GreaterThanOrEqualTo => ">=",
+            BooleanComparisonType.LessThanOrEqualTo => "<=",
+            BooleanComparisonType.NotEqualToBrackets => "<>",
+            BooleanComparisonType.NotEqualToExclamation => "<>",
+            _ => throw new NotImplementedException($"Unrecognized comparison operator: {comparisonType}"),
+        };
 
         private void RecordParameters(IList<ProcedureParameter> parameters)
         {
@@ -80,7 +97,7 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private void TryAddFinding(ScalarExpression first, ScalarExpression second, TSqlFragment node)
+        private void TryAddFinding(ScalarExpression first, ScalarExpression second, string operatorText, TSqlFragment node)
         {
             if (_scopeStack.Count == 0)
             {
@@ -116,7 +133,7 @@ public static class TypedPredicateExtractor
             var otherType = other is PredicateOperand.Value value ? value.Type : ((PredicateOperand.Column)other).Type;
             var verdict = VerdictClassifier.Classify(column.Type, otherType);
 
-            Findings.Add(new TypedPredicateFinding(verdict, column, other, sourcePath, node.StartLine, node.StartColumn));
+            Findings.Add(new TypedPredicateFinding(verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn));
         }
 
         private PredicateOperand ResolveOperand(ScalarExpression expression, Dictionary<string, ScopeEntry> byAlias, List<ScopeEntry> ordered)

@@ -12,6 +12,7 @@ public sealed record TypedPredicateFinding(
     Verdict Verdict,
     PredicateOperand.Column Column,
     PredicateOperand OtherOperand,
+    string Operator,
     string SourcePath,
     int Line,
     int ColumnPosition);
