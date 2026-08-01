@@ -389,4 +389,62 @@ public sealed class LineageResolverTests
 
         Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "recursive CTE");
     }
+
+    [Fact]
+    public void Resolve_AlterView_LedgeredAsUnresolvedIntoLineage()
+    {
+        // ViewDefinitionExtractor matches only CreateViewStatement - an ALTER VIEW redefinition
+        // is a distinct ScriptDOM node type and is invisible to lineage (coverage-remediation-
+        // plan.md Phase 2.1). This proves it's at least counted, not silently dropped, until
+        // that gap is closed.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE VIEW dbo.vw_T AS SELECT Col FROM dbo.T;",
+            "ALTER VIEW dbo.vw_T AS SELECT Col FROM dbo.T WHERE Col > 0;");
+
+        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("ALTER VIEW", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Resolve_CreateOrAlterView_LedgeredAsUnresolvedIntoLineage()
+    {
+        var (_, lineage) = Build("CREATE OR ALTER VIEW dbo.vw_T AS SELECT 1 AS Col;");
+
+        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("CREATE OR ALTER VIEW", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Resolve_AlterFunctionReturningTable_LedgeredAsUnresolvedIntoLineage()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT Col FROM dbo.T;",
+            "ALTER FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT Col FROM dbo.T WHERE Col > 0;");
+
+        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("ALTER FUNCTION", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Resolve_CreateOrAlterFunctionReturningTable_LedgeredAsUnresolvedIntoLineage()
+    {
+        var (_, lineage) = Build("CREATE OR ALTER FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT 1 AS Col;");
+
+        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("CREATE OR ALTER FUNCTION", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Resolve_ClrTableValuedFunction_ResolvesDeclaredReturnShapeLikeAnMstvf()
+    {
+        // A CLR TVF still declares its RETURNS TABLE(...) column list in the script even though
+        // the body is EXTERNAL NAME - unlike a CLR scalar function, there's no missing type
+        // information here, so this resolves through the exact same path as an ordinary
+        // multi-statement TVF, not a gap.
+        var (catalog, lineage) = Build("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];");
+
+        var relation = lineage.AllRelations["dbo.fn_Clr"];
+        var column = Assert.Single(relation.Columns);
+        Assert.Equal("Col", column.Name);
+        Assert.IsType<ColumnProvenance.Declared>(column.Provenance);
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "column type");
+    }
 }

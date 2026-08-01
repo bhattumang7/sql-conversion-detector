@@ -43,7 +43,8 @@ public sealed class SarifReportWriterTests
                 1)],
             [],
             [],
-            []);
+            [],
+            SkippedConstructSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -68,7 +69,8 @@ public sealed class SarifReportWriterTests
                 5,
                 [new TransformationSite("vw_outer.sql", 3, "CAST/CONVERT to Int"), new TransformationSite("vw_inner.sql", 2, "CAST/CONVERT to VarChar(20)")],
                 [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)])],
-            []);
+            [],
+            SkippedConstructSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -90,7 +92,8 @@ public sealed class SarifReportWriterTests
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)],
             [],
-            []);
+            [],
+            SkippedConstructSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -109,7 +112,8 @@ public sealed class SarifReportWriterTests
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")],
             [],
-            []);
+            [],
+            SkippedConstructSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -129,7 +133,8 @@ public sealed class SarifReportWriterTests
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.InnerParseFailed, "Incorrect syntax near '$$$'.")],
             [],
-            []);
+            [],
+            SkippedConstructSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -156,7 +161,8 @@ public sealed class SarifReportWriterTests
                 new SourceSpan("test.sql", 4, 10))],
             [],
             [],
-            []);
+            [],
+            SkippedConstructSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);

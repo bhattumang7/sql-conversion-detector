@@ -48,21 +48,21 @@
       "construct": "CreateTypeUdtStatement",
       "group": "ColumnDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
-      "rationale": "CLR UDT. No visitor; a column of this type resolves Type=null - safe (UNKNOWN, never a wrong verdict) but was uncounted until this ledgering pass. coverage-remediation-plan.md Phase 0.2/3.6."
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "CLR UDT. No visitor; a column of this type resolves Type=null - safe (UNKNOWN, never a wrong verdict). Now counted (coverage-remediation-plan.md Phase 0.2/3.6)."
     },
     {
       "construct": "CreateAssemblyStatement",
       "group": "ColumnDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": "CLR assembly registration. Deliberately not modeled - coverage-remediation-plan.md decision: count and decline, never analyze CLR."
     },
     {
       "construct": "CreateAggregateStatement",
       "group": "ColumnDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": "CLR aggregate. Same as CreateAssemblyStatement - counted, not analyzed."
     },
     {
@@ -131,16 +131,16 @@
     {
       "construct": "AlterViewStatement",
       "group": "ViewOrFunctionDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "ViewDefinitionExtractor matches only CreateViewStatement. An ALTER VIEW body is invisible to lineage - the view-inheritance analysis this study is built around silently does not run. coverage-remediation-plan.md Phase 2.1."
+      "status": "Ledgered",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "ViewDefinitionExtractor matches only CreateViewStatement. An ALTER VIEW body is invisible to lineage - the view-inheritance analysis this study is built around does not run for it, but every occurrence is now counted rather than silently dropped. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
     },
     {
       "construct": "CreateOrAlterViewStatement",
       "group": "ViewOrFunctionDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "Same gap as AlterViewStatement - the modern SSDT idiom for redefining a view is entirely invisible to lineage. coverage-remediation-plan.md Phase 2.1."
+      "status": "Ledgered",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "Same gap as AlterViewStatement - the modern SSDT idiom for redefining a view is entirely invisible to lineage, but now counted. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
     },
     {
       "construct": "CreateFunctionStatement (inline TVF)",
@@ -160,22 +160,29 @@
       "construct": "CreateFunctionStatement (scalar)",
       "group": "ViewOrFunctionDefiner",
       "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "No return-type registry exists (ScalarFunctionReturnType is matched nowhere). WHERE VarcharCol = dbo.fn_ReturnsNvarchar(@x) types the right side null and resolves Unknown - a guaranteed false negative on the classic pattern. coverage-remediation-plan.md Phase 3.1, highest-value single gap."
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "No return-type registry exists (ScalarFunctionReturnType is matched nowhere). WHERE VarcharCol = dbo.fn_ReturnsNvarchar(@x) types the right side null and resolves Unknown - a guaranteed false negative on the classic pattern, though now ledgered rather than silently dropped. Still the highest-value single gap in this plan (coverage-remediation-plan.md Phase 3.1)."
     },
     {
       "construct": "AlterFunctionStatement (view-layer forms)",
       "group": "ViewOrFunctionDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "Handled for catalog scoping and predicate-body walking, but not by ViewDefinitionExtractor - an ALTER FUNCTION redefining an iTVF/MSTVF is invisible to lineage. coverage-remediation-plan.md Phase 2.1."
+      "status": "Ledgered",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "Handled for catalog scoping and predicate-body walking, but not by ViewDefinitionExtractor - an ALTER FUNCTION redefining an iTVF/MSTVF is invisible to lineage, though now counted. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
     },
     {
       "construct": "CreateOrAlterFunctionStatement (view-layer forms)",
       "group": "ViewOrFunctionDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "Same gap as AlterFunctionStatement. coverage-remediation-plan.md Phase 2.1."
+      "status": "Ledgered",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "Same gap as AlterFunctionStatement, now counted. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
+    },
+    {
+      "construct": "CreateFunctionStatement (CLR table-valued)",
+      "group": "ViewOrFunctionDefiner",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "A CLR TVF still declares its RETURNS TABLE(...) column list in the script even though the body is EXTERNAL NAME - unlike a CLR scalar function, there is no missing type information, so it resolves through the identical declared-shape path an ordinary multi-statement TVF uses. Not a gap; corrects an earlier (wrong) assumption in this plan that it was."
     },
     {
       "construct": "CreateExternalFunctionStatement",

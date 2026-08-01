@@ -372,6 +372,14 @@ public static class TypedPredicateExtractor
                     return new PredicateOperand.Value(Rules.LiteralTypeResolver.Resolve(literal), IsLiteral: true, Rules.LiteralTextRenderer.Render(literal));
 
                 default:
+                    // Most commonly a function call (scalar UDF or builtin - neither has a return
+                    // type registry; coverage-remediation-plan.md Phase 3.1/0.2), but also any
+                    // other scalar expression kind this pass doesn't type. The operand still
+                    // resolves Unknown, exactly as before - this only makes it counted instead of
+                    // silently falling through.
+                    ledger.Record(
+                        AnalysisPass.Predicates, sourcePath, expression.StartLine, expression.StartColumn,
+                        "predicate operand", $"operand of kind '{expression.GetType().Name}' has no type resolution - resolved Unknown");
                     return new PredicateOperand.Value(Type: null);
             }
         }

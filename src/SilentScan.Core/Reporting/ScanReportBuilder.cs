@@ -95,7 +95,9 @@ public static class ScanReportBuilder
             .ThenBy(s => s.Column)
             .ToList();
 
-        return new ScanReport(new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, orderedSkippedConstructs);
+        return new ScanReport(
+            new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings,
+            orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs));
     }
 
     private static int VerdictRank(Verdict verdict) => verdict switch

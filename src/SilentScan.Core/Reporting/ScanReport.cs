@@ -9,4 +9,5 @@ public sealed record ScanReport(
     IReadOnlyList<TypedPredicateFinding> TypedFindings,
     IReadOnlyList<DynamicSqlFinding> DynamicSqlFindings,
     IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
-    IReadOnlyList<SkippedConstruct> SkippedConstructs);
+    IReadOnlyList<SkippedConstruct> SkippedConstructs,
+    SkippedConstructSummary SkippedConstructSummary);

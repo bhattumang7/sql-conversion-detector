@@ -543,6 +543,64 @@ public sealed class CatalogBuilderTests
         Assert.False(catalog.Find("dbo.T")!.FindColumn("Id")!.IsNullable);
     }
 
+    [Fact]
+    public void Build_SpatialColumn_TypeIsNullAndLedgered()
+    {
+        // sys.geography/geometry are CLR UDTs with no local definition to resolve (coverage-
+        // remediation-plan.md Phase 0.2) - the column still enters the catalog (Type: null,
+        // which VerdictClassifier already treats as Unknown), but until this pass it was
+        // uncounted, indistinguishable from a genuine resolution success.
+        var catalog = BuildFrom("CREATE TABLE dbo.Cities (Id INT NOT NULL, Location GEOGRAPHY NULL);");
+
+        Assert.Null(catalog.Find("dbo.Cities")!.FindColumn("Location")!.Type);
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "column type" && e.Reason.Contains("Location", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithNoDeclaredType_NotLedgered()
+    {
+        // A computed column's type comes from its expression, not a DataType node - this must
+        // not be confused with the spatial/CLR case above, which has a real declared type that
+        // failed to resolve.
+        var catalog = BuildFrom("CREATE TABLE dbo.T (A INT NOT NULL, B AS (A + 1));");
+
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "column type");
+    }
+
+    [Fact]
+    public void Build_CreateAssembly_Ledgered()
+    {
+        var catalog = BuildFrom("CREATE ASSEMBLY MyAssembly FROM 0x4D5A;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly" && e.Reason.Contains("MyAssembly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateAggregate_Ledgered()
+    {
+        var catalog = BuildFrom("CREATE AGGREGATE dbo.Concat(@input NVARCHAR(4000)) RETURNS NVARCHAR(4000) EXTERNAL NAME MyAssembly.[Concat];");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR aggregate" && e.Reason.Contains("dbo.Concat", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateTypeExternalName_Ledgered()
+    {
+        var catalog = BuildFrom("CREATE TYPE dbo.Point EXTERNAL NAME MyAssembly.[Point];");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR user-defined type" && e.Reason.Contains("dbo.Point", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateAssembly_DoesNotTripleCountAcrossThreeBuildPhases()
+    {
+        // CatalogBuilder walks every file three times (CollectTypeAliases/CollectTables/
+        // ApplyEverythingElse) - the CLR visitors must be gated to exactly one phase.
+        var catalog = BuildFrom("CREATE ASSEMBLY MyAssembly FROM 0x4D5A;");
+
+        Assert.Single(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly");
+    }
+
     private static SqlParseResult Parse(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

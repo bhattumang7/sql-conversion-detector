@@ -150,6 +150,46 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        // CLR constructs (coverage-remediation-plan.md Phase 0.2/3.6): no assembly-backed type,
+        // aggregate, or CLR UDT is modeled - the decision is to count and decline, never guess at
+        // a shape that lives outside the scanned script. Gated to one phase so a file walked
+        // multiple times (CollectTypeAliases/CollectTables/ApplyEverythingElse) doesn't triple-count.
+        public override void ExplicitVisit(CreateAssemblyStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "CLR assembly", $"'{node.Name.Value}': CREATE ASSEMBLY is not modeled - CLR types/functions/aggregates it backs resolve Unknown");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateAggregateStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "CLR aggregate", $"'{SchemaObjectNameHelper.Qualify(node.Name)}': CREATE AGGREGATE is not modeled - not usable in typed comparisons");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateTypeUdtStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "CLR user-defined type", $"'{SchemaObjectNameHelper.Qualify(node.Name)}': CREATE TYPE ... EXTERNAL NAME is not modeled - columns of this type resolve Unknown");
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(CreateTableStatement node)
         {
             if (phase == BuildPhase.CollectTables)
@@ -291,7 +331,7 @@ public static class CatalogBuilder
             var isTemp = schema is null;
             var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation, catalog.TypeAliases);
+            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
             var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
             columns = ApplyPrimaryKeyNotNull(columns, allIndexes);
@@ -321,7 +361,7 @@ public static class CatalogBuilder
                 return;
             }
 
-            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases);
+            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
@@ -456,7 +496,7 @@ public static class CatalogBuilder
             // same simplification SchemaObjectNameHelper makes), so the scanned database's
             // default is the closest available signal rather than leaving every unqualified
             // column UNKNOWN.
-            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation, catalog.TypeAliases);
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
             var table = new CatalogTable(
@@ -543,11 +583,11 @@ public static class CatalogBuilder
     /// its declared columns become <see cref="Lineage.ColumnProvenance.Declared"/> provenance.
     /// </summary>
     public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
-        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null) =>
-        BuildColumns(definition, defaultCollation, typeAliases).Columns;
+        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null, string? sourcePath = null) =>
+        BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath).Columns;
 
     private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(
-        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases)
+        TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases, SkipLedger? ledger, string? sourcePath)
     {
         var columns = new List<CatalogColumn>();
         var inlineIndexes = new List<CatalogIndex>();
@@ -562,7 +602,24 @@ public static class CatalogBuilder
                 inlineIndexes.Add(BuildInlineIndex(inlineIndex, name));
             }
 
-            var resolvedType = SqlTypeReferenceResolver.Resolve(columnDefinition.DataType, columnDefinition.Collation, typeAliases);
+            var declaredType = columnDefinition.DataType;
+            var resolvedType = declaredType is null ? null : SqlTypeReferenceResolver.Resolve(declaredType, columnDefinition.Collation, typeAliases);
+            if (resolvedType is null && sourcePath is not null && declaredType is not null)
+            {
+                // A computed column with no declared type (its type comes from the expression,
+                // out of scope here - a documented hard case, not a resolution failure) has a
+                // null DataType and is intentionally excluded from this: nothing to have
+                // resolved. What IS recorded: a table type (TVP shape), CLR UDT, or other
+                // explicitly-declared type this resolver declines to guess at (coverage-
+                // remediation-plan.md Phase 0.2) - the column still enters the catalog as
+                // Unknown (VerdictClassifier already treats a null Type as Unknown, never a
+                // guess), but until now nothing counted how often this happens, so it was safe
+                // but invisible in the study's coverage accounting.
+                ledger?.Record(
+                    AnalysisPass.Catalog, sourcePath, columnDefinition.StartLine, columnDefinition.StartColumn,
+                    "column type", $"column '{name}' has type '{SchemaObjectNameHelper.Qualify(declaredType.Name)}' which could not be resolved");
+            }
+
             if (resolvedType is { IsStringFamily: true, Collation: null } && defaultCollation is not null)
             {
                 // CLAUDE.md Pass 1: "database default collation from any CREATE DATABASE/

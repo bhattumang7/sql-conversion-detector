@@ -1194,4 +1194,19 @@ public sealed class TypedPredicateExtractorTests
         Assert.Empty(findings.TypedFindings);
         Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "trigger inserted/deleted");
     }
+
+    [Fact]
+    public void Extract_ColumnComparedToFunctionCall_ResolvesUnknownAndLedgersOperand()
+    {
+        // No return-type registry exists for scalar UDFs or builtins (coverage-remediation-
+        // plan.md Phase 3.1) - the right side resolves Unknown, same as before this pass, but
+        // now it's counted instead of silently falling through the default switch arm.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col = dbo.fn_DisplayName(1);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("FunctionCall", StringComparison.Ordinal));
+    }
 }

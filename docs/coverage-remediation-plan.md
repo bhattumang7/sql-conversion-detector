@@ -100,10 +100,14 @@ accident.
 `CatalogBuilder` (lines 273, 352, 495). Everything else that falls through a
 `switch` or a `when` guard vanishes. Concretely uncounted today:
 `CatalogBuilder.cs:565` stores a column with `Type = null` and records nothing;
-`ViewDefinitionExtractor.cs:46`'s `when` guard drops a CLR TVF with no entry;
 `CREATE ASSEMBLY` / `CREATE AGGREGATE` / `CREATE TYPE … EXTERNAL NAME` have no
 visitor at all; `TypedPredicateExtractor.cs:374` returns an untyped operand for any
-unrecognised expression without recording it.
+unrecognised expression without recording it. (A CLR table-valued function was
+suspected to be a fourth silent drop via `ViewDefinitionExtractor.cs:46`'s `when`
+guard - checked while implementing this item and found not to be one: a CLR TVF
+still declares its `RETURNS TABLE(...)` column list in the script, so
+`DeclareTableVariableBody.Definition` is never null there on a successful parse
+and it resolves through the same path an ordinary multi-statement TVF does.)
 
 The policy in `SkippedConstruct.cs:11-16` says nothing that reaches a pass is ever
 silently dropped. That is currently aspirational.
@@ -120,9 +124,9 @@ silently dropped. That is currently aspirational.
 - Surface the ledger grouped by `ConstructKind` in `ScanReport` output, the way
   `DynamicSqlSummary` already is.
 
-**Done when.** A scan of a fixture containing a spatial column, a CLR TVF and a
-`CREATE ASSEMBLY` reports three distinct, explainable ledger entries; a test
-asserts the ledger is non-empty for each.
+**Done when.** A scan of a fixture containing a spatial column, an unresolved
+predicate operand and a `CREATE ASSEMBLY` reports three distinct, explainable
+ledger entries; a test asserts the ledger is non-empty for each.
 
 **Size.** M.
 
