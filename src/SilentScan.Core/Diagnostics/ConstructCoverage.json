@@ -208,9 +208,9 @@
     {
       "construct": "TVF-to-TVF dependency edge",
       "group": "ViewOrFunctionDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "ViewDependencyGraph's TableReferenceCollector collects only NamedTableReference. An iTVF selecting FROM another iTVF creates no dependency edge, so topo order can resolve the outer function before the inner one and its columns degrade to Unknown; TVF cycles go undetected. coverage-remediation-plan.md Phase 3.5."
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "ViewDependencyGraph's TableReferenceCollector collected only NamedTableReference. An iTVF selecting FROM another iTVF created no dependency edge, so topo order could resolve the outer function before the inner one and its columns would degrade to Unknown; TVF cycles went undetected. Fixed: the collector also matches SchemaObjectFunctionTableReference. Verified as genuinely load-bearing by temporarily reverting the fix and confirming both regression tests fail without it. coverage-remediation-plan.md Phase 3.5."
     },
     {
       "construct": "CreateProcedureStatement",

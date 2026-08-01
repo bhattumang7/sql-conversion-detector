@@ -206,6 +206,38 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
+    public void Resolve_InlineTvfCallingAnotherInlineTvf_DeclaredOuterFirst_StillResolvesToBaseColumn()
+    {
+        // FROM dbo.fn_Inner(...) inside an inline TVF's own SELECT is a
+        // SchemaObjectFunctionTableReference, not a NamedTableReference -
+        // ViewDependencyGraph.TableReferenceCollector only matched the latter, so no dependency
+        // edge existed between the two TVFs (coverage-remediation-plan.md Phase 3.5). Declaring
+        // the outer function BEFORE the inner one in source order is what actually exercises
+        // this: without the edge, topological order has no reason to visit fn_Inner first, and
+        // fn_Outer's column would degrade to Unknown depending on traversal order.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE FUNCTION dbo.fn_Outer() RETURNS TABLE AS RETURN SELECT Col FROM dbo.fn_Inner();",
+            "CREATE FUNCTION dbo.fn_Inner() RETURNS TABLE AS RETURN SELECT Col FROM dbo.T;");
+
+        var outer = lineage.Find("dbo.fn_Outer")!;
+        var provenance = Assert.IsType<ColumnProvenance.BaseColumn>(outer.FindColumn("Col")!.Provenance);
+        Assert.Equal("dbo.T", provenance.TableQualifiedName);
+        Assert.Equal(1, provenance.Depth);
+    }
+
+    [Fact]
+    public void Resolve_CyclicInlineTvfs_DetectedAsCyclicNotSilentlyUnknown()
+    {
+        var (_, lineage) = Build(
+            "CREATE FUNCTION dbo.fn_A() RETURNS TABLE AS RETURN SELECT Id FROM dbo.fn_B();",
+            "CREATE FUNCTION dbo.fn_B() RETURNS TABLE AS RETURN SELECT Id FROM dbo.fn_A();");
+
+        Assert.Contains("dbo.fn_A", lineage.CyclicViews);
+        Assert.Contains("dbo.fn_B", lineage.CyclicViews);
+    }
+
+    [Fact]
     public void Resolve_UnknownBaseTable_ProducesUnknownProvenanceNotAGuess()
     {
         var (_, lineage) = Build("CREATE VIEW dbo.vw_Orphan AS SELECT SomeColumn FROM dbo.NoSuchTable;");

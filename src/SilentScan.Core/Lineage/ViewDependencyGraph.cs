@@ -91,6 +91,15 @@ public static class ViewDependencyGraph
 
         public override void Visit(NamedTableReference node) =>
             QualifiedNames.Add(SchemaObjectNameHelper.Qualify(node.SchemaObject));
+
+        // An inline TVF calling another inline TVF in its own FROM clause (FROM
+        // dbo.other_itvf(...)) is a SchemaObjectFunctionTableReference, not a
+        // NamedTableReference - missing this meant no dependency edge was recorded between
+        // them, so topological order could resolve the outer TVF before the inner one and its
+        // columns would degrade to Unknown, and a genuine TVF-to-TVF cycle went undetected
+        // entirely (coverage-remediation-plan.md Phase 3.5).
+        public override void Visit(SchemaObjectFunctionTableReference node) =>
+            QualifiedNames.Add(SchemaObjectNameHelper.Qualify(node.SchemaObject));
     }
 
     private sealed class TraversalState(Dictionary<string, ViewDefinition> byName, Dictionary<string, HashSet<string>> edges)

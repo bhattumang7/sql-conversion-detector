@@ -412,21 +412,27 @@ too, since both share the same `VariableTableReference` fix.
 **Size.** Larger than estimated (S) - the `VariableTableReference` gap it
 surfaced was the actual blocker, not a footnote.
 
-### 3.5 TVF-to-TVF dependency edges
+### 3.5 TVF-to-TVF dependency edges — DONE
 
-**Problem.** `ViewDependencyGraph.TableReferenceCollector` collects only
-`NamedTableReference` (`ViewDependencyGraph.cs:88-93`). An iTVF selecting `FROM
-dbo.other_itvf(…)` creates no edge, so topological order can resolve the outer
-function first and the inner one's columns degrade to Unknown. True cycles through
-TVF calls are also not detected.
+**Problem.** `ViewDependencyGraph.TableReferenceCollector` collected only
+`NamedTableReference`. An iTVF selecting `FROM dbo.other_itvf(…)` created no
+edge, so topological order could resolve the outer function first and the inner
+one's columns would degrade to Unknown. True cycles through TVF calls were also
+not detected.
 
-**Work.** Collect `SchemaObjectFunctionTableReference` too.
+**Work done.** `TableReferenceCollector` also matches
+`SchemaObjectFunctionTableReference` now.
 
-**Done when.** A two-deep iTVF chain resolves to base columns at depth 2 regardless
-of declaration order in the file, and a TVF cycle is reported as cyclic rather than
-Unknown.
+**Verified.** A two-deep iTVF chain, declared OUTER-before-inner in source order
+specifically (the case that actually exercises the missing edge - `Dictionary`
+enumeration order otherwise happens to match declaration order and would mask
+the bug), resolves to the base column at depth 1; a genuine iTVF-to-iTVF cycle is
+reported as cyclic. Confirmed both are genuinely load-bearing, not vacuous, by
+temporarily reverting the fix (`git stash` on just this file) and watching both
+new tests fail with the exact symptom the problem statement predicted -
+`Unknown` provenance instead of `BaseColumn`, and an empty cyclic-views set.
 
-**Size.** S.
+**Size.** S, as estimated.
 
 ### 3.6 CLR: decline explicitly, do not model
 
