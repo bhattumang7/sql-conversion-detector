@@ -1076,4 +1076,98 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(findings);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
+
+    [Fact]
+    public void Extract_TriggerBody_InsertedPseudoTable_ResolvesToTargetTableColumn()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.Orders
+            AFTER INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_TriggerBody_DeletedPseudoTableWithAlias_Resolves()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.Orders
+            AFTER DELETE
+            AS
+            BEGIN
+                IF EXISTS (SELECT 1 FROM deleted d WHERE d.Code = N'x') RETURN;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Extract_AlterTriggerBody_InsertedPseudoTable_Resolves()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TRIGGER dbo.trg_Orders ON dbo.Orders AFTER INSERT AS BEGIN RETURN; END",
+            """
+            ALTER TRIGGER dbo.trg_Orders ON dbo.Orders
+            AFTER INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Extract_TriggerBody_InsertedVisibleInsideNestedSubquery()
+    {
+        // inserted/deleted are visible throughout the whole trigger body, not just a single
+        // top-level SELECT - the same CTE-style scope chain used elsewhere in this pass.
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.Orders
+            AFTER INSERT
+            AS
+            BEGIN
+                IF EXISTS (SELECT 1 FROM (SELECT Code FROM inserted) AS i WHERE i.Code = N'x') RETURN;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Extract_TriggerBody_TargetTableNotInCatalog_RecordsSkipInsteadOfGuessing()
+    {
+        var findings = ExtractAll(
+            """
+            CREATE TRIGGER dbo.trg_Ghost ON dbo.Ghost
+            AFTER INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        Assert.Empty(findings.TypedFindings);
+        Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "trigger inserted/deleted");
+    }
 }

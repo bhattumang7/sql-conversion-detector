@@ -129,9 +129,9 @@ public static class TypedPredicateExtractor
 
         public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name);
+        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject.Name);
 
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name);
+        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject.Name);
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
@@ -186,14 +186,50 @@ public static class TypedPredicateExtractor
             _currentProcScope = previousScope;
         }
 
-        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name)
+        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, SchemaObjectName targetTableName)
         {
             _variables.Clear();
 
             var previousScope = _currentProcScope;
             _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+
+            // inserted/deleted are visible throughout the whole trigger body, not just a single
+            // top-level SELECT - pushed onto the same CTE stack a real WITH clause uses (they're
+            // resolved identically by FromScopeResolver, a named relation checked before the
+            // catalog/views), so nested subqueries inherit them the same way a CTE would.
+            _cteStack.Push(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName, node)));
             node.AcceptChildren(this);
+            _cteStack.Pop();
+
             _currentProcScope = previousScope;
+        }
+
+        /// <summary>
+        /// inserted/deleted are shaped exactly like the trigger's own target table (docs/audit-
+        /// remediation-plan.md, trigger inserted/deleted resolution - a gap found auditing this
+        /// pass, not on the original remediation plan): a predicate against inserted.Col reflects
+        /// that real base-table column's type and index, so this reuses the same catalog-table ->
+        /// ResolvedRelation conversion an ordinary FROM-clause table reference goes through,
+        /// rather than inventing a parallel resolution path.
+        /// </summary>
+        private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
+            var table = catalog.Find(qualifiedName);
+            if (table is null)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
+                    "trigger inserted/deleted", $"trigger target table '{qualifiedName}' has no known DDL - inserted/deleted left unresolved");
+                return EmptyCteRelations;
+            }
+
+            var relation = FromScopeResolver.ToResolvedRelation(table, qualifiedName);
+            return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["inserted"] = relation,
+                ["deleted"] = relation,
+            };
         }
 
         public override void Visit(BooleanComparisonExpression node)

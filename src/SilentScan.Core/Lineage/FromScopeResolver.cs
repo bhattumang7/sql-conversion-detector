@@ -216,7 +216,14 @@ public static class FromScopeResolver
         }
     }
 
-    private static ResolvedRelation ToResolvedRelation(CatalogTable? table, string qualifiedName)
+    /// <summary>
+    /// Exposed for <see cref="Predicates.TypedPredicateExtractor"/>: a trigger's inserted/
+    /// deleted pseudo-tables are shaped exactly like the trigger's own target table (docs/
+    /// audit-remediation-plan.md, trigger inserted/deleted resolution), so building their
+    /// relation is the identical "real catalog table -> ResolvedRelation" conversion an ordinary
+    /// FROM-clause table reference already does.
+    /// </summary>
+    internal static ResolvedRelation ToResolvedRelation(CatalogTable? table, string qualifiedName)
     {
         if (table is null)
         {
