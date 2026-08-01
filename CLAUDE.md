@@ -12,6 +12,8 @@ positive in the published study is worse than ten missed true positives.
 Roadmap and phase status live in `plan.md`. Local setup in `docs/local-dev.md`.
 This file is the standing contract; don't turn it back into a build plan.
 
+When you have to make code changes and are just moving to the next stage and all that you have to ask from me is yes, never stop for me in such situations - just continue working.
+
 ## Hard scope (do not revisit without asking)
 
 * SQL Server / T-SQL only. Parser is `Microsoft.SqlServer.TransactSql.ScriptDom`.
