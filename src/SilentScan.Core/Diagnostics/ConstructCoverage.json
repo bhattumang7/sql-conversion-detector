@@ -264,16 +264,16 @@
     {
       "construct": "CreateTriggerStatement (DDL: ON DATABASE / ON ALL SERVER)",
       "group": "ProcedureOrTriggerDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "TriggerObject.Name is dereferenced unconditionally; a DDL trigger has no target object name. Suspected NullReferenceException that would abort an entire corpus scan with no isolation - unreproduced as of this entry. coverage-remediation-plan.md Phase 0.3."
+      "status": "Ledgered",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "TriggerObject.Name is null for a DDL trigger (no target table). Reproduced as an unguarded NullReferenceException that aborted the whole scan; fixed to record a ledger entry and still walk the body for ordinary predicates against real tables (coverage-remediation-plan.md Phase 0.3). No inserted/deleted pseudo-tables exist for this trigger kind at all (EVENTDATA() is the data source), so nothing beyond the guard is missing."
     },
     {
       "construct": "CreateTriggerStatement (LOGON)",
       "group": "ProcedureOrTriggerDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "Same nameless-TriggerObject shape as the DDL-trigger case. coverage-remediation-plan.md Phase 0.3."
+      "status": "Ledgered",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Same nameless-TriggerObject shape as the DDL-trigger case; same fix. coverage-remediation-plan.md Phase 0.3."
     },
     {
       "construct": "SelectStatement / QuerySpecification (WHERE/HAVING)",

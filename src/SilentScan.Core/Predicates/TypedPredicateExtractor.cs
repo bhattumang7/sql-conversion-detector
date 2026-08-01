@@ -129,9 +129,9 @@ public static class TypedPredicateExtractor
 
         public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject.Name);
+        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
 
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject.Name);
+        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
@@ -186,12 +186,29 @@ public static class TypedPredicateExtractor
             _currentProcScope = previousScope;
         }
 
-        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, SchemaObjectName targetTableName)
+        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
         {
             _variables.Clear();
 
             var previousScope = _currentProcScope;
             _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+
+            // A DDL trigger (ON DATABASE/ON ALL SERVER) or LOGON trigger has no target object -
+            // TriggerObject.Name is null whenever TriggerScope isn't Normal (coverage-
+            // remediation-plan.md Phase 0.3, reproduced: this used to be an unguarded dereference
+            // that took down the whole scan). Neither kind has an inserted/deleted rowset at all (a
+            // DDL trigger gets its data from EVENTDATA(), not a pseudo-table), so there is nothing
+            // to guess here - record it and still walk the body, since it may still contain
+            // ordinary predicates against real tables.
+            if (triggerObject.Name is not { } targetTableName)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
+                    "DDL/LOGON trigger", $"trigger scope '{triggerObject.TriggerScope}' has no target table - no inserted/deleted pseudo-tables to resolve");
+                node.AcceptChildren(this);
+                _currentProcScope = previousScope;
+                return;
+            }
 
             // inserted/deleted are visible throughout the whole trigger body, not just a single
             // top-level SELECT - pushed onto the same CTE stack a real WITH clause uses (they're

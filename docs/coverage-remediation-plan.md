@@ -130,28 +130,35 @@ ledger entries; a test asserts the ledger is non-empty for each.
 
 **Size.** M.
 
-### 0.3 Crash-proof the trigger visitor
+### 0.3 Crash-proof the trigger visitor — DONE, reproduced real
 
-**Problem (unverified — reproduce first).** `TypedPredicateExtractor.cs:132,134`
-dereference `node.TriggerObject.Name` unconditionally into
+**Problem (was unverified; reproduced before fixing).** `TypedPredicateExtractor.cs:132,134`
+dereferenced `node.TriggerObject.Name` unconditionally into
 `SchemaObjectNameHelper.Qualify`, which dereferences `name.BaseIdentifier.Value`
 (`SchemaObjectNameHelper.cs:11`). A DDL trigger (`ON DATABASE` / `ON ALL SERVER`)
 and a LOGON trigger have no target object name. There is no try/catch anywhere in
 `SilentScan.Core`, and `ScanReportBuilder.cs:60` calls the extractor per file with
-no isolation — so one such file would abort an entire corpus scan rather than
-degrade to a skip.
+no isolation — so one such file aborted an entire corpus scan rather than degrade
+to a skip. Confirmed with a standalone repro before touching any code: both a
+`CREATE TRIGGER … ON DATABASE FOR CREATE_TABLE` and a `… ON ALL SERVER FOR LOGON`
+threw `NullReferenceException` from exactly this call chain.
 
-**Work.**
-- Reproduce with a `CREATE TRIGGER … ON DATABASE FOR CREATE_TABLE` fixture. If it
-  does not throw, downgrade this item to a coverage entry in the matrix and move on.
-- Null-guard the target name; record a ledger entry naming the trigger scope and
-  **still walk the body** — a DDL trigger body routinely contains ordinary
-  analyzable predicates against real tables.
-- Read `TriggerObject.TriggerScope` rather than inferring from a null name.
-- Separately, decide whether `ScanReportBuilder` should isolate per-file failures.
-  Recommendation: yes, but as its own item — a scan that dies on file 300 of 339
-  loses everything, and no amount of null-guarding proves the next crash won't
-  happen.
+**Work done.**
+- Null-guarded the target name (`triggerObject.Name is not { } targetTableName`);
+  records a ledger entry (`"DDL/LOGON trigger"`) naming the `TriggerScope` and
+  **still walks the body** — a DDL trigger body routinely contains ordinary
+  analyzable predicates against real tables, and the fix is verified to still
+  report those.
+- Read `TriggerObject.TriggerScope` for the ledger message rather than inferring
+  from a null name — `VisitTriggerBody` now takes the whole `TriggerObject`.
+- `CreateOrAlterTriggerStatement` deliberately NOT added here — it needs the same
+  fix, but belongs with the rest of the `Create`/`Alter`/`CreateOrAlter` parity
+  sweep in Phase 2.1, not bolted onto a crash fix.
+
+**Still open.** Whether `ScanReportBuilder` should isolate per-file failures.
+Recommendation unchanged: yes, but as its own item — a scan that dies on file 300
+of 339 loses everything, and no amount of null-guarding proves the next crash
+won't happen.
 
 **Done when.** A DDL trigger and a LOGON trigger both scan without throwing, both
 appear in the ledger, and predicates in their bodies against real tables are still

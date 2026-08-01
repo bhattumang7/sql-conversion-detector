@@ -1196,6 +1196,66 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_DdlTrigger_OnDatabase_DoesNotThrowAndLedgersInsteadOfGuessing()
+    {
+        // Reproduced before this fix (coverage-remediation-plan.md Phase 0.3): TriggerObject.Name
+        // is null for a DDL trigger (no target table - it fires on database-level DDL events, not
+        // rows), and the trigger visitor used to dereference it unconditionally, taking down the
+        // whole scan on the first DDL trigger it encountered.
+        var findings = ExtractAll(
+            """
+            CREATE TRIGGER trg_DdlAudit
+            ON DATABASE
+            FOR CREATE_TABLE
+            AS
+            BEGIN
+                DECLARE @x INT;
+            END
+            """);
+
+        Assert.Empty(findings.TypedFindings);
+        Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "DDL/LOGON trigger");
+    }
+
+    [Fact]
+    public void Extract_LogonTrigger_DoesNotThrowAndLedgersInsteadOfGuessing()
+    {
+        var findings = ExtractAll(
+            """
+            CREATE TRIGGER trg_LogonAudit
+            ON ALL SERVER
+            FOR LOGON
+            AS
+            BEGIN
+                DECLARE @x INT = 1;
+            END
+            """);
+
+        Assert.Empty(findings.TypedFindings);
+        Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "DDL/LOGON trigger");
+    }
+
+    [Fact]
+    public void Extract_DdlTriggerBody_RealPredicateAgainstRealTable_StillAnalyzed()
+    {
+        // A DDL trigger has no inserted/deleted, but its body can still contain ordinary
+        // predicates against real tables - those must not be lost just because the trigger
+        // itself has no target.
+        var findings = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE TRIGGER trg_DdlAudit ON DATABASE FOR CREATE_TABLE
+            AS
+            BEGIN
+                SELECT Col FROM dbo.T WHERE Col = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
     public void Extract_ColumnComparedToFunctionCall_ResolvesUnknownAndLedgersOperand()
     {
         // No return-type registry exists for scalar UDFs or builtins (coverage-remediation-
