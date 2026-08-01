@@ -10,16 +10,27 @@ namespace SilentScan.Core.Lineage;
 /// </summary>
 public static class ColumnProvenanceAnalysis
 {
-    /// <summary>True if the value at this point is a computed expression (CAST/CONVERT or any other scalar expression), not a passthrough of a real column.</summary>
-    public static bool IsExpressionDerived(ColumnProvenance provenance) =>
-        provenance is ColumnProvenance.Cast or ColumnProvenance.Expression;
+    /// <summary>
+    /// True if the value at this point is a computed expression (CAST/CONVERT or any other
+    /// scalar expression), not a passthrough of a real column. A UNION branch counts if ANY
+    /// branch is expression-derived - CLAUDE.md's "mixed-branch case is itself a finding," and
+    /// a predicate against the merged column can't seek through the expression-derived branch
+    /// regardless of what the other branches look like.
+    /// </summary>
+    public static bool IsExpressionDerived(ColumnProvenance provenance) => provenance switch
+    {
+        ColumnProvenance.Cast or ColumnProvenance.Expression => true,
+        ColumnProvenance.Union union => union.Branches.Any(IsExpressionDerived),
+        _ => false,
+    };
 
-    /// <summary>Every base table column reachable underneath this provenance (0, 1, or many - an expression can combine several columns).</summary>
+    /// <summary>Every base table column reachable underneath this provenance (0, 1, or many - an expression, or a UNION of several branches, can combine several columns).</summary>
     public static IReadOnlyList<ColumnProvenance.BaseColumn> FindUnderlyingBaseColumns(ColumnProvenance provenance) => provenance switch
     {
         ColumnProvenance.BaseColumn baseColumn => [baseColumn],
         ColumnProvenance.Cast cast => FindUnderlyingBaseColumns(cast.Inner),
         ColumnProvenance.Expression expression => [.. expression.Inputs.SelectMany(FindUnderlyingBaseColumns)],
+        ColumnProvenance.Union union => [.. union.Branches.SelectMany(FindUnderlyingBaseColumns)],
         _ => [],
     };
 
@@ -50,6 +61,18 @@ public static class ColumnProvenanceAnalysis
                 foreach (var input in expression.Inputs)
                 {
                     Walk(input, sites);
+                }
+
+                break;
+
+            case ColumnProvenance.Union union:
+                // The Union node itself isn't a transformation site - each branch's own
+                // Cast/Expression sites (if any) already carry their own file/line, so a
+                // reader can tell which UNION branch introduced the mismatch without this
+                // adding a synthetic "UNION" entry with no origin of its own.
+                foreach (var branch in union.Branches)
+                {
+                    Walk(branch, sites);
                 }
 
                 break;

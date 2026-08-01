@@ -334,4 +334,49 @@ public sealed class TypedPredicateExtractorTests
         var underlying = Assert.Single(finding.UnderlyingBaseColumns);
         Assert.Equal("Name", underlying.ColumnName);
     }
+
+    [Fact]
+    public void Extract_UnionViewWithOneCastBranch_ReportsExpressionDerivedForMixedBranchColumn()
+    {
+        // CLAUDE.md Pass 2: "record ALL branch types - the mixed-branch case is itself a
+        // finding." vw_Combined's Id column passes through untouched from dbo.Recent but is
+        // CAST from VARCHAR in the dbo.Archive branch; a predicate against the merged column
+        // can't seek through the Archive branch regardless of the other branch being clean.
+        var findings = ExtractExpressionDerived(
+            """
+            CREATE TABLE dbo.Recent (Id INT NOT NULL);
+            """,
+            """
+            CREATE TABLE dbo.Archive (IdStr VARCHAR(20) NOT NULL);
+            """,
+            """
+            CREATE VIEW dbo.vw_Combined AS
+            SELECT Id FROM dbo.Recent
+            UNION ALL
+            SELECT CAST(IdStr AS INT) AS Id FROM dbo.Archive;
+            """,
+            "SELECT Id FROM dbo.vw_Combined WHERE Id = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Id", finding.ColumnName);
+        // Both branches' real columns are reported - the clean dbo.Recent.Id passthrough for
+        // context, and dbo.Archive.IdStr as the actual source of the mismatch.
+        Assert.Equal(2, finding.UnderlyingBaseColumns.Count);
+        Assert.Contains(finding.UnderlyingBaseColumns, c => c.TableQualifiedName == "dbo.Recent" && c.ColumnName == "Id");
+        Assert.Contains(finding.UnderlyingBaseColumns, c => c.TableQualifiedName == "dbo.Archive" && c.ColumnName == "IdStr");
+    }
+
+    [Fact]
+    public void Extract_UnionViewWithAllPassthroughBranches_NoExpressionDerivedFinding()
+    {
+        // Negative case: every branch is a clean passthrough, so the merged column must not
+        // be flagged even though it's wrapped in a Union provenance node.
+        var findings = ExtractExpressionDerived(
+            "CREATE TABLE dbo.Recent (Id INT NOT NULL);",
+            "CREATE TABLE dbo.Archive (Id INT NOT NULL);",
+            "CREATE VIEW dbo.vw_Combined AS SELECT Id FROM dbo.Recent UNION ALL SELECT Id FROM dbo.Archive;",
+            "SELECT Id FROM dbo.vw_Combined WHERE Id = 5;");
+
+        Assert.Empty(findings);
+    }
 }

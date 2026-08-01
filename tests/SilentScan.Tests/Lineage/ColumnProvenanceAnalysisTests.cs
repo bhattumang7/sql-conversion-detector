@@ -38,6 +38,37 @@ public sealed class ColumnProvenanceAnalysisTests
     }
 
     [Fact]
+    public void IsExpressionDerived_UnionWithOneExpressionDerivedBranch_True()
+    {
+        // CLAUDE.md: mixed-branch UNIONs must not lose the expression-derived branch.
+        var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.VarChar, Length: 20));
+        var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
+        var union = new ColumnProvenance.Union([other, cast]);
+
+        Assert.True(ColumnProvenanceAnalysis.IsExpressionDerived(union));
+    }
+
+    [Fact]
+    public void IsExpressionDerived_UnionWithAllBaseColumnBranches_False()
+    {
+        var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.Int));
+        var union = new ColumnProvenance.Union([Base, other]);
+
+        Assert.False(ColumnProvenanceAnalysis.IsExpressionDerived(union));
+    }
+
+    [Fact]
+    public void IsExpressionDerived_NestedUnionWithExpressionDerivedBranch_True()
+    {
+        // A UNION of three or more branches nests as Union([Union([A, B]), C]).
+        var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.Int));
+        var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
+        var nested = new ColumnProvenance.Union([new ColumnProvenance.Union([Base, other]), cast]);
+
+        Assert.True(ColumnProvenanceAnalysis.IsExpressionDerived(nested));
+    }
+
+    [Fact]
     public void FindUnderlyingBaseColumns_DirectBaseColumn_ReturnsItself()
     {
         var found = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(Base);
@@ -77,6 +108,18 @@ public sealed class ColumnProvenanceAnalysisTests
     }
 
     [Fact]
+    public void FindUnderlyingBaseColumns_UnionOfBaseColumnAndCast_ReturnsBoth()
+    {
+        var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.VarChar, Length: 20));
+        var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
+        var union = new ColumnProvenance.Union([other, cast]);
+
+        var found = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(union);
+
+        Assert.Equal([other, Base], found);
+    }
+
+    [Fact]
     public void DescribeTransformationChain_StackedCasts_ListsOutermostFirst()
     {
         var innerCast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base, "vw_inner.sql", 5);
@@ -95,5 +138,19 @@ public sealed class ColumnProvenanceAnalysisTests
     public void DescribeTransformationChain_PlainBaseColumn_Empty()
     {
         Assert.Empty(ColumnProvenanceAnalysis.DescribeTransformationChain(Base));
+    }
+
+    [Fact]
+    public void DescribeTransformationChain_UnionWithOneCastBranch_ListsOnlyTheCastBranchSite()
+    {
+        var passthroughBranch = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.VarChar, Length: 20));
+        var castBranch = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base, "vw_branch.sql", 12);
+        var union = new ColumnProvenance.Union([passthroughBranch, castBranch]);
+
+        var chain = ColumnProvenanceAnalysis.DescribeTransformationChain(union);
+
+        var site = Assert.Single(chain);
+        Assert.Equal("vw_branch.sql", site.SourcePath);
+        Assert.Equal(12, site.Line);
     }
 }
