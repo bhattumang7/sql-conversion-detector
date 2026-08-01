@@ -123,4 +123,6 @@ published externally without Umang's explicit go-ahead.
 * **Git:** conventional commits, authored as Umang Bhatt
   <bhatt.umang7@gmail.com>. Never credit Claude or any other model/company as
   co-author. Write commit messages about what changed and why — never
-  "resolve item #3", which means nothing to someone reading it back later.
+  "resolve item #3", which means nothing to someone reading it back later. Do not 
+  use "Phase 1", "gate 1" etc place holders in the commit message that have 
+  no meaning in the future.
