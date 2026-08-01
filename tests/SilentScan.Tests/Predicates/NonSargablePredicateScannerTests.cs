@@ -126,4 +126,53 @@ public sealed class NonSargablePredicateScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void FunctionWrappedColumn_AggregateInHaving_DoesNotFire()
+    {
+        // docs/audit-remediation-plan.md Phase 3.1: confirmed false positive - SUM(Qty) in
+        // HAVING was flagged as FunctionWrappedColumn before this fix, even though an
+        // aggregate wrapping a grouped column is not an avoidable non-sargable transform.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_aggregate_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_ScalarFunctionInHaving_StillFires()
+    {
+        // Near-miss sibling: a non-aggregate function wrapping a column in HAVING is exactly
+        // as non-sargable as the same wrap in WHERE - the aggregate exclusion must be scoped
+        // to aggregate function names, not to "any function call found in HAVING".
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("SomeDate", finding.ColumnName);
+        Assert.Equal("YEAR", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_InsideSelectListCase_DoesNotFire()
+    {
+        // docs/audit-remediation-plan.md Phase 3.1: confirmed false positive - a SELECT-list
+        // CASE expression's WHEN condition was treated identically to a WHERE-clause predicate
+        // before this fix, even though a SELECT-list computation has no seek to lose.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_select_list_case_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_InJoinOnClause_StillFires()
+    {
+        // A JOIN's ON clause is a filter context exactly like WHERE - proves the context-gating
+        // rewrite didn't regress ON-clause detection while excluding the SELECT list.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("CreatedAt", finding.ColumnName);
+        Assert.Equal("YEAR", finding.Detail);
+    }
 }

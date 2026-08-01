@@ -6,8 +6,10 @@ namespace SilentScan.Core.Predicates;
 /// <summary>
 /// Pass 3 Tier-1: syntactic non-sargable predicate detection that needs no type/lineage
 /// information (CLAUDE.md: "Tier-1 syntactic rules (no types needed)"). Scoped to comparison
-/// and LIKE predicates specifically - a function call in a SELECT list is not a sargability
-/// concern, only one wrapping a column inside a WHERE/ON/HAVING/comparison is.
+/// and LIKE predicates specifically inside a genuine filter context - WHERE, a JOIN's ON
+/// clause, or HAVING's own filter - never a SELECT list, ORDER BY, or GROUP BY
+/// (docs/audit-remediation-plan.md Phase 3.1: a function/arithmetic wrap on a column that's
+/// never used to filter rows isn't a sargability concern at all, since there's no seek to lose).
 /// </summary>
 public static class NonSargablePredicateScanner
 {
@@ -18,18 +20,102 @@ public static class NonSargablePredicateScanner
         return visitor.Findings;
     }
 
+    /// <summary>
+    /// T-SQL aggregate functions never lose "sargability" the way a scalar function wrap does -
+    /// COUNT/SUM/AVG/etc. wrapping a column in a HAVING clause (the only place they can appear
+    /// alongside a column reference) reflects per-group aggregation, not an avoidable index-
+    /// defeating transform (docs/audit-remediation-plan.md Phase 3.1).
+    /// </summary>
+    private static readonly HashSet<string> AggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SUM", "COUNT", "COUNT_BIG", "AVG", "MIN", "MAX",
+        "STDEV", "STDEVP", "VAR", "VARP",
+        "GROUPING", "GROUPING_ID", "STRING_AGG", "CHECKSUM_AGG", "APPROX_COUNT_DISTINCT",
+    };
+
     private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
     {
+        private bool _inFilterContext;
+
         public List<SargabilityFinding> Findings { get; } = [];
+
+        /// <summary>
+        /// Resets filter context to false for every part of a query specification except its
+        /// own WHERE/HAVING (whose own overrides turn it back on) - without this, a WHERE
+        /// clause's own nested subquery (an EXISTS/IN (SELECT ...)) would inherit "filter
+        /// context = true" for that subquery's unrelated SELECT list, and a top-level SELECT
+        /// list would inherit whatever the enclosing scope happened to be.
+        /// </summary>
+        public override void ExplicitVisit(QuerySpecification node)
+        {
+            var previous = _inFilterContext;
+            _inFilterContext = false;
+
+            node.FromClause?.Accept(this);
+
+            foreach (var element in node.SelectElements)
+            {
+                element.Accept(this);
+            }
+
+            node.WhereClause?.Accept(this);
+            node.GroupByClause?.Accept(this);
+            node.HavingClause?.Accept(this);
+            node.OrderByClause?.Accept(this);
+            node.WindowClause?.Accept(this);
+
+            _inFilterContext = previous;
+        }
+
+        public override void ExplicitVisit(WhereClause node)
+        {
+            var previous = _inFilterContext;
+            _inFilterContext = true;
+            node.AcceptChildren(this);
+            _inFilterContext = previous;
+        }
+
+        public override void ExplicitVisit(HavingClause node)
+        {
+            var previous = _inFilterContext;
+            _inFilterContext = true;
+            node.AcceptChildren(this);
+            _inFilterContext = previous;
+        }
+
+        /// <summary>
+        /// A JOIN's ON clause is a filter context exactly like WHERE; the table references it
+        /// joins are not (a derived-table subquery there has its own SELECT list to protect).
+        /// </summary>
+        public override void ExplicitVisit(QualifiedJoin node)
+        {
+            node.FirstTableReference?.Accept(this);
+            node.SecondTableReference?.Accept(this);
+
+            var previous = _inFilterContext;
+            _inFilterContext = true;
+            node.SearchCondition?.Accept(this);
+            _inFilterContext = previous;
+        }
 
         public override void Visit(BooleanComparisonExpression node)
         {
+            if (!_inFilterContext)
+            {
+                return;
+            }
+
             InspectSide(node.FirstExpression);
             InspectSide(node.SecondExpression);
         }
 
         public override void Visit(BooleanTernaryExpression node)
         {
+            if (!_inFilterContext)
+            {
+                return;
+            }
+
             // BETWEEN: "col BETWEEN a AND b" - the tested value is FirstExpression; the
             // range bounds (Second/Third) are typically literals and not inspected here.
             if (node.TernaryExpressionType == BooleanTernaryExpressionType.Between
@@ -41,6 +127,11 @@ public static class NonSargablePredicateScanner
 
         public override void Visit(LikePredicate node)
         {
+            if (!_inFilterContext)
+            {
+                return;
+            }
+
             if (node.FirstExpression is not ColumnReferenceExpression columnRef || ColumnName(columnRef) is not { } columnName)
             {
                 return;
@@ -67,7 +158,7 @@ public static class NonSargablePredicateScanner
             switch (expression)
             {
                 case FunctionCall { Parameters.Count: > 0 } functionCall
-                    when FirstNamedColumn(functionCall.Parameters) is { } named:
+                    when !AggregateFunctionNames.Contains(functionCall.FunctionName.Value) && FirstNamedColumn(functionCall.Parameters) is { } named:
                     Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall);
                     break;
 
