@@ -249,6 +249,25 @@ that still seeks.
 sibling MUST-fire fixture, and the mini-project scan's Tier-1 count drops with every
 removed finding individually justified.
 
+**Outcome (verified before fixing, per the "reproduce first" rule above).** Two of
+the four claims reproduced; two did not, and implementing the originally-proposed
+fix for either would have suppressed a legitimate finding:
+
+- SELECT-list `CASE` expression — **confirmed.** Fixed by tracking filter context
+  explicitly (WHERE/ON/HAVING only).
+- `HAVING SUM(Qty) > 5` — **confirmed.** Fixed by excluding aggregate function
+  names from the function-wrapped-column rule.
+- `WHERE OrderTotal = Qty * Price` "arithmetic direction" — **did not reproduce.**
+  `Qty` is genuinely non-sargable via this predicate (it's wrapped in arithmetic
+  regardless of what it's compared against); flagging it is correct. Left
+  unchanged.
+- `CAST(col AS DATE) = @d` "documented optimizer exception" — **did not
+  reproduce.** Verified against the real Docker oracle: the compiled plan is a
+  table scan even with an index on the column. Flagging it as non-sargable is
+  correct. Left unchanged.
+
+See the Phase 3.1 commit for the full verification trail.
+
 ---
 
 ## Phase 4 — Coverage expansion
