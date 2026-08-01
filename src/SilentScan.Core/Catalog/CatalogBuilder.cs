@@ -150,6 +150,34 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        /// <summary>
+        /// <c>CREATE TYPE ... AS TABLE</c> - a reusable column shape for table-valued parameters
+        /// (coverage-remediation-plan.md Phase 3.2). Gated to the same phase as
+        /// <c>CREATE TYPE ... FROM</c> aliases: a TVP parameter referencing this type can appear
+        /// in any scanned file regardless of declaration order, so the shape must be known before
+        /// <see cref="VisitScopedBody"/> processes any procedure/function parameter list.
+        /// </summary>
+        public override void ExplicitVisit(CreateTypeTableStatement node)
+        {
+            if (phase == BuildPhase.CollectTypeAliases)
+            {
+                var (schema, name) = SchemaObjectNameHelper.Resolve(node.Name);
+                var (columns, indexesFromColumns) = BuildColumns(node.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+                var indexesFromConstraints = BuildIndexesFromTableConstraints(node.Definition.TableConstraints);
+
+                catalog.AddOrReplace(new CatalogTable(
+                    schema,
+                    name,
+                    CatalogTableKind.TableType,
+                    columns,
+                    [.. indexesFromColumns, .. indexesFromConstraints],
+                    sourcePath,
+                    node.StartLine));
+            }
+
+            node.AcceptChildren(this);
+        }
+
         // CLR constructs (coverage-remediation-plan.md Phase 0.2/3.6): no assembly-backed type,
         // aggregate, or CLR UDT is modeled - the decision is to count and decline, never guess at
         // a shape that lives outside the scanned script. Gated to one phase so a file walked
@@ -332,8 +360,45 @@ public static class CatalogBuilder
         {
             var previous = _currentScope;
             _currentScope = SchemaObjectNameHelper.Qualify(name);
+
+            if (phase == BuildPhase.ApplyEverythingElse && node is ProcedureStatementBodyBase { Parameters: { } parameters })
+            {
+                RegisterTableValuedParameters(parameters);
+            }
+
             node.AcceptChildren(this);
             _currentScope = previous;
+        }
+
+        /// <summary>
+        /// A table-valued parameter (<c>@Orders Website.OrderList READONLY</c>) declares its type
+        /// as a <see cref="UserDataTypeReference"/> naming a <c>CREATE TYPE ... AS TABLE</c> shape
+        /// (coverage-remediation-plan.md Phase 3.2) - registered under the parameter's own
+        /// variable name, scoped to the enclosing procedure/function/trigger exactly like a body-
+        /// declared table variable, so <c>FROM @Orders</c> anywhere in the body resolves through
+        /// the identical <c>VariableTableReference</c> path Phase 3.4 wired up. A parameter whose
+        /// type isn't a registered table type (a scalar type, or a table type this scan never saw)
+        /// is silently not a TVP - nothing to register, not a gap.
+        /// </summary>
+        private void RegisterTableValuedParameters(IList<ProcedureParameter> parameters)
+        {
+            foreach (var parameter in parameters)
+            {
+                if (parameter.DataType is not UserDataTypeReference userType)
+                {
+                    continue;
+                }
+
+                var typeQualifiedName = SchemaObjectNameHelper.Qualify(userType.Name);
+                if (catalog.Find(typeQualifiedName) is not { Kind: CatalogTableKind.TableType } tableType)
+                {
+                    continue;
+                }
+
+                catalog.AddOrReplace(
+                    tableType with { SchemaName = null, Name = parameter.VariableName.Value, Kind = CatalogTableKind.TableVariable },
+                    _currentScope);
+            }
         }
 
         /// <summary>
@@ -427,7 +492,7 @@ public static class CatalogBuilder
         private void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(alterTable.SchemaObjectName);
-            var existing = catalog.Find(qualifiedName);
+            var existing = catalog.Find(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER TABLE ADD", qualifiedName, alterTable);
@@ -439,17 +504,33 @@ public static class CatalogBuilder
             var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
             var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
 
-            catalog.AddOrReplace(existing with
-            {
-                Columns = ApplyPrimaryKeyNotNull(mergedColumns, mergedIndexes),
-                Indexes = mergedIndexes,
-            });
+            // Scoped lookup AND scoped write-back (coverage-remediation-plan.md Phase 3.2, the
+            // same bug class as the predicate-side index lookup fix above): an ALTER TABLE/CREATE
+            // INDEX targeting a #temp table or table variable must find AND re-store it under the
+            // same scoped key it was declared with, or the update either silently misses a scoped
+            // entry (unscoped Find) or creates a stray unscoped duplicate while leaving the real,
+            // scoped entry stale (unscoped AddOrReplace). Find is always safe with a scope - a
+            // real table falls through to the unscoped lookup automatically - but AddOrReplace's
+            // write-back scope must match how the row was ORIGINALLY stored (see WriteScopeFor),
+            // or a real table altered from inside a proc body would get wrongly re-stored under a
+            // scoped key of its own, orphaning its real unscoped entry.
+            catalog.AddOrReplace(
+                existing with
+                {
+                    Columns = ApplyPrimaryKeyNotNull(mergedColumns, mergedIndexes),
+                    Indexes = mergedIndexes,
+                },
+                WriteScopeFor(existing));
         }
+
+        /// <summary>The scope key an already-cataloged table must be re-stored under after an in-place update - only a temp table/table variable was ever stored scoped; a real table always lives at the unscoped key regardless of where the statement altering it appears.</summary>
+        private string? WriteScopeFor(CatalogTable table) =>
+            table.Kind is CatalogTableKind.TemporaryTable or CatalogTableKind.TableVariable ? _currentScope : null;
 
         private void VisitAlterColumn(AlterTableAlterColumnStatement alterColumn)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(alterColumn.SchemaObjectName);
-            var existing = catalog.Find(qualifiedName);
+            var existing = catalog.Find(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER TABLE ALTER COLUMN", qualifiedName, alterColumn);
@@ -483,13 +564,13 @@ public static class CatalogBuilder
                 .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase) ? c with { Type = newType } : c)
                 .ToList();
 
-            catalog.AddOrReplace(existing with { Columns = updatedColumns });
+            catalog.AddOrReplace(existing with { Columns = updatedColumns }, WriteScopeFor(existing));
         }
 
         private void VisitDropTableElements(AlterTableDropTableElementStatement dropStatement)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(dropStatement.SchemaObjectName);
-            var existing = catalog.Find(qualifiedName);
+            var existing = catalog.Find(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER TABLE DROP", qualifiedName, dropStatement);
@@ -511,13 +592,13 @@ public static class CatalogBuilder
             }
 
             var remainingColumns = existing.Columns.Where(c => !droppedColumnNames.Contains(c.Name)).ToList();
-            catalog.AddOrReplace(existing with { Columns = remainingColumns });
+            catalog.AddOrReplace(existing with { Columns = remainingColumns }, WriteScopeFor(existing));
         }
 
         private void VisitCreateIndex(CreateIndexStatement createIndex)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
-            var existing = catalog.Find(qualifiedName);
+            var existing = catalog.Find(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("CREATE INDEX", qualifiedName, createIndex);
@@ -532,13 +613,13 @@ public static class CatalogBuilder
                 [.. createIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
                 IsFiltered: createIndex.FilterPredicate is not null);
 
-            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] });
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, WriteScopeFor(existing));
         }
 
         private void VisitCreateColumnStoreIndex(CreateColumnStoreIndexStatement createIndex)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
-            var existing = catalog.Find(qualifiedName);
+            var existing = catalog.Find(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("CREATE COLUMNSTORE INDEX", qualifiedName, createIndex);
@@ -553,7 +634,7 @@ public static class CatalogBuilder
                 IncludedColumns: [],
                 IsColumnstore: true);
 
-            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] });
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, WriteScopeFor(existing));
         }
 
         private void VisitDeclareTableVariable(DeclareTableVariableStatement declareTableVar)
@@ -709,6 +790,14 @@ public static class CatalogBuilder
                 IsComputed: columnDefinition.ComputedColumnExpression is not null,
                 IsPersisted: columnDefinition.IsPersisted));
         }
+
+        // Table-level INDEX (...) definitions - e.g. WWI's `INDEX [IX_...] ([Col])` inside a
+        // CREATE TYPE ... AS TABLE - live in TableDefinition.Indexes, a collection entirely
+        // separate from TableConstraints (PK/UNIQUE) and a column's own inline .Index. Found
+        // while wiring up table-valued parameters (coverage-remediation-plan.md Phase 3.2) but
+        // not specific to table types - this was never read for an ordinary CREATE TABLE either,
+        // so a real index declared this way was silently invisible to Indexed lookups everywhere.
+        inlineIndexes.AddRange(definition.Indexes.Select(i => BuildInlineIndex(i, columnName: string.Empty)));
 
         return (columns, inlineIndexes);
     }

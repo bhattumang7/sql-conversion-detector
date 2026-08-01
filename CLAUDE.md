@@ -126,3 +126,7 @@ published externally without Umang's explicit go-ahead.
   "resolve item #3", which means nothing to someone reading it back later. Do not 
   use "Phase 1", "gate 1" etc place holders in the commit message that have 
   no meaning in the future.
+  
+# Mark down files
+Resist the urge to write down mark down files that wont have any meaning in 
+long term. If you have written down one, delete it after the work is done.

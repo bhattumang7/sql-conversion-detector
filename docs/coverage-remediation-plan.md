@@ -324,7 +324,7 @@ ledgered.
 
 **Size.** L. Largest single item in this plan.
 
-### 3.2 Table types (`CREATE TYPE … AS TABLE`) and TVPs
+### 3.2 Table types (`CREATE TYPE … AS TABLE`) and TVPs — DONE
 
 **Problem.** `CreateTypeTableStatement` is handled nowhere. WWI's manifest
 explicitly lists `Website/User Defined Types/*.sql` in `ddlPaths` — four files with

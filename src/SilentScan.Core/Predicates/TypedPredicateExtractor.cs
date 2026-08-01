@@ -512,7 +512,14 @@ public static class TypedPredicateExtractor
 
             if (provenance is ColumnProvenance.BaseColumn baseColumn)
             {
-                var indexed = catalog.Find(baseColumn.TableQualifiedName)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
+                // Scoped lookup (coverage-remediation-plan.md Phase 3.2, found while wiring up
+                // table-valued parameters): a #temp table or table variable is cataloged under a
+                // key scoped to its enclosing procedure/function/trigger, but BaseColumn carries
+                // only the bare qualified name, so an unscoped Find here silently missed the
+                // catalog entry and always reported Indexed=false for any indexed temp
+                // object - a real table was never stored with a scope, so passing one is always
+                // safe (DatabaseCatalog falls back to the unscoped lookup automatically).
+                var indexed = catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
                 return new PredicateOperand.Column(baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn);
             }
 
@@ -537,7 +544,7 @@ public static class TypedPredicateExtractor
         private void RecordExpressionDerivedFinding(string columnName, ColumnReferenceExpression columnRef, ColumnProvenance provenance)
         {
             var underlyingBaseColumns = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(provenance)
-                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName)?.IsIndexedColumn(bc.ColumnName) ?? false))
+                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(bc.ColumnName) ?? false))
                 .ToList();
 
             if (underlyingBaseColumns.Count == 0)

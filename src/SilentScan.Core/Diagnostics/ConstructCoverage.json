@@ -40,9 +40,9 @@
     {
       "construct": "CreateTypeTableStatement",
       "group": "ColumnDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "CREATE TYPE ... AS TABLE (table types / TVP shapes) has no visitor anywhere. WWI's manifest lists a User Defined Types path with four such files consumed as TVPs by four procs - coverage-remediation-plan.md Phase 3.2."
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "CREATE TYPE ... AS TABLE (table types / TVP shapes). Fixed: registered as CatalogTableKind.TableType; a procedure/function parameter declared with that type is bound under its own variable name, scoped to the enclosing body, so FROM @Param resolves through the same VariableTableReference path table variables use. Surfaced two further bugs while wiring this up: TableDefinition.Indexes (table-level INDEX(...) syntax, distinct from TableConstraints) was never read for ANY table, not just table types; and the predicate-side index lookup, plus five CatalogBuilder call sites (ALTER TABLE ADD/ALTER COLUMN/DROP, CREATE INDEX, CREATE COLUMNSTORE INDEX), used unscoped catalog lookups against entries that are only ever stored scoped - silently missing/misreporting for any indexed #temp table or table variable, not just TVPs. All fixed together."
     },
     {
       "construct": "CreateTypeUdtStatement",

@@ -5,6 +5,9 @@ public enum CatalogTableKind
     Table,
     TemporaryTable,
     TableVariable,
+
+    /// <summary>A <c>CREATE TYPE ... AS TABLE</c> shape - reusable as a table-valued parameter's declared type, not a queryable object in its own right (coverage-remediation-plan.md Phase 3.2).</summary>
+    TableType,
 }
 
 public sealed record CatalogTable(

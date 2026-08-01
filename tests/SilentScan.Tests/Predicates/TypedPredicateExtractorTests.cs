@@ -1004,6 +1004,31 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_IndexedTempTableInsideProcedure_ReportsIndexedTrue()
+    {
+        // A genuinely pre-existing bug found while wiring up TVPs (coverage-remediation-plan.md
+        // Phase 3.2): ResolveColumnOperand's index lookup called the UNSCOPED catalog.Find, but
+        // a #temp table/table variable is cataloged under a key scoped to its enclosing
+        // procedure - so an indexed #temp table or table variable ALWAYS silently reported
+        // Indexed=false, for every proc, not just TVPs. Fixed by passing _currentProcScope
+        // through (safe for a real persistent table too - DatabaseCatalog falls back to the
+        // unscoped lookup automatically).
+        var findings = Extract(
+            """
+            CREATE PROCEDURE dbo.usp_UseIndexedTemp
+            AS
+            BEGIN
+                CREATE TABLE #t (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+                CREATE INDEX IX_t_Code ON #t(Code);
+                SELECT Code FROM #t WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.True(finding.Column.Indexed);
+    }
+
+    [Fact]
     public void Extract_MultiStatementTvfBody_PredicateAgainstOwnReturnVariable_Resolves()
     {
         // RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a
@@ -1026,6 +1051,30 @@ public sealed class TypedPredicateExtractorTests
         Assert.Equal("@t", finding.Column.TableQualifiedName);
         Assert.Equal("Code", finding.Column.ColumnName);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_TableValuedParameterInFromClause_Resolves()
+    {
+        // CREATE TYPE ... AS TABLE (a table-valued parameter's declared shape) had no visitor
+        // anywhere - WWI's manifest lists four such files, each consumed as a TVP by a real proc
+        // (coverage-remediation-plan.md Phase 3.2). This mirrors that exact shape: a table type
+        // with an inline INDEX, used as a READONLY procedure parameter.
+        var findings = Extract(
+            "CREATE TYPE Website.OrderLineList AS TABLE (StockItemID INT NOT NULL, INDEX IX_OrderLineList (StockItemID));",
+            """
+            CREATE PROCEDURE Website.InsertOrderLines
+                @OrderLines Website.OrderLineList READONLY
+            AS
+            BEGIN
+                SELECT StockItemID FROM @OrderLines WHERE StockItemID = 1;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("@OrderLines", finding.Column.TableQualifiedName);
+        Assert.Equal("StockItemID", finding.Column.ColumnName);
+        Assert.True(finding.Column.Indexed);
     }
 
     [Fact]

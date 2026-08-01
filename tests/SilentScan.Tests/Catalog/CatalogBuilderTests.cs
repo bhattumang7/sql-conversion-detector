@@ -385,6 +385,31 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_AlterTableAddOnScopedTempTable_UpdatesTheScopedEntryNotAnUnscopedCopy()
+    {
+        // The same "scoped entry, unscoped lookup" bug class as the predicate-side index lookup
+        // fix (coverage-remediation-plan.md Phase 3.2): ALTER TABLE ADD on a #temp table used an
+        // unscoped Find (silently missing the scoped entry, treating it as an unresolved target)
+        // and an unscoped AddOrReplace on write-back (which would have created a stray unscoped
+        // duplicate instead of updating the real scoped one).
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.usp_Test
+                AS
+                BEGIN
+                    CREATE TABLE #t (Col1 INT NOT NULL);
+                    ALTER TABLE #t ADD Col2 VARCHAR(20) NOT NULL;
+                END
+                """)]);
+
+        var scoped = catalog.Find("#t", "dbo.usp_Test");
+
+        Assert.NotNull(scoped);
+        Assert.NotNull(scoped!.FindColumn("Col2"));
+        Assert.Null(catalog.Find("#t"));
+    }
+
+    [Fact]
     public void Build_TempTablesInsideDifferentProcedures_SameNameDifferentShape_DoNotClobberEachOther()
     {
         // docs/audit-remediation-plan.md Phase 2.5 "Done when": two procedures with same-named
@@ -484,6 +509,69 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_CreateTypeAsTable_RegistersColumnShapeIncludingInlineIndex()
+    {
+        // CREATE TYPE ... AS TABLE has no visitor anywhere - WWI's manifest lists a User Defined
+        // Types path with four such files consumed as TVPs by four procs (coverage-remediation-
+        // plan.md Phase 3.2).
+        var catalog = BuildFrom("""
+            CREATE TYPE Website.OrderLineList AS TABLE
+            (
+                StockItemID INT NOT NULL,
+                Quantity INT NOT NULL,
+                INDEX IX_OrderLineList (StockItemID)
+            );
+            """);
+
+        var tableType = catalog.Find("Website.OrderLineList");
+
+        Assert.NotNull(tableType);
+        Assert.Equal(CatalogTableKind.TableType, tableType!.Kind);
+        Assert.Equal(SqlTypeCategory.Int, tableType.FindColumn("StockItemID")!.Type!.Category);
+        Assert.True(tableType.IsIndexedColumn("StockItemID"));
+    }
+
+    [Fact]
+    public void Build_TableValuedParameter_RegisteredUnderProcedureScopeWithSameShape()
+    {
+        var catalog = BuildFrom(
+            """
+            CREATE TYPE Website.OrderLineList AS TABLE (StockItemID INT NOT NULL);
+            GO
+            CREATE PROCEDURE Website.InsertOrderLines
+                @OrderLines Website.OrderLineList READONLY
+            AS
+            BEGIN
+                RETURN;
+            END
+            """);
+
+        var parameterRelation = catalog.Find("@OrderLines", "Website.InsertOrderLines");
+
+        Assert.NotNull(parameterRelation);
+        Assert.Equal(CatalogTableKind.TableVariable, parameterRelation!.Kind);
+        Assert.Equal(SqlTypeCategory.Int, parameterRelation.FindColumn("StockItemID")!.Type!.Category);
+        Assert.Null(catalog.Find("@OrderLines"));
+    }
+
+    [Fact]
+    public void Build_ScalarParameter_NotRegisteredAsTableValued()
+    {
+        // A parameter whose type isn't a registered table type (an ordinary scalar type) must
+        // not be mistaken for a TVP.
+        var catalog = BuildFrom(
+            """
+            CREATE PROCEDURE dbo.usp_Ordinary @Id INT
+            AS
+            BEGIN
+                RETURN;
+            END
+            """);
+
+        Assert.Null(catalog.Find("@Id", "dbo.usp_Ordinary"));
+    }
+
+    [Fact]
     public void Build_ClrTableValuedFunction_NoVariableNameToRegister_DoesNotThrow()
     {
         // A CLR TVF's RETURNS TABLE(...) has the same TableValuedFunctionReturnType shape as a
@@ -531,6 +619,27 @@ public sealed class CatalogBuilderTests
             [Parse("""
                 CREATE TABLE dbo.Orders (Id INT NOT NULL, Status VARCHAR(20) NOT NULL);
                 CREATE INDEX IX_Orders_Status ON dbo.Orders(Status);
+                """)]);
+
+        Assert.True(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_TableLevelInlineIndexDefinition_CountsAsSeekable()
+    {
+        // TableDefinition.Indexes (the INDEX (...) form written inside the column list, e.g.
+        // WWI's `INDEX [IX_...] ([Col])`) is a collection entirely separate from
+        // TableConstraints and a column's own inline .Index - found while wiring up table-valued
+        // parameters (coverage-remediation-plan.md Phase 3.2), but this was never read for an
+        // ordinary CREATE TABLE either, not just CREATE TYPE ... AS TABLE.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders
+                (
+                    Id INT NOT NULL,
+                    Status VARCHAR(20) NOT NULL,
+                    INDEX IX_Orders_Status (Status)
+                );
                 """)]);
 
         Assert.True(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
