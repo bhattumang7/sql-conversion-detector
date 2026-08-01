@@ -1098,6 +1098,46 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_TriggerBody_InsertedPseudoTable_DoesNotInheritTargetTablesRealIndex()
+    {
+        // inserted/deleted are a version-store rowset, not the real table - even when Code IS
+        // indexed on dbo.Orders, a predicate against inserted.Code must report Indexed=false
+        // (coverage-remediation-plan.md Phase 1.1). Before this fix, inserted/deleted resolved
+        // through the ordinary BaseColumn path and wrongly inherited the real table's index,
+        // which would have ranked this finding first under CLAUDE.md's ranking rule despite not
+        // being a real index-killing conversion.
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE INDEX IX_Orders_Code ON dbo.Orders(Code);
+            """,
+            """
+            CREATE TRIGGER dbo.trg_Orders ON dbo.Orders
+            AFTER INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.False(finding.Column.Indexed);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // The direct FROM-clause case must be unaffected by this fix - the real table still
+        // reports its real index.
+        var directFindings = Extract(
+            """
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE INDEX IX_Orders_Code ON dbo.Orders(Code);
+            """,
+            "SELECT Code FROM dbo.Orders WHERE Code = N'x';");
+
+        var directFinding = Assert.Single(directFindings);
+        Assert.True(directFinding.Column.Indexed);
+    }
+
+    [Fact]
     public void Extract_TriggerBody_DeletedPseudoTableWithAlias_Resolves()
     {
         var findings = Extract(

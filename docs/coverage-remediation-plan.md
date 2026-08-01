@@ -174,48 +174,54 @@ Items that can produce a finding that is not true. Highest priority in the plan:
 CLAUDE.md's precision-over-recall rule means one of these in the published study
 is worse than every gap in Phase 3 combined.
 
-### 1.1 Pseudo-table predicates must not inherit the base table's index
+### 1.1 Pseudo-table predicates must not inherit the base table's index — DONE
 
 **Problem.** `BuildTriggerPseudoTableRelations` (`TypedPredicateExtractor.cs:214`)
-binds `inserted`/`deleted` to the target table's `ResolvedRelation`, so
-`inserted.Col` resolves to `ColumnProvenance.BaseColumn("dbo.Orders", "Col")` and
-later inherits `Indexed: true` from `dbo.Orders`. There is no index on `inserted` —
-it is a rowset materialised from the version store. A `ScanForced` + indexed
-finding against a pseudo-table would rank **first** under the ranking rule in
+bound `inserted`/`deleted` to the target table's `ResolvedRelation`, so
+`inserted.Col` resolved to `ColumnProvenance.BaseColumn("dbo.Orders", "Col")` and
+inherited `Indexed: true` from `dbo.Orders`. There is no index on `inserted` — it
+is a rowset materialised from the version store. A `ScanForced` + indexed finding
+against a pseudo-table would have ranked **first** under the ranking rule in
 CLAUDE.md while not being an index-killing conversion at all.
 
-Note this is a defect *introduced by* the most recent commit (6534feb), which is
-itself correct about types — the type inheritance is right, the index inheritance
-is not.
+Note this was a defect *introduced by* the most recent commit at the time
+(6534feb), which was itself correct about types — the type inheritance was right,
+the index inheritance was not.
 
-**Work.** Requires a decision (see Decisions, D1). Under the recommended option:
-- Carry a flag on the resolved relation marking it a pseudo-table.
-- Report `Indexed: false` for predicates against it, with the reason recorded so the
-  finding is still explicable.
-- Keep the type resolution exactly as it is — the conversion is real and still
-  costs CPU per row; only the seek-loss claim is wrong.
+**Decided and done, chosen option:** `FromScopeResolver.ToPseudoTableRelation`
+gives pseudo-table columns `ColumnProvenance.Declared` instead of `BaseColumn` -
+the identical "known type, never guess an index" treatment a multi-statement
+TVF's declared `RETURNS TABLE(...)` column already gets (`Indexed: false` falls
+out of the existing `Declared` branch in `ResolveColumnOperand` with no new
+special-casing there), reusing an established pattern rather than adding a new
+"pseudo-table flag" concept. Type resolution is unchanged — the conversion is
+real and still costs CPU per row; only the seek-loss claim changes.
+`TableQualifiedName` is kept as the real target table's name, so a finding
+against `inserted`/`deleted` stays attributable to where the data actually lives.
 
-**Done when.** A fixture with `WHERE inserted.VarcharCol = @NvarcharParam` against a
-target table with an index on `VarcharCol` reports the conversion but not
-`Indexed: true`, and does not sort into the top rank band.
+**Verified.** A fixture with an indexed column on the target table, predicated
+through `inserted`, reports the conversion with `Indexed: false`; the equivalent
+direct `FROM dbo.Orders` predicate in the same test still reports `Indexed: true`,
+proving the ordinary FROM-clause path is unaffected.
 
-**Size.** S once D1 is decided.
+**Size.** S, as estimated.
 
-### 1.2 Sweep for other index-attribution inheritance
+### 1.2 Sweep for other index-attribution inheritance — DONE, no further defects found
 
 **Problem.** 1.1 is an instance. Principle 4 requires checking the class: any place
 that builds a `ResolvedRelation` from a catalog table for something that is not
-that table. Candidates to check: table variables and temp tables (do they carry
-inline index info correctly?), MSTVF declared shapes, and view-derived relations.
+that table.
 
-**Work.** Audit every `ToResolvedRelation` call site and every construction of
-`ColumnProvenance.BaseColumn`; assert in a test that a qualified name reaching the
-index lookup always denotes an object that can actually have an index.
+**Audit result.** `ColumnProvenance.BaseColumn` (the only provenance kind that
+feeds the real index lookup at `TypedPredicateExtractor.cs:502`) is constructed in
+exactly one place in the whole codebase: `FromScopeResolver.ToResolvedRelation`,
+used only for genuine `NamedTableReference` FROM-clause resolution. Every other
+relation-building path (MSTVF declared shapes, view-derived relations, and now
+trigger pseudo-tables) already produces `Declared`, `Expression`, `Cast`, `Union`,
+or `Unknown` — none of which claim a real index. No further defect found; nothing
+else to fix.
 
-**Done when.** The audit is written down in the coverage matrix rationale column,
-and any discrepancy found is either fixed or recorded.
-
-**Size.** S–M.
+**Size.** S — the grep-based audit was the whole cost; no code changed beyond 1.1.
 
 ---
 
@@ -478,15 +484,14 @@ Nothing published without Umang's explicit go-ahead, per CLAUDE.md.
 
 ## Decisions needed before starting
 
-**D1 — Pseudo-table index semantics (blocks 1.1).**
+**D1 — Pseudo-table index semantics (blocked 1.1) — DECIDED: option (a).**
 `inserted.VarcharCol = @nvarchar` performs a real conversion but cannot lose a seek
-that never existed. Options:
-- (a) **Recommended.** Report the finding with `Indexed: false` and a recorded
-  reason. Honest, keeps the CPU-cost signal, keeps it out of the top rank band.
-- (b) Do not report predicates against pseudo-tables at all. Cleanest for the study,
-  loses a real if lesser cost signal.
-- (c) Split the schema: `BaseColumnIndexed` vs `IndexUsableHere`. Most correct,
-  most invasive, changes the versioned findings schema and the SARIF mapping.
+that never existed. Chose (a): report the finding with `Indexed: false`, keeping
+the conversion/CPU-cost signal and keeping it out of the top rank band, over (b)
+suppressing the finding entirely (loses a real signal) or (c) splitting the schema
+into `BaseColumnIndexed`/`IndexUsableHere` (more correct but invasive - changes the
+versioned findings schema and SARIF mapping for one narrow case). Implemented via
+`ColumnProvenance.Declared` rather than a new flag (see 1.1).
 
 **D2 — CLR scope (blocks 3.6).** Recommended: count and decline, never analyze.
 The alternative is modelling CLR UDT comparison semantics, which is a large amount

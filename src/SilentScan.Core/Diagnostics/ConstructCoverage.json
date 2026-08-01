@@ -257,9 +257,9 @@
     {
       "construct": "Trigger pseudo-table index attribution",
       "group": "ProcedureOrTriggerDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "WRONG ANSWER, not a missing one. inserted/deleted resolve to the target table's ResolvedRelation and inherit Indexed=true from it, but inserted/deleted have no index of their own - a ScanForced+indexed finding here would rank first under the CLAUDE.md ranking rule while not being a real index-killing conversion. coverage-remediation-plan.md Phase 1.1, highest-priority item in the whole plan."
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Was a WRONG ANSWER, not a missing one: inserted/deleted used to resolve through the ordinary BaseColumn path and inherit Indexed=true from the target table, though inserted/deleted have no index of their own - a ScanForced+indexed finding there would have ranked first under the CLAUDE.md ranking rule while not being a real index-killing conversion. Fixed by giving pseudo-table columns Declared provenance (FromScopeResolver.ToPseudoTableRelation) - the same never-guess-an-index treatment a multi-statement TVF's declared column already gets - instead of BaseColumn. coverage-remediation-plan.md Phase 1.1, was the highest-priority item in the whole plan."
     },
     {
       "construct": "CreateTriggerStatement (DDL: ON DATABASE / ON ALL SERVER)",

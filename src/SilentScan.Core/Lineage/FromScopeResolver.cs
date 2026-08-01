@@ -216,13 +216,7 @@ public static class FromScopeResolver
         }
     }
 
-    /// <summary>
-    /// Exposed for <see cref="Predicates.TypedPredicateExtractor"/>: a trigger's inserted/
-    /// deleted pseudo-tables are shaped exactly like the trigger's own target table (docs/
-    /// audit-remediation-plan.md, trigger inserted/deleted resolution), so building their
-    /// relation is the identical "real catalog table -> ResolvedRelation" conversion an ordinary
-    /// FROM-clause table reference already does.
-    /// </summary>
+    /// <summary>Real catalog table -&gt; <see cref="ResolvedRelation"/>, used for an ordinary FROM-clause table reference. Columns carry <see cref="ColumnProvenance.BaseColumn"/>, so a predicate against one can report the table's real index.</summary>
     internal static ResolvedRelation ToResolvedRelation(CatalogTable? table, string qualifiedName)
     {
         if (table is null)
@@ -237,6 +231,35 @@ public static class FromScopeResolver
             c.Name,
             c.Type is { } type
                 ? new ColumnProvenance.BaseColumn(qualifiedName, c.Name, type)
+                : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
+    }
+
+    /// <summary>
+    /// Exposed for <see cref="Predicates.TypedPredicateExtractor"/>: a trigger's inserted/deleted
+    /// pseudo-tables are shaped exactly like the trigger's own target table - same column names
+    /// and types - but they are a rowset materialised from the version store, not a real catalog
+    /// object, so a predicate against inserted.Col MUST NOT report an index the pseudo-table does
+    /// not have (coverage-remediation-plan.md Phase 1.1 - a ScanForced+indexed finding here would
+    /// wrongly rank first under CLAUDE.md's ranking rule while not being an index-killing
+    /// conversion at all: the conversion is real, the seek loss claim is not). Columns therefore
+    /// carry <see cref="ColumnProvenance.Declared"/> rather than <see cref="ColumnProvenance.BaseColumn"/>
+    /// - the same "known type, not traceable to a real index" provenance a multi-statement TVF's
+    /// declared RETURNS TABLE(...) column already uses, reusing that established pattern rather
+    /// than inventing a parallel one. <paramref name="qualifiedName"/> is still the real target
+    /// table's name, kept so a finding against inserted/deleted stays attributable to where the
+    /// data actually lives - only the index claim changes, not the reported location.
+    /// </summary>
+    internal static ResolvedRelation ToPseudoTableRelation(CatalogTable? table, string qualifiedName)
+    {
+        if (table is null)
+        {
+            return new ResolvedRelation(qualifiedName, []);
+        }
+
+        return new ResolvedRelation(qualifiedName, [.. table.Columns.Select(c => new ResolvedColumn(
+            c.Name,
+            c.Type is { } type
+                ? new ColumnProvenance.Declared(type, qualifiedName)
                 : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
     }
 }

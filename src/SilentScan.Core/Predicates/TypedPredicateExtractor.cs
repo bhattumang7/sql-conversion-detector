@@ -225,9 +225,10 @@ public static class TypedPredicateExtractor
         /// inserted/deleted are shaped exactly like the trigger's own target table (docs/audit-
         /// remediation-plan.md, trigger inserted/deleted resolution - a gap found auditing this
         /// pass, not on the original remediation plan): a predicate against inserted.Col reflects
-        /// that real base-table column's type and index, so this reuses the same catalog-table ->
-        /// ResolvedRelation conversion an ordinary FROM-clause table reference goes through,
-        /// rather than inventing a parallel resolution path.
+        /// that real base-table column's type, but NOT its index - inserted/deleted are a version-
+        /// store rowset with no index of their own (coverage-remediation-plan.md Phase 1.1), so
+        /// this uses <see cref="FromScopeResolver.ToPseudoTableRelation"/> rather than the ordinary
+        /// FROM-clause conversion, which would wrongly inherit the real table's index.
         /// </summary>
         private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
         {
@@ -241,7 +242,7 @@ public static class TypedPredicateExtractor
                 return EmptyCteRelations;
             }
 
-            var relation = FromScopeResolver.ToResolvedRelation(table, qualifiedName);
+            var relation = FromScopeResolver.ToPseudoTableRelation(table, qualifiedName);
             return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
             {
                 ["inserted"] = relation,
