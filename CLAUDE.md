@@ -164,8 +164,9 @@ only oracle-confirmed findings; static-only findings go in an appendix.
   separators, bracket quoting, `dbo.`, ScriptDOM parse success rate ≥ 90% of
   files. Skip files that fail dialect sniffing — a MySQL file parsed as T-SQL
   is noise, not signal.
-- Ethics: aggregate stats public; per-repo findings go to maintainers as PRs
-  or issues BEFORE the writeup names any project. Never name-and-shame.
+- Ethics: aggregate stats public. No maintainer-outreach requirement before
+  naming a project in the writeup — do not file GitHub issues/PRs on scanned
+  repos as part of this workflow. Never name-and-shame in tone.
 
 ## Precision discipline
 
