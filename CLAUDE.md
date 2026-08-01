@@ -1,222 +1,124 @@
-CLAUDE.md — SilentScan (working title)
+# CLAUDE.md — SilentScan
 
 Static analyser + corpus study: find index-killing implicit conversions in T-SQL,
-including ones inherited through layers of views/TVFs, and quantify their prevalence
-and cost across public open-source codebases.
+including ones inherited through layers of views/TVFs, and quantify their
+prevalence and cost across public open-source codebases.
 
-What this project is
+Two deliverables, one codebase: the **tool** (`silentscan scan`, JSON + SARIF
+findings) and the **study** (`docs/study.md`, `docs/bench-results.csv`).
+Fame goal, not commercial. **Precision beats recall everywhere** — one false
+positive in the published study is worse than ten missed true positives.
 
-Two deliverables, one codebase:
+Roadmap and phase status live in `plan.md`. Local setup in `docs/local-dev.md`.
+This file is the standing contract; don't turn it back into a build plan.
 
-1. The tool: a CLI (silentscan) that ingests a folder of .sql files
-(DDL + views + procs), builds a column lineage graph with type propagation,
-and reports column-side implicit conversions and non-sargable predicates —
-ranked by whether the column is indexed and how many layers deep the type
-mismatch originates.
-2. The study: run the tool over a curated corpus of well-known open-source
-SQL Server projects, verify findings against a real SQL Server in Docker,
-benchmark the cost, and publish prevalence numbers.
+## Hard scope (do not revisit without asking)
 
-Fame goal, not commercial. Precision beats recall everywhere: one false positive
-in the published study is worse than ten missed true positives.
+* SQL Server / T-SQL only. Parser is `Microsoft.SqlServer.TransactSql.ScriptDom`.
+  No other dialects in v1, no ANTLR.
+* EF Core / ORM analysis is out of v1. SQL text only.
+* Corpus DML and procs are **never executed**, anywhere. The only execution is
+  self-authored probes inside the disposable Docker SQL Server.
+* .NET 10, C#. Ubuntu; Docker assumed available.
+* Corpus stays at the pinned 5-repo pilot set unless we decide otherwise.
 
-Hard scope decisions (do not revisit without asking)
+## Layout
 
-* SQL Server / T-SQL only. Parser is Microsoft.SqlServer.TransactSql.ScriptDom
-(NuGet, first-party, free). No MySQL/Postgres/Oracle in v1. No ANTLR.
-* EF Core / ORM analysis is explicitly OUT of v1. SQL text only.
-* No execution of corpus code except inside the disposable Docker SQL Server
-used for verification/benchmarks.
-* Target framework: .NET 10—language: C#.
+`src/SilentScan.Core` holds the four passes — `Parsing/`, `Catalog/` (tables,
+columns, types, collations, indexes), `Lineage/` (view/iTVF resolution, topo
+order, column provenance), `Predicates/` + `Rules/` (extraction, precedence,
+verdicts), `Reporting/` (ranked findings, JSON + SARIF), plus `Corpus/`.
+Then `SilentScan.Cli`, `SilentScan.Verify` (Docker oracle), `SilentScan.Bench`,
+and `tests/SilentScan.Tests`.
 
-Architecture (4 passes)
+Each finding carries: `verdict`, whether the base column is **indexed**,
+**depth** (0 = direct table predicate, N = view/TVF layers between predicate and
+base column), and **origin** — both the predicate's file/line and the file/line
+of the layer that introduced the mismatch. Rank `ScanForced` + indexed +
+depth ≥ 1 first. `Verdict` is `SeekPreserved | RangeSeek | ScanForced | Unknown`;
+syntactic non-sargability is its own finding stream (`SargabilityFindingKind`).
 
-src/
-  SilentScan.Core/
-    Parsing/        # ScriptDOM wrapper, batch splitting, error tolerance
-    Catalog/        # Pass 1: tables, columns, types, collations, indexes, PK/UQ
-    Lineage/        # Pass 2: view/iTVF resolution, topo order, column provenance
-    Predicates/     # Pass 3: predicate extraction + type comparison
-    Rules/          # Precedence matrix, collation rules, verdict classification
-    Reporting/      # Pass 4: ranked findings, JSON + SARIF + markdown output
-  SilentScan.Cli/
-  SilentScan.Verify/   # Docker SQL Server: deploy DDL, diff sys.columns,
-                       # capture plan XML, grep CONVERT_IMPLICIT
-  SilentScan.Bench/    # cost harness (see Benchmark protocol)
-tests/
-  SilentScan.Tests/    # xUnit; every rule gets a minimal repro .sql fixture
-corpus/                # cloned repos (gitignored), manifest.json checked in
-docs/
+## The type rules (the heart of the tool — get these exactly right)
 
-* Pass 1 (Catalog): CREATE TABLE, ALTER TABLE, CREATE INDEX, computed
-columns, temp tables (#t via SELECT INTO and CREATE TABLE #t), table
-variables, database default collation from any CREATE DATABASE/manifest hint.
-* Pass 2 (Lineage): resolve every view output column to
-BaseColumn(table, column, type, collation) | Expression(inferredType) |
-Cast(explicitType) | Unknown(reason). Views in topological order of
-dependency; cycles → Unknown. SELECT * expands against catalog. UNION/UNION
-ALL output type = highest precedence across branches (record ALL branch types —
-the mixed-branch case is itself a finding). Inline TVFs = views. Multi-statement
-TVFs read declared RETURNS table types.
-* Pass 3 (Predicates): comparison predicates in WHERE/ON/HAVING of procs, views,
-functions, ad-hoc statements. For each colRef <op> other, resolve colRef
-through lineage to base type + collation; determine other side’s type (literal
-typing rules, parameter/variable declarations, other column via lineage).
-* Pass 4 (Verdict + rank), per finding:
-  * verdict: SEEK_PRESERVED | RANGE_SEEK (dynamic seek, partial penalty) |
-SCAN_FORCED | NOT_SARGABLE_FUNCTION | OPERAND_CLASH | UNKNOWN
-  * indexed: is the base column a key column of any index / PK / UQ?
-  * depth: 0 = direct table predicate; N = layers of views/TVFs between the
-predicate and the base column
-  * origin: file/line of predicate AND file/line of the layer that introduced
-the mismatch (e.g., the CAST inside vw_X)
-  * Rank: SCAN_FORCED + indexed + depth>=1 first.
+* **Only column-side conversion loses the seek.** T-SQL precedence converts the
+  LOWER-precedence side. `varchar` column vs `nvarchar` value/param → the COLUMN
+  converts → seek lost. `nvarchar` column vs `varchar` value → the VALUE converts
+  → harmless (`SeekPreserved`). Direction errors are the #1 way this study dies
+  in public.
+* **Collation is a first-class input.** For `varchar` column vs `nvarchar` value:
+  `SQL_*` collations → `ScanForced`; Windows collations → `RangeSeek`
+  (`GetRangeThroughConvert` — cheaper than a scan, dearer than a seek), and
+  benchmarked separately. Collation unknown and unpinned by the manifest →
+  `Unknown`. Never guess silently.
+* **Precedence matrix** encodes the official T-SQL list; seek/scan ground truth
+  cross-checked against Kehayias' implicit conversion matrix (sqlskills.com) —
+  cite it, but verify every pair we report against our own Docker oracle rather
+  than trusting either source.
+* **Literal typing:** `N'x'` nvarchar, `'x'` varchar, integer literal int, `1.5`
+  numeric(p,s), date literals stay strings until compared.
+* **Syntactic (Tier-1, no type info):** function-wrapped column, CAST/CONVERT on
+  column, column arithmetic, leading-wildcard `LIKE`, non-literal `LIKE` pattern.
+* **Hard cases** — explicit rule with fixtures, or `Unknown`: CASE/COALESCE/
+  NULLIF result typing, mixed-type `IN` lists, `BETWEEN`, computed columns
+  (persisted + indexed can still seek), `sql_variant`, date/time vs string.
+* When inference is uncertain → `Unknown`, never a guess. `Unknown` and
+  unanalyzable counts are reported honestly in the study.
 
-The type rules (the heart of the tool — get these exactly right)
+## Dynamic SQL
 
-* Only column-side conversion loses the seek. T-SQL data type precedence
-converts the LOWER-precedence side. varchar column vs nvarchar
-value/param → the COLUMN converts → seek lost (subject to collation, below).
-nvarchar column vs varchar value → the VALUE converts → harmless
-(SEEK_PRESERVED). Direction errors are the #1 way this study dies in public.
-* Precedence matrix: encode from the official T-SQL data type precedence
-list. Ground-truth seek/scan outcomes per type-pair: Kehayias’ implicit
-conversion matrix (sqlskills.com) — cite it, verify it against our Docker
-oracle for the pairs we actually report, don’t blindly trust either source.
-* Collation is a first-class input. varchar column vs nvarchar value:
-  * SQL_* collations (e.g. SQL_Latin1_General_CP1_CI_AS): SCAN_FORCED.
-  * Windows collations (e.g. Latin1_General_CI_AS): engine can build a dynamic
-range seek (GetRangeThroughConvert) → classify RANGE_SEEK, not SCAN_FORCED,
-and benchmark it separately (it is cheaper than a scan, dearer than a seek).
-  * If column collation unknown (no explicit COLLATE, no db default found):
-verdict UNKNOWN unless the manifest pins a collation. Never guess silently.
-* Non-sargable functions (Tier-1 syntactic, no type info needed):
-function-wrapped column (YEAR(col)=, UPPER(col)=, ISNULL(col,x)=,
-CONVERT/CAST(col,...)=), column arithmetic (col+1=), leading-wildcard
-LIKE '%...', LIKE @p marked conditional.
-* Literal typing: N'x' = nvarchar, 'x' = varchar, integer literal = int,
-1.5 = numeric(p,s), date literals stay strings (varchar) until compared.
-* Known hard cases — implement as explicit rules with test fixtures, or emit
-UNKNOWN: CASE/COALESCE/NULLIF result typing (precedence of branches), IN lists
-(mixed literal types), BETWEEN, computed columns (persisted + indexed can
-still seek), sql_variant → OPERAND-ish special, date/time family vs string.
+`EXEC`/`sp_executesql` arguments are analyzed when they can be **proved
+constant**, then run back through the normal pipeline with findings remapped to
+their true source lines and the call site kept as provenance: literal or literal
+concatenation; `sp_executesql`'s own params declaration for exact parameter
+types; and reaching-definitions tracing of DECLARE/SET/SELECT chains through
+straight-line code, recursing up to 5 levels. Anything not provably constant is
+reported with a machine-readable reason and counted in `DynamicSqlSummary` —
+never silently counted as clean. Soundness first: no heuristic string guessing.
 
-Dynamic SQL policy
+## Verification and benchmarks
 
-EXEC(@sql) / sp_executesql with concatenated strings: do NOT attempt full
-analysis. If the argument is a single string literal or trivially constant-folded
-concatenation of literals, parse it. Otherwise count the statement in an
-unanalyzable bucket that is REPORTED in the study (“X% of procs contain
-dynamic SQL we could not analyze”) — never silently counted as clean.
+* **Oracle is plan-XML based, never plan-shape based.** A finding is confirmed
+  iff the plan contains `CONVERT_IMPLICIT` applied to the COLUMN side of the
+  predicate. Whether a tiny table happened to seek or scan is irrelevant.
+* Per repo: deploy DDL to a fresh database → diff inferred view column
+  types/collations against `sys.columns` (any mismatch is a P0 lineage bug) →
+  for each `ScanForced` finding, submit a self-authored probe `SELECT` under
+  `SET SHOWPLAN_XML ON` (compile-only, empty tables).
+* Static verdicts never depend on the cardinality estimator — they state what
+  the predicate makes possible for the engine. Benchmarks pin compat level 160
+  and MAXDOP 1, and sweep both CE modes and both collation families so the
+  numbers can't be dismissed. Median of 5 warm runs; CSV out.
+* The study reports only oracle-confirmed findings; static-only findings go in
+  an appendix.
 
-Cardinality estimator & server settings — the policy
+## Corpus
 
-Classification (seek vs scan shape) is driven by type precedence + collation
+`corpus/manifest.json` is checked in and pins repo URL, commit SHA, license, DDL
+vs proc paths, and declared/assumed collation. Only repos whose SQL is plausibly
+SQL Server (GO separators, bracket quoting, `dbo.`, ScriptDOM parse success
+≥ 90%); files failing dialect sniffing are skipped — a MySQL file parsed as
+T-SQL is noise. Do not invent our own corpus or hand-write repros: rule fixtures
+come from real, internet-sourced implicit-conversion bugs.
 
-* predicate form. The CE version (legacy 70 vs new 120+) changes ROW ESTIMATES
-and COSTS, not the sargability of a predicate — but misestimates can flip the
-optimizer’s seek/scan CHOICE in borderline cases, and conversions themselves
-degrade estimates (that’s part of the tax). So:
-* The static verdict never depends on CE. It states what the predicate makes
-possible for the engine.
-* The oracle test is plan-XML based, not shape based: a finding is confirmed
-iff the actual plan contains CONVERT_IMPLICIT applied to the COLUMN side of
-the predicate (search ScalarOperator/Convert with Implicit=“true” over a
-ColumnReference). Whether the plan happens to seek or scan on tiny data is
-irrelevant and must not be used as the pass/fail signal.
-* Benchmarks pin the environment (see below) and run the cost comparison
-under BOTH CE versions (LEGACY_CARDINALITY_ESTIMATION ON/OFF) so the paper
-can say “the tax exists under both estimators; magnitudes were X and Y.”
-* Settings that actually matter and are controlled: database compatibility level
-(pin 160), database collation (test both one SQL_* and one Windows collation),
-LEGACY_CARDINALITY_ESTIMATION (both), MAXDOP 1 for reproducibility,
-SET STATISTICS IO/TIME capture, warm cache (report warm numbers; note cold).
-Settings we note as non-factors for classification: parameter sniffing,
-optimize-for-adhoc, memory grants (report if they distort a specific bench).
+Ethics: aggregate stats are public, no maintainer outreach required, no GitHub
+issues or PRs filed on scanned repos, never name-and-shame in tone. Nothing gets
+published externally without Umang's explicit go-ahead.
 
-Benchmark protocol (SilentScan.Bench)
+## Working agreements
 
-Docker mcr.microsoft.com/mssql/server:2022-latest. One synthetic table per
-type-pair under test; row counts 10K / 1M / 10M; identical query with matching
-vs mismatching parameter type; capture logical reads, CPU ms, elapsed ms,
-estimated vs actual rows, plan XML. Each cell = median of 5 warm runs. Output a
-CSV the writeup can chart directly.
-
-Verification workflow (SilentScan.Verify)
-
-For each corpus repo: deploy its DDL to a fresh database → diff our inferred
-view column types/collations against sys.columns for every view (this is the
-free ground-truth oracle for the lineage engine; ANY mismatch is a P0 bug) →
-for each SCAN_FORCED finding, submit a SELF-AUTHORED probe SELECT (never the
-repo’s procs) under SET SHOWPLAN_XML ON — compile-only, nothing executes, no
-data needed (tables stay empty; CONVERT_IMPLICIT is a compile-time artifact
-visible in the estimated plan) — and confirm CONVERT_IMPLICIT-on-column in the
-returned plan XML. Corpus DML/procs are NEVER executed anywhere. Study reports
-only oracle-confirmed findings; static-only findings go in an appendix.
-
-Corpus rules
-
-* corpus/manifest.json (checked in): repo URL, commit SHA pinned, license,
-which paths contain DDL vs procs, declared/assumed collation.
-* Only repos whose SQL is plausibly SQL Server: heuristics = GO batch
-separators, bracket quoting, dbo., ScriptDOM parse success rate ≥ 90% of
-files. Skip files that fail dialect sniffing — a MySQL file parsed as T-SQL
-is noise, not signal.
-* Ethics: aggregate stats public. No maintainer-outreach requirement before
-naming a project in the writeup — do not file GitHub issues/PRs on scanned
-repos as part of this workflow. Never name-and-shame in tone.
-
-Precision discipline
-
-* Every rule ships with: a minimal fixture that MUST fire, a near-miss fixture
-that MUST NOT fire, and (if verdict-bearing) an oracle test in Verify.
-* Pilot gate: before scanning the full corpus, run on 5 repos and hand-verify
-100% of findings. Published precision target: >95% on oracle-confirmed set.
-* When inference is uncertain → UNKNOWN, never a guess. UNKNOWN counts are
-reported honestly in the study.
-
-Conventions
-
-* xUnit; fixtures live in tests/fixtures/*.sql, named RULEID_fires.sql /
-RULEID_clean.sql.
-* Findings schema is versioned JSON; SARIF export so the tool doubles as a CI
-gate later (GitHub Action = phase 2 distribution).
-* Conventional commits. No network calls in Core—deterministic output ordering.
-* Run everything on Ubuntu; assume Docker available; dotnet test must pass
-before any commit that touches Rules/ or Lineage/.
-
-Git
-
-  * Never mention Claude or Gemini or any other company or model as co-author in this.
-  * Always commit using Umang Bhatt (bhatt.umang7@gmail.com).
-  * If you are resolving 10 items from a list, the commit message should never say “resolve item #1” because those details have no relevance when we are going back.
-
-Hallucination
-
-  * We want to do things right in the first go. Do not write any placeholders or dummy values that would have to be cleared later. All that you can do is not implement exceptions.
-
-Sonar
-
-  * Sonar is available here, and we scan using it before each commit. All issues are resolved before commit.  I have brought in a sonar scanning script from another project - tweak it as needed.
-  * Compile as well as Sonar should report 0 issues in all categories.
-  * Run Sonar and get to 0 issues before every commit.
-
-Local database
-
-* We have a local SQL Server image in Docker. Use that.
-
-Code coverage
-
-* We always aim for 99% code coverage.
-
-Inventing our own corpus
-
-* Do not invent our own corpus; look for issues from the internet and include those as tests for us to detect.
-
-Test fixtures
-
-* The test fixtures need to be repeatable. Make sure to clean up correctly at the end to avoid flaky tests.
-
-Tests
-
-* A balance between unit and integration tests needs to be maintained.
+* **Correct on the first pass.** No placeholders, dummy values, or TODOs left to
+  clean up later. Leaving an edge case unimplemented is fine; faking it is not.
+* **Tests:** xUnit; fixtures in `tests/SilentScan.Tests/fixtures/`, named
+  `RULEID_fires.sql` / `RULEID_clean.sql`. Every rule ships a fixture that MUST
+  fire, a near-miss that MUST NOT, and — if verdict-bearing — an oracle test.
+  Keep a real balance of unit and integration tests. Fixtures must be repeatable
+  and clean up unconditionally; no flaky state across runs. Aim for 99% coverage.
+* **Zero issues, every category.** `dotnet build` (warnings are errors) and
+  `dotnet test` clean, and a Sonar scan at 0 issues, before every commit —
+  via `sonar-scan.ps1` then `sonar-check-issues.sh`.
+* Deterministic output ordering. No network calls in Core. Findings schema is
+  versioned JSON; SARIF export doubles the tool as a CI gate later.
+* **Git:** conventional commits, authored as Umang Bhatt
+  <bhatt.umang7@gmail.com>. Never credit Claude or any other model/company as
+  co-author. Write commit messages about what changed and why — never
+  "resolve item #3", which means nothing to someone reading it back later.
