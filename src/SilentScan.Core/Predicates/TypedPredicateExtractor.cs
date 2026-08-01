@@ -51,20 +51,30 @@ public static class TypedPredicateExtractor
             _scopeStack.Pop();
         }
 
-        public override void ExplicitVisit(CreateProcedureStatement node)
-        {
-            // Local declarations don't cross proc boundaries, so start fresh per proc.
-            _variables.Clear();
-            RecordParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
+        // ScriptDOM's visitor double-dispatches through each concrete node type's own Accept()
+        // method, which binds at compile time to the most specific ExplicitVisit overload that
+        // exists - so overriding only the common ProcedureStatementBodyBase base type would
+        // never fire for e.g. an AlterProcedureStatement node. Real-world corpora routinely ship
+        // a body-less "CREATE PROCEDURE ... AS RETURN 0" stub followed by the real body via
+        // ALTER PROCEDURE (DynamicSqlScanner already had to handle this same pattern for the
+        // First Responder Kit corpus repo) - without these overrides, an ALTER PROCEDURE body
+        // was walked with the PREVIOUS procedure's stale _variables still in scope, and its own
+        // parameters were never recorded at all (docs/audit-remediation-plan.md Phase 2.3).
+        public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node);
 
-        public override void ExplicitVisit(CreateFunctionStatement node)
-        {
-            _variables.Clear();
-            RecordParameters(node.Parameters);
-            base.ExplicitVisit(node);
-        }
+        public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node);
+
+        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node);
+
+        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node);
+
+        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node);
+
+        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node);
+
+        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node);
+
+        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node);
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
@@ -74,6 +84,21 @@ public static class TypedPredicateExtractor
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        {
+            // Local declarations and parameters don't cross a proc/function boundary, so every
+            // body - however it was introduced - starts with a clean slate.
+            _variables.Clear();
+            RecordParameters(node.Parameters);
+            node.AcceptChildren(this);
+        }
+
+        private void VisitTriggerBody(TriggerStatementBody node)
+        {
+            _variables.Clear();
+            node.AcceptChildren(this);
         }
 
         public override void Visit(BooleanComparisonExpression node)

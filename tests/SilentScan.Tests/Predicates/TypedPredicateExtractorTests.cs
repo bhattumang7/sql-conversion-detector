@@ -486,4 +486,76 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
         Assert.Equal("dbo.Archive", finding.Column.TableQualifiedName);
     }
+
+    [Fact]
+    public void Extract_AlterProcedureAfterCreateStub_UsesAlterProcsOwnParameterType()
+    {
+        // docs/audit-remediation-plan.md Phase 2.3: the idempotent-deploy pattern seen verbatim
+        // in the First Responder Kit corpus repo - a body-less CREATE PROCEDURE stub, then the
+        // real body via ALTER PROCEDURE. Before the fix, ALTER PROCEDURE's parameters were never
+        // recorded at all (only CreateProcedureStatement/CreateFunctionStatement were handled),
+        // so @DisplayName here would resolve to an untyped variable and produce no finding.
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE PROCEDURE dbo.usp_FindUser AS RETURN 0;",
+            """
+            ALTER PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("DisplayName", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_CreateOrAlterProcedure_UsesOwnParameterType()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE OR ALTER PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_TwoProceduresInSequence_SecondProcDoesNotInheritFirstProcsVariableTypes()
+    {
+        // The core staleness bug: before the fix, only CreateProcedureStatement/
+        // CreateFunctionStatement reset _variables, but every CREATE PROCEDURE already did that
+        // correctly - the real gap was ALTER's total non-handling. This test guards the
+        // more basic regression (two ordinary CREATE PROCEDUREs in a row must never leak
+        // variable types between them) so it can't quietly break again while fixing the ALTER
+        // gap above.
+        var findings = Extract(
+            "CREATE TABLE dbo.Ints (Col INT NOT NULL);",
+            "CREATE TABLE dbo.Strings (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_First @Id INT
+            AS
+            BEGIN
+                SELECT Col FROM dbo.Ints WHERE Col = @Id;
+            END
+            """,
+            """
+            CREATE PROCEDURE dbo.usp_Second @Id NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Col FROM dbo.Strings WHERE Col = @Id;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Strings");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
 }
