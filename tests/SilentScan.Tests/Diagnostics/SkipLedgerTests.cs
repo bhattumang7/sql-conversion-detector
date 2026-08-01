@@ -10,9 +10,10 @@ namespace SilentScan.Tests.Diagnostics;
 /// <summary>
 /// Phase 0.1 of the audit remediation plan: every pass must record what it could not resolve
 /// rather than silently dropping it (CLAUDE.md's dynamic-SQL "never silently counted as clean"
-/// policy, extended to Catalog/Lineage/Predicates). These tests pin the specific gaps that
-/// currently exist so a later fix (e.g. Phase 2.5's ALTER TABLE ordering fix, Phase 4.1's
-/// UPDATE/DELETE coverage) is provably a fix - it must remove the corresponding ledger entry.
+/// policy, extended to Catalog/Lineage/Predicates). Some of these tests originally pinned gaps
+/// that a later phase then closed (e.g. Phase 2.5's two-phase build fixed ALTER TABLE cross-file
+/// ordering) - those were updated in place to assert the fix instead of the gap, proving the
+/// ledger entry is gone, not just that the code compiles.
 /// </summary>
 public sealed class SkipLedgerTests
 {
@@ -33,32 +34,46 @@ public sealed class SkipLedgerTests
     }
 
     [Fact]
-    public void CatalogBuilder_AlterTableBeforeCreateTable_RecordsSkip()
+    public void CatalogBuilder_AlterTableBeforeCreateTable_TwoPhaseBuildResolvesRegardlessOfOrder()
     {
-        // Cross-file ordering: the ALTER arrives (in enumeration order) before the CREATE TABLE
-        // that would establish the target. CLAUDE.md precision discipline says never silently
-        // drop this - it can hide an indexed/typed column from every downstream pass.
+        // Cross-file ordering (docs/audit-remediation-plan.md Phase 2.5): the ALTER arrives (in
+        // enumeration order) before the CREATE TABLE that establishes the target. The two-phase
+        // build (every CREATE TABLE across every file first, then everything else) resolves this
+        // correctly regardless of file order - this used to be a recorded skip (see git history
+        // for the Phase 0.1 version of this test); now it's a real fix; no skip, real data.
         var alterFirst = new SqlScriptParser().ParseText("02_alter.sql", "ALTER TABLE dbo.Users ADD Email VARCHAR(200) NULL;");
         var createSecond = new SqlScriptParser().ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL);");
 
         var catalog = CatalogBuilder.Build([alterFirst, createSecond]);
 
-        var entry = Assert.Single(catalog.Skipped.Entries);
-        Assert.Equal(AnalysisPass.Catalog, entry.Pass);
-        Assert.Equal("02_alter.sql", entry.SourcePath);
-        Assert.Contains("dbo.Users", entry.Reason, StringComparison.Ordinal);
+        Assert.Empty(catalog.Skipped.Entries);
+        Assert.NotNull(catalog.Find("dbo.Users")!.FindColumn("Email"));
     }
 
     [Fact]
-    public void CatalogBuilder_CreateIndexBeforeCreateTable_RecordsSkip()
+    public void CatalogBuilder_CreateIndexBeforeCreateTable_TwoPhaseBuildResolvesRegardlessOfOrder()
     {
         var indexFirst = new SqlScriptParser().ParseText("02_index.sql", "CREATE INDEX IX_Users_Email ON dbo.Users(Email);");
         var createSecond = new SqlScriptParser().ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL, Email VARCHAR(200) NULL);");
 
         var catalog = CatalogBuilder.Build([indexFirst, createSecond]);
 
+        Assert.Empty(catalog.Skipped.Entries);
+        Assert.True(catalog.Find("dbo.Users")!.IsIndexedColumn("Email"));
+    }
+
+    [Fact]
+    public void CatalogBuilder_AlterOrIndexWithNoMatchingTableAnywhere_StillRecordsSkip()
+    {
+        // The two-phase build fixes ordering, not a genuinely missing base table - this must
+        // still be recorded, not silently dropped.
+        var alterOnly = new SqlScriptParser().ParseText("test.sql", "ALTER TABLE dbo.Ghost ADD Email VARCHAR(200) NULL;");
+
+        var catalog = CatalogBuilder.Build([alterOnly]);
+
         var entry = Assert.Single(catalog.Skipped.Entries);
-        Assert.Equal("CREATE INDEX", entry.ConstructKind);
+        Assert.Equal(AnalysisPass.Catalog, entry.Pass);
+        Assert.Contains("dbo.Ghost", entry.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

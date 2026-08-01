@@ -7,13 +7,22 @@ namespace SilentScan.Core.Lineage;
 /// <summary>Resolves a FROM clause to an alias-&gt;relation scope, flattening the join tree to its leaf table references.</summary>
 public static class FromScopeResolver
 {
+    /// <summary>
+    /// <paramref name="procScope"/> is the qualified name of the innermost enclosing
+    /// procedure/function/trigger, if any (docs/audit-remediation-plan.md Phase 2.5) - temp
+    /// tables and table variables declared inside one are cataloged under a key scoped to it, so
+    /// resolving a bare "#t"/"@t" reference needs the same scope to find them; a real persistent
+    /// table was never stored with a scope, so passing one here is always safe (DatabaseCatalog
+    /// falls back to the unscoped lookup automatically).
+    /// </summary>
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
         FromClause? fromClause,
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         string sourcePath,
         SkipLedger? ledger = null,
-        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null)
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null,
+        string? procScope = null)
     {
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<ScopeEntry>();
@@ -27,7 +36,7 @@ public static class FromScopeResolver
         {
             foreach (var leaf in FlattenJoins(tableReference))
             {
-                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath, ledger, cteRelations);
+                var (alias, entry) = ResolveTableReference(leaf, catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
                 if (alias is not null)
                 {
                     byAlias[alias] = entry;
@@ -77,7 +86,8 @@ public static class FromScopeResolver
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         string sourcePath,
         SkipLedger? ledger,
-        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations)
+        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations,
+        string? procScope)
     {
         switch (tableReference)
         {
@@ -95,7 +105,7 @@ public static class FromScopeResolver
 
                 var qualifiedName = SchemaObjectNameHelper.Qualify(named.SchemaObject);
                 var isViewLayer = resolvedViews.TryGetValue(qualifiedName, out var view);
-                var catalogTable = catalog.Find(qualifiedName);
+                var catalogTable = catalog.Find(qualifiedName, procScope);
                 if (!isViewLayer && catalogTable is null)
                 {
                     ledger?.Record(
@@ -111,7 +121,7 @@ public static class FromScopeResolver
                 // A derived-table subquery is inline, local to this statement - not a
                 // persisted view/TVF, so it does not add view-layer depth. The enclosing
                 // statement's CTEs stay visible inside it.
-                var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations);
+                var innerColumns = QueryExpressionResolver.Resolve(derived.QueryExpression, catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
                 if (derived.Columns.Count > 0)
                 {
                     innerColumns = [.. innerColumns.Zip(derived.Columns, (c, id) => c with { Name = id.Value })];

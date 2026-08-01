@@ -6,7 +6,12 @@ namespace SilentScan.Core.Catalog;
 
 /// <summary>
 /// Pass 1: walks parsed .sql files and builds the <see cref="DatabaseCatalog"/> - tables,
-/// columns, types, collations, indexes, PK/UQ (CLAUDE.md Pass 1).
+/// columns, types, collations, indexes, PK/UQ, temp tables, table variables (CLAUDE.md Pass 1).
+/// A <see cref="TSqlFragmentVisitor"/>-based visitor rather than a hand-rolled statement switch
+/// (docs/audit-remediation-plan.md Phase 2.5): the default (un-overridden) ExplicitVisit
+/// implementation already recurses into every container - procedure/function/trigger bodies,
+/// IF/WHILE/TRY blocks, BEGIN/END blocks - so a construct nested inside any of them is never
+/// silently missed just because nobody enumerated that specific container type.
 /// </summary>
 public static class CatalogBuilder
 {
@@ -24,20 +29,35 @@ public static class CatalogBuilder
 
         catalog.DefaultCollation = ResolveDefaultCollation(results, manifestDeclaredCollation);
 
+        // Two-phase build (docs/audit-remediation-plan.md Phase 2.5): every CREATE TABLE across
+        // every scanned file is cataloged before any ALTER TABLE/CREATE INDEX/SELECT INTO is
+        // applied, so cross-file ordering (an index or ALTER declared in a file that sorts
+        // before the file with the base CREATE TABLE - routine in real repos that split DDL
+        // across per-object files) no longer drops real catalog data.
         foreach (var result in results)
         {
-            if (result.Fragment is not TSqlScript script)
-            {
-                continue;
-            }
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.CollectTables));
+        }
 
-            foreach (var statement in script.Batches.SelectMany(b => b.Statements))
-            {
-                Visit(statement, catalog, result.SourcePath);
-            }
+        foreach (var result in results)
+        {
+            Walk(result, new Visitor(catalog, result.SourcePath, BuildPhase.ApplyEverythingElse));
         }
 
         return catalog;
+    }
+
+    private static void Walk(SqlParseResult result, Visitor visitor)
+    {
+        if (result.Fragment is not TSqlScript script)
+        {
+            return;
+        }
+
+        foreach (var batch in script.Batches)
+        {
+            batch.Accept(visitor);
+        }
     }
 
     /// <summary>
@@ -93,132 +113,388 @@ public static class CatalogBuilder
         return found;
     }
 
-    private static void Visit(TSqlStatement statement, DatabaseCatalog catalog, string sourcePath)
+    private enum BuildPhase
     {
-        switch (statement)
-        {
-            case CreateTableStatement createTable:
-                VisitCreateTable(createTable, catalog, sourcePath);
-                break;
-            case AlterTableAddTableElementStatement alterTable:
-                VisitAlterTableAdd(alterTable, catalog, sourcePath);
-                break;
-            case CreateIndexStatement createIndex:
-                VisitCreateIndex(createIndex, catalog, sourcePath);
-                break;
-            case DeclareTableVariableStatement declareTableVar:
-                VisitDeclareTableVariable(declareTableVar, catalog, sourcePath);
-                break;
-            case BeginEndBlockStatement beginEnd:
-                foreach (var inner in beginEnd.StatementList.Statements)
-                {
-                    Visit(inner, catalog, sourcePath);
-                }
-
-                break;
-        }
+        CollectTables,
+        ApplyEverythingElse,
     }
 
-    private static void VisitCreateTable(CreateTableStatement createTable, DatabaseCatalog catalog, string sourcePath)
+    /// <summary>
+    /// One traversal of one file's batches. <see cref="_currentScope"/> tracks the qualified
+    /// name of the innermost enclosing procedure/function/trigger, if any, so a temp table or
+    /// table variable declared inside one gets a catalog key scoped to it - two procedures'
+    /// same-named-but-differently-shaped temp objects (a very common real-world pattern) must
+    /// not clobber each other (docs/audit-remediation-plan.md Phase 2.5).
+    /// </summary>
+    private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
     {
-        if (createTable.Definition is null)
+        private string? _currentScope;
+
+        public override void ExplicitVisit(CreateTableStatement node)
         {
-            // CREATE TABLE ... AS CLONE OF or CTAS-only forms have no inline column list.
-            return;
+            if (phase == BuildPhase.CollectTables)
+            {
+                VisitCreateTable(node);
+            }
+
+            node.AcceptChildren(this);
         }
 
-        var (schema, name) = SchemaObjectNameHelper.Resolve(createTable.SchemaObjectName);
-        var kind = schema is null ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
-
-        var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation);
-        var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
-
-        var table = new CatalogTable(
-            schema,
-            name,
-            kind,
-            columns,
-            [.. indexesFromColumns, .. indexesFromConstraints],
-            sourcePath,
-            createTable.StartLine);
-
-        catalog.AddOrReplace(table);
-    }
-
-    private static void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable, DatabaseCatalog catalog, string sourcePath)
-    {
-        var qualifiedName = SchemaObjectNameHelper.Qualify(alterTable.SchemaObjectName);
-        var existing = catalog.Find(qualifiedName);
-        if (existing is null)
+        public override void ExplicitVisit(AlterTableAddTableElementStatement node)
         {
-            // ALTER TABLE against a table we haven't seen DDL for (e.g. cross-file ordering,
-            // or the base CREATE TABLE failed to parse) - nothing to merge into. Recorded
-            // rather than dropped: this can silently mask indexed/typed columns downstream.
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitAlterTableAdd(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(AlterTableAlterColumnStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitAlterColumn(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(AlterTableDropTableElementStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitDropTableElements(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitCreateIndex(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateColumnStoreIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitCreateColumnStoreIndex(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(DeclareTableVariableStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitDeclareTableVariable(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse && node.Into is not null)
+            {
+                VisitSelectInto(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        // Every concrete CREATE/ALTER/CREATE OR ALTER procedure and function statement needs its
+        // own override for the same reason Phase 2.3 needed one in TypedPredicateExtractor:
+        // ScriptDOM's Accept() binds at compile time to the most specific ExplicitVisit overload
+        // that exists, so overriding only the common ProcedureStatementBodyBase base type would
+        // never fire for e.g. an AlterProcedureStatement node.
+        public override void ExplicitVisit(CreateProcedureStatement node) => VisitScopedBody(node, node.ProcedureReference.Name);
+
+        public override void ExplicitVisit(AlterProcedureStatement node) => VisitScopedBody(node, node.ProcedureReference.Name);
+
+        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitScopedBody(node, node.ProcedureReference.Name);
+
+        public override void ExplicitVisit(CreateFunctionStatement node) => VisitScopedBody(node, node.Name);
+
+        public override void ExplicitVisit(AlterFunctionStatement node) => VisitScopedBody(node, node.Name);
+
+        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitScopedBody(node, node.Name);
+
+        public override void ExplicitVisit(CreateTriggerStatement node) => VisitScopedBody(node, node.Name);
+
+        public override void ExplicitVisit(AlterTriggerStatement node) => VisitScopedBody(node, node.Name);
+
+        private void VisitScopedBody(TSqlFragment node, SchemaObjectName name)
+        {
+            var previous = _currentScope;
+            _currentScope = SchemaObjectNameHelper.Qualify(name);
+            node.AcceptChildren(this);
+            _currentScope = previous;
+        }
+
+        private void VisitCreateTable(CreateTableStatement createTable)
+        {
+            if (createTable.Definition is null)
+            {
+                // CREATE TABLE ... AS CLONE OF or CTAS-only forms have no inline column list.
+                return;
+            }
+
+            var (schema, name) = SchemaObjectNameHelper.Resolve(createTable.SchemaObjectName);
+            var isTemp = schema is null;
+            var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
+
+            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation);
+            var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
+            var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
+            columns = ApplyPrimaryKeyNotNull(columns, allIndexes);
+
+            var table = new CatalogTable(
+                schema,
+                name,
+                kind,
+                columns,
+                allIndexes,
+                sourcePath,
+                createTable.StartLine);
+
+            // A temp table (#t) is scoped to its declaring procedure, same as a table variable -
+            // it's just as invisible outside that procedure. A batch-level temp table (declared
+            // in an ad-hoc script, not inside any proc) has no scope, matching pre-fix behavior.
+            catalog.AddOrReplace(table, isTemp ? _currentScope : null);
+        }
+
+        private void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(alterTable.SchemaObjectName);
+            var existing = catalog.Find(qualifiedName);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("ALTER TABLE ADD", qualifiedName, alterTable);
+                return;
+            }
+
+            var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation);
+            var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
+            var mergedColumns = (List<CatalogColumn>)[.. existing.Columns, .. newColumns];
+            var mergedIndexes = (List<CatalogIndex>)[.. existing.Indexes, .. indexesFromColumns, .. newIndexes];
+
+            catalog.AddOrReplace(existing with
+            {
+                Columns = ApplyPrimaryKeyNotNull(mergedColumns, mergedIndexes),
+                Indexes = mergedIndexes,
+            });
+        }
+
+        private void VisitAlterColumn(AlterTableAlterColumnStatement alterColumn)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(alterColumn.SchemaObjectName);
+            var existing = catalog.Find(qualifiedName);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("ALTER TABLE ALTER COLUMN", qualifiedName, alterColumn);
+                return;
+            }
+
+            var columnName = alterColumn.ColumnIdentifier.Value;
+            var existingColumn = existing.FindColumn(columnName);
+            if (existingColumn is null)
+            {
+                // ALTER COLUMN on a column this pass never saw declared (e.g. added by a
+                // migration script this scan doesn't include) - nothing to replace.
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, alterColumn.StartLine, alterColumn.StartColumn,
+                    "ALTER TABLE ALTER COLUMN", $"column '{columnName}' on '{qualifiedName}' not found in catalog");
+                return;
+            }
+
+            // The exact bug this fixes (docs/audit-remediation-plan.md Phase 2.5): a migration
+            // script that widens a column's type (e.g. varchar -> nvarchar) previously left the
+            // ORIGINAL type in the catalog forever, producing wrong-direction findings on
+            // precisely the pattern this tool exists to catch. An unresolvable target type nulls
+            // the column so downstream goes UNKNOWN rather than keeping the stale value.
+            var newType = SqlTypeReferenceResolver.Resolve(alterColumn.DataType, alterColumn.Collation);
+            if (newType is { IsStringFamily: true, Collation: null } && catalog.DefaultCollation is not null)
+            {
+                newType = newType with { Collation = catalog.DefaultCollation };
+            }
+
+            var updatedColumns = existing.Columns
+                .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase) ? c with { Type = newType } : c)
+                .ToList();
+
+            catalog.AddOrReplace(existing with { Columns = updatedColumns });
+        }
+
+        private void VisitDropTableElements(AlterTableDropTableElementStatement dropStatement)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(dropStatement.SchemaObjectName);
+            var existing = catalog.Find(qualifiedName);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("ALTER TABLE DROP", qualifiedName, dropStatement);
+                return;
+            }
+
+            var droppedColumnNames = dropStatement.AlterTableDropTableElements
+                .Where(e => e.TableElementType == TableElementType.Column)
+                .Select(e => e.Name.Value)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (droppedColumnNames.Count == 0)
+            {
+                // Only constraints/indexes were dropped, no columns - nothing to remove from
+                // the column list. Dropping a constraint by name isn't tracked back to a
+                // specific CatalogIndex today (constraints aren't named-and-keyed for lookup),
+                // so the index list is left as-is rather than guessing which one it was.
+                return;
+            }
+
+            var remainingColumns = existing.Columns.Where(c => !droppedColumnNames.Contains(c.Name)).ToList();
+            catalog.AddOrReplace(existing with { Columns = remainingColumns });
+        }
+
+        private void VisitCreateIndex(CreateIndexStatement createIndex)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
+            var existing = catalog.Find(qualifiedName);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("CREATE INDEX", qualifiedName, createIndex);
+                return;
+            }
+
+            var index = new CatalogIndex(
+                createIndex.Name?.Value,
+                CatalogIndexKind.Index,
+                createIndex.Unique,
+                [.. createIndex.Columns.Select(ColumnName)],
+                [.. createIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
+                IsFiltered: createIndex.FilterPredicate is not null);
+
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] });
+        }
+
+        private void VisitCreateColumnStoreIndex(CreateColumnStoreIndexStatement createIndex)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
+            var existing = catalog.Find(qualifiedName);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("CREATE COLUMNSTORE INDEX", qualifiedName, createIndex);
+                return;
+            }
+
+            var index = new CatalogIndex(
+                createIndex.Name?.Value,
+                CatalogIndexKind.Index,
+                IsUnique: false,
+                [.. createIndex.Columns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
+                IncludedColumns: [],
+                IsColumnstore: true);
+
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] });
+        }
+
+        private void VisitDeclareTableVariable(DeclareTableVariableStatement declareTableVar)
+        {
+            var body = declareTableVar.Body;
+            if (body.Definition is null)
+            {
+                return;
+            }
+
+            // A table variable's columns technically default to tempdb's collation, not the
+            // user database's - but this tool models a single target database per scan (the
+            // same simplification SchemaObjectNameHelper makes), so the scanned database's
+            // default is the closest available signal rather than leaving every unqualified
+            // column UNKNOWN.
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation);
+            var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
+
+            var table = new CatalogTable(
+                SchemaName: null,
+                body.VariableName.Value,
+                CatalogTableKind.TableVariable,
+                columns,
+                [.. indexesFromColumns, .. indexesFromConstraints],
+                sourcePath,
+                declareTableVar.StartLine);
+
+            catalog.AddOrReplace(table, _currentScope);
+        }
+
+        private void VisitSelectInto(SelectStatement select)
+        {
+            var targetName = select.Into!;
+            var (schema, name) = SchemaObjectNameHelper.Resolve(targetName);
+            var isTemp = schema is null;
+
+            var columns = SelectIntoColumnResolver.Resolve(select, catalog, _currentScope, sourcePath, catalog.Skipped);
+
+            var table = new CatalogTable(
+                schema,
+                name,
+                isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table,
+                columns,
+                Indexes: [],
+                sourcePath,
+                select.StartLine);
+
+            catalog.AddOrReplace(table, isTemp ? _currentScope : null);
+        }
+
+        private void RecordUnresolvedTarget(string constructKind, string qualifiedName, TSqlFragment node) =>
             catalog.Skipped.Record(
-                AnalysisPass.Catalog, sourcePath, alterTable.StartLine, alterTable.StartColumn,
-                "ALTER TABLE ADD", $"target table '{qualifiedName}' not found in catalog (cross-file ordering or failed base CREATE TABLE)");
-            return;
+                AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                constructKind, $"target table '{qualifiedName}' not found in catalog (cross-file/cross-database reference, or failed base CREATE TABLE)");
+
+        private static List<CatalogIndex> BuildIndexesFromTableConstraints(IList<ConstraintDefinition> tableConstraints)
+        {
+            var indexes = new List<CatalogIndex>();
+
+            foreach (var constraint in tableConstraints.OfType<UniqueConstraintDefinition>())
+            {
+                indexes.Add(new CatalogIndex(
+                    constraint.ConstraintIdentifier?.Value,
+                    constraint.IsPrimaryKey ? CatalogIndexKind.PrimaryKey : CatalogIndexKind.UniqueConstraint,
+                    IsUnique: true,
+                    [.. constraint.Columns.Select(ColumnName)],
+                    IncludedColumns: []));
+            }
+
+            return indexes;
         }
 
-        var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation);
-        var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
-
-        var merged = existing with
+        /// <summary>
+        /// A table-level PRIMARY KEY constraint (CONSTRAINT PK_X PRIMARY KEY (Col1, Col2))
+        /// implies NOT NULL on its key columns even with no explicit NOT NULL clause on the
+        /// column itself - the inline column-level case is already handled in
+        /// BuildColumnConstraints; this covers the out-of-line, table-level form
+        /// (docs/audit-remediation-plan.md Phase 2.5, needed for the sys.columns diff to agree
+        /// with the real server).
+        /// </summary>
+        private static List<CatalogColumn> ApplyPrimaryKeyNotNull(List<CatalogColumn> columns, List<CatalogIndex> indexes)
         {
-            Columns = [.. existing.Columns, .. newColumns],
-            Indexes = [.. existing.Indexes, .. indexesFromColumns, .. newIndexes],
-        };
+            var primaryKeyColumns = indexes
+                .Where(i => i.Kind == CatalogIndexKind.PrimaryKey)
+                .SelectMany(i => i.KeyColumns)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        catalog.AddOrReplace(merged);
-    }
+            if (primaryKeyColumns.Count == 0)
+            {
+                return columns;
+            }
 
-    private static void VisitCreateIndex(CreateIndexStatement createIndex, DatabaseCatalog catalog, string sourcePath)
-    {
-        var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
-        var existing = catalog.Find(qualifiedName);
-        if (existing is null)
-        {
-            catalog.Skipped.Record(
-                AnalysisPass.Catalog, sourcePath, createIndex.StartLine, createIndex.StartColumn,
-                "CREATE INDEX", $"target table '{qualifiedName}' not found in catalog (cross-file ordering or failed base CREATE TABLE)");
-            return;
+            return [.. columns.Select(c => primaryKeyColumns.Contains(c.Name) ? c with { IsNullable = false } : c)];
         }
-
-        var index = new CatalogIndex(
-            createIndex.Name?.Value,
-            CatalogIndexKind.Index,
-            createIndex.Unique,
-            [.. createIndex.Columns.Select(ColumnName)],
-            [.. createIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)]);
-
-        catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] });
-    }
-
-    private static void VisitDeclareTableVariable(DeclareTableVariableStatement declareTableVar, DatabaseCatalog catalog, string sourcePath)
-    {
-        var body = declareTableVar.Body;
-        if (body.Definition is null)
-        {
-            return;
-        }
-
-        // A table variable's columns technically default to tempdb's collation, not the user
-        // database's - but this tool models a single target database per scan (the same
-        // simplification SchemaObjectNameHelper makes), so the scanned database's default is
-        // the closest available signal rather than leaving every unqualified column UNKNOWN.
-        var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation);
-        var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
-
-        var table = new CatalogTable(
-            SchemaName: null,
-            body.VariableName.Value,
-            CatalogTableKind.TableVariable,
-            columns,
-            [.. indexesFromColumns, .. indexesFromConstraints],
-            sourcePath,
-            declareTableVar.StartLine);
-
-        catalog.AddOrReplace(table);
     }
 
     /// <summary>
@@ -284,6 +560,15 @@ public static class CatalogBuilder
                         IsUnique: true,
                         unique.Columns.Count > 0 ? [.. unique.Columns.Select(ColumnName)] : [columnName],
                         IncludedColumns: []));
+
+                    // A PRIMARY KEY column is implicitly NOT NULL even with no explicit NOT
+                    // NULL clause (needed for the sys.columns diff to agree with the real
+                    // server - docs/audit-remediation-plan.md Phase 2.5).
+                    if (unique.IsPrimaryKey)
+                    {
+                        isNullable = false;
+                    }
+
                     break;
             }
         }
@@ -297,23 +582,6 @@ public static class CatalogBuilder
         inlineIndex.Unique,
         inlineIndex.Columns.Count > 0 ? [.. inlineIndex.Columns.Select(ColumnName)] : [columnName],
         [.. inlineIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)]);
-
-    private static List<CatalogIndex> BuildIndexesFromTableConstraints(IList<ConstraintDefinition> tableConstraints)
-    {
-        var indexes = new List<CatalogIndex>();
-
-        foreach (var constraint in tableConstraints.OfType<UniqueConstraintDefinition>())
-        {
-            indexes.Add(new CatalogIndex(
-                constraint.ConstraintIdentifier?.Value,
-                constraint.IsPrimaryKey ? CatalogIndexKind.PrimaryKey : CatalogIndexKind.UniqueConstraint,
-                IsUnique: true,
-                [.. constraint.Columns.Select(ColumnName)],
-                IncludedColumns: []));
-        }
-
-        return indexes;
-    }
 
     private static string ColumnName(ColumnWithSortOrder columnWithSortOrder) =>
         columnWithSortOrder.Column.MultiPartIdentifier.Identifiers[^1].Value;

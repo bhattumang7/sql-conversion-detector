@@ -21,7 +21,7 @@ public static class CteResolver
     /// result dictionary. Returns an empty dictionary for a statement with no WITH clause.
     /// </summary>
     public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
-        WithCtesAndXmlNamespaces? withClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger)
+        WithCtesAndXmlNamespaces? withClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger, string? procScope = null)
     {
         var ctes = new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase);
         if (withClause is null)
@@ -33,8 +33,8 @@ public static class CteResolver
         {
             var name = cte.ExpressionName.Value;
             var columns = ReferencesSelf(cte.QueryExpression, name)
-                ? ResolveRecursiveAnchor(cte, catalog, resolvedViews, ctes, sourcePath, ledger)
-                : QueryExpressionResolver.Resolve(cte.QueryExpression, catalog, resolvedViews, sourcePath, ledger, ctes);
+                ? ResolveRecursiveAnchor(cte, catalog, resolvedViews, ctes, sourcePath, ledger, procScope)
+                : QueryExpressionResolver.Resolve(cte.QueryExpression, catalog, resolvedViews, sourcePath, ledger, ctes, procScope);
 
             if (cte.Columns.Count > 0)
             {
@@ -58,7 +58,7 @@ public static class CteResolver
     /// </summary>
     private static List<ResolvedColumn> ResolveRecursiveAnchor(
         CommonTableExpression cte, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
-        IReadOnlyDictionary<string, ResolvedRelation> priorCtes, string sourcePath, SkipLedger? ledger)
+        IReadOnlyDictionary<string, ResolvedRelation> priorCtes, string sourcePath, SkipLedger? ledger, string? procScope)
     {
         var name = cte.ExpressionName.Value;
         ledger?.Record(
@@ -75,7 +75,7 @@ public static class CteResolver
         var anchorIsFirst = !ReferencesSelf(binary.FirstQueryExpression, name);
         var anchorExpression = anchorIsFirst ? binary.FirstQueryExpression : binary.SecondQueryExpression;
 
-        var anchorColumns = QueryExpressionResolver.Resolve(anchorExpression, catalog, resolvedViews, sourcePath, ledger, priorCtes);
+        var anchorColumns = QueryExpressionResolver.Resolve(anchorExpression, catalog, resolvedViews, sourcePath, ledger, priorCtes, procScope);
         return [.. anchorColumns.Select(c => c with
         {
             Provenance = new ColumnProvenance.Union([c.Provenance, new ColumnProvenance.Unknown($"recursive member of CTE '{name}' not resolved - never guess")]),

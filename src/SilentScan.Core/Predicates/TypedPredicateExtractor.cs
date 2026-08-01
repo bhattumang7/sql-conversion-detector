@@ -37,6 +37,7 @@ public static class TypedPredicateExtractor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
+        private string? _currentProcScope;
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
@@ -53,7 +54,7 @@ public static class TypedPredicateExtractor
             // derived-table subquery nested inside a CTE-using statement), so this always pushes
             // something - an unchanged copy of the current top when there's nothing new to add.
             var currentCtes = CurrentCteRelations();
-            var ctes = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, resolvedViews, sourcePath, ledger);
+            var ctes = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, resolvedViews, sourcePath, ledger, _currentProcScope);
             _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
             base.ExplicitVisit(node);
             _cteStack.Pop();
@@ -61,7 +62,7 @@ public static class TypedPredicateExtractor
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations()));
+            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope));
             base.ExplicitVisit(node);
             _scopeStack.Pop();
         }
@@ -74,22 +75,25 @@ public static class TypedPredicateExtractor
         // ALTER PROCEDURE (DynamicSqlScanner already had to handle this same pattern for the
         // First Responder Kit corpus repo) - without these overrides, an ALTER PROCEDURE body
         // was walked with the PREVIOUS procedure's stale _variables still in scope, and its own
-        // parameters were never recorded at all (docs/audit-remediation-plan.md Phase 2.3).
-        public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node);
+        // parameters were never recorded at all (docs/audit-remediation-plan.md Phase 2.3). The
+        // qualified name each override passes through is also this body's temp-table/table-
+        // variable scope key (Phase 2.5), matching CatalogBuilder's identical scoping so a
+        // predicate inside a procedure can find that same procedure's own temp objects.
+        public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-        public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node);
+        public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node);
+        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
-        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node);
+        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
-        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node);
+        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node);
+        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node);
+        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name);
 
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node);
+        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name);
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
@@ -121,19 +125,27 @@ public static class TypedPredicateExtractor
             return merged;
         }
 
-        private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
         {
             // Local declarations and parameters don't cross a proc/function boundary, so every
             // body - however it was introduced - starts with a clean slate.
             _variables.Clear();
             RecordParameters(node.Parameters);
+
+            var previousScope = _currentProcScope;
+            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
+            _currentProcScope = previousScope;
         }
 
-        private void VisitTriggerBody(TriggerStatementBody node)
+        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name)
         {
             _variables.Clear();
+
+            var previousScope = _currentProcScope;
+            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
+            _currentProcScope = previousScope;
         }
 
         public override void Visit(BooleanComparisonExpression node)

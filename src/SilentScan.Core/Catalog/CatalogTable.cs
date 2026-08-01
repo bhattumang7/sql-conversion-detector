@@ -22,6 +22,12 @@ public sealed record CatalogTable(
     public CatalogColumn? FindColumn(string columnName) =>
         Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// True only if a genuinely seekable index covers this column as a key column - a filtered
+    /// index (only covers rows matching its own predicate) or a columnstore index (no B-tree to
+    /// seek) does not count, even though the column is technically "in an index"
+    /// (docs/audit-remediation-plan.md Phase 2.5).
+    /// </summary>
     public bool IsIndexedColumn(string columnName) =>
-        Indexes.Any(i => i.KeyColumns.Any(k => string.Equals(k, columnName, StringComparison.OrdinalIgnoreCase)));
+        Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Any(k => string.Equals(k, columnName, StringComparison.OrdinalIgnoreCase)));
 }

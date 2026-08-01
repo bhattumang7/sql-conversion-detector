@@ -627,4 +627,41 @@ public sealed class TypedPredicateExtractorTests
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
+
+    [Fact]
+    public void Extract_SameNamedTempTableInTwoProcedures_EachProcedureResolvesItsOwnShape()
+    {
+        // docs/audit-remediation-plan.md Phase 2.5 "Done when": two procedures with same-named
+        // temp tables of different shapes each resolve correctly - proves the scoped catalog
+        // lookup Phase 2.5 added reaches all the way through predicate extraction, not just the
+        // catalog's own storage (see CatalogBuilderTests for the catalog-level version of this).
+        var findings = Extract(
+            """
+            CREATE PROCEDURE dbo.usp_First
+            AS
+            BEGIN
+                CREATE TABLE #t (Col INT NOT NULL);
+                SELECT Col FROM #t WHERE Col = 1;
+            END
+            """,
+            """
+            CREATE PROCEDURE dbo.usp_Second
+            AS
+            BEGIN
+                CREATE TABLE #t (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+                SELECT Col FROM #t WHERE Col = N'x';
+            END
+            """);
+
+        // usp_First's predicate is Int = Int literal (SeekPreserved); usp_Second's is VarChar
+        // column vs NVarChar literal (ScanForced) - if the two #t declarations had clobbered
+        // each other, one of these would resolve to the wrong type or Unknown instead.
+        Assert.Equal(2, findings.Count);
+        var firstFinding = Assert.Single(findings, f => f.Verdict == Verdict.SeekPreserved);
+        Assert.Equal(SqlTypeCategory.Int, firstFinding.Column.Type!.Category);
+
+        var secondFinding = Assert.Single(findings, f => f.Verdict == Verdict.ScanForced);
+        Assert.Equal("#t", secondFinding.Column.TableQualifiedName);
+        Assert.Equal(SqlTypeCategory.VarChar, secondFinding.Column.Type!.Category);
+    }
 }

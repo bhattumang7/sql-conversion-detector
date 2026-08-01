@@ -261,6 +261,226 @@ public sealed class CatalogBuilderTests
         Assert.Null(col.Type!.Collation);
     }
 
+    [Fact]
+    public void Build_AlterColumnAfterCreateTable_YieldsPostAlterType()
+    {
+        // docs/audit-remediation-plan.md Phase 2.5: the exact pattern this tool exists to catch
+        // - a migration script widening a column's type. Before the fix, the ORIGINAL type
+        // stayed in the catalog forever, producing wrong-direction findings on precisely this.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);
+                ALTER TABLE dbo.Users ALTER COLUMN DisplayName NVARCHAR(40) NOT NULL;
+                """)]);
+
+        var column = catalog.Find("dbo.Users")!.FindColumn("DisplayName")!;
+
+        Assert.Equal(SqlTypeCategory.NVarChar, column.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_AlterColumnAcrossFiles_AppliesRegardlessOfFileOrder()
+    {
+        var catalog = CatalogBuilder.Build(
+        [
+            Parse("ALTER TABLE dbo.Users ALTER COLUMN DisplayName NVARCHAR(40) NOT NULL;"),
+            Parse("CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);"),
+        ]);
+
+        var column = catalog.Find("dbo.Users")!.FindColumn("DisplayName")!;
+
+        Assert.Equal(SqlTypeCategory.NVarChar, column.Type!.Category);
+        Assert.Empty(catalog.Skipped.Entries);
+    }
+
+    [Fact]
+    public void Build_AlterColumnUnresolvableTargetType_NullsColumnRatherThanKeepingStaleType()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);
+                ALTER TABLE dbo.Users ALTER COLUMN DisplayName dbo.SomeUserDefinedType NOT NULL;
+                """)]);
+
+        var column = catalog.Find("dbo.Users")!.FindColumn("DisplayName")!;
+
+        Assert.Null(column.Type);
+    }
+
+    [Fact]
+    public void Build_DropColumn_RemovesColumnFromCatalog()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Users (Id INT NOT NULL, Obsolete VARCHAR(10) NULL);
+                ALTER TABLE dbo.Users DROP COLUMN Obsolete;
+                """)]);
+
+        var table = catalog.Find("dbo.Users")!;
+
+        Assert.Null(table.FindColumn("Obsolete"));
+        Assert.NotNull(table.FindColumn("Id"));
+    }
+
+    [Fact]
+    public void Build_TempTablesInsideDifferentProcedures_SameNameDifferentShape_DoNotClobberEachOther()
+    {
+        // docs/audit-remediation-plan.md Phase 2.5 "Done when": two procedures with same-named
+        // temp tables of different shapes each resolve correctly.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.usp_First
+                AS
+                BEGIN
+                    CREATE TABLE #t (Col INT NOT NULL);
+                END
+                GO
+                CREATE PROCEDURE dbo.usp_Second
+                AS
+                BEGIN
+                    CREATE TABLE #t (Col VARCHAR(20) NOT NULL);
+                END
+                """)]);
+
+        var firstTemp = catalog.Find("#t", "dbo.usp_First")!;
+        var secondTemp = catalog.Find("#t", "dbo.usp_Second")!;
+
+        Assert.Equal(SqlTypeCategory.Int, firstTemp.FindColumn("Col")!.Type!.Category);
+        Assert.Equal(SqlTypeCategory.VarChar, secondTemp.FindColumn("Col")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_TableVariablesInsideDifferentProcedures_SameNameDifferentShape_DoNotClobberEachOther()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.usp_First
+                AS
+                BEGIN
+                    DECLARE @t TABLE (Col INT NOT NULL);
+                END
+                GO
+                CREATE PROCEDURE dbo.usp_Second
+                AS
+                BEGIN
+                    DECLARE @t TABLE (Col VARCHAR(20) NOT NULL);
+                END
+                """)]);
+
+        var firstVar = catalog.Find("@t", "dbo.usp_First")!;
+        var secondVar = catalog.Find("@t", "dbo.usp_Second")!;
+
+        Assert.Equal(SqlTypeCategory.Int, firstVar.FindColumn("Col")!.Type!.Category);
+        Assert.Equal(SqlTypeCategory.VarChar, secondVar.FindColumn("Col")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_CrossDatabaseReference_DoesNotMergeWithSameSchemaTableInCurrentDatabase()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Users (Id INT NOT NULL, DisplayName VARCHAR(40) NOT NULL);
+                ALTER TABLE OtherDb.dbo.Users ADD ExtraColumn INT NULL;
+                """)]);
+
+        var localUsers = catalog.Find("dbo.Users")!;
+
+        Assert.Null(localUsers.FindColumn("ExtraColumn"));
+        Assert.Contains(catalog.Skipped.Entries, e => e.Reason.Contains("OtherDb.dbo.Users", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_FilteredIndex_NotCountedAsSeekableForRanking()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL, Status VARCHAR(20) NOT NULL);
+                CREATE INDEX IX_Orders_Status ON dbo.Orders(Status) WHERE Status = 'Open';
+                """)]);
+
+        Assert.False(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_OrdinaryIndex_StillCountsAsSeekable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL, Status VARCHAR(20) NOT NULL);
+                CREATE INDEX IX_Orders_Status ON dbo.Orders(Status);
+                """)]);
+
+        Assert.True(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_ColumnstoreIndex_NotCountedAsSeekableForRanking()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL, Status VARCHAR(20) NOT NULL);
+                CREATE COLUMNSTORE INDEX IX_Orders_CS ON dbo.Orders(Status);
+                """)]);
+
+        Assert.False(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_SelectIntoTempTable_InfersColumnTypesFromSourceTable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerName VARCHAR(40) NOT NULL);
+                GO
+                CREATE PROCEDURE dbo.usp_Snapshot
+                AS
+                BEGIN
+                    SELECT Id, CustomerName AS Name INTO #snapshot FROM dbo.Orders;
+                END
+                """)]);
+
+        var snapshot = catalog.Find("#snapshot", "dbo.usp_Snapshot")!;
+
+        Assert.Equal(SqlTypeCategory.Int, snapshot.FindColumn("Id")!.Type!.Category);
+        Assert.Equal(SqlTypeCategory.VarChar, snapshot.FindColumn("Name")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_SelectIntoWithNonColumnExpression_TargetColumnHasNoGuessedType()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL);
+                GO
+                CREATE PROCEDURE dbo.usp_Snapshot
+                AS
+                BEGIN
+                    SELECT Id, COUNT(*) AS Total INTO #snapshot FROM dbo.Orders GROUP BY Id;
+                END
+                """)]);
+
+        var snapshot = catalog.Find("#snapshot", "dbo.usp_Snapshot")!;
+
+        Assert.Null(snapshot.FindColumn("Total")!.Type);
+    }
+
+    [Fact]
+    public void Build_InlinePrimaryKeyColumn_IsNotNullableEvenWithoutExplicitNotNull()
+    {
+        var catalog = CatalogBuilder.Build([Parse("CREATE TABLE dbo.T (Id INT PRIMARY KEY);")]);
+
+        Assert.False(catalog.Find("dbo.T")!.FindColumn("Id")!.IsNullable);
+    }
+
+    [Fact]
+    public void Build_TableLevelPrimaryKeyConstraint_MarksKeyColumnsNotNullable()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE dbo.T (Id INT, CONSTRAINT PK_T PRIMARY KEY (Id));")]);
+
+        Assert.False(catalog.Find("dbo.T")!.FindColumn("Id")!.IsNullable);
+    }
+
     private static SqlParseResult Parse(string sql)
     {
         var result = new SqlScriptParser().ParseText("test.sql", sql);
