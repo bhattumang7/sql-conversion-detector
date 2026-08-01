@@ -412,6 +412,30 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_CreateOrAlterTriggerBody_TempTableScopedToTrigger()
+    {
+        // CreateOrAlterTriggerStatement is a distinct ScriptDOM node type from
+        // CreateTriggerStatement/AlterTriggerStatement - procedures and functions already got
+        // all three variants; triggers didn't (coverage-remediation-plan.md Phase 2.1).
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL);
+                GO
+                CREATE OR ALTER TRIGGER dbo.trg_Orders ON dbo.Orders
+                AFTER INSERT
+                AS
+                BEGIN
+                    CREATE TABLE #t (Col INT NOT NULL);
+                END
+                """)]);
+
+        var temp = catalog.Find("#t", "dbo.trg_Orders");
+
+        Assert.NotNull(temp);
+        Assert.Null(catalog.Find("#t"));
+    }
+
+    [Fact]
     public void Build_TableVariablesInsideDifferentProcedures_SameNameDifferentShape_DoNotClobberEachOther()
     {
         var catalog = CatalogBuilder.Build(
@@ -589,6 +613,33 @@ public sealed class CatalogBuilderTests
         var catalog = BuildFrom("CREATE TYPE dbo.Point EXTERNAL NAME MyAssembly.[Point];");
 
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR user-defined type" && e.Reason.Contains("dbo.Point", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_AlterAssembly_Ledgered()
+    {
+        // Found by StatementVariantParityTests' reflection backstop, not manual audit -
+        // ALTER ASSEMBLY was silently unhandled (no ledger entry at all) despite CREATE ASSEMBLY
+        // already being ledgered (coverage-remediation-plan.md Phase 2.1).
+        var catalog = BuildFrom("ALTER ASSEMBLY MyAssembly FROM 0x4D5A;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly" && e.Reason.Contains("MyAssembly", StringComparison.Ordinal) && e.Reason.Contains("ALTER ASSEMBLY", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_AlterIndexDisable_Ledgered()
+    {
+        // Found by the same reflection backstop. Not fixed - the precision-relevant case
+        // (DISABLE) needs index-name -> state tracking this pass doesn't have; ledgered so it's
+        // at least counted rather than silently reporting a disabled index as still seekable.
+        var catalog = BuildFrom(
+            """
+            CREATE TABLE dbo.T (Col INT NOT NULL);
+            CREATE INDEX IX_T_Col ON dbo.T(Col);
+            ALTER INDEX IX_T_Col ON dbo.T DISABLE;
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "ALTER INDEX" && e.Reason.Contains("IX_T_Col", StringComparison.Ordinal));
     }
 
     [Fact]

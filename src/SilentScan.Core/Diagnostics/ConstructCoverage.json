@@ -59,6 +59,13 @@
       "rationale": "CLR assembly registration. Deliberately not modeled - coverage-remediation-plan.md decision: count and decline, never analyze CLR."
     },
     {
+      "construct": "AlterAssemblyStatement",
+      "group": "ColumnDefiner",
+      "status": "Ledgered",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Re-points an existing CLR assembly's file/version. Same decline-to-model decision as CreateAssemblyStatement. Found by the StatementVariantParityTests reflection backstop, not by manual audit - was silently unhandled (no ledger entry at all) until this pass, unlike its CREATE sibling."
+    },
+    {
       "construct": "CreateAggregateStatement",
       "group": "ColumnDefiner",
       "status": "Ledgered",
@@ -78,6 +85,13 @@
       "status": "Handled",
       "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": null
+    },
+    {
+      "construct": "AlterIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Gap",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Found by the StatementVariantParityTests reflection backstop, not by manual audit. ALTER INDEX ... DISABLE makes a previously-seekable index genuinely unusable; this pass tracks only whether an index was ever created, not whether it is currently enabled, so a disabled index still reports Indexed=true - the wrong direction for CLAUDE.md's precision discipline. Ledgered (not silently dropped) rather than fixed, since fixing it needs index-name -> CatalogIndex state tracking this pass doesn't have yet. Real risk is low: REBUILD/REORGANIZE (the common cases) don't change seekability at all."
     },
     {
       "construct": "CreateColumnStoreIndexStatement",
@@ -131,16 +145,16 @@
     {
       "construct": "AlterViewStatement",
       "group": "ViewOrFunctionDefiner",
-      "status": "Ledgered",
+      "status": "Handled",
       "verifiedBy": "Lineage.LineageResolverTests",
-      "rationale": "ViewDefinitionExtractor matches only CreateViewStatement. An ALTER VIEW body is invisible to lineage - the view-inheritance analysis this study is built around does not run for it, but every occurrence is now counted rather than silently dropped. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
+      "rationale": "Was invisible to lineage - ViewDefinitionExtractor matched only CreateViewStatement. Fixed: matched on the same shape as CREATE, with last-definition-in-source-order-wins semantics reused from ViewDependencyGraph.TopologicalSort (coverage-remediation-plan.md Phase 2.1)."
     },
     {
       "construct": "CreateOrAlterViewStatement",
       "group": "ViewOrFunctionDefiner",
-      "status": "Ledgered",
+      "status": "Handled",
       "verifiedBy": "Lineage.LineageResolverTests",
-      "rationale": "Same gap as AlterViewStatement - the modern SSDT idiom for redefining a view is entirely invisible to lineage, but now counted. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
+      "rationale": "Same fix as AlterViewStatement - the modern SSDT idiom for redefining a view now resolves into lineage. coverage-remediation-plan.md Phase 2.1."
     },
     {
       "construct": "CreateFunctionStatement (inline TVF)",
@@ -166,16 +180,16 @@
     {
       "construct": "AlterFunctionStatement (view-layer forms)",
       "group": "ViewOrFunctionDefiner",
-      "status": "Ledgered",
+      "status": "Handled",
       "verifiedBy": "Lineage.LineageResolverTests",
-      "rationale": "Handled for catalog scoping and predicate-body walking, but not by ViewDefinitionExtractor - an ALTER FUNCTION redefining an iTVF/MSTVF is invisible to lineage, though now counted. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
+      "rationale": "Was handled for catalog scoping and predicate-body walking, but not by ViewDefinitionExtractor - an ALTER FUNCTION redefining an iTVF/MSTVF was invisible to lineage. Fixed (coverage-remediation-plan.md Phase 2.1)."
     },
     {
       "construct": "CreateOrAlterFunctionStatement (view-layer forms)",
       "group": "ViewOrFunctionDefiner",
-      "status": "Ledgered",
+      "status": "Handled",
       "verifiedBy": "Lineage.LineageResolverTests",
-      "rationale": "Same gap as AlterFunctionStatement, now counted. Resolving it into lineage is still open (coverage-remediation-plan.md Phase 2.1)."
+      "rationale": "Same fix as AlterFunctionStatement. coverage-remediation-plan.md Phase 2.1."
     },
     {
       "construct": "CreateFunctionStatement (CLR table-valued)",
@@ -236,9 +250,9 @@
     {
       "construct": "CreateOrAlterTriggerStatement",
       "group": "ProcedureOrTriggerDefiner",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "Missing from both CatalogBuilder and TypedPredicateExtractor while procedures and functions both got all three variants - coverage-remediation-plan.md Phase 2.1."
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Was missing from both CatalogBuilder and TypedPredicateExtractor while procedures and functions both got all three variants - fixed (coverage-remediation-plan.md Phase 2.1)."
     },
     {
       "construct": "CreateTriggerStatement (INSTEAD OF on TABLE)",

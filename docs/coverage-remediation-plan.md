@@ -230,41 +230,65 @@ else to fix.
 One systematic change rather than five one-off fixes. This is the class behind
 question 2 and question 4 of the audit.
 
-### 2.1 Create / Alter / CreateOrAlter parity across all three passes
+### 2.1 Create / Alter / CreateOrAlter parity across all three passes — DONE
 
 **Problem.** ScriptDOM double-dispatch means `CreateX`, `AlterX` and
-`CreateOrAlterX` are unrelated node types. Passes 1 and 3 handle all three for
-procedures and functions. Nobody handles all three anywhere else:
+`CreateOrAlterX` are unrelated node types. Passes 1 and 3 handled all three for
+procedures and functions. Nobody handled all three anywhere else:
 
 | Construct | Pass 1 catalog | Pass 2 lineage | Pass 3 predicates |
 |---|---|---|---|
 | Procedure | all three | n/a | all three |
-| Function | all three | **`Create` only** (`ViewDefinitionExtractor.cs:36,45`) | all three |
-| View | n/a | **`Create` only** (`ViewDefinitionExtractor.cs:27`) | n/a |
-| Trigger | `Create`/`Alter`, **no `CreateOrAlter`** (`CatalogBuilder.cs:250,252`) | n/a | `Create`/`Alter`, **no `CreateOrAlter`** (`TypedPredicateExtractor.cs:132,134`) |
+| Function | all three | was **`Create` only** | all three |
+| View | n/a | was **`Create` only** | n/a |
+| Trigger | was `Create`/`Alter` only | n/a | was `Create`/`Alter` only |
 
-The lineage row is the serious one: `CREATE OR ALTER VIEW` and `ALTER VIEW` produce
-no `ViewDefinition`, so the view-inheritance analysis — the study's distinctive
-claim — silently does not run on codebases that use the modern idiom.
+The lineage row was the serious one: `CREATE OR ALTER VIEW` and `ALTER VIEW`
+produced no `ViewDefinition`, so the view-inheritance analysis — the study's
+distinctive claim — silently didn't run on codebases using the modern idiom.
 
-**Work.**
-- Extend `ViewDefinitionExtractor`'s switch to `AlterViewStatement`,
+**Work done.**
+- `ViewDefinitionExtractor`'s switch now matches `AlterViewStatement`,
   `CreateOrAlterViewStatement`, `AlterFunctionStatement`,
-  `CreateOrAlterFunctionStatement`, preserving last-definition-wins semantics
-  within a scan (an `ALTER` after a `CREATE` stub must replace, not duplicate).
-- Add `CreateOrAlterTriggerStatement` to `CatalogBuilder` and
+  `CreateOrAlterFunctionStatement` on the same shape as their `Create` forms.
+  Last-definition-wins was already implemented in
+  `ViewDependencyGraph.TopologicalSort` (a prior phase, for repeated `CREATE VIEW`
+  across incremental-upgrade scripts) - reused unchanged, no new dedup logic
+  needed.
+- `CreateOrAlterTriggerStatement` added to `CatalogBuilder` and
   `TypedPredicateExtractor`.
-- **Mechanical backstop:** a test that reflects over the ScriptDOM assembly, finds
-  every `Create*Statement` for which an `Alter*` or `CreateOrAlter*` sibling exists,
-  and asserts that each pass either handles all variants or names the construct in
-  the coverage matrix with a rationale. This is what stops a sixth instance of this
-  bug.
+- **Mechanical backstop built:** `StatementVariantParityTests` reflects over the
+  real ScriptDOM assembly (not a hand-written list), finds every concrete
+  `CreateXStatement` a pass handles that has an `AlterX`/`CreateOrAlterX` sibling,
+  and fails if the sibling is neither handled nor named in the coverage matrix.
+  Two bugs surfaced *while building the backstop itself*, both fixed before
+  trusting it: (1) `GetMethods()` without `BindingFlags.DeclaredOnly` returns
+  every inherited no-op `ExplicitVisit` overload `TSqlFragmentVisitor` itself
+  declares, making every statement kind look "handled" regardless of whether the
+  pass actually overrides it — caught by deliberately disabling a real override
+  and watching the assertion still pass; (2) a stale `Gap` matrix row for
+  `CreateOrAlterTriggerStatement` (citing a defect already fixed) let the
+  matrix-fallback excuse a real code gap — fixed by only honoring the fallback
+  for rows that currently claim `Gap`/`Ledgered`, never `Handled`.
+- The backstop found two previously-unknown gaps beyond anything in this plan:
+  `AlterAssemblyStatement` and `AlterIndexStatement` were both silently unhandled
+  in `CatalogBuilder`. `AlterTableStatement` also matched the sibling pattern but
+  is abstract (ScriptDOM's ALTER TABLE concrete types are named differently -
+  `AlterTableAddTableElementStatement` etc. - and were already handled); excluded
+  abstract types from the check as a class fix, not a one-off skip. `ALTER
+  ASSEMBLY` now gets the same CLR decline-to-model ledger entry as `CREATE
+  ASSEMBLY`. `ALTER INDEX` is ledgered, not fixed - `DISABLE` makes a previously-
+  seekable index genuinely unusable, which this pass can't yet track (needs
+  index-name -> state, not just column-level index presence); real risk judged
+  low since `REBUILD`/`REORGANIZE`, the common cases, don't change seekability.
 
-**Done when.** A view chain expressed entirely in `CREATE OR ALTER VIEW` produces
-identical findings to the same chain in `CREATE VIEW`, and the reflection test
-fails if a new variant is added without a matrix entry.
+**Verified.** A view chain expressed entirely in `CREATE OR ALTER VIEW` produces
+identical resolution to the same chain in `CREATE VIEW`. The reflection backstop
+was confirmed to actually fail on a deliberately-injected gap, not just checked to
+pass — see the two self-caught bugs above.
 
-**Size.** M. The reflection test is the interesting part.
+**Size.** M, as estimated. The reflection test was indeed the interesting part -
+and paid for itself immediately by finding two gaps nobody had listed.
 
 ---
 

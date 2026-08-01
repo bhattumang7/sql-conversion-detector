@@ -1175,6 +1175,28 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_CreateOrAlterTriggerBody_InsertedPseudoTable_Resolves()
+    {
+        // CreateOrAlterTriggerStatement is a distinct ScriptDOM node type from
+        // CreateTriggerStatement/AlterTriggerStatement - procedures and functions already got
+        // all three variants; triggers didn't (coverage-remediation-plan.md Phase 2.1).
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE OR ALTER TRIGGER dbo.trg_Orders ON dbo.Orders
+            AFTER INSERT
+            AS
+            BEGIN
+                SELECT Code FROM inserted WHERE Code = N'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
     public void Extract_InsteadOfTriggerBody_OnTable_InsertedPseudoTable_Resolves()
     {
         // INSTEAD OF triggers on a table target take the identical resolution path AFTER

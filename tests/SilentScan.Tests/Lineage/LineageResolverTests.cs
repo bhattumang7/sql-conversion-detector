@@ -391,45 +391,49 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
-    public void Resolve_AlterView_LedgeredAsUnresolvedIntoLineage()
+    public void Resolve_AlterView_RedefinesTheViewResolvedFromCreate()
     {
-        // ViewDefinitionExtractor matches only CreateViewStatement - an ALTER VIEW redefinition
-        // is a distinct ScriptDOM node type and is invisible to lineage (coverage-remediation-
-        // plan.md Phase 2.1). This proves it's at least counted, not silently dropped, until
-        // that gap is closed.
+        // ALTER VIEW is a distinct ScriptDOM node type from CreateViewStatement - previously
+        // invisible to lineage entirely (coverage-remediation-plan.md Phase 2.1). "Last
+        // definition in source order wins" (ViewDependencyGraph.TopologicalSort) means the
+        // ALTER's body, not the CREATE's, is what the view resolves to.
         var (_, lineage) = Build(
-            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_T AS SELECT Col FROM dbo.T;",
-            "ALTER VIEW dbo.vw_T AS SELECT Col FROM dbo.T WHERE Col > 0;");
+            "ALTER VIEW dbo.vw_T AS SELECT CAST(Col AS INT) AS Col FROM dbo.T;");
 
-        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("ALTER VIEW", StringComparison.Ordinal));
+        var column = Assert.Single(lineage.AllRelations["dbo.vw_T"].Columns);
+        Assert.IsType<ColumnProvenance.Cast>(column.Provenance);
     }
 
     [Fact]
-    public void Resolve_CreateOrAlterView_LedgeredAsUnresolvedIntoLineage()
+    public void Resolve_CreateOrAlterView_ResolvesIntoLineage()
     {
         var (_, lineage) = Build("CREATE OR ALTER VIEW dbo.vw_T AS SELECT 1 AS Col;");
 
-        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("CREATE OR ALTER VIEW", StringComparison.Ordinal));
+        var column = Assert.Single(lineage.AllRelations["dbo.vw_T"].Columns);
+        Assert.Equal("Col", column.Name);
     }
 
     [Fact]
-    public void Resolve_AlterFunctionReturningTable_LedgeredAsUnresolvedIntoLineage()
+    public void Resolve_AlterFunctionReturningTable_RedefinesTheInlineTvfResolvedFromCreate()
     {
         var (_, lineage) = Build(
-            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT Col FROM dbo.T;",
-            "ALTER FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT Col FROM dbo.T WHERE Col > 0;");
+            "ALTER FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT CAST(Col AS INT) AS Col FROM dbo.T;");
 
-        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("ALTER FUNCTION", StringComparison.Ordinal));
+        var column = Assert.Single(lineage.AllRelations["dbo.fn_T"].Columns);
+        Assert.IsType<ColumnProvenance.Cast>(column.Provenance);
     }
 
     [Fact]
-    public void Resolve_CreateOrAlterFunctionReturningTable_LedgeredAsUnresolvedIntoLineage()
+    public void Resolve_CreateOrAlterFunctionReturningTable_ResolvesIntoLineage()
     {
         var (_, lineage) = Build("CREATE OR ALTER FUNCTION dbo.fn_T() RETURNS TABLE AS RETURN SELECT 1 AS Col;");
 
-        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "view/TVF definer" && e.Reason.Contains("CREATE OR ALTER FUNCTION", StringComparison.Ordinal));
+        var column = Assert.Single(lineage.AllRelations["dbo.fn_T"].Columns);
+        Assert.Equal("Col", column.Name);
     }
 
     [Fact]

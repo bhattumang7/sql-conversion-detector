@@ -133,6 +133,8 @@ public static class TypedPredicateExtractor
 
         public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
 
+        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
+
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
             foreach (var declaration in node.Declarations)

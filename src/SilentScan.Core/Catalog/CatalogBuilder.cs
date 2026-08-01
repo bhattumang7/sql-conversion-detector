@@ -190,6 +190,41 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        // ALTER ASSEMBLY (re-pointing an existing CLR assembly's file/version) - same CLR
+        // decline-to-model decision as CREATE ASSEMBLY. Found by the reflection backstop
+        // (coverage-remediation-plan.md Phase 2.1) while auditing CREATE/ALTER parity - was
+        // silently unhandled before this, unlike CREATE ASSEMBLY which was already ledgered.
+        public override void ExplicitVisit(AlterAssemblyStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "CLR assembly", $"'{node.Name.Value}': ALTER ASSEMBLY is not modeled - CLR types/functions/aggregates it backs resolve Unknown");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        // ALTER INDEX (REBUILD/REORGANIZE/DISABLE/...) - also found by the reflection backstop.
+        // Not modeled: this pass tracks which columns HAVE an index, not per-statement index
+        // state changes. The precision-relevant case is ALTER INDEX ... DISABLE, which makes a
+        // previously-seekable index genuinely unusable - underreporting that (still counting the
+        // column Indexed=true) is the wrong direction for CLAUDE.md's precision discipline, but
+        // implementing it needs index-name -> CatalogIndex state tracking this pass doesn't have
+        // yet. Ledgered rather than silently dropped; tracked as follow-up work, not fixed here.
+        public override void ExplicitVisit(AlterIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "ALTER INDEX", $"'{node.Name?.Value ?? "ALL"}' on '{SchemaObjectNameHelper.Qualify(node.OnName)}': index state changes (REBUILD/REORGANIZE/DISABLE) are not modeled - Indexed reflects only whether an index was ever created, not whether it is currently enabled");
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(CreateTableStatement node)
         {
             if (phase == BuildPhase.CollectTables)
@@ -290,6 +325,8 @@ public static class CatalogBuilder
         public override void ExplicitVisit(CreateTriggerStatement node) => VisitScopedBody(node, node.Name);
 
         public override void ExplicitVisit(AlterTriggerStatement node) => VisitScopedBody(node, node.Name);
+
+        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitScopedBody(node, node.Name);
 
         private void VisitScopedBody(TSqlFragment node, SchemaObjectName name)
         {
