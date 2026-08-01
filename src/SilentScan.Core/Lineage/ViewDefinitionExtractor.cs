@@ -8,7 +8,7 @@ namespace SilentScan.Core.Lineage;
 public static class ViewDefinitionExtractor
 {
     public static (List<ViewDefinition> Views, List<MultiStatementTvfDefinition> MultiStatementTvfs) Extract(
-        IEnumerable<SqlParseResult> parseResults)
+        IEnumerable<SqlParseResult> parseResults, Collation? defaultCollation = null)
     {
         var views = new List<ViewDefinition>();
         var tvfs = new List<MultiStatementTvfDefinition>();
@@ -44,7 +44,7 @@ public static class ViewDefinitionExtractor
 
                     case CreateFunctionStatement { ReturnType: TableValuedFunctionReturnType tableReturn } createFunction
                         when tableReturn.DeclareTableVariableBody.Definition is { } definition:
-                        var columns = CatalogBuilder.BuildColumnsForExternalUse(definition);
+                        var columns = CatalogBuilder.BuildColumnsForExternalUse(definition, defaultCollation);
                         tvfs.Add(new MultiStatementTvfDefinition(
                             SchemaObjectNameHelper.Qualify(createFunction.Name),
                             columns,

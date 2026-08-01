@@ -136,6 +136,75 @@ public sealed class CorpusManifestLoaderTests
     }
 
     [Fact]
+    public void Parse_MissingUrl_Throws()
+    {
+        var json = """
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"]
+                }
+              ]
+            }
+            """;
+
+        Assert.Throws<InvalidDataException>(() => CorpusManifestLoader.Parse(json));
+    }
+
+    [Theory]
+    [InlineData("not a real collation name")]
+    [InlineData("ab")]
+    [InlineData("123_starts_with_digit")]
+    public void Parse_InvalidDeclaredCollationShape_Throws(string declaredCollation)
+    {
+        var json = $$"""
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"],
+                  "declaredCollation": "{{declaredCollation}}"
+                }
+              ]
+            }
+            """;
+
+        Assert.Throws<InvalidDataException>(() => CorpusManifestLoader.Parse(json));
+    }
+
+    [Theory]
+    [InlineData("SQL_Latin1_General_CP1_CI_AS")]
+    [InlineData("Latin1_General_CI_AS")]
+    [InlineData("Japanese_CI_AS_KS_WS")]
+    public void Parse_ValidDeclaredCollationShape_Succeeds(string declaredCollation)
+    {
+        var json = $$"""
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"],
+                  "declaredCollation": "{{declaredCollation}}"
+                }
+              ]
+            }
+            """;
+
+        var manifest = CorpusManifestLoader.Parse(json);
+
+        Assert.Equal(declaredCollation, Assert.Single(manifest.Repos).DeclaredCollation);
+    }
+
+    [Fact]
     public void Parse_EmptyRepoList_Succeeds()
     {
         var manifest = CorpusManifestLoader.Parse("""{ "repos": [] }""");

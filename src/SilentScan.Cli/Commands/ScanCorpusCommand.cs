@@ -76,7 +76,7 @@ public static class ScanCorpusCommand
 
             var files = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
             var parseResults = files.Select(f => ParseCorpusFile(parser, repo, f)).ToList();
-            reportsByRepo[repo.Name] = ScanReportBuilder.BuildFromParseResults(parseResults);
+            reportsByRepo[repo.Name] = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
         }
 
         stdout.WriteLine(JsonSerializer.Serialize(reportsByRepo, JsonOptions));

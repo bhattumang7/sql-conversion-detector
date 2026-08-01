@@ -20,8 +20,11 @@ public static class ScanReportBuilder
     /// so callers that need to preprocess text before parsing (e.g. the corpus scanner
     /// substituting DNN's {databaseOwner}/{objectQualifier} template tokens) can parse in
     /// memory via <see cref="SqlScriptParser.ParseText"/> instead of writing temp files.
+    /// <paramref name="manifestDeclaredCollation"/> is the corpus manifest's declaredCollation
+    /// hint (CLAUDE.md Pass 1), used only when no scanned file has its own explicit CREATE/ALTER
+    /// DATABASE ... COLLATE statement - null for a plain folder scan with no manifest.
     /// </summary>
-    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults)
+    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, string? manifestDeclaredCollation = null)
     {
         var fileHealth = new List<FileParseHealth>();
         var cleanParseResults = new List<SqlParseResult>();
@@ -47,7 +50,7 @@ public static class ScanReportBuilder
 
         // Catalog/lineage need every cleanly-parsed file together, so views can resolve
         // against tables (and other views) declared in a different file.
-        var catalog = CatalogBuilder.Build(cleanParseResults);
+        var catalog = CatalogBuilder.Build(cleanParseResults, manifestDeclaredCollation);
         var lineage = LineageResolver.Resolve(catalog, cleanParseResults);
         var extractionResults = cleanParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();

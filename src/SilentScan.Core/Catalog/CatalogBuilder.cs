@@ -10,11 +10,21 @@ namespace SilentScan.Core.Catalog;
 /// </summary>
 public static class CatalogBuilder
 {
-    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults)
+    /// <summary>
+    /// Builds the catalog. <paramref name="manifestDeclaredCollation"/> is the corpus manifest's
+    /// declaredCollation hint (CLAUDE.md Pass 1: "database default collation from any CREATE
+    /// DATABASE/manifest hint") - used only as a last resort, when no scanned file contains an
+    /// explicit CREATE DATABASE/ALTER DATABASE ... COLLATE statement of its own. Every string
+    /// column's own collation always wins over either source.
+    /// </summary>
+    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null)
     {
         var catalog = new DatabaseCatalog();
+        var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
 
-        foreach (var result in parseResults)
+        catalog.DefaultCollation = ResolveDefaultCollation(results, manifestDeclaredCollation);
+
+        foreach (var result in results)
         {
             if (result.Fragment is not TSqlScript script)
             {
@@ -28,6 +38,59 @@ public static class CatalogBuilder
         }
 
         return catalog;
+    }
+
+    /// <summary>
+    /// Explicit DDL always wins over the manifest hint (CLAUDE.md Pass 1: "database default
+    /// collation from any CREATE DATABASE/manifest hint" - DDL is the stronger signal of the
+    /// two, since it's what the repo itself declares rather than an out-of-band annotation).
+    /// </summary>
+    private static Collation? ResolveDefaultCollation(IReadOnlyList<SqlParseResult> results, string? manifestDeclaredCollation)
+    {
+        if (FindExplicitDatabaseCollation(results) is { } explicitName)
+        {
+            return new Collation(explicitName, CollationSource.DatabaseDefaultFromDdl);
+        }
+
+        return manifestDeclaredCollation is { Length: > 0 }
+            ? new Collation(manifestDeclaredCollation, CollationSource.DatabaseDefaultFromManifest)
+            : null;
+    }
+
+    /// <summary>
+    /// Scans every batch's top-level statements (not nested inside procedures/blocks - a
+    /// database-level COLLATE statement is standalone DDL, never buried in a proc body) for the
+    /// last CREATE DATABASE or ALTER DATABASE ... COLLATE, in file/statement order. Last-writer-
+    /// wins, matching every other catalog merge in this pass - the tool assumes a single target
+    /// database per scan, same simplification <see cref="SchemaObjectNameHelper"/> already makes.
+    /// </summary>
+    private static string? FindExplicitDatabaseCollation(IReadOnlyList<SqlParseResult> results)
+    {
+        string? found = null;
+        foreach (var result in results)
+        {
+            if (result.Fragment is not TSqlScript script)
+            {
+                continue;
+            }
+
+            foreach (var statement in script.Batches.SelectMany(b => b.Statements))
+            {
+                var collation = statement switch
+                {
+                    CreateDatabaseStatement { Collation.Value: { } name } => name,
+                    AlterDatabaseCollateStatement { Collation.Value: { } name } => name,
+                    _ => null,
+                };
+
+                if (collation is not null)
+                {
+                    found = collation;
+                }
+            }
+        }
+
+        return found;
     }
 
     private static void Visit(TSqlStatement statement, DatabaseCatalog catalog, string sourcePath)
@@ -67,7 +130,7 @@ public static class CatalogBuilder
         var (schema, name) = SchemaObjectNameHelper.Resolve(createTable.SchemaObjectName);
         var kind = schema is null ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-        var (columns, indexesFromColumns) = BuildColumns(createTable.Definition);
+        var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation);
         var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
 
         var table = new CatalogTable(
@@ -97,7 +160,7 @@ public static class CatalogBuilder
             return;
         }
 
-        var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition);
+        var (newColumns, indexesFromColumns) = BuildColumns(alterTable.Definition, catalog.DefaultCollation);
         var newIndexes = BuildIndexesFromTableConstraints(alterTable.Definition.TableConstraints);
 
         var merged = existing with
@@ -139,7 +202,11 @@ public static class CatalogBuilder
             return;
         }
 
-        var (columns, indexesFromColumns) = BuildColumns(body.Definition);
+        // A table variable's columns technically default to tempdb's collation, not the user
+        // database's - but this tool models a single target database per scan (the same
+        // simplification SchemaObjectNameHelper makes), so the scanned database's default is
+        // the closest available signal rather than leaving every unqualified column UNKNOWN.
+        var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation);
         var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
         var table = new CatalogTable(
@@ -159,10 +226,10 @@ public static class CatalogBuilder
     /// RETURNS @t TABLE(...) is column-definition syntax identical to a table variable, and
     /// its declared columns become <see cref="Lineage.ColumnProvenance.Declared"/> provenance.
     /// </summary>
-    public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(TableDefinition definition) =>
-        BuildColumns(definition).Columns;
+    public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(TableDefinition definition, Collation? defaultCollation) =>
+        BuildColumns(definition, defaultCollation).Columns;
 
-    private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(TableDefinition definition)
+    private static (List<CatalogColumn> Columns, List<CatalogIndex> InlineIndexes) BuildColumns(TableDefinition definition, Collation? defaultCollation)
     {
         var columns = new List<CatalogColumn>();
         var inlineIndexes = new List<CatalogIndex>();
@@ -177,9 +244,18 @@ public static class CatalogBuilder
                 inlineIndexes.Add(BuildInlineIndex(inlineIndex, name));
             }
 
+            var resolvedType = SqlTypeReferenceResolver.Resolve(columnDefinition.DataType, columnDefinition.Collation);
+            if (resolvedType is { IsStringFamily: true, Collation: null } && defaultCollation is not null)
+            {
+                // CLAUDE.md Pass 1: "database default collation from any CREATE DATABASE/
+                // manifest hint" - applied only when the column itself carries no explicit
+                // COLLATE, which always wins.
+                resolvedType = resolvedType with { Collation = defaultCollation };
+            }
+
             columns.Add(new CatalogColumn(
                 name,
-                SqlTypeReferenceResolver.Resolve(columnDefinition.DataType, columnDefinition.Collation),
+                resolvedType,
                 isNullable,
                 IsIdentity: columnDefinition.IdentityOptions is not null,
                 IsComputed: columnDefinition.ComputedColumnExpression is not null,

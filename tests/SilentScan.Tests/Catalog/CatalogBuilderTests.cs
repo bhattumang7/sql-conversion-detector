@@ -162,4 +162,109 @@ public sealed class CatalogBuilderTests
 
         Assert.True(id.IsIdentity);
     }
+
+    [Fact]
+    public void Build_ColumnWithExplicitCollate_NeverOverriddenByDefault()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE DATABASE Foo COLLATE SQL_Latin1_General_CP1_CI_AS;
+                CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);
+                """)]);
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Equal("Latin1_General_CI_AS", col.Type!.Collation!.Name);
+        Assert.Equal(CollationSource.ColumnExplicit, col.Type.Collation.Source);
+    }
+
+    [Fact]
+    public void Build_CreateDatabaseCollate_FallsBackOntoUncollatedStringColumns()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE DATABASE Foo COLLATE SQL_Latin1_General_CP1_CI_AS;
+                CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);
+                """)]);
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", col.Type!.Collation!.Name);
+        Assert.Equal(CollationSource.DatabaseDefaultFromDdl, col.Type.Collation.Source);
+    }
+
+    [Fact]
+    public void Build_AlterDatabaseCollate_FallsBackOntoUncollatedStringColumns()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                ALTER DATABASE CURRENT COLLATE Latin1_General_CI_AS;
+                CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);
+                """)]);
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Equal("Latin1_General_CI_AS", col.Type!.Collation!.Name);
+        Assert.Equal(CollationSource.DatabaseDefaultFromDdl, col.Type.Collation.Source);
+    }
+
+    [Fact]
+    public void Build_ExplicitDatabaseCollation_TakesPrecedenceOverManifestHint()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE DATABASE Foo COLLATE SQL_Latin1_General_CP1_CI_AS;
+                CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);
+                """)],
+            manifestDeclaredCollation: "Latin1_General_CI_AS");
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", col.Type!.Collation!.Name);
+        Assert.Equal(CollationSource.DatabaseDefaultFromDdl, col.Type.Collation.Source);
+    }
+
+    [Fact]
+    public void Build_NoExplicitDatabaseCollation_FallsBackToManifestHint()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CI_AS");
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Equal("Latin1_General_CI_AS", col.Type!.Collation!.Name);
+        Assert.Equal(CollationSource.DatabaseDefaultFromManifest, col.Type.Collation.Source);
+    }
+
+    [Fact]
+    public void Build_NoDatabaseCollationAnySource_ColumnCollationStaysNull()
+    {
+        var catalog = CatalogBuilder.Build([Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")]);
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Null(col.Type!.Collation);
+    }
+
+    [Fact]
+    public void Build_DatabaseCollation_DoesNotApplyToNonStringColumns()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE DATABASE Foo COLLATE SQL_Latin1_General_CP1_CI_AS;
+                CREATE TABLE dbo.T (Col INT NOT NULL);
+                """)]);
+
+        var col = catalog.Find("dbo.T")!.FindColumn("Col")!;
+
+        Assert.Null(col.Type!.Collation);
+    }
+
+    private static SqlParseResult Parse(string sql)
+    {
+        var result = new SqlScriptParser().ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return result;
+    }
 }

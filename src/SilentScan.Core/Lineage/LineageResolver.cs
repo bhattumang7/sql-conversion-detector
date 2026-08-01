@@ -16,7 +16,7 @@ public static class LineageResolver
     public static LineageCatalog Resolve(DatabaseCatalog catalog, IEnumerable<SqlParseResult> parseResults)
     {
         var ledger = new SkipLedger();
-        var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults);
+        var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults, catalog.DefaultCollation);
         var (order, cyclicViews) = ViewDependencyGraph.TopologicalSort(views);
 
         var resolved = new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase);

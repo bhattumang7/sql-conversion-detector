@@ -15,6 +15,14 @@ public static partial class CorpusManifestLoader
     [GeneratedRegex("^[0-9a-f]{40}$")]
     private static partial Regex CommitShaPattern();
 
+    // SQL Server collation names are an identifier-shaped ASCII token (e.g.
+    // SQL_Latin1_General_CP1_CI_AS, Latin1_General_CI_AS, Japanese_CI_AS_KS_WS) - this is a
+    // shape check, not a lookup against the real collation list (CLAUDE.md: verify against the
+    // Docker oracle, not by hand), so it catches typos/pasted-wrong-value without pretending to
+    // validate the name is real.
+    [GeneratedRegex("^[A-Za-z][A-Za-z0-9_]{2,127}$")]
+    private static partial Regex CollationNameShape();
+
     public static CorpusManifest Load(string path)
     {
         var json = File.ReadAllText(path);
@@ -47,9 +55,19 @@ public static partial class CorpusManifestLoader
             throw new InvalidDataException($"'{dto.Name}': license is required before a repo can be scanned.");
         }
 
+        if (string.IsNullOrWhiteSpace(dto.Url))
+        {
+            throw new InvalidDataException($"'{dto.Name}': url is required.");
+        }
+
         if (dto.DdlPaths is not { Count: > 0 })
         {
             throw new InvalidDataException($"'{dto.Name}': ddlPaths is empty - a corpus entry with no declared DDL paths can't be scanned meaningfully.");
+        }
+
+        if (dto.DeclaredCollation is { Length: > 0 } collation && !CollationNameShape().IsMatch(collation))
+        {
+            throw new InvalidDataException($"'{dto.Name}': declaredCollation '{collation}' doesn't look like a SQL Server collation name.");
         }
 
         return new CorpusRepoEntry(

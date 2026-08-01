@@ -126,7 +126,7 @@ public static class VerifyCorpusCommand
             parseResults.Add(await ParseCorpusFileAsync(context.Parser, repo, file, cancellationToken));
         }
 
-        var report = ScanReportBuilder.BuildFromParseResults(parseResults);
+        var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
         var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
 
         var databaseName = SanitizeDatabaseName(repo.Name);
