@@ -404,7 +404,9 @@ public static class NonSargablePredicateScanner
         private void Add(SargabilityFindingKind kind, string columnName, string? detail, TSqlFragment node, ColumnReferenceExpression columnRef)
         {
             var (tableQualifiedName, indexed) = ResolveIndexInfo(columnRef);
-            Findings.Add(new SargabilityFinding(kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn, TableQualifiedName: tableQualifiedName, Indexed: indexed));
+            Findings.Add(new SargabilityFinding(
+                kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn,
+                TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Rules.FragmentTextRenderer.Render(node)));
         }
 
         /// <summary>

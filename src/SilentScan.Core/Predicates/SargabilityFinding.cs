@@ -23,6 +23,16 @@ namespace SilentScan.Core.Predicates;
 /// guess" discipline applied to this field specifically: null is NOT the same claim as false,
 /// and must never be presented to a reader as "not indexed."
 /// </param>
+/// <param name="PredicateFragmentText">
+/// Roadmap Phase E3: the exact fragment <see cref="NonSargablePredicateScanner"/> matched on,
+/// re-rendered to valid T-SQL text via <see cref="Rules.FragmentTextRenderer"/> - for
+/// <see cref="SargabilityFindingKind.LeadingWildcardLike"/>/<see
+/// cref="SargabilityFindingKind.LikePatternNotLiteral"/> this is the WHOLE LIKE predicate
+/// (already a complete, probeable boolean expression); for the other three kinds it is the bare
+/// wrapping scalar expression (e.g. <c>UPPER(Code)</c>), which a probe still has to wrap in its
+/// own synthesized comparison. Lets the corpus oracle actually probe this finding instead of
+/// merely trusting the classifier that detected it - previously this had no oracle path at all.
+/// </param>
 public sealed record SargabilityFinding(
     SargabilityFindingKind Kind,
     string ColumnName,
@@ -32,4 +42,5 @@ public sealed record SargabilityFinding(
     int Column,
     SourceSpan? DynamicSqlCallSite = null,
     string? TableQualifiedName = null,
-    bool? Indexed = null);
+    bool? Indexed = null,
+    string? PredicateFragmentText = null);

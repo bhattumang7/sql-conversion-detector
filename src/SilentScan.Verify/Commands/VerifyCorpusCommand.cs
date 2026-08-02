@@ -93,7 +93,8 @@ public static class VerifyCorpusCommand
         }
 
         var context = new VerifyContext(
-            new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), new CollationConflictVerifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
+            new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), new CollationConflictVerifier(sqlOptions),
+            new Tier1Verifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
         var summaries = new SortedDictionary<string, RepoVerificationSummary>(StringComparer.Ordinal);
         var hadMissingRepo = false;
 
@@ -136,7 +137,8 @@ public static class VerifyCorpusCommand
     }
 
     private sealed record VerifyContext(
-        DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, CollationConflictVerifier CollationConflictVerifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
+        DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, CollationConflictVerifier CollationConflictVerifier,
+        Tier1Verifier Tier1Verifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
 
     private static async Task<RepoVerificationSummary> VerifyRepoAsync(
         CorpusRepoEntry repo,
@@ -242,6 +244,15 @@ public static class VerifyCorpusCommand
                 collationConflictResults.Add(await context.CollationConflictVerifier.VerifyAsync(databaseName, finding, cancellationToken));
             }
 
+            // Every Tier-1 finding is probe-worthy too - Tier1ProbeBuilder itself reports
+            // NotProbeable for anything it can't synthesize a probe for (an unresolved table,
+            // no rendered fragment), rather than the caller pre-filtering.
+            var tier1Results = new List<Tier1Result>();
+            foreach (var finding in report.Tier1Findings)
+            {
+                tier1Results.Add(await context.Tier1Verifier.VerifyAsync(databaseName, finding, catalog, cancellationToken));
+            }
+
             return new RepoVerificationSummary(
                 TotalDdlFiles: ddlFiles.Count,
                 DeploymentErrors: deploymentErrors,
@@ -257,6 +268,12 @@ public static class VerifyCorpusCommand
                 CollationConflictConfirmed: [.. collationConflictResults.Where(r => r.Outcome == CollationConflictOutcome.Confirmed)],
                 CollationConflictNotConfirmed: [.. collationConflictResults.Where(r => r.Outcome == CollationConflictOutcome.NotConfirmed)],
                 CollationConflictProbeFailed: [.. collationConflictResults.Where(r => r.Outcome == CollationConflictOutcome.ProbeFailed)],
+                Tier1Confirmed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.Confirmed)],
+                Tier1NotConfirmed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.NotConfirmed)],
+                Tier1NotProbeable: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.NotProbeable)],
+                Tier1ProbeFailed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ProbeFailed)],
+                Tier1ConfirmedUnindexed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ConfirmedUnindexed)],
+                Tier1ConfirmedViaScratchIndex: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ConfirmedViaScratchIndex)],
                 DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
@@ -303,6 +320,12 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<CollationConflictResult> CollationConflictConfirmed,
     IReadOnlyList<CollationConflictResult> CollationConflictNotConfirmed,
     IReadOnlyList<CollationConflictResult> CollationConflictProbeFailed,
+    IReadOnlyList<Tier1Result> Tier1Confirmed,
+    IReadOnlyList<Tier1Result> Tier1NotConfirmed,
+    IReadOnlyList<Tier1Result> Tier1NotProbeable,
+    IReadOnlyList<Tier1Result> Tier1ProbeFailed,
+    IReadOnlyList<Tier1Result> Tier1ConfirmedUnindexed,
+    IReadOnlyList<Tier1Result> Tier1ConfirmedViaScratchIndex,
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,
