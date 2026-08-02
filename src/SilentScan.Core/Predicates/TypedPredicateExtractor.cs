@@ -64,6 +64,16 @@ public static class TypedPredicateExtractor
         // had no such gating at all and reported a ScanForced/RangeSeek verdict for ANY
         // comparison anywhere in the tree, filter or not.
         private bool _inFilterContext;
+
+        // Roadmap Phase E2: `WHERE NOT (Col = @p)` previously visited the inner
+        // BooleanComparisonExpression completely unaware of the enclosing NOT - the default
+        // ExplicitVisit(BooleanNotExpression) recurses into .Expression with no polarity
+        // tracking at all, so this reported a plain `=` finding for what the engine actually
+        // sees as `<>` (a materially different, oracle-verified-non-sargable comparison,
+        // CLAUDE.md's own precision discipline turned against itself: a WRONG verdict, not a
+        // missing one). A bool rather than a stack because BooleanNotExpression nests by
+        // toggling parity (NOT NOT X == X), never by depth.
+        private bool _negated;
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
@@ -230,6 +240,20 @@ public static class TypedPredicateExtractor
             base.ExplicitVisit(node);
         }
 
+        /// <summary>
+        /// Toggles negation parity around whatever this NOT wraps, rather than dispatching to a
+        /// specific predicate kind - AcceptChildren still reaches the SAME BooleanComparisonExpression/
+        /// LikePredicate/InPredicate visitors below, now with <see cref="_negated"/> correctly
+        /// reflecting an odd or even number of enclosing NOTs (NOT NOT X negates twice, back to
+        /// X's own polarity).
+        /// </summary>
+        public override void ExplicitVisit(BooleanNotExpression node)
+        {
+            _negated = !_negated;
+            node.AcceptChildren(this);
+            _negated = !_negated;
+        }
+
         private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
         {
             var currentCtes = CurrentCteRelations();
@@ -357,7 +381,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            TryAddFinding(node.FirstExpression, node.SecondExpression, operatorText, node);
+            TryAddFinding(node.FirstExpression, node.SecondExpression, _negated ? Negate(operatorText) : operatorText, node);
         }
 
         public override void Visit(BooleanTernaryExpression node)
@@ -377,7 +401,10 @@ public static class TypedPredicateExtractor
 
         public override void Visit(LikePredicate node)
         {
-            if (node.NotDefined)
+            // `NOT (Col LIKE @p)` reaches here with node.NotDefined still false - the NOT sits
+            // on the wrapping BooleanNotExpression, not this node - so _negated stands in for it
+            // (Roadmap Phase E2, same bug class as the comparison-operator fix above).
+            if (node.NotDefined || _negated)
             {
                 // NOT LIKE is not sargable regardless of type match - oracle-verified directly
                 // (a varchar column compared against a matching-type, non-leading-wildcard
@@ -420,7 +447,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            if (node.NotDefined)
+            if (node.NotDefined || _negated)
             {
                 // NOT IN is not sargable regardless of type match - oracle-verified directly
                 // (a varchar column compared against a matching-type NOT IN list still produces
@@ -464,6 +491,20 @@ public static class TypedPredicateExtractor
             BooleanComparisonType.NotEqualToBrackets => "<>",
             BooleanComparisonType.NotEqualToExclamation => "<>",
             _ => null,
+        };
+
+        /// <summary>T-SQL's own operator negation, applied when a NOT wraps this comparison - the SAME direction VerdictClassifier already treats <c>&lt;&gt;</c> as non-sargable regardless of type match, so negating <c>=</c> into <c>&lt;&gt;</c> correctly routes to that existing ledgered-skip path rather than reporting the wrong comparison's verdict.</summary>
+        private static string Negate(string operatorText) => operatorText switch
+        {
+            "=" => "<>",
+            "<>" => "=",
+            ">" => "<=",
+            "<" => ">=",
+            ">=" => "<",
+            "<=" => ">",
+            "!<" => "<",
+            "!>" => ">",
+            _ => operatorText,
         };
 
         private void RecordParameters(IList<ProcedureParameter> parameters)

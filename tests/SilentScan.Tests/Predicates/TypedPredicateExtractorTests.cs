@@ -673,6 +673,68 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_NotWrappedEqualsComparison_IsTreatedAsNotEqual_NotAsEquals()
+    {
+        // Roadmap Phase E2: WHERE NOT (Col = @p) is semantically <> (a materially different,
+        // oracle-verified-non-sargable comparison), not = - before this fix, the enclosing NOT
+        // was invisible to TypedPredicateExtractor entirely and this reported an ordinary =
+        // finding, a wrong verdict rather than a missing one.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (Col = N'a');");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("<>", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_NotWrappedNotEqualsComparison_IsTreatedAsEquals()
+    {
+        // The other direction: NOT (Col <> @p) is semantically =, and DOES classify normally -
+        // proves this is a genuine polarity inversion, not just "NOT always suppresses".
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (Col <> N'a');");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("=", finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_DoubleNotWrappedEqualsComparison_ResolvesBackToEquals()
+    {
+        // NOT NOT X == X - proves negation toggles by parity, not by "any enclosing NOT flips it".
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (NOT (Col = N'a'));");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("=", finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_NotWrappedLikePredicate_IsNotAttributedToTypeConversionVerdict()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (Col LIKE N'a%');");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator");
+    }
+
+    [Fact]
+    public void Extract_NotWrappedInPredicate_IsNotAttributedToTypeConversionVerdict()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (Col IN (N'a', N'b'));");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator");
+    }
+
+    [Fact]
     public void Extract_TriggerBody_InsertedPseudoTable_ResolvesToTargetTableColumn()
     {
         // INSERTED is a pseudo-table that only exists inside a real trigger firing on a real DML
@@ -2195,6 +2257,30 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
 
         await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task DoubleNotWrappedComparison_ClassifiesTheSameAsTheBareComparison_OracleConfirmed()
+    {
+        // Roadmap Phase E2: proves the NOT-polarity fix produces a REAL, oracle-confirmed
+        // verdict, not just the right operator string statically - NOT (NOT (X)) must convert
+        // the column exactly like the bare `DisplayName = @DisplayName` flagship case does.
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindUserDoubleNot @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                SELECT DisplayName FROM dbo.Users WHERE NOT (NOT (DisplayName = @DisplayName));
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.Equal("=", finding.Operator);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
