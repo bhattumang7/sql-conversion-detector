@@ -297,6 +297,20 @@
       "rationale": null
     },
     {
+      "construct": "BooleanNotExpression",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Roadmap Phase E2: previously invisible to the extractor entirely - the default traversal recursed straight into whatever the NOT wrapped, so `NOT (Col = @p)` reported an ordinary = finding for what the engine evaluates as <> (a WRONG verdict, not a missing one). Fixed: negation tracked as a toggled bool applied to comparison operators (inverted to their T-SQL negation) and to LIKE/IN (routed to the existing non-sargable-regardless-of-type ledgered-skip path NOT LIKE/NOT IN already use). BETWEEN-under-NOT is deliberately not covered - it decomposes into a disjunction, not a simple operator inversion."
+    },
+    {
+      "construct": "BooleanIsNullExpression",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Roadmap Phase E2: IS NULL/IS NOT NULL is its own distinct SQL operation, not a value comparison - no CONVERT_IMPLICIT is possible when comparing to NULL, so there is nothing for the verdict engine to classify. Previously fell through the default traversal with zero trace; now an explicit no-op so it is accounted for rather than invisible."
+    },
+    {
       "construct": "UpdateStatement",
       "group": "PredicateCarrier",
       "status": "Handled",

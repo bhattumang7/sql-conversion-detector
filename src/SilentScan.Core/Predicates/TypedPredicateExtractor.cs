@@ -479,6 +479,22 @@ public static class TypedPredicateExtractor
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
+        /// <summary>
+        /// Roadmap Phase E2: IS NULL/IS NOT NULL is its own distinct SQL operation, not a value
+        /// comparison - no CONVERT_IMPLICIT is possible when comparing to NULL, so there is
+        /// nothing here for the verdict engine to classify. An explicit no-op rather than
+        /// relying on the default traversal falling through silently, so this construct is
+        /// accounted for (ConstructCoverage.json: Handled) instead of having zero trace - the
+        /// wrapped expression is a bare column/expression reference with no top-level visitor of
+        /// its own in this class regardless (columns are only ever inspected via ResolveOperand,
+        /// called directly from a comparison), so whether the base ExplicitVisit still walks
+        /// into it afterward has no effect on what this pass finds.
+        /// </summary>
+        public override void Visit(BooleanIsNullExpression node)
+        {
+            // Intentionally empty - see the doc comment above.
+        }
+
         private static string? ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
         {
             BooleanComparisonType.Equals => "=",

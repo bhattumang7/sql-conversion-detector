@@ -735,6 +735,21 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_IsNullPredicate_ProducesNoFindingAndNoLedgerNoise()
+    {
+        // Roadmap Phase E2: IS NULL is its own distinct SQL operation, not a value comparison -
+        // no CONVERT_IMPLICIT is possible, so this must produce neither a typed finding nor a
+        // ledger entry (a construct that's genuinely handled, not one that was dropped).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NULL);",
+            "SELECT Col FROM dbo.T WHERE Col IS NULL;",
+            "SELECT Col FROM dbo.T WHERE Col IS NOT NULL;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.Reason.Contains("IS NULL", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Extract_TriggerBody_InsertedPseudoTable_ResolvesToTargetTableColumn()
     {
         // INSERTED is a pseudo-table that only exists inside a real trigger firing on a real DML
