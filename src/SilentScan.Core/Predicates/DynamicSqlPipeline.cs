@@ -43,71 +43,95 @@ public static class DynamicSqlPipeline
         int depth,
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds)
     {
-        var findings = new List<DynamicSqlFinding>();
-        var tier1 = new List<SargabilityFinding>();
-        var typed = new List<TypedPredicateFinding>();
-        var expressionDerived = new List<ExpressionDerivedFinding>();
-        var collationConflicts = new List<CollationConflictFinding>();
-        var skipped = new List<SkippedConstruct>();
-
+        var accumulator = new ResultAccumulator();
         foreach (var script in scripts)
         {
-            var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}";
-            var innerParseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText);
-
-            if (innerParseResult.HasErrors)
-            {
-                var reason = innerParseResult.Errors[0].Message;
-                findings.Add(new DynamicSqlFinding(
-                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.InnerParseFailed, reason));
-                continue;
-            }
-
-            findings.Add(new DynamicSqlFinding(
-                script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
-
-            foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope))
-            {
-                tier1.Add(Remap(tier1Finding, script));
-            }
-
-            var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
-                ? DynamicSqlParameterDeclarations.TryParse(declarationText, catalog.TypeAliases) ?? NoDeclaredParameters
-                : NoDeclaredParameters;
-            var declaredParameters = seeds is not null && seeds.TryGetValue(script, out var seed)
-                ? MergeSeededParameters(ownDeclaredParameters, seed)
-                : ownDeclaredParameters;
-            var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope);
-            foreach (var typedFinding in extraction.TypedFindings)
-            {
-                typed.Add(Remap(typedFinding, script));
-            }
-
-            foreach (var expressionFinding in extraction.ExpressionDerivedFindings)
-            {
-                expressionDerived.Add(Remap(expressionFinding, script));
-            }
-
-            foreach (var collationConflict in extraction.CollationConflictFindings)
-            {
-                collationConflicts.Add(Remap(collationConflict, script));
-            }
-
-            foreach (var skippedConstruct in extraction.SkippedConstructs)
-            {
-                skipped.Add(Remap(skippedConstruct, script));
-            }
-
-            var nested = AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth);
-            findings.AddRange(nested.Findings);
-            tier1.AddRange(nested.Tier1Findings);
-            typed.AddRange(nested.TypedFindings);
-            expressionDerived.AddRange(nested.ExpressionDerivedFindings);
-            collationConflicts.AddRange(nested.CollationConflictFindings);
-            skipped.AddRange(nested.SkippedConstructs);
+            ProcessScript(script, catalog, lineage, depth, seeds, accumulator);
         }
 
-        return new DynamicSqlPipelineResult(findings, tier1, typed, expressionDerived, collationConflicts, skipped);
+        return accumulator.ToResult();
+    }
+
+    /// <summary>Mutable accumulator for one <see cref="ProcessScript"/> loop's worth of findings - a plain field bag rather than growing the caller's own local-variable count, which is most of what was driving its cognitive complexity over the line.</summary>
+    private sealed class ResultAccumulator
+    {
+        public List<DynamicSqlFinding> Findings { get; } = [];
+
+        public List<SargabilityFinding> Tier1 { get; } = [];
+
+        public List<TypedPredicateFinding> Typed { get; } = [];
+
+        public List<ExpressionDerivedFinding> ExpressionDerived { get; } = [];
+
+        public List<CollationConflictFinding> CollationConflicts { get; } = [];
+
+        public List<SkippedConstruct> Skipped { get; } = [];
+
+        public DynamicSqlPipelineResult ToResult() =>
+            new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, Skipped);
+    }
+
+    private static void ProcessScript(
+        DynamicSqlScript script,
+        DatabaseCatalog catalog,
+        LineageCatalog lineage,
+        int depth,
+        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
+        ResultAccumulator accumulator)
+    {
+        var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}";
+        var innerParseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText);
+
+        if (innerParseResult.HasErrors)
+        {
+            var reason = innerParseResult.Errors[0].Message;
+            accumulator.Findings.Add(new DynamicSqlFinding(
+                script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.InnerParseFailed, reason));
+            return;
+        }
+
+        accumulator.Findings.Add(new DynamicSqlFinding(
+            script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
+
+        foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope))
+        {
+            accumulator.Tier1.Add(Remap(tier1Finding, script));
+        }
+
+        var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
+            ? DynamicSqlParameterDeclarations.TryParse(declarationText, catalog.TypeAliases) ?? NoDeclaredParameters
+            : NoDeclaredParameters;
+        var declaredParameters = seeds is not null && seeds.TryGetValue(script, out var seed)
+            ? MergeSeededParameters(ownDeclaredParameters, seed)
+            : ownDeclaredParameters;
+        var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope);
+        foreach (var typedFinding in extraction.TypedFindings)
+        {
+            accumulator.Typed.Add(Remap(typedFinding, script));
+        }
+
+        foreach (var expressionFinding in extraction.ExpressionDerivedFindings)
+        {
+            accumulator.ExpressionDerived.Add(Remap(expressionFinding, script));
+        }
+
+        foreach (var collationConflict in extraction.CollationConflictFindings)
+        {
+            accumulator.CollationConflicts.Add(Remap(collationConflict, script));
+        }
+
+        foreach (var skippedConstruct in extraction.SkippedConstructs)
+        {
+            accumulator.Skipped.Add(Remap(skippedConstruct, script));
+        }
+
+        var nested = AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth);
+        accumulator.Findings.AddRange(nested.Findings);
+        accumulator.Tier1.AddRange(nested.Tier1Findings);
+        accumulator.Typed.AddRange(nested.TypedFindings);
+        accumulator.ExpressionDerived.AddRange(nested.ExpressionDerivedFindings);
+        accumulator.CollationConflicts.AddRange(nested.CollationConflictFindings);
+        accumulator.Skipped.AddRange(nested.SkippedConstructs);
     }
 
     private static DynamicSqlPipelineResult AnalyzeNested(
@@ -183,7 +207,7 @@ public static class DynamicSqlPipeline
 
             if (seed is not null)
             {
-                seeds ??= new Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>();
+                seeds ??= [];
                 seeds[nestedScript] = seed;
             }
         }

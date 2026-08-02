@@ -73,7 +73,7 @@ public static class NonSargablePredicateScanner
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {
-                _cteStack.Push(BuildTriggerPseudoTableRelations(target, rootFragment));
+                _cteStack.Push(BuildTriggerPseudoTableRelations(target));
             }
         }
 
@@ -229,7 +229,7 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            _cteStack.Push(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName, node)));
+            _cteStack.Push(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName)));
             node.AcceptChildren(this);
             _cteStack.Pop();
 
@@ -237,7 +237,7 @@ public static class NonSargablePredicateScanner
         }
 
         /// <summary>Mirrors TypedPredicateExtractor's identical helper - inserted/deleted are shaped like the trigger's own target table or view, but never claim its index (they're a version-store rowset with none of their own).</summary>
-        private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
+        private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
 
