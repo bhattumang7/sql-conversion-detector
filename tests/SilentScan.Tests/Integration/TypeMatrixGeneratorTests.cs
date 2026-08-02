@@ -78,4 +78,40 @@ public sealed class TypeMatrixGeneratorTests
         Assert.True(windowsCollationEntry.ColumnConverts);
         Assert.True(windowsCollationEntry.DynamicRangeSeekAvailable);
     }
+
+    [Fact]
+    public async Task GenerateAsync_TimestampColumnVsVarbinaryValue_ColumnConverts()
+    {
+        // Roadmap Phase A3: a rowversion/timestamp concurrency-token column compared against a
+        // VARBINARY(8) variable is a ubiquitous optimistic-concurrency pattern that previously
+        // resolved Unknown for lack of any probe data at all.
+        var generator = new TypeMatrixGenerator(Options);
+
+        var (entries, _) = await generator.GenerateAsync([], [], [], [], binaryFamily: TypeMatrixGenerator.BinaryFamily);
+
+        var timestampVsVarBinary = Assert.Single(entries, e => e.ColumnCategory == SqlTypeCategory.Timestamp && e.OtherCategory == SqlTypeCategory.VarBinary);
+        Assert.False(timestampVsVarBinary.CompileFailed);
+        Assert.False(timestampVsVarBinary.ColumnConverts);
+
+        var varBinaryVsTimestamp = Assert.Single(entries, e => e.ColumnCategory == SqlTypeCategory.VarBinary && e.OtherCategory == SqlTypeCategory.Timestamp);
+        Assert.True(varBinaryVsTimestamp.ColumnConverts);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_BinaryColumnVsVarbinaryValue_SameComparisonTypeNeitherConverts()
+    {
+        // Mirrors the char/varchar precedent already established elsewhere: binary and
+        // varbinary are the same comparison type in SQL Server despite being distinct
+        // SqlTypeCategory values in this tool's model.
+        var generator = new TypeMatrixGenerator(Options);
+
+        var (entries, _) = await generator.GenerateAsync([], [], [], [], binaryFamily: TypeMatrixGenerator.BinaryFamily);
+
+        var binaryVsVarBinary = Assert.Single(entries, e => e.ColumnCategory == SqlTypeCategory.Binary && e.OtherCategory == SqlTypeCategory.VarBinary);
+        Assert.False(binaryVsVarBinary.CompileFailed);
+        Assert.False(binaryVsVarBinary.ColumnConverts);
+
+        var varBinaryVsBinary = Assert.Single(entries, e => e.ColumnCategory == SqlTypeCategory.VarBinary && e.OtherCategory == SqlTypeCategory.Binary);
+        Assert.False(varBinaryVsBinary.ColumnConverts);
+    }
 }

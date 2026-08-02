@@ -42,6 +42,24 @@ public sealed class TypeMatrixGenerator
         (SqlTypeCategory.DateTimeOffset, "DATETIMEOFFSET"),
     ];
 
+    /// <summary>
+    /// Roadmap Phase A3: BINARY/VARBINARY/TIMESTAMP(rowversion) were previously absent from the
+    /// matrix entirely - any comparison involving one resolved Unknown for lack of probe data,
+    /// even though same-category comparisons (binary vs binary) already worked fine through
+    /// VerdictClassifier's category-equality branch, which never consults the matrix. What
+    /// actually needed probing is the cross-category case: a `binary(n)` column compared
+    /// against a `varbinary(n)` value or vice versa, and a `timestamp`/`rowversion` concurrency
+    /// column compared against a `varbinary(8)` variable - both real, common patterns (rowversion
+    /// columns are a ubiquitous optimistic-concurrency idiom) that previously reported Unknown
+    /// purely because nobody had probed them yet.
+    /// </summary>
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> BinaryFamily =
+    [
+        (SqlTypeCategory.Binary, "BINARY(16)"),
+        (SqlTypeCategory.VarBinary, "VARBINARY(16)"),
+        (SqlTypeCategory.Timestamp, "ROWVERSION"),
+    ];
+
     /// <summary>String-family category/DDL-syntax pairs, probed once per <see cref="Collations"/> entry.</summary>
     public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> StringFamily =
     [
@@ -115,10 +133,11 @@ public sealed class TypeMatrixGenerator
     }
 
     /// <summary>
-    /// Probes <paramref name="numericFamily"/> and <paramref name="dateTimeFamily"/> (no
-    /// collation dimension) plus <paramref name="stringFamily"/> under every entry of
-    /// <paramref name="collations"/>, and returns the combined outcome list plus the server
-    /// build string extracted from the first successfully-captured plan.
+    /// Probes <paramref name="numericFamily"/>, <paramref name="dateTimeFamily"/>, and
+    /// <paramref name="binaryFamily"/> (none have a collation dimension) plus
+    /// <paramref name="stringFamily"/> under every entry of <paramref name="collations"/>, and
+    /// returns the combined outcome list plus the server build string extracted from the first
+    /// successfully-captured plan.
     /// </summary>
     public async Task<(IReadOnlyList<TypePairProbeResult> Entries, string ServerVersion)> GenerateAsync(
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> numericFamily,
@@ -126,23 +145,26 @@ public sealed class TypeMatrixGenerator
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> stringFamily,
         IReadOnlyList<string> collations,
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? crossFamilyOther = null,
+        IReadOnlyList<(SqlTypeCategory Category, string Syntax)>? binaryFamily = null,
         CancellationToken cancellationToken = default)
     {
         crossFamilyOther ??= [];
+        binaryFamily ??= [];
         var entries = new List<TypePairProbeResult>();
         string? serverVersion = null;
 
-        if (numericFamily.Count > 0 || dateTimeFamily.Count > 0)
+        if (numericFamily.Count > 0 || dateTimeFamily.Count > 0 || binaryFamily.Count > 0)
         {
             const string familyDb = "SilentScanTypeMatrixFamily";
             SqlConnection.ClearAllPools();
             await _provisioner.CreateFreshAsync(familyDb, cancellationToken: cancellationToken);
             try
             {
-                await DeployFamilyTablesAsync(familyDb, numericFamily.Concat(dateTimeFamily).ToList(), collationName: null, cancellationToken);
+                await DeployFamilyTablesAsync(familyDb, numericFamily.Concat(dateTimeFamily).Concat(binaryFamily).ToList(), collationName: null, cancellationToken);
                 var familyContext = new ProbeContext(familyDb, CollationName: null, entries, v => serverVersion ??= v, cancellationToken);
                 await ProbeFamilyAsync(numericFamily, familyContext);
                 await ProbeFamilyAsync(dateTimeFamily, familyContext);
+                await ProbeFamilyAsync(binaryFamily, familyContext);
 
                 // Non-string column vs a string-typed value (e.g. `WHERE IntColumn = '123'`) is
                 // not collation-sensitive - the target isn't a string, so which collation family

@@ -81,6 +81,10 @@ public static class ReadableScanReportWriter
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
             "Something the verdict rules need was missing or ambiguous - most often a collation that no DDL in the scan pinned down. These are neither clean nor flagged; they are unanswered, and they are listed rather than dropped so the counts above cannot be read as covering them."));
+        blocks.AddRange(TypedSection(
+            report, Verdict.OperandClash, headingLevel, pathBase,
+            "Comparisons between genuinely incompatible types",
+            "The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all (e.g. TIME vs a date-family type, or a GUID vs a string) - distinct from an unclassified comparison above: this one has a definitive answer, and the answer is that the comparison itself cannot run as written."));
         blocks.AddRange(DynamicSql(report, headingLevel, pathBase));
         blocks.AddRange(ParseFailures(report, headingLevel, pathBase));
         blocks.AddRange(SkippedConstructs(report, headingLevel));

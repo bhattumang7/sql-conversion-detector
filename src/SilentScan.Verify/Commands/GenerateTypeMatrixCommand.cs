@@ -49,6 +49,7 @@ public static class GenerateTypeMatrixCommand
             TypeMatrixGenerator.StringFamily,
             TypeMatrixGenerator.Collations,
             TypeMatrixGenerator.CrossFamilyOther,
+            TypeMatrixGenerator.BinaryFamily,
             cancellationToken);
 
         var document = new

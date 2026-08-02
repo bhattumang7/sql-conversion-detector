@@ -73,9 +73,16 @@ public static class VerdictClassifier
             ? TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(columnType.Category, otherType.Category)
             : TypePairMatrix.Instance.TryGetOutcome(columnType.Category, otherType.Category, collationName);
 
-        if (outcome is null || outcome.CompileFailed)
+        if (outcome is null)
         {
             return Verdict.Unknown;
+        }
+
+        if (outcome.CompileFailed)
+        {
+            // A probed, empirically-confirmed fact (Roadmap Phase A3), not an absence of data -
+            // distinct from the "no probe recorded this cell" Unknown case just above.
+            return Verdict.OperandClash;
         }
 
         if (!outcome.ColumnConverts)

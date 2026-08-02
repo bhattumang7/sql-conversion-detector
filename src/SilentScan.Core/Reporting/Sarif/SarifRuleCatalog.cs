@@ -36,6 +36,7 @@ public static class SarifRuleCatalog
         Verdict.RangeSeek => "silentscan/verdict/range-seek",
         Verdict.Unknown => "silentscan/verdict/unknown",
         Verdict.SeekPreserved => "silentscan/verdict/seek-preserved",
+        Verdict.OperandClash => "silentscan/verdict/operand-clash",
         _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, "Unhandled Verdict."),
     };
 
@@ -50,6 +51,7 @@ public static class SarifRuleCatalog
         Rule(VerdictRuleId(Verdict.RangeSeek), "An implicit type conversion on the column side permits only a dynamic range seek, not a direct seek."),
         Rule(VerdictRuleId(Verdict.Unknown), "A predicate's sargability could not be determined (e.g. unresolved collation) - never guessed."),
         Rule(VerdictRuleId(Verdict.SeekPreserved), "A predicate compares types where the seek is preserved (reported for completeness; not filtered into ScanReportBuilder's actionable findings)."),
+        Rule(VerdictRuleId(Verdict.OperandClash), "The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all - a definitive fact, not an absence of probe data."),
         Rule(DynamicSqlAnalyzedRuleId, "A dynamic SQL call site with a provably-constant argument; its contents were reparsed and analyzed like static SQL."),
         Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed."),
         Rule(DynamicSqlInnerParseFailedRuleId, "A dynamic SQL call site's argument was provably constant but its reassembled text did not parse as T-SQL."),

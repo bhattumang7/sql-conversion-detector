@@ -26,6 +26,7 @@ public sealed class TypedPredicateSummaryTests
         Assert.Equal(0, summary.RangeSeekCount);
         Assert.Equal(0, summary.ScanForcedCount);
         Assert.Equal(0, summary.UnknownCount);
+        Assert.Equal(0, summary.OperandClashCount);
         Assert.Equal(0, summary.DistinctRangeSeekCount);
         Assert.Equal(0, summary.DistinctScanForcedCount);
         Assert.Equal(0, summary.DistinctTotalClassified);
@@ -47,15 +48,17 @@ public sealed class TypedPredicateSummaryTests
             Finding(Verdict.ScanForced),
             Finding(Verdict.ScanForced),
             Finding(Verdict.Unknown),
+            Finding(Verdict.OperandClash),
         };
 
         var summary = TypedPredicateSummary.From(findings);
 
-        Assert.Equal(7, summary.TotalClassified);
+        Assert.Equal(8, summary.TotalClassified);
         Assert.Equal(3, summary.SeekPreservedCount);
         Assert.Equal(1, summary.RangeSeekCount);
         Assert.Equal(2, summary.ScanForcedCount);
         Assert.Equal(1, summary.UnknownCount);
+        Assert.Equal(1, summary.OperandClashCount);
     }
 
     [Fact]

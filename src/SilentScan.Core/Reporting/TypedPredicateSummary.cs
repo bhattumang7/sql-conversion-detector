@@ -33,6 +33,7 @@ public sealed record TypedPredicateSummary(
     int RangeSeekCount,
     int ScanForcedCount,
     int UnknownCount,
+    int OperandClashCount,
     int DistinctRangeSeekCount,
     int DistinctScanForcedCount,
     int DistinctTotalClassified)
@@ -43,6 +44,7 @@ public sealed record TypedPredicateSummary(
         var rangeSeek = 0;
         var scanForced = 0;
         var unknown = 0;
+        var operandClash = 0;
 
         foreach (var finding in allFindingsBeforeFiltering)
         {
@@ -60,6 +62,9 @@ public sealed record TypedPredicateSummary(
                 case Verdict.Unknown:
                     unknown++;
                     break;
+                case Verdict.OperandClash:
+                    operandClash++;
+                    break;
             }
         }
 
@@ -70,7 +75,7 @@ public sealed record TypedPredicateSummary(
         var distinctTotalClassified = TypedFindingDeduplicator.Dedupe(allFindingsBeforeFiltering).Count;
 
         return new TypedPredicateSummary(
-            allFindingsBeforeFiltering.Count, seekPreserved, rangeSeek, scanForced, unknown,
+            allFindingsBeforeFiltering.Count, seekPreserved, rangeSeek, scanForced, unknown, operandClash,
             distinctRangeSeek, distinctScanForced, distinctTotalClassified);
     }
 }

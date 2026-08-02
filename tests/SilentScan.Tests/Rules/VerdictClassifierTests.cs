@@ -394,6 +394,60 @@ public sealed class VerdictClassifierTests
         Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
     }
 
+    [Fact]
+    public void Classify_TimeColumnVsDateValue_CompileFailedCell_OperandClash()
+    {
+        // Roadmap Phase A3: TIME vs the DATE family is one of the matrix's 14 oracle-probed
+        // CompileFailed cells - a definitively confirmed "this does not compile", not merely
+        // an absence of probe data, so it gets its own distinct verdict rather than folding
+        // into Unknown.
+        var column = new SqlType(SqlTypeCategory.Time);
+        var value = new SqlType(SqlTypeCategory.Date);
+
+        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_UniqueIdentifierColumnVsVarcharValue_CompileFailedCell_OperandClash()
+    {
+        var column = new SqlType(SqlTypeCategory.UniqueIdentifier);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 36);
+
+        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_VarBinaryColumnVsTimestampValue_OracleVerified_ScanForced()
+    {
+        // Roadmap Phase A3: previously absent from the matrix entirely (Unknown regardless of
+        // direction) - a rowversion/timestamp concurrency token compared against a VARBINARY
+        // variable is a ubiquitous optimistic-concurrency pattern.
+        var column = new SqlType(SqlTypeCategory.VarBinary, Length: 8);
+        var value = new SqlType(SqlTypeCategory.Timestamp);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_TimestampColumnVsVarBinaryValue_DirectionMatters_SeekPreserved()
+    {
+        var column = new SqlType(SqlTypeCategory.Timestamp);
+        var value = new SqlType(SqlTypeCategory.VarBinary, Length: 8);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BinaryColumnVsVarBinaryValue_SameComparisonType_SeekPreserved()
+    {
+        // Mirrors the already-established char/varchar precedent: binary and varbinary are the
+        // same comparison type in SQL Server, despite being distinct SqlTypeCategory values.
+        var column = new SqlType(SqlTypeCategory.Binary, Length: 16);
+        var value = new SqlType(SqlTypeCategory.VarBinary, Length: 16);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
     [Theory]
     [MemberData(nameof(AllMatrixEntries))]
     public void Classify_NeverDisagreesWithItsOwnOracleProbedMatrix(
@@ -414,7 +468,7 @@ public sealed class VerdictClassifierTests
 
         if (entry.CompileFailed)
         {
-            Assert.Equal(Verdict.Unknown, actual);
+            Assert.Equal(Verdict.OperandClash, actual);
         }
         else if (!entry.ColumnConverts)
         {

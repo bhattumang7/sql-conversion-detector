@@ -30,9 +30,6 @@ public sealed record SqlType(
         or SqlTypeCategory.SmallDateTime or SqlTypeCategory.DateTime or SqlTypeCategory.DateTime2
         or SqlTypeCategory.DateTimeOffset;
 
-    /// <summary>Numeric-or-bit family membership, used by VerdictClassifier to decide whether a cross-category pair should consult the oracle-probed type-pair matrix instead of the raw precedence list.</summary>
-    public bool IsNumericOrBit => IsNumericFamily || Category == SqlTypeCategory.Bit;
-
     public override string ToString()
     {
         var baseName = Category.ToString();
