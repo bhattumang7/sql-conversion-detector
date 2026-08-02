@@ -20,9 +20,17 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class DynamicSqlScanner
 {
-    public static DynamicSqlExtractionResult Scan(SqlParseResult parseResult)
+    /// <summary>
+    /// <paramref name="enclosingScope"/> seeds the scope a call site found at the TOP of
+    /// <paramref name="parseResult"/> is considered inside - null (the default) for an ordinary
+    /// top-level file scan. <see cref="DynamicSqlPipeline"/> passes the outer script's own
+    /// scope here when reparsing a NESTED dynamic SQL fragment, so scope propagation survives
+    /// however many nesting levels deep a call site sits (the reparsed fragment itself never
+    /// contains a CREATE PROCEDURE wrapper to discover the scope from directly).
+    /// </summary>
+    public static DynamicSqlExtractionResult Scan(SqlParseResult parseResult, DynamicSqlScope? enclosingScope = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath);
+        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None);
         if (parseResult.Fragment is TSqlScript script)
         {
             foreach (var batch in script.Batches)
@@ -58,9 +66,10 @@ public static class DynamicSqlScanner
         public static FoldState Tainted(string reason, SourceSpan location) => new() { TaintReason = reason, TaintLocation = location };
     }
 
-    private sealed class Visitor(string sourcePath)
+    private sealed class Visitor(string sourcePath, DynamicSqlScope initialScope)
     {
-        private static readonly IReadOnlyDictionary<string, SqlType?> NoDeclaredParameters = new Dictionary<string, SqlType?>();
+
+        private DynamicSqlScope _scope = initialScope;
 
         public List<DynamicSqlFinding> Findings { get; } = [];
 
@@ -73,6 +82,31 @@ public static class DynamicSqlScanner
             var foldingEnabled = !ContainsGotoOrLabel(statements);
             WalkStatements(statements, folded, foldingEnabled);
         }
+
+        /// <summary>A proc/function body's fresh variable scope, additionally recording its own qualified name as the enclosing scope for any dynamic SQL call site found inside - mirrors CatalogBuilder.VisitScopedBody's identical save/restore.</summary>
+        private void WalkScopedBody(SchemaObjectName? name, IList<TSqlStatement> statements)
+        {
+            var previousScope = _scope;
+            _scope = name is null ? _scope : new DynamicSqlScope(SchemaObjectNameHelper.Qualify(name), _scope.TriggerTarget);
+            WalkScope(statements);
+            _scope = previousScope;
+        }
+
+        /// <summary>Same save/restore as <see cref="WalkScopedBody"/>, plus the trigger's own target table/view (null for a DDL/LOGON trigger, which has no inserted/deleted rowset at all) so a dynamic SQL call site inside the body can resolve inserted/deleted the same way it would statically.</summary>
+        private void WalkTriggerBody(TriggerStatementBody trigger)
+        {
+            var previousScope = _scope;
+            _scope = new DynamicSqlScope(SchemaObjectNameHelper.Qualify(trigger.Name), trigger.TriggerObject.Name);
+            WalkScope(trigger.StatementList.Statements);
+            _scope = previousScope;
+        }
+
+        private static SchemaObjectName? ProcedureOrFunctionName(ProcedureStatementBodyBase procOrFunc) => procOrFunc switch
+        {
+            ProcedureStatementBody proc => proc.ProcedureReference.Name,
+            FunctionStatementBody func => func.Name,
+            _ => null,
+        };
 
         private void WalkStatements(IList<TSqlStatement> statements, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
@@ -93,7 +127,7 @@ public static class DynamicSqlScanner
                 // real body" pattern (seen verbatim in the First Responder Kit corpus repo),
                 // which a CreateProcedureStatement-only match would silently never walk into.
                 case ProcedureStatementBodyBase { StatementList: not null } procOrFunc:
-                    WalkScope(procOrFunc.StatementList.Statements);
+                    WalkScopedBody(ProcedureOrFunctionName(procOrFunc), procOrFunc.StatementList.Statements);
                     break;
 
                 case ProcedureStatementBodyBase:
@@ -104,7 +138,7 @@ public static class DynamicSqlScanner
 
                 // Same reasoning for CREATE/ALTER/CREATE OR ALTER TRIGGER.
                 case TriggerStatementBody { StatementList: not null } trigger:
-                    WalkScope(trigger.StatementList.Statements);
+                    WalkTriggerBody(trigger);
                     break;
 
                 case TriggerStatementBody:
@@ -382,7 +416,7 @@ public static class DynamicSqlScanner
                 segments.AddRange(attempt.Segments!);
             }
 
-            Scripts.Add(BuildScript(node, segments, NoDeclaredParameters));
+            Scripts.Add(BuildScript(node, segments, parameterDeclarationText: null));
         }
 
         private void HandleSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -407,32 +441,31 @@ public static class DynamicSqlScanner
                 return;
             }
 
-            Scripts.Add(BuildScript(node, queryAttempt.Segments!, ResolveDeclaredParameters(procRef, folded, foldingEnabled)));
+            Scripts.Add(BuildScript(node, queryAttempt.Segments!, ResolveParameterDeclarationText(procRef, folded, foldingEnabled)));
         }
 
         /// <summary>
         /// sp_executesql's optional second argument declares its parameters' exact types
-        /// (Tier B) - e.g. <c>N'@DisplayName nvarchar(40)'</c>. Missing, unfoldable, or
-        /// unparseable falls back to no declared types rather than guessing; predicates
-        /// against an undeclared parameter simply resolve to Unknown, same as any other
-        /// unresolvable operand.
+        /// (Tier B) - e.g. <c>N'@DisplayName nvarchar(40)'</c>. Missing or unfoldable falls
+        /// back to null rather than guessing. The raw text is returned as-is, not parsed here -
+        /// see <see cref="DynamicSqlScript.ParameterDeclarationText"/> for why parsing is
+        /// deferred to <see cref="DynamicSqlPipeline"/>, where a real catalog exists.
         /// </summary>
-        private IReadOnlyDictionary<string, SqlType?> ResolveDeclaredParameters(ExecutableProcedureReference procRef, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        private string? ResolveParameterDeclarationText(ExecutableProcedureReference procRef, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
             var paramsArg = ResolveNamedOrPositionalArgument(procRef.Parameters, index: 1, "@params", "@parameters");
             if (paramsArg is null)
             {
-                return NoDeclaredParameters;
+                return null;
             }
 
             var attempt = TryFoldExpression(paramsArg, folded, foldingEnabled);
             if (!attempt.Success)
             {
-                return NoDeclaredParameters;
+                return null;
             }
 
-            var declarationText = string.Concat(attempt.Segments!.Select(s => s.Value));
-            return DynamicSqlParameterDeclarations.TryParse(declarationText) ?? NoDeclaredParameters;
+            return string.Concat(attempt.Segments!.Select(s => s.Value));
         }
 
         /// <summary>
@@ -465,7 +498,7 @@ public static class DynamicSqlScanner
             return index < parameters.Count ? parameters[index].ParameterValue : null;
         }
 
-        private DynamicSqlScript BuildScript(ExecuteStatement node, IReadOnlyList<LiteralSegment> segments, IReadOnlyDictionary<string, SqlType?> declaredParameters)
+        private DynamicSqlScript BuildScript(ExecuteStatement node, IReadOnlyList<LiteralSegment> segments, string? parameterDeclarationText)
         {
             var segmentMap = new DynamicSqlSegmentMap();
             foreach (var segment in segments)
@@ -473,7 +506,7 @@ public static class DynamicSqlScanner
                 segmentMap.AppendLiteral(segment.SourcePath, segment.StartLine, segment.StartColumn, segment.PrefixLength, segment.Value);
             }
 
-            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, declaredParameters);
+            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope);
         }
 
         /// <summary>

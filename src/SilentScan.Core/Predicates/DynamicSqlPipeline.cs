@@ -23,6 +23,8 @@ public static class DynamicSqlPipeline
     /// </summary>
     private const int MaxNestingDepth = 5;
 
+    private static readonly IReadOnlyDictionary<string, SqlType?> NoDeclaredParameters = new Dictionary<string, SqlType?>();
+
     public static DynamicSqlPipelineResult Analyze(IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage) =>
         Analyze(scripts, catalog, lineage, depth: 1);
 
@@ -51,12 +53,15 @@ public static class DynamicSqlPipeline
             findings.Add(new DynamicSqlFinding(
                 script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
 
-            foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage))
+            foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope))
             {
                 tier1.Add(Remap(tier1Finding, script));
             }
 
-            var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, script.DeclaredParameters);
+            var declaredParameters = script.ParameterDeclarationText is { } declarationText
+                ? DynamicSqlParameterDeclarations.TryParse(declarationText, catalog.TypeAliases) ?? NoDeclaredParameters
+                : NoDeclaredParameters;
+            var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope);
             foreach (var typedFinding in extraction.TypedFindings)
             {
                 typed.Add(Remap(typedFinding, script));
@@ -92,7 +97,10 @@ public static class DynamicSqlPipeline
     private static DynamicSqlPipelineResult AnalyzeNested(
         SqlParseResult innerParseResult, DynamicSqlScript script, DatabaseCatalog catalog, LineageCatalog lineage, int depth)
     {
-        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult);
+        // Propagates the outer script's own scope into the nested scanner - the reparsed inner
+        // text has no CREATE PROCEDURE wrapper for it to discover the scope from itself, so
+        // without this, propagation would silently die at nesting depth 2.
+        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope);
         var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, script)).ToList();
 
         if (nestedExtraction.AnalyzableScripts.Count == 0)

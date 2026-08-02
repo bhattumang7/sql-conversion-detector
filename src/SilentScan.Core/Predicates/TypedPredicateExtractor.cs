@@ -17,13 +17,18 @@ public static class TypedPredicateExtractor
     // externalVariables: variable/parameter types known before parsing even starts - used by
     // DynamicSqlPipeline to seed sp_executesql's declared parameter types (CLAUDE.md dynamic
     // SQL policy, Tier B), since those are declared at the call site, not inside the reparsed
-    // query text itself. Null/empty for ordinary static SQL.
+    // query text itself. Null/empty for ordinary static SQL. enclosingScope: the proc/function/
+    // trigger a reparsed dynamic SQL fragment was found inside, if any - lets a #temp table or
+    // trigger inserted/deleted pseudo-table that resolves fine in the surrounding STATIC body
+    // resolve inside the dynamic text too, since the reparsed fragment has no CREATE PROCEDURE
+    // wrapper of its own to discover either from.
     public static PredicateExtractionResult Extract(
-        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null)
+        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null, DynamicSqlScope? enclosingScope = null)
     {
         var resolvedViews = lineage.AllRelations;
         var ledger = new SkipLedger();
-        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope);
+        visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
         return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, ledger.Entries);
     }
@@ -33,14 +38,24 @@ public static class TypedPredicateExtractor
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
-        SkipLedger ledger) : TSqlFragmentVisitor
+        SkipLedger ledger,
+        DynamicSqlScope? enclosingScope = null) : TSqlFragmentVisitor
     {
         /// <summary>Skip-ledger construct kind shared by every "this operand has no type resolution" entry below - one label for the whole family of unresolved-operand reasons.</summary>
         private const string PredicateOperandConstructKind = "predicate operand";
 
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
-        private string? _currentProcScope;
+        private string? _currentProcScope = enclosingScope?.ProcScope;
+
+        /// <summary>Pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack, if any - called once, before the visitor starts walking, so they're visible for the whole reparsed fragment exactly like a real trigger body's own VisitTriggerBody does.</summary>
+        public void SeedEnclosingScope(TSqlFragment rootFragment)
+        {
+            if (enclosingScope?.TriggerTarget is { } target)
+            {
+                _cteStack.Push(BuildTriggerPseudoTableRelations(target, rootFragment));
+            }
+        }
 
         // Mirrors NonSargablePredicateScanner's identical tracker (CLAUDE.md Tier-1 scope note:
         // "never a SELECT list, ORDER BY, or GROUP BY - there's no seek to lose"): a comparison

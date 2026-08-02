@@ -94,7 +94,7 @@ public static class SelectIntoLineagePass
         private void ResolveSelectIntoTarget(SelectStatement select)
         {
             var targetName = select.Into!;
-            var (schema, name) = SchemaObjectNameHelper.Resolve(targetName);
+            var (schema, _) = SchemaObjectNameHelper.Resolve(targetName);
             var isTemp = schema is null;
             var qualifiedName = SchemaObjectNameHelper.Qualify(targetName);
 

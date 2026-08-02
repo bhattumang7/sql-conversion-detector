@@ -44,18 +44,25 @@ public static class NonSargablePredicateScanner
     public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult) =>
         Scan(parseResult, new DatabaseCatalog(), new LineageCatalog(new Dictionary<string, ResolvedRelation>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), new SkipLedger()));
 
-    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage)
+    /// <summary>
+    /// <paramref name="enclosingScope"/> seeds the proc/function/trigger scope a reparsed
+    /// dynamic SQL fragment is considered inside, so a #temp table declared in the surrounding
+    /// STATIC body resolves inside the dynamic text too - the reparsed fragment has no
+    /// CREATE PROCEDURE wrapper of its own to discover the scope from. Null (the default) for
+    /// an ordinary top-level scan.
+    /// </summary>
+    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope);
         parseResult.Fragment.Accept(visitor);
         return visitor.Findings;
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, DynamicSqlScope? enclosingScope = null) : TSqlFragmentVisitor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
-        private string? _currentProcScope;
+        private string? _currentProcScope = enclosingScope?.ProcScope;
         private bool _inFilterContext;
 
         public List<SargabilityFinding> Findings { get; } = [];

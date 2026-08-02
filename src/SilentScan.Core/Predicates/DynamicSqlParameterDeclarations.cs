@@ -15,7 +15,17 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class DynamicSqlParameterDeclarations
 {
-    public static IReadOnlyDictionary<string, SqlType?>? TryParse(string declarationText)
+    /// <summary>
+    /// <paramref name="typeAliases"/> lets a sp_executesql parameter declared with a
+    /// <c>CREATE TYPE ... FROM</c> alias (e.g. <c>@Code dbo.CodeType</c>) resolve to that
+    /// alias's real underlying type instead of null - this is called from
+    /// <see cref="DynamicSqlPipeline"/>, where <c>DatabaseCatalog</c> (and therefore
+    /// <c>TypeAliases</c>) already exists, unlike <see cref="DynamicSqlScanner"/> (this
+    /// method's ORIGINAL caller, back when the catalog didn't exist yet at scan time - see
+    /// <see cref="DynamicSqlScript.ParameterDeclarationText"/>'s own doc comment for why the
+    /// parsing moved). Null (the default) still resolves only <c>sysname</c>, same as before.
+    /// </summary>
+    public static IReadOnlyDictionary<string, SqlType?>? TryParse(string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null)
     {
         if (string.IsNullOrWhiteSpace(declarationText))
         {
@@ -31,16 +41,10 @@ public static class DynamicSqlParameterDeclarations
             return null;
         }
 
-        // No DatabaseCatalog is available here - DynamicSqlScanner (this method's only caller)
-        // runs before CatalogBuilder in ScanReportBuilder's pipeline, so a sp_executesql
-        // parameter declared with a CREATE TYPE ... FROM alias (docs/audit-remediation-plan.md
-        // Phase 6.2) still resolves via SqlTypeReferenceResolver's sysname special-case, but not
-        // via a user-declared alias - a deliberate, narrow scope boundary rather than
-        // restructuring pass ordering for a rare case (aliased sp_executesql parameters).
         var declared = new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase);
         foreach (var parameter in createProcedure.Parameters)
         {
-            declared[parameter.VariableName.Value] = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null);
+            declared[parameter.VariableName.Value] = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, typeAliases);
         }
 
         return declared;

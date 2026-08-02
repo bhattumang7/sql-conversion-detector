@@ -58,7 +58,7 @@ public static class ScanReportBuilder
             }
         }
 
-        var dynamicSqlExtractions = usableParseResults.Select(DynamicSqlScanner.Scan).ToList();
+        var dynamicSqlExtractions = usableParseResults.Select(r => DynamicSqlScanner.Scan(r)).ToList();
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
         var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 

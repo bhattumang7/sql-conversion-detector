@@ -121,7 +121,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
         var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
-        Assert.True(script.DeclaredParameters.ContainsKey("@DisplayName"));
+        Assert.Contains("@DisplayName", script.ParameterDeclarationText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
@@ -147,7 +147,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.False(parseResult.HasErrors);
 
         var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
-        Assert.Empty(script.DeclaredParameters);
+        Assert.Null(script.ParameterDeclarationText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
@@ -171,7 +171,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
         var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
-        Assert.Empty(script.DeclaredParameters);
+        Assert.Null(script.ParameterDeclarationText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 

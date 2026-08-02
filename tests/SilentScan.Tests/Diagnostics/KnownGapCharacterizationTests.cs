@@ -155,52 +155,18 @@ public sealed class KnownGapCharacterizationTests
     // Dynamic SQL: declared gaps (ConstructCoverage.json, verifiedBy: None until now)
     // ------------------------------------------------------------------
 
-    [Fact]
-    public void DynamicSql_TempTableFromEnclosingProcScope_DoesNotResolveInsideReparsedText()
-    {
-        // The identical predicate appears twice: once statically (resolves through the
-        // proc-scoped #w catalog entry, ScanForced + Indexed) and once inside EXEC('...')
-        // (the reparsed fragment carries no enclosing proc scope, so #w never resolves and
-        // no ScanForced finding is produced). When scope propagation lands, both must fire.
-        var report = Scan("""
-            CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
-            GO
-            CREATE PROCEDURE dbo.usp_DynamicTemp AS
-            BEGIN
-                CREATE TABLE #w (WidgetCode varchar(25) NOT NULL, INDEX IX_W (WidgetCode));
-                INSERT INTO #w SELECT WidgetCode FROM dbo.Widgets;
-                EXEC('SELECT 1 FROM #w WHERE WidgetCode = N''W1''');
-                SELECT 1 FROM #w WHERE WidgetCode = N'W2';
-            END;
-            """);
+    // DynamicSql_TempTableFromEnclosingProcScope was pinned here and is now CLOSED -
+    // DynamicSqlScanner records the enclosing proc/function/trigger's own qualified name as a
+    // DynamicSqlScope threaded through DynamicSqlPipeline into both NonSargablePredicateScanner
+    // and TypedPredicateExtractor (and recursively into nested dynamic SQL), so a #temp table
+    // declared in the surrounding static body now resolves inside the reparsed text too. Moved
+    // to Predicates/DynamicSqlScopePropagationTests.cs.
 
-        Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
-
-        // Exactly one ScanForced - the static twin. The dynamic occurrence contributes none.
-        var scanForced = Assert.Single(report.TypedFindings, f => f.Verdict == Verdict.ScanForced);
-        Assert.Null(scanForced.DynamicSqlCallSite);
-        Assert.True(scanForced.Column.Indexed);
-    }
-
-    [Fact]
-    public void DynamicSql_AliasTypedDeclaredParameter_ResolvesToNullType_Unknown()
-    {
-        // sp_executesql's @params declaration is parsed with NO DatabaseCatalog, so the
-        // dbo.CodeType alias (nvarchar(50), declared in the same scanned file) resolves to
-        // null and the flagship varchar-vs-nvarchar ScanForced degrades to Unknown.
-        var report = Scan("""
-            CREATE TYPE dbo.CodeType FROM nvarchar(50);
-            GO
-            CREATE TABLE dbo.Vendors (VendorCode varchar(50) NOT NULL, INDEX IX_VendorCode (VendorCode));
-            GO
-            CREATE PROCEDURE dbo.usp_FindVendor @Code dbo.CodeType AS
-            BEGIN
-                EXEC sp_executesql N'SELECT 1 FROM dbo.Vendors WHERE VendorCode = @P', N'@P dbo.CodeType', @P = @Code;
-            END;
-            """);
-
-        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "VendorCode");
-        Assert.Equal(Verdict.Unknown, finding.Verdict);
-        Assert.NotNull(finding.DynamicSqlCallSite);
-    }
+    // DynamicSql_AliasTypedDeclaredParameter was pinned here and is now CLOSED -
+    // sp_executesql's @params declaration text is kept as raw text on DynamicSqlScript
+    // (DynamicSqlScript.ParameterDeclarationText) instead of being parsed at scan time, before
+    // any DatabaseCatalog exists; DynamicSqlPipeline parses it later, once the real catalog
+    // (and therefore TypeAliases) is available, so a CREATE TYPE ... FROM alias used in the
+    // declaration now resolves to its real underlying type instead of null. Moved to
+    // Predicates/DynamicSqlParameterAliasPipelineTests.cs.
 }
