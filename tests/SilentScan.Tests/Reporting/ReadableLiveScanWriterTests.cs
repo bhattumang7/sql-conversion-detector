@@ -22,8 +22,9 @@ public sealed class ReadableLiveScanWriterTests
 
     private static LiveScanResult Result(
         IReadOnlyList<LiveLineageParityMismatch>? mismatches = null,
-        IReadOnlyList<UnanalyzableModule>? unanalyzable = null) =>
-        new(EmptyReport(), Catalog, ModulesAnalyzed: 7, mismatches ?? [], unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: []);
+        IReadOnlyList<UnanalyzableModule>? unanalyzable = null,
+        IReadOnlyList<WorkloadFinding>? workloadFindings = null) =>
+        new(EmptyReport(), Catalog, ModulesAnalyzed: 7, mismatches ?? [], unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? []);
 
     [Fact]
     public void CatalogSummary_SaysWhatWasReadAndThatNothingWasExecuted()

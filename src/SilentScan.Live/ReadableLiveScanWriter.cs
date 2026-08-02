@@ -48,6 +48,7 @@ public static class ReadableLiveScanWriter
         blocks.AddRange(Connection(result));
         blocks.AddRange(LineageParity(result));
         blocks.AddRange(PlanCacheEvidence(result));
+        blocks.AddRange(WorkloadFindings(result));
 
         // No collation sensitivity report: a live database always answers what its own default
         // collation is, so there is nothing here for the scan to have left unpinned.
@@ -132,6 +133,37 @@ public static class ReadableLiveScanWriter
                         f.ObservedExecutionCount.ToString(CultureInfo.InvariantCulture),
                     })]);
         }
+    }
+
+    /// <summary>
+    /// Roadmap Phase D: conversions the live plan cache confirms are actually running right now
+    /// for a (table, column) pair no module body produced a static finding for at all - the
+    /// dominant real-world case being ad-hoc, parameterized application-side SQL (an ORM, a
+    /// hand-written data-access layer) that was never a stored procedure. These carry no source
+    /// file/line - the query text that produced them was never scanned, only its plan - so they
+    /// are reported by table/column and observed cost instead.
+    /// </summary>
+    private static IEnumerable<ReadableBlock> WorkloadFindings(LiveScanResult result)
+    {
+        if (result.WorkloadFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(2, $"Conversions observed in the workload, not in any scanned module ({result.WorkloadFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "The live plan cache shows these columns converting in a real, currently-cached query plan, but no CREATE PROCEDURE/VIEW/FUNCTION body this scan read produced a matching finding - almost always ad-hoc, parameterized SQL sent directly from application code rather than a stored procedure. Confirmed by the plan itself, not a static inference.");
+        yield return new ReadableBlock.Table(
+            ["Column", "Indexed", "Outcome", "Executions"],
+            [.. result.WorkloadFindings
+                .OrderByDescending(f => f.ExecutionCount)
+                .Select(f => new List<string>
+                {
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.Indexed ? "yes" : "no",
+                    f.Verdict == WorkloadVerdict.ScanForced ? "forces a scan" : "degrades the seek",
+                    f.ExecutionCount.ToString(CultureInfo.InvariantCulture),
+                })]);
     }
 
     private static IEnumerable<ReadableBlock> UnanalyzableModules(LiveScanResult result)

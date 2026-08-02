@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;
+using SilentScan.Core.Catalog;
 using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Live.Catalog;
@@ -83,10 +84,80 @@ public sealed class LivePlanCacheReader
 
     private async Task<PlanCacheEvidenceResult> ReadOnceAsync(int maxPlansToInspect, CancellationToken cancellationToken)
     {
+        var accumulated = await AccumulateAsync(maxPlansToInspect, cancellationToken);
+
+        var evidence = accumulated.ByColumn
+            .Select(kvp => new PlanCacheColumnEvidence(kvp.Key.Table, kvp.Key.Column, kvp.Value.ExecutionCount))
+            .OrderByDescending(e => e.ExecutionCount)
+            .ThenBy(e => e.TableQualifiedName, StringComparer.Ordinal)
+            .ThenBy(e => e.ColumnName, StringComparer.Ordinal)
+            .ToList();
+
+        return new PlanCacheEvidenceResult(evidence, accumulated.PlansInspected, UnavailableReason: null);
+    }
+
+    /// <summary>
+    /// Roadmap Phase D: the plan cache's own XML already tells us, for real, whether a column
+    /// converts and whether the engine could still bound it with GetRangeThroughConvert - no
+    /// static predicate typing needed at all, since this is live evidence rather than a guess.
+    /// Most such conversions already surface as a module-derived static finding this same table/
+    /// column would have produced anyway, so this only promotes the ones that DON'T - the
+    /// dominant real-world case being ad-hoc, parameterized application-side SQL that was never
+    /// a stored procedure body at all, and so was otherwise invisible to this tool entirely.
+    /// </summary>
+    public async Task<IReadOnlyList<WorkloadFinding>> ReadWorkloadFindingsAsync(
+        DatabaseCatalog catalog, IReadOnlySet<(string TableQualifiedName, string ColumnName)> alreadyCoveredColumns,
+        int maxPlansToInspect = 1000, CancellationToken cancellationToken = default)
+    {
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            try
+            {
+                var accumulated = await AccumulateAsync(maxPlansToInspect, cancellationToken);
+                return accumulated.ByColumn
+                    .Where(kvp => !alreadyCoveredColumns.Contains(kvp.Key))
+                    .Select(kvp => ToWorkloadFinding(kvp.Key.Table, kvp.Key.Column, kvp.Value, catalog))
+                    .OrderByDescending(f => f.ExecutionCount)
+                    .ThenBy(f => f.TableQualifiedName, StringComparer.Ordinal)
+                    .ThenBy(f => f.ColumnName, StringComparer.Ordinal)
+                    .ToList();
+            }
+            catch (SqlException)
+            {
+                // Same degrade-gracefully contract as ReadObservedConversionsAsync: on the last
+                // attempt (a permission denial, or every retry hitting the same transient
+                // instance-wide condition), yield "no workload findings" rather than failing the
+                // whole scan-db run - the caller's UnavailableReason-bearing evidence result
+                // (from ReadObservedConversionsAsync, run alongside this) already carries that
+                // story. The `when` guard this project's own StatementVariantParityTests-style
+                // discipline would flag was the actual bug here on the first pass: it let the
+                // final attempt's exception propagate uncaught instead of degrading.
+                if (attempt == MaxAttempts)
+                {
+                    return [];
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken);
+            }
+        }
+
+        throw new UnreachableException("The loop above always returns within its final iteration.");
+    }
+
+    private static WorkloadFinding ToWorkloadFinding(string table, string column, ColumnAccumulation accumulation, DatabaseCatalog catalog)
+    {
+        var indexed = catalog.Find(table)?.IsIndexedColumn(column) ?? false;
+        var verdict = accumulation.HasRangeSeek ? WorkloadVerdict.RangeSeek : WorkloadVerdict.ScanForced;
+        return new WorkloadFinding(table, column, indexed, verdict, accumulation.ExecutionCount);
+    }
+
+    private async Task<(Dictionary<(string Table, string Column), ColumnAccumulation> ByColumn, int PlansInspected)> AccumulateAsync(
+        int maxPlansToInspect, CancellationToken cancellationToken)
+    {
         // Keyed by (table, column) while accumulating - a tuple key is convenient here but
         // cannot be System.Text.Json-serialized directly (no built-in converter for a
-        // ValueTuple dictionary key), so this is flattened to a plain list before returning.
-        var executionCountByColumn = new Dictionary<(string Table, string Column), long>();
+        // ValueTuple dictionary key), so callers flatten to a plain list before returning.
+        var byColumn = new Dictionary<(string Table, string Column), ColumnAccumulation>();
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -99,22 +170,19 @@ public sealed class LivePlanCacheReader
         while (await reader.ReadAsync(cancellationToken))
         {
             plansInspected++;
-            AccumulateConversions(reader.GetInt64(0), reader.GetString(1), executionCountByColumn);
+            AccumulateConversions(reader.GetInt64(0), reader.GetString(1), byColumn);
         }
 
-        var evidence = executionCountByColumn
-            .Select(kvp => new PlanCacheColumnEvidence(kvp.Key.Table, kvp.Key.Column, kvp.Value))
-            .OrderByDescending(e => e.ExecutionCount)
-            .ThenBy(e => e.TableQualifiedName, StringComparer.Ordinal)
-            .ThenBy(e => e.ColumnName, StringComparer.Ordinal)
-            .ToList();
-
-        return new PlanCacheEvidenceResult(evidence, plansInspected, UnavailableReason: null);
+        return (byColumn, plansInspected);
     }
 
     private static void AccumulateConversions(
-        long executionCount, string planXml, Dictionary<(string Table, string Column), long> executionCountByColumn)
+        long executionCount, string planXml, Dictionary<(string Table, string Column), ColumnAccumulation> byColumn)
     {
+        // GetRangeThroughConvert applies to the whole plan, not to one specific conversion node
+        // within it - matching how TypeMatrixGenerator's own oracle probe reads this same signal.
+        var hasRangeSeek = planXml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
+
         foreach (var conversion in ConvertImplicitDetector.FindColumnConversions(planXml))
         {
             if (conversion.Table is null)
@@ -132,10 +200,30 @@ public sealed class LivePlanCacheReader
                 ? $"{conversion.Schema}.{conversion.Table}"
                 : conversion.Table;
             var key = (qualifiedTable, conversion.Column ?? string.Empty);
-            executionCountByColumn[key] = executionCountByColumn.GetValueOrDefault(key) + executionCount;
+            var existing = byColumn.GetValueOrDefault(key);
+            byColumn[key] = new ColumnAccumulation(
+                existing.ExecutionCount + executionCount, existing.HasRangeSeek || hasRangeSeek);
         }
     }
+
+    private readonly record struct ColumnAccumulation(long ExecutionCount, bool HasRangeSeek);
 }
+
+/// <summary>Roadmap Phase D verdict for a workload-observed finding - only the two outcomes a real plan's XML can actually confirm (RangeSeek if GetRangeThroughConvert appears anywhere in the plan, ScanForced otherwise); SeekPreserved/Unknown/OperandClash never surface here because a column that didn't convert leaves no CONVERT_IMPLICIT for ConvertImplicitDetector to find in the first place.</summary>
+public enum WorkloadVerdict
+{
+    ScanForced,
+    RangeSeek,
+}
+
+/// <summary>
+/// A conversion the live plan cache confirms is actually happening right now, for a (table,
+/// column) pair no module-derived static finding already covers - overwhelmingly, ad-hoc
+/// parameterized application-side SQL that was never a stored procedure body at all, and so was
+/// otherwise entirely invisible to this tool. Confirmed by construction (it comes from a real
+/// executed plan's own XML), not a static guess needing separate oracle verification.
+/// </summary>
+public sealed record WorkloadFinding(string TableQualifiedName, string ColumnName, bool Indexed, WorkloadVerdict Verdict, long ExecutionCount);
 
 /// <summary>One real table column, and the total execution count summed across every cached plan whose XML shows it converting.</summary>
 public sealed record PlanCacheColumnEvidence(string TableQualifiedName, string ColumnName, long ExecutionCount);

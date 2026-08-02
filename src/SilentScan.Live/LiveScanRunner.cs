@@ -60,15 +60,27 @@ public static class LiveScanRunner
 
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];
+        IReadOnlyList<WorkloadFinding> workloadFindings = [];
         if (includePlanCacheEvidence)
         {
-            planCacheEvidence = await new LivePlanCacheReader(connectionString).ReadObservedConversionsAsync(cancellationToken: cancellationToken);
+            var planCacheReader = new LivePlanCacheReader(connectionString);
+            planCacheEvidence = await planCacheReader.ReadObservedConversionsAsync(cancellationToken: cancellationToken);
             rankedFindings = RankByPlanCacheEvidence(report.TypedFindings, planCacheEvidence);
+
+            // Roadmap Phase D: everything above only ranks/confirms findings this scan ALREADY
+            // produced from module bodies - an ad-hoc, parameterized application-side query was
+            // never a stored procedure body at all, so it never became a TypedPredicateFinding in
+            // the first place, no matter how often the plan cache shows it converting. This
+            // promotes exactly the (table, column) pairs the module-body pass never covered.
+            var alreadyCovered = report.TypedFindings
+                .Select(f => (f.Column.TableQualifiedName, f.Column.ColumnName))
+                .ToHashSet();
+            workloadFindings = await planCacheReader.ReadWorkloadFindingsAsync(catalog, alreadyCovered, cancellationToken: cancellationToken);
         }
 
         return new LiveScanResult(
             report, LiveCatalogSummary.From(catalog), moduleResult.Modules.Count, parityMismatches,
-            moduleResult.Unanalyzable, planCacheEvidence, rankedFindings);
+            moduleResult.Unanalyzable, planCacheEvidence, rankedFindings, workloadFindings);
     }
 
     private static List<RankedFinding> RankByPlanCacheEvidence(
@@ -105,7 +117,8 @@ public sealed record LiveScanResult(
     IReadOnlyList<LiveLineageParityMismatch> LineageParityMismatches,
     IReadOnlyList<UnanalyzableModule> UnanalyzableModules,
     PlanCacheEvidenceResult? PlanCacheEvidence,
-    IReadOnlyList<RankedFinding> RankedFindings);
+    IReadOnlyList<RankedFinding> RankedFindings,
+    IReadOnlyList<WorkloadFinding> WorkloadFindings);
 
 /// <summary>One static finding plus whether the live plan cache actually shows it converting right now, and how often.</summary>
 public sealed record RankedFinding(TypedPredicateFinding Finding, bool ObservedInLivePlanCache, long ObservedExecutionCount);
