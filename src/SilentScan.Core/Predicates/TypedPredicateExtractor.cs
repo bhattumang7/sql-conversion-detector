@@ -83,6 +83,19 @@ public static class TypedPredicateExtractor
         // missing one). A bool rather than a stack because BooleanNotExpression nests by
         // toggling parity (NOT NOT X == X), never by depth.
         private bool _negated;
+
+        /// <summary>
+        /// Roadmap Phase E3: the whole boolean predicate fragment currently being resolved (set
+        /// right before each top-level predicate visitor's own ResolveOperand call(s), read only
+        /// by RecordExpressionDerivedFinding) - lets an expression-derived finding carry the
+        /// exact comparison it was found inside of, re-rendered to valid T-SQL text, so the
+        /// corpus oracle can actually probe it. Never needs restoring the way _negated does:
+        /// each predicate visitor is a leaf call (it never itself recurses into another nested
+        /// predicate visit before its own ResolveOperand calls return), so the next Visit(...)
+        /// simply overwrites it.
+        /// </summary>
+        private TSqlFragment? _currentPredicateFragment;
+
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
@@ -696,6 +709,7 @@ public static class TypedPredicateExtractor
             }
 
             var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
                 // The tested expression isn't a real column (an expression, a CAST result,
@@ -761,6 +775,7 @@ public static class TypedPredicateExtractor
             }
 
             var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
                 return;
@@ -878,6 +893,7 @@ public static class TypedPredicateExtractor
             // predicate can legitimately reference an enclosing query's alias
             // (docs/audit-remediation-plan.md Phase 2.2).
             var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            _currentPredicateFragment = node;
             var left = ResolveOperand(first, scopeChain);
             var right = ResolveOperand(second, scopeChain);
 
@@ -1213,7 +1229,7 @@ public static class TypedPredicateExtractor
 
             if (ColumnProvenanceAnalysis.IsExpressionDerived(provenance))
             {
-                RecordExpressionDerivedFinding(columnName, columnRef, provenance);
+                RecordExpressionDerivedFinding(columnName, columnRef, provenance, scopeChain);
             }
             else if (provenance is ColumnProvenance.Union)
             {
@@ -1235,7 +1251,9 @@ public static class TypedPredicateExtractor
             return new PredicateOperand.Value(Type: null);
         }
 
-        private void RecordExpressionDerivedFinding(string columnName, ColumnReferenceExpression columnRef, ColumnProvenance provenance)
+        private void RecordExpressionDerivedFinding(
+            string columnName, ColumnReferenceExpression columnRef, ColumnProvenance provenance,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             var underlyingBaseColumns = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(provenance)
                 .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(bc.ColumnName) ?? false))
@@ -1250,8 +1268,22 @@ public static class TypedPredicateExtractor
             }
 
             var transformationChain = ColumnProvenanceAnalysis.DescribeTransformationChain(provenance);
+
+            // Roadmap Phase E3: TryResolveImmediateRelation only returns non-null for a real,
+            // catalog-known view/TVF layer (ScalarExpressionResolver's own IsViewLayer check) -
+            // an inline derived table/CTE in the same statement isn't an independently queryable
+            // object a probe could target on its own, so PredicateFragmentText is still captured
+            // (harmless on its own) but ImmediateRelationQualifiedName stays null, and
+            // ExpressionDerivedProbeBuilder treats that as not-probeable rather than guessing.
+            var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
+            var identifiers = columnRef.MultiPartIdentifier.Identifiers;
+            var alias = identifiers.Count >= 2 ? identifiers[^2].Value : null;
+
             ExpressionDerivedFindings.Add(new ExpressionDerivedFinding(
-                columnName, sourcePath, columnRef.StartLine, columnRef.StartColumn, transformationChain, underlyingBaseColumns));
+                columnName, sourcePath, columnRef.StartLine, columnRef.StartColumn, transformationChain, underlyingBaseColumns,
+                PredicateFragmentText: _currentPredicateFragment is { } fragment ? Rules.FragmentTextRenderer.Render(fragment) : null,
+                ImmediateRelationQualifiedName: immediateRelation?.RelationQualifiedName,
+                ImmediateRelationAlias: immediateRelation is not null ? alias : null));
         }
     }
 }

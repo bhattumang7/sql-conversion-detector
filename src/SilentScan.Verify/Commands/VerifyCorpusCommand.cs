@@ -94,7 +94,7 @@ public static class VerifyCorpusCommand
 
         var context = new VerifyContext(
             new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), new CollationConflictVerifier(sqlOptions),
-            new Tier1Verifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
+            new Tier1Verifier(sqlOptions), new ExpressionDerivedVerifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
         var summaries = new SortedDictionary<string, RepoVerificationSummary>(StringComparer.Ordinal);
         var hadMissingRepo = false;
 
@@ -138,7 +138,7 @@ public static class VerifyCorpusCommand
 
     private sealed record VerifyContext(
         DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, CollationConflictVerifier CollationConflictVerifier,
-        Tier1Verifier Tier1Verifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
+        Tier1Verifier Tier1Verifier, ExpressionDerivedVerifier ExpressionDerivedVerifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
 
     private static async Task<RepoVerificationSummary> VerifyRepoAsync(
         CorpusRepoEntry repo,
@@ -253,6 +253,12 @@ public static class VerifyCorpusCommand
                 tier1Results.Add(await context.Tier1Verifier.VerifyAsync(databaseName, finding, catalog, cancellationToken));
             }
 
+            var expressionDerivedResults = new List<ExpressionDerivedResult>();
+            foreach (var finding in report.ExpressionDerivedFindings)
+            {
+                expressionDerivedResults.Add(await context.ExpressionDerivedVerifier.VerifyAsync(databaseName, finding, cancellationToken));
+            }
+
             return new RepoVerificationSummary(
                 TotalDdlFiles: ddlFiles.Count,
                 DeploymentErrors: deploymentErrors,
@@ -274,6 +280,11 @@ public static class VerifyCorpusCommand
                 Tier1ProbeFailed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ProbeFailed)],
                 Tier1ConfirmedUnindexed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ConfirmedUnindexed)],
                 Tier1ConfirmedViaScratchIndex: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ConfirmedViaScratchIndex)],
+                ExpressionDerivedConfirmed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.Confirmed)],
+                ExpressionDerivedNotConfirmed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.NotConfirmed)],
+                ExpressionDerivedNotProbeable: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.NotProbeable)],
+                ExpressionDerivedProbeFailed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.ProbeFailed)],
+                ExpressionDerivedConfirmedUnindexed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.ConfirmedUnindexed)],
                 DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
@@ -326,6 +337,11 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<Tier1Result> Tier1ProbeFailed,
     IReadOnlyList<Tier1Result> Tier1ConfirmedUnindexed,
     IReadOnlyList<Tier1Result> Tier1ConfirmedViaScratchIndex,
+    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedConfirmed,
+    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedNotConfirmed,
+    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedNotProbeable,
+    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedProbeFailed,
+    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedConfirmedUnindexed,
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,

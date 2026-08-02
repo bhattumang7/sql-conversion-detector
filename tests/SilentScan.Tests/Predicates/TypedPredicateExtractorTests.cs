@@ -226,6 +226,14 @@ public sealed class TypedPredicateExtractorTests
         Assert.Equal("CustomerId", underlying.ColumnName);
         Assert.True(underlying.Indexed);
 
+        // Roadmap Phase E3: enough to actually probe this finding, not just describe it - the
+        // predicate was written unqualified against dbo.vw_OrdersRoundTrip directly (no alias),
+        // so ImmediateRelationAlias is correctly null while ImmediateRelationQualifiedName still
+        // resolves through the real, catalog-known view layer.
+        Assert.Equal("CustomerIdAgain = @CustomerId", finding.PredicateFragmentText);
+        Assert.Equal("dbo.vw_OrdersRoundTrip", finding.ImmediateRelationQualifiedName);
+        Assert.Null(finding.ImmediateRelationAlias);
+
         // And no ordinary typed finding was produced for it either - it's reported exactly once.
         Assert.Empty(Extract(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CustomerId INT NOT NULL);",

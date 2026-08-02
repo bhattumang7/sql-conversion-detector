@@ -11,6 +11,31 @@ namespace SilentScan.Core.Predicates;
 /// reported separately from <see cref="Rules.Verdict"/>, which is about type-precedence
 /// mismatches between two otherwise-real operands, not this.
 /// </summary>
+/// <param name="ColumnName">The bare (unqualified) column name the predicate referenced.</param>
+/// <param name="SourcePath">Where this finding's own predicate lives.</param>
+/// <param name="Line">1-based line of the finding's own predicate.</param>
+/// <param name="ColumnPosition">1-based column of the finding's own predicate.</param>
+/// <param name="TransformationChain">Every layer (outermost first) that introduced a CAST/CONVERT or other expression between the predicate and the base column(s).</param>
+/// <param name="UnderlyingBaseColumns">Every real base table column reachable underneath this expression-derived chain, and whether each is indexed.</param>
+/// <param name="DynamicSqlCallSite">Set when this finding was found inside a reparsed dynamic SQL script - where the EXEC/sp_executesql call site lives.</param>
+/// <param name="PredicateFragmentText">
+/// Roadmap Phase E3: the whole enclosing predicate (e.g. <c>v.ComputedCol = 5</c>), re-rendered
+/// to valid T-SQL text via <see cref="Rules.FragmentTextRenderer"/> at the moment this finding
+/// was recorded - null when the column was found outside any comparison this pass tracks the
+/// enclosing fragment for. Lets the corpus oracle actually probe this finding instead of only
+/// trusting the lineage classifier that detected it.
+/// </param>
+/// <param name="ImmediateRelationQualifiedName">
+/// The real, catalog-known view/TVF the predicate was actually written against (mirrors
+/// <see cref="PredicateOperand.Column.ImmediateRelationQualifiedName"/>) - null when the column
+/// came from an inline derived table/CTE in the same statement rather than a real, independently
+/// queryable object, which a probe has no standalone way to reconstruct.
+/// </param>
+/// <param name="ImmediateRelationAlias">
+/// The exact alias token the source predicate qualified the column with (e.g. the <c>v</c> in
+/// <c>v.ComputedCol</c>), if any - a probe has to expose the SAME alias for
+/// <paramref name="PredicateFragmentText"/>'s own qualified column reference to resolve.
+/// </param>
 public sealed record ExpressionDerivedFinding(
     string ColumnName,
     string SourcePath,
@@ -18,7 +43,10 @@ public sealed record ExpressionDerivedFinding(
     int ColumnPosition,
     IReadOnlyList<TransformationSite> TransformationChain,
     IReadOnlyList<UnderlyingBaseColumn> UnderlyingBaseColumns,
-    SourceSpan? DynamicSqlCallSite = null);
+    SourceSpan? DynamicSqlCallSite = null,
+    string? PredicateFragmentText = null,
+    string? ImmediateRelationQualifiedName = null,
+    string? ImmediateRelationAlias = null);
 
 /// <summary>A real base table column found underneath an expression-derived provenance chain, and whether it's indexed (which is what makes the finding worth fixing).</summary>
 public sealed record UnderlyingBaseColumn(string TableQualifiedName, string ColumnName, bool Indexed);

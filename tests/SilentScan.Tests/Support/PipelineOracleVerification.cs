@@ -57,18 +57,19 @@ public static class PipelineOracleVerification
 
     /// <summary>
     /// Asserts every result is oracle-confirmed - <see cref="CorpusFindingOutcome.Confirmed"/>,
-    /// or <see cref="CorpusFindingOutcome.ConfirmedUnindexed"/> when the fixture's column
-    /// carries no leading-key index (CorpusFindingVerifier already downgrades ScanForced/
-    /// RangeSeek's plan-shape check to "confirmed unindexed" rather than asserting a shape
-    /// distinction the environment never actually tested). A single unconfirmed finding fails
-    /// with the plan-XML mismatch detail inline, not a bare boolean.
+    /// <see cref="CorpusFindingOutcome.ConfirmedUnindexed"/> when the fixture's column carries
+    /// no leading-key index AND its type can't be scratch-indexed either, or
+    /// <see cref="CorpusFindingOutcome.ConfirmedViaScratchIndex"/> (roadmap Phase E3) when it
+    /// carries no leading-key index but the plan-shape claim was still confirmed against a
+    /// scratch index deployed for the probe. A single unconfirmed finding fails with the plan-
+    /// XML mismatch detail inline, not a bare boolean.
     /// </summary>
     public static void AssertAllConfirmed(IEnumerable<CorpusFindingResult> results)
     {
         foreach (var result in results)
         {
             Assert.True(
-                result.Outcome is CorpusFindingOutcome.Confirmed or CorpusFindingOutcome.ConfirmedUnindexed,
+                result.Outcome is CorpusFindingOutcome.Confirmed or CorpusFindingOutcome.ConfirmedUnindexed or CorpusFindingOutcome.ConfirmedViaScratchIndex,
                 $"{result.Finding.Column.TableQualifiedName}.{result.Finding.Column.ColumnName} " +
                 $"(verdict {result.Finding.Verdict}) was not oracle-confirmed: {result.Outcome}. {result.Detail}");
         }
