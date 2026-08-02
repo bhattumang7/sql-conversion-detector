@@ -1781,4 +1781,58 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.Unknown, finding.Verdict);
     }
+
+    [Fact]
+    public void Extract_PredicateAgainstSysObjectsIntColumnVsNvarcharValue_ResolvesAndClassifies()
+    {
+        // sys.objects has no CREATE DDL anywhere (it's a built-in system catalog view), and
+        // before SystemCatalogViewRegistry existed a predicate against it fell through as an
+        // unresolved FROM table reference - the single dominant cause of skipped predicates
+        // across this project's own pinned corpus, since DBA/admin scripts (a large share of it)
+        // query sys.objects/sysobjects constantly. type_desc is NVARCHAR(60) (oracle-verified);
+        // comparing it to a lower-precedence VARCHAR value converts the VALUE side, not the
+        // column - SeekPreserved is the correct, harmless verdict here (proves direction is
+        // still respected even for a system view), and the point of this test is that a real
+        // verdict was reached at all, not that it happened to be ScanForced.
+        var result = ExtractAll(
+            "CREATE PROCEDURE dbo.usp_Find @T VARCHAR(20) AS BEGIN SELECT name FROM sys.objects WHERE type_desc = @T; END");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("sys.objects", finding.Column.TableQualifiedName);
+        Assert.Equal("type_desc", finding.Column.ColumnName);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.False(finding.Column.Indexed);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
+    }
+
+    [Fact]
+    public void Extract_PredicateAgainstLegacySysobjectsCompatibilityView_ColumnSideConverts()
+    {
+        // Bare "sysobjects" (no schema) qualifies to dbo.sysobjects, a DIFFERENT column shape
+        // than sys.objects (id/xtype/type, not object_id/type_desc) - DNN Platform's incremental
+        // upgrade scripts use exactly this legacy form throughout. xtype is CHAR(2)
+        // (oracle-verified); its collation is deliberately left unresolved by the registry
+        // (never guessed), so a cross-category comparison against NVARCHAR correctly reaches
+        // Unknown rather than either being skipped (the old behavior) or a guessed verdict.
+        var result = ExtractAll(
+            "CREATE PROCEDURE dbo.usp_Find @T NVARCHAR(2) AS BEGIN SELECT name FROM sysobjects WHERE xtype = @T; END");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("dbo.sysobjects", finding.Column.TableQualifiedName);
+        Assert.Equal("xtype", finding.Column.ColumnName);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
+    }
+
+    [Fact]
+    public void Extract_PredicateAgainstUnregisteredSystemView_StillRecordsSkip()
+    {
+        // A system view genuinely not in the curated registry (e.g. a DMV) must still record
+        // the honest "no known DDL" skip, not silently resolve to nothing.
+        var result = ExtractAll(
+            "SELECT session_id FROM sys.dm_exec_requests WHERE session_id = 1;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference" && s.Reason.Contains("sys.dm_exec_requests", StringComparison.Ordinal));
+    }
 }

@@ -180,14 +180,30 @@ public static class FromScopeResolver
                 var qualifiedName = SchemaObjectNameHelper.Qualify(named.SchemaObject);
                 var isViewLayer = resolvedViews.TryGetValue(qualifiedName, out var view);
                 var catalogTable = catalog.Find(qualifiedName, procScope);
-                if (!isViewLayer && catalogTable is null)
+
+                // A well-known built-in system catalog view (sys.objects, sysobjects, ...) -
+                // never appears in a repo's own DDL (there's nothing to CREATE), so it always
+                // fails the ordinary catalogTable/isViewLayer lookups above; without this it was
+                // reported as "no known DDL" alongside a genuine unresolvable reference, when it
+                // is in fact a fully known, if external, shape (an audit finding: this was the
+                // single dominant cause of unresolved FROM-table skips across the corpus, since
+                // DBA/admin scripts - a large share of the pinned corpus - query these constantly).
+                var systemCatalogColumns = !isViewLayer && catalogTable is null
+                    ? SystemCatalogViewRegistry.TryResolve(qualifiedName)
+                    : null;
+
+                if (!isViewLayer && catalogTable is null && systemCatalogColumns is null)
                 {
                     ledger?.Record(
                         AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn,
                         "FROM table reference", $"'{qualifiedName}' has no known DDL and is not a resolved view/TVF");
                 }
 
-                var relation = isViewLayer ? view! : ToResolvedRelation(catalogTable, qualifiedName);
+                var relation = isViewLayer
+                    ? view!
+                    : systemCatalogColumns is not null
+                        ? ToSystemCatalogRelation(systemCatalogColumns, qualifiedName)
+                        : ToResolvedRelation(catalogTable, qualifiedName);
                 var alias = named.Alias?.Value ?? aliasOverride ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
                 return (alias, new ScopeEntry(relation, isViewLayer));
 
@@ -283,6 +299,19 @@ public static class FromScopeResolver
                 ? new ColumnProvenance.BaseColumn(qualifiedName, c.Name, type)
                 : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
     }
+
+    /// <summary>
+    /// A well-known system catalog view's fixed column shape (<see
+    /// cref="SystemCatalogViewRegistry"/>) - carries <see cref="ColumnProvenance.BaseColumn"/>
+    /// like an ordinary table, since a real predicate against it types and classifies exactly
+    /// the same way. <see cref="Catalog.DatabaseCatalog"/>'s own lookup never has an entry for it (there
+    /// is no CREATE DDL for a built-in system view), so <c>TypedPredicateExtractor</c>'s own
+    /// index lookup for a BaseColumn's table naturally resolves Indexed=false - the honest "no
+    /// evidence of an index" default this codebase already uses everywhere else, not a claim
+    /// about whatever real index SQL Server's internal storage for this view may or may not have.
+    /// </summary>
+    private static ResolvedRelation ToSystemCatalogRelation(IReadOnlyList<(string Name, SqlType Type)> columns, string qualifiedName) =>
+        new(qualifiedName, [.. columns.Select(c => new ResolvedColumn(c.Name, new ColumnProvenance.BaseColumn(qualifiedName, c.Name, c.Type)))]);
 
     /// <summary>
     /// Exposed for <see cref="Predicates.TypedPredicateExtractor"/>: a trigger's inserted/deleted

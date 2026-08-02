@@ -458,11 +458,14 @@ public static class TypedPredicateExtractor
         {
             if (_scopeStack.Count == 0)
             {
-                // A comparison outside any QuerySpecification's FROM scope: either a genuinely
-                // scope-less comparison (a bare IF @x = 1, nothing to classify), or a WHERE
-                // clause on an UPDATE/DELETE/MERGE statement, which this pass does not yet push
-                // a scope for. Recorded rather than silently dropped, since the second case is a
-                // real coverage gap, not a non-finding, and the two can't be told apart here.
+                // A comparison genuinely outside any FROM scope - a bare IF @x = 1/WHILE
+                // condition, or any other scalar check with no query underneath it. UPDATE/
+                // DELETE/MERGE's own WHERE/ON already push a scope (see ExplicitVisit overrides
+                // above), so this is no longer the "second case" the comment here used to
+                // describe as a coverage gap - verified against the real corpus (every instance
+                // sampled is a bare IF check with no query at all). Recorded rather than
+                // silently dropped, since a future regression in that scope-pushing would
+                // otherwise degrade into this same bucket unnoticed.
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
             }
