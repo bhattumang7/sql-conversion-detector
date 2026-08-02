@@ -20,11 +20,9 @@ namespace SilentScan.Tests.Diagnostics;
 /// characterization scenarios, distinct from the tier1/ rule fixtures whose real-world-sourced
 /// requirement (CLAUDE.md) applies to rules' fire/clean evidence, not to gap pinning.
 ///
-/// Two declared gaps are NOT pinned here: nested sp_executesql declared-parameter propagation
-/// across two nesting levels (ConstructCoverage.json, verifiedBy: None) and the
-/// Collation.IsWindowsFamily prefix heuristic misclassifying UTF-8/_BIN2 collations - both
-/// need multi-level dynamic scaffolding or matrix regeneration to demonstrate end to end and
-/// should gain characterization coverage when their areas are next touched.
+/// One declared gap is NOT pinned here: the Collation.IsWindowsFamily prefix heuristic
+/// misclassifying UTF-8/_BIN2 collations - it needs matrix regeneration to demonstrate end to
+/// end and should gain characterization coverage when that area is next touched.
 /// </summary>
 public sealed class KnownGapCharacterizationTests
 {

@@ -26,9 +26,22 @@ public static class DynamicSqlPipeline
     private static readonly IReadOnlyDictionary<string, SqlType?> NoDeclaredParameters = new Dictionary<string, SqlType?>();
 
     public static DynamicSqlPipelineResult Analyze(IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage) =>
-        Analyze(scripts, catalog, lineage, depth: 1);
+        Analyze(scripts, catalog, lineage, depth: 1, seeds: null);
 
-    private static DynamicSqlPipelineResult Analyze(IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, int depth)
+    /// <summary>
+    /// <paramref name="seeds"/> supplies, for a nested script whose own declared-parameter text
+    /// can't type one of its parameters, the enclosing script's type for that same parameter -
+    /// but ONLY for a parameter this exact script bound to a bare variable reference of the
+    /// enclosing script's own declared parameter (<see cref="DynamicSqlScript.ArgumentBindings"/>).
+    /// Never a blanket name-scope match: dynamic SQL runs in a fresh variable scope, so guessing
+    /// from name alone risks a false ScanForced from an unrelated same-named variable.
+    /// </summary>
+    private static DynamicSqlPipelineResult Analyze(
+        IReadOnlyList<DynamicSqlScript> scripts,
+        DatabaseCatalog catalog,
+        LineageCatalog lineage,
+        int depth,
+        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds)
     {
         var findings = new List<DynamicSqlFinding>();
         var tier1 = new List<SargabilityFinding>();
@@ -58,9 +71,12 @@ public static class DynamicSqlPipeline
                 tier1.Add(Remap(tier1Finding, script));
             }
 
-            var declaredParameters = script.ParameterDeclarationText is { } declarationText
+            var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
                 ? DynamicSqlParameterDeclarations.TryParse(declarationText, catalog.TypeAliases) ?? NoDeclaredParameters
                 : NoDeclaredParameters;
+            var declaredParameters = seeds is not null && seeds.TryGetValue(script, out var seed)
+                ? MergeSeededParameters(ownDeclaredParameters, seed)
+                : ownDeclaredParameters;
             var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope);
             foreach (var typedFinding in extraction.TypedFindings)
             {
@@ -82,7 +98,7 @@ public static class DynamicSqlPipeline
                 skipped.Add(Remap(skippedConstruct, script));
             }
 
-            var nested = AnalyzeNested(innerParseResult, script, catalog, lineage, depth);
+            var nested = AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth);
             findings.AddRange(nested.Findings);
             tier1.AddRange(nested.Tier1Findings);
             typed.AddRange(nested.TypedFindings);
@@ -95,7 +111,12 @@ public static class DynamicSqlPipeline
     }
 
     private static DynamicSqlPipelineResult AnalyzeNested(
-        SqlParseResult innerParseResult, DynamicSqlScript script, DatabaseCatalog catalog, LineageCatalog lineage, int depth)
+        SqlParseResult innerParseResult,
+        DynamicSqlScript script,
+        IReadOnlyDictionary<string, SqlType?> outerDeclaredParameters,
+        DatabaseCatalog catalog,
+        LineageCatalog lineage,
+        int depth)
     {
         // Propagates the outer script's own scope into the nested scanner - the reparsed inner
         // text has no CREATE PROCEDURE wrapper for it to discover the scope from itself, so
@@ -119,7 +140,8 @@ public static class DynamicSqlPipeline
             return new DynamicSqlPipelineResult(findings, [], [], [], [], []);
         }
 
-        var nestedResult = Analyze(nestedExtraction.AnalyzableScripts, catalog, lineage, depth + 1);
+        var seeds = BuildArgumentBindingSeeds(nestedExtraction.AnalyzableScripts, outerDeclaredParameters);
+        var nestedResult = Analyze(nestedExtraction.AnalyzableScripts, catalog, lineage, depth + 1, seeds);
         findings.AddRange(nestedResult.Findings.Select(f => RemapFinding(f, script)));
 
         return new DynamicSqlPipelineResult(
@@ -129,6 +151,63 @@ public static class DynamicSqlPipeline
             [.. nestedResult.ExpressionDerivedFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.CollationConflictFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.SkippedConstructs.Select(s => Remap(s, script))]);
+    }
+
+    /// <summary>
+    /// For each nested script, seeds only the formal parameters it bound to a bare variable
+    /// reference (<see cref="DynamicSqlScript.ArgumentBindings"/>) that matches, by name, one of
+    /// the ENCLOSING script's own declared parameters - the one case CLAUDE.md's dynamic SQL
+    /// policy allows an enclosing script's type to stand in for a nested one's, since it's an
+    /// explicit value hand-off at the call site rather than a guess from name alone.
+    /// </summary>
+    private static Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? BuildArgumentBindingSeeds(
+        IReadOnlyList<DynamicSqlScript> nestedScripts, IReadOnlyDictionary<string, SqlType?> outerDeclaredParameters)
+    {
+        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds = null;
+        foreach (var nestedScript in nestedScripts)
+        {
+            if (nestedScript.ArgumentBindings is not { Count: > 0 } bindings)
+            {
+                continue;
+            }
+
+            Dictionary<string, SqlType?>? seed = null;
+            foreach (var (formalName, boundVariableName) in bindings)
+            {
+                if (outerDeclaredParameters.TryGetValue(boundVariableName, out var outerType))
+                {
+                    seed ??= new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase);
+                    seed[formalName] = outerType;
+                }
+            }
+
+            if (seed is not null)
+            {
+                seeds ??= new Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>();
+                seeds[nestedScript] = seed;
+            }
+        }
+
+        return seeds;
+    }
+
+    /// <summary>
+    /// The nested script's OWN declaration always wins when it resolved a concrete type - the
+    /// seed only fills a parameter the nested declaration left missing or null.
+    /// </summary>
+    private static Dictionary<string, SqlType?> MergeSeededParameters(
+        IReadOnlyDictionary<string, SqlType?> ownDeclaredParameters, IReadOnlyDictionary<string, SqlType?> seed)
+    {
+        var merged = new Dictionary<string, SqlType?>(ownDeclaredParameters, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, type) in seed)
+        {
+            if (!merged.TryGetValue(name, out var existing) || existing is null)
+            {
+                merged[name] = type;
+            }
+        }
+
+        return merged;
     }
 
     private static DynamicSqlFinding RemapFinding(DynamicSqlFinding finding, DynamicSqlScript outerScript)

@@ -35,10 +35,17 @@ public sealed record DynamicSqlScope(string? ProcScope, SchemaObjectName? Trigge
 /// text is parsed later, in <see cref="DynamicSqlPipeline"/>, where the real catalog already
 /// exists (<see cref="DynamicSqlParameterDeclarations.TryParse"/>). <see cref="Scope"/> is the
 /// enclosing proc/function/trigger the call site was found inside, if any.
+/// <see cref="ArgumentBindings"/> is this call's own named execute-parameter bindings whose
+/// value is a bare variable reference (e.g. <c>@P = @Code</c> maps <c>"@P"</c> to
+/// <c>"@Code"</c>) - CLAUDE.md's nested-dynamic-SQL parameter propagation (<see
+/// cref="DynamicSqlPipeline"/>) uses this, and only this - never a blanket name match across
+/// scopes - to let an enclosing script's own declared parameter type stand in for this call's
+/// declared parameter when its own declaration can't otherwise resolve it.
 /// </summary>
 public sealed record DynamicSqlScript(
     SourceSpan CallSite,
     string InnerText,
     DynamicSqlSegmentMap SegmentMap,
     string? ParameterDeclarationText,
-    DynamicSqlScope Scope);
+    DynamicSqlScope Scope,
+    IReadOnlyDictionary<string, string>? ArgumentBindings = null);

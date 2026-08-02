@@ -404,16 +404,16 @@
     {
       "construct": "ExecuteStatement / sp_executesql (enclosing proc/trigger scope propagation)",
       "group": "DynamicSql",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "The reparsed fragment has no enclosing CREATE PROCEDURE/TRIGGER wrapper, so ProcScope stays null - a #temp table declared in the calling procedure, or a trigger's inserted/deleted, does not resolve inside dynamic SQL even though it resolves in the static body. coverage-remediation-plan.md Phase 4.1."
+      "status": "Handled",
+      "verifiedBy": "Predicates.DynamicSqlScopePropagationTests",
+      "rationale": "DynamicSqlScanner records the enclosing proc/function/trigger as a DynamicSqlScope and DynamicSqlPipeline threads it through NonSargablePredicateScanner and TypedPredicateExtractor, recursing into nested dynamic SQL too - a #temp table or trigger inserted/deleted declared in the calling scope now resolves inside dynamic SQL the same way it resolves in the static body."
     },
     {
       "construct": "ExecuteStatement / sp_executesql (nested declared-parameter propagation)",
       "group": "DynamicSql",
-      "status": "Gap",
-      "verifiedBy": null,
-      "rationale": "Recursion into nested dynamic SQL passes only the nested script's own AnalyzableScripts; an outer sp_executesql parameter used two levels down types as Unknown. coverage-remediation-plan.md Phase 4.2."
+      "status": "Handled",
+      "verifiedBy": "Predicates.DynamicSqlNestedParameterBindingPipelineTests",
+      "rationale": "A nested call's own explicit argument binding (e.g. @P = @Code, where @Code is one of the enclosing script's own declared parameters) lets the enclosing type stand in when the nested call's own @params can't resolve it - deliberately narrower than full name-scope propagation, which would risk a false verdict from an unrelated same-named variable."
     },
     {
       "construct": "Objects created inside dynamic SQL (EXEC('CREATE TABLE #x ...'))",

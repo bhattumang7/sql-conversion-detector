@@ -416,7 +416,7 @@ public static class DynamicSqlScanner
                 segments.AddRange(attempt.Segments!);
             }
 
-            Scripts.Add(BuildScript(node, segments, parameterDeclarationText: null));
+            Scripts.Add(BuildScript(node, segments, parameterDeclarationText: null, argumentBindings: null));
         }
 
         private void HandleSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -441,8 +441,42 @@ public static class DynamicSqlScanner
                 return;
             }
 
-            Scripts.Add(BuildScript(node, queryAttempt.Segments!, ResolveParameterDeclarationText(procRef, folded, foldingEnabled)));
+            Scripts.Add(BuildScript(
+                node,
+                queryAttempt.Segments!,
+                ResolveParameterDeclarationText(procRef, folded, foldingEnabled),
+                ResolveArgumentBindings(procRef)));
         }
+
+        /// <summary>
+        /// Every named execute-parameter beyond @stmt/@params (e.g. <c>@P = @Code</c>) whose
+        /// value is a bare variable reference - <see cref="DynamicSqlScript.ArgumentBindings"/>'s
+        /// own doc comment explains why this is captured unconditionally, for every call
+        /// regardless of nesting depth, rather than only when a caller is known to need it.
+        /// </summary>
+        private static Dictionary<string, string>? ResolveArgumentBindings(ExecutableProcedureReference procRef)
+        {
+            Dictionary<string, string>? bindings = null;
+            foreach (var parameter in procRef.Parameters)
+            {
+                if (parameter.Variable is not { } formalName
+                    || ReservedArgumentNames.Contains(formalName.Name)
+                    || parameter.ParameterValue is not VariableReference valueVariable)
+                {
+                    continue;
+                }
+
+                bindings ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                bindings[formalName.Name] = valueVariable.Name;
+            }
+
+            return bindings;
+        }
+
+        private static readonly HashSet<string> ReservedArgumentNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "@stmt", "@statement", "@params", "@parameters",
+        };
 
         /// <summary>
         /// sp_executesql's optional second argument declares its parameters' exact types
@@ -498,7 +532,11 @@ public static class DynamicSqlScanner
             return index < parameters.Count ? parameters[index].ParameterValue : null;
         }
 
-        private DynamicSqlScript BuildScript(ExecuteStatement node, IReadOnlyList<LiteralSegment> segments, string? parameterDeclarationText)
+        private DynamicSqlScript BuildScript(
+            ExecuteStatement node,
+            IReadOnlyList<LiteralSegment> segments,
+            string? parameterDeclarationText,
+            IReadOnlyDictionary<string, string>? argumentBindings)
         {
             var segmentMap = new DynamicSqlSegmentMap();
             foreach (var segment in segments)
@@ -506,7 +544,7 @@ public static class DynamicSqlScanner
                 segmentMap.AppendLiteral(segment.SourcePath, segment.StartLine, segment.StartColumn, segment.PrefixLength, segment.Value);
             }
 
-            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope);
+            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope, argumentBindings);
         }
 
         /// <summary>
