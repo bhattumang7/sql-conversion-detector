@@ -1,6 +1,8 @@
 using Microsoft.Data.SqlClient;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
+using SilentScan.Core.Parsing;
 
 namespace SilentScan.Live.Catalog;
 
@@ -37,6 +39,11 @@ public sealed class LiveCatalogReader
         foreach (var (qualifiedName, underlyingType) in await ReadTypeAliasesAsync(connection, cancellationToken))
         {
             catalog.AddTypeAlias(qualifiedName, underlyingType);
+        }
+
+        foreach (var (qualifiedName, targetQualifiedName) in await ReadSynonymsAsync(connection, cancellationToken))
+        {
+            catalog.AddSynonym(qualifiedName, targetQualifiedName);
         }
 
         var tables = await ReadTablesAsync(connection, cancellationToken);
@@ -100,6 +107,54 @@ public sealed class LiveCatalogReader
         }
 
         return aliases;
+    }
+
+    /// <summary>
+    /// Roadmap Phase C2: <c>CREATE SYNONYM</c> is DDL a live scan never parses text for (a
+    /// synonym is metadata only, never a <c>sys.sql_modules</c> body <see cref="LiveModuleReader"/>
+    /// reads), so without this a synonym-qualified FROM-clause reference in a live-scanned
+    /// module always resolved "no known DDL", identically to a file-mode scan that happened to
+    /// omit the synonym's own script. <c>base_object_name</c> is the exact text as declared
+    /// (bracket-quoted or not, 1-4 parts) - parsed the same way any other schema object name in
+    /// this codebase is, rather than hand-rolling a second bracket-stripping normalizer.
+    /// </summary>
+    private static async Task<List<(string QualifiedName, string TargetQualifiedName)>> ReadSynonymsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, syn.name AS synonym_name, syn.base_object_name
+            FROM sys.synonyms syn
+            JOIN sys.schemas s ON s.schema_id = syn.schema_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var synonyms = new List<(string, string)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var baseObjectName = reader.GetString(2);
+
+            if (TryParseSchemaObjectName(baseObjectName) is { } targetQualifiedName)
+            {
+                synonyms.Add((qualifiedName, targetQualifiedName));
+            }
+        }
+
+        return synonyms;
+    }
+
+    /// <summary>Parses a raw schema-object-name string (as `sys.synonyms.base_object_name` reports it) into the same qualified form <see cref="SchemaObjectNameHelper.Qualify"/> produces elsewhere, via a throwaway wrapper statement rather than a second hand-rolled bracket/part parser.</summary>
+    private static string? TryParseSchemaObjectName(string rawName)
+    {
+        var result = SqlScriptParser.ParseText("synonym-target", $"SELECT * FROM {rawName};");
+        if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } }] }] })
+        {
+            return null;
+        }
+
+        return SchemaObjectNameHelper.Qualify(namedTable.SchemaObject);
     }
 
     private static async Task<List<(int ObjectId, string SchemaName, string TableName)>> ReadTablesAsync(

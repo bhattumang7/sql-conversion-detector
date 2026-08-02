@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
@@ -37,6 +38,15 @@ public static class LiveScanRunner
         var parseResults = moduleResult.Modules
             .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition))
             .ToList();
+
+        // Roadmap Phase C2 (live catalog parity): engine metadata alone knows nothing about
+        // temp tables/table variables/TVP shapes or a scalar UDF's return type - those live only
+        // as text inside a module body. Running CatalogBuilder over the SAME parsed module
+        // bodies (already parsed above for predicate analysis, not reparsed) and merging in only
+        // what it can contribute that engine metadata cannot closes the gap that otherwise made
+        // a live scan of a synonym/UDF/temp-table-heavy database strictly WORSE than scanning
+        // the same objects' scripted-out DDL from disk.
+        catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResults));
 
         // Resolved once here for the parity gate below, and again inside ScanReportBuilder for
         // the findings pipeline itself - a pure function of (catalog, parseResults), so the

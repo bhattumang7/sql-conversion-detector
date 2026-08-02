@@ -154,4 +154,37 @@ public sealed class DatabaseCatalog
 
     private static string Key(string qualifiedName, string? scope) =>
         scope is null ? qualifiedName : $"{scope}::{qualifiedName}";
+
+    /// <summary>
+    /// Roadmap Phase C2 (live catalog parity): live-mode's catalog comes straight from engine
+    /// metadata (<c>LiveCatalogReader</c>), which knows nothing about temp tables/table
+    /// variables/TVP shapes, or a scalar UDF's return type - those exist only as text inside a
+    /// module body, which the live pass DOES parse (for predicate analysis) but never previously
+    /// fed through <see cref="CatalogBuilder"/> at all. Merges exactly what a
+    /// <see cref="CatalogBuilder"/> pass over those SAME parsed module bodies can contribute that
+    /// engine metadata cannot: <see cref="CatalogTableKind.TemporaryTable"/>/
+    /// <see cref="CatalogTableKind.TableVariable"/>/<see cref="CatalogTableKind.TableType"/>
+    /// entries and scalar-UDF return types. Real <see cref="CatalogTableKind.Table"/> entries
+    /// from <paramref name="fileModeCatalog"/> are deliberately never merged - live's own engine-
+    /// read tables are authoritative and must never be overwritten by a DDL-text guess (module
+    /// bodies contain no CREATE TABLE for a real persistent table anyway, so this filter is a
+    /// safety net, not something expected to actually trigger). Type aliases are likewise
+    /// skipped - live already reads those straight from <c>sys.types</c>, a stronger source than
+    /// re-deriving them from parsed text.
+    /// </summary>
+    public void MergeFileModeExtras(DatabaseCatalog fileModeCatalog)
+    {
+        foreach (var (key, table) in fileModeCatalog._tablesByQualifiedName)
+        {
+            if (table.Kind is CatalogTableKind.TemporaryTable or CatalogTableKind.TableVariable or CatalogTableKind.TableType)
+            {
+                _tablesByQualifiedName[key] = table;
+            }
+        }
+
+        foreach (var (qualifiedName, returnType) in fileModeCatalog._scalarFunctionReturnTypesByQualifiedName)
+        {
+            _scalarFunctionReturnTypesByQualifiedName[qualifiedName] = returnType;
+        }
+    }
 }
