@@ -115,7 +115,10 @@ public static class ScanCorpusCommand
 
     private static SqlParseResult ParseCorpusFile(CorpusRepoEntry repo, string path)
     {
-        var text = File.ReadAllText(path);
+        // Routes through the same BOM-detection/Latin-1 fallback ParseFile uses (an audit
+        // finding: this was the one path that actually determines the published study's
+        // numbers, and it was bypassing that recovery entirely via a plain File.ReadAllText).
+        var text = SqlScriptParser.DecodeFile(path);
         text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, text);
         return SqlScriptParser.ParseText(path, text);
     }

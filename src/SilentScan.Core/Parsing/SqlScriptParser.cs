@@ -34,7 +34,7 @@ public static class SqlScriptParser
     /// </summary>
     public static SqlParseResult ParseFile(string path)
     {
-        var text = DecodeText(File.ReadAllBytes(path));
+        var text = DecodeFile(path);
 
         var best = Parse(path, text, initialQuotedIdentifiers: true);
         if (best.Errors.Count > 0)
@@ -44,6 +44,17 @@ public static class SqlScriptParser
 
         return best;
     }
+
+    /// <summary>
+    /// Reads and decodes <paramref name="path"/> using the same BOM-detection/Latin-1 fallback
+    /// <see cref="ParseFile"/> uses internally, without parsing it - for callers that need to
+    /// transform the text (e.g. corpus template token substitution) before handing it to <see
+    /// cref="ParseText"/>. Exists because a plain <c>File.ReadAllText</c> silently mis-decodes a
+    /// Windows-1252/Latin-1 corpus file as replacement-character-laden UTF-8 rather than failing
+    /// visibly - the same failure mode <see cref="ParseFile"/> already guards against, which a
+    /// caller reading bytes directly would otherwise bypass entirely.
+    /// </summary>
+    public static string DecodeFile(string path) => DecodeText(File.ReadAllBytes(path));
 
     private static SqlParseResult Parse(string sourcePath, string sql, bool initialQuotedIdentifiers)
     {

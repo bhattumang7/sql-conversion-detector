@@ -12,6 +12,7 @@ public sealed record ScanReport(
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
+    DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
     /// <summary>

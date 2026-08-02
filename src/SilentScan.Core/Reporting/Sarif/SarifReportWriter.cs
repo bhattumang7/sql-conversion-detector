@@ -76,12 +76,19 @@ public static class SarifReportWriter
     private static SarifResult ToResult(TypedPredicateFinding finding)
     {
         var ruleId = SarifRuleCatalog.VerdictRuleId(finding.Verdict);
-        var level = finding.Verdict switch
+        var baseLevel = finding.Verdict switch
         {
             Verdict.ScanForced => LevelError,
             Verdict.RangeSeek => LevelWarning,
             _ => LevelNote,
         };
+
+        // Mirrors the Tier-1 downgrade below: a ScanForced/RangeSeek verdict on a column with no
+        // evidence it's indexed cost nothing extra beyond the conversion itself - there was no
+        // seek to lose. Every corpus finding this tool has actually produced against real-world
+        // repos has been on an unindexed column (an audit finding), so without this every one of
+        // them reported at "error" regardless of whether an index was ever in play.
+        var level = finding.Column.Indexed ? baseLevel : DowngradeOneLevel(baseLevel);
 
         var depthNote = DescribeDepth(finding.Column.Depth);
         var indexNote = finding.Column.Indexed ? ", indexed" : ", not indexed";
@@ -98,8 +105,21 @@ public static class SarifReportWriter
             : string.Join(", ", finding.UnderlyingBaseColumns.Select(bc => $"{bc.TableQualifiedName}.{bc.ColumnName}{(bc.Indexed ? " (indexed)" : " (not indexed)")}"));
         var message = $"Column '{finding.ColumnName}' is a computed expression by the time it reaches this predicate ({chain}); underlying: {underlying}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
-        return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, LevelError, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+        // Same indexed-based downgrade as every other verdict-bearing finding kind: an
+        // expression-derived column with no indexed base column underneath it isn't costing an
+        // otherwise-available seek.
+        var anyUnderlyingIndexed = finding.UnderlyingBaseColumns.Any(bc => bc.Indexed);
+        var level = anyUnderlyingIndexed ? LevelError : DowngradeOneLevel(LevelError);
+
+        return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
+
+    private static string DowngradeOneLevel(string level) => level switch
+    {
+        LevelError => LevelWarning,
+        LevelWarning => LevelNote,
+        _ => LevelNote,
+    };
 
     private static SarifResult ToResult(DynamicSqlFinding finding)
     {

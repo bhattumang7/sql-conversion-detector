@@ -181,4 +181,25 @@ public sealed class SqlScriptParserTests
             Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
+
+    [Fact]
+    public void DecodeFile_Windows1252EncodedIdentifier_DecodesCorrectlyInsteadOfUtf8Mojibake()
+    {
+        // DecodeFile is ParseFile's own decode step, exposed for callers (corpus template
+        // substitution) that must transform the text before parsing it - it must apply the
+        // identical BOM-detection/Latin-1 fallback, not a plain File.ReadAllText.
+        var sql = "CREATE TABLE dbo.Café (Id INT NOT NULL);\nGO\n";
+        var path = WriteTempFile(Encoding.Latin1.GetBytes(sql));
+
+        try
+        {
+            var text = SqlScriptParser.DecodeFile(path);
+
+            Assert.Equal(sql, text);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
 }

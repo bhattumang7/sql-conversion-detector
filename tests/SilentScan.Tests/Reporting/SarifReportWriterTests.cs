@@ -45,7 +45,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             SkippedConstructSummary.From([]),
-            TypedPredicateSummary.From([]));
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -53,6 +54,37 @@ public sealed class SarifReportWriterTests
         var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
         Assert.Equal("error", result.GetProperty("level").GetString());
         Assert.Equal("silentscan/verdict/scan-forced", result.GetProperty("ruleId").GetString());
+    }
+
+    [Fact]
+    public void Write_ScanForcedFindingOnUnindexedColumn_DowngradesToWarningLevel()
+    {
+        // Every corpus finding this tool has actually produced against real-world repos has
+        // been on a column with no evidence it's indexed - reporting all of them at "error"
+        // regardless overstates the cost, since there was no seek to lose in the first place.
+        var report = new ScanReport(
+            new ParseHealthReport([]),
+            [],
+            [new TypedPredicateFinding(
+                Verdict.ScanForced,
+                new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: false, Depth: 0, Provenance: null!),
+                new PredicateOperand.Value(null),
+                "=",
+                "test.sql",
+                1,
+                1)],
+            [],
+            [],
+            [],
+            SkippedConstructSummary.From([]),
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
+        Assert.Equal("warning", result.GetProperty("level").GetString());
     }
 
     [Fact]
@@ -72,7 +104,8 @@ public sealed class SarifReportWriterTests
                 [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)])],
             [],
             SkippedConstructSummary.From([]),
-            TypedPredicateSummary.From([]));
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -86,6 +119,33 @@ public sealed class SarifReportWriterTests
     }
 
     [Fact]
+    public void Write_ExpressionDerivedFindingWithNoIndexedUnderlyingColumn_DowngradesToWarningLevel()
+    {
+        var report = new ScanReport(
+            new ParseHealthReport([]),
+            [],
+            [],
+            [],
+            [new ExpressionDerivedFinding(
+                "CustomerIdAgain",
+                "test.sql",
+                10,
+                5,
+                [new TransformationSite("vw_outer.sql", 3, "CAST/CONVERT to Int")],
+                [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: false)])],
+            [],
+            SkippedConstructSummary.From([]),
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
+        Assert.Equal("warning", result.GetProperty("level").GetString());
+    }
+
+    [Fact]
     public void Write_DynamicSqlAnalyzedFinding_MapsToNoteLevel()
     {
         var report = new ScanReport(
@@ -96,7 +156,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             SkippedConstructSummary.From([]),
-            TypedPredicateSummary.From([]));
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -117,7 +178,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             SkippedConstructSummary.From([]),
-            TypedPredicateSummary.From([]));
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -139,7 +201,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             SkippedConstructSummary.From([]),
-            TypedPredicateSummary.From([]));
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);
@@ -168,7 +231,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             SkippedConstructSummary.From([]),
-            TypedPredicateSummary.From([]));
+            TypedPredicateSummary.From([]),
+            DynamicSqlSummary.From([]));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);

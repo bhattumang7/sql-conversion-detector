@@ -83,6 +83,12 @@ public static class ScanReportBuilder
         // anything).
         var typedPredicateSummary = TypedPredicateSummary.From(typedFindings);
 
+        // Previously computed only by VerifyCorpusCommand - a plain `scan`/`scan-corpus` run
+        // carried the raw DynamicSqlFindings list with no rollup anywhere in its own output (an
+        // audit finding), so a reader had to hand-count outcomes to get the "X% of dynamic SQL
+        // call sites we could not analyze" figure CLAUDE.md's dynamic SQL policy requires.
+        var dynamicSqlSummary = DynamicSqlSummary.From(dynamicSqlFindings);
+
         typedFindings = [.. typedFindings.Where(f => f.Verdict != Verdict.SeekPreserved)];
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
@@ -105,7 +111,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings,
-            orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary);
+            orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
     private static int VerdictRank(Verdict verdict) => verdict switch

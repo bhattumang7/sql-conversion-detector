@@ -208,13 +208,13 @@ public static class VerifyCorpusCommand
             var scripts = new List<(string Label, string Script)>();
             foreach (var ddlFile in ddlFiles)
             {
-                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, await File.ReadAllTextAsync(ddlFile, cancellationToken));
+                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, SqlScriptParser.DecodeFile(ddlFile));
                 scripts.Add((ddlFile, text));
             }
 
             foreach (var procFile in procOnlyFiles)
             {
-                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, await File.ReadAllTextAsync(procFile, cancellationToken));
+                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, SqlScriptParser.DecodeFile(procFile));
                 scripts.Add((procFile, text));
             }
 
@@ -244,7 +244,7 @@ public static class VerifyCorpusCommand
                 NotProbeable: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.NotProbeable)],
                 ProbeFailed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ProbeFailed)],
                 ConfirmedUnindexed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ConfirmedUnindexed)],
-                DynamicSql: DynamicSqlSummary.From(report.DynamicSqlFindings),
+                DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
         }
@@ -254,11 +254,15 @@ public static class VerifyCorpusCommand
         }
     }
 
-    private static async Task<SqlParseResult> ParseCorpusFileAsync(CorpusRepoEntry repo, string path, CancellationToken cancellationToken)
+    private static Task<SqlParseResult> ParseCorpusFileAsync(CorpusRepoEntry repo, string path, CancellationToken cancellationToken)
     {
-        var text = await File.ReadAllTextAsync(path, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Routes through the same BOM-detection/Latin-1 fallback ParseFile uses (an audit
+        // finding: this was bypassing that recovery entirely via a plain File.ReadAllTextAsync).
+        var text = SqlScriptParser.DecodeFile(path);
         text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, text);
-        return SqlScriptParser.ParseText(path, text);
+        return Task.FromResult(SqlScriptParser.ParseText(path, text));
     }
 
     private static string RepoDirectoryName(string url) => url.TrimEnd('/').Split('/')[^1];
