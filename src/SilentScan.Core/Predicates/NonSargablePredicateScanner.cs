@@ -333,6 +333,18 @@ public static class NonSargablePredicateScanner
 
         private void InspectSide(ScalarExpression expression)
         {
+            // Unwrap defensive parens before dispatching - `(CASE WHEN Col = 'x' THEN 1 END) = 1`
+            // is exactly as common in real-world SQL as the unparenthesized form (the Microsoft
+            // Q&A repro FUNCTION_WRAPPED_COLUMN_case_when_test_fires.sql cites writes it exactly
+            // this way), and every case below (CAST/CONVERT/BinaryExpression/CASE/COALESCE/
+            // NULLIF/IIF) would otherwise silently miss it - a ParenthesisExpression node sitting
+            // directly on top of the wrap defeats every `case SomeWrapType` match here even
+            // though FindAnyColumn already unwraps parens fine one level down.
+            while (expression is ParenthesisExpression parenthesized)
+            {
+                expression = parenthesized.Expression;
+            }
+
             switch (expression)
             {
                 case FunctionCall { Parameters.Count: > 0 } functionCall
@@ -351,8 +363,41 @@ public static class NonSargablePredicateScanner
                 case BinaryExpression binary:
                     InspectArithmetic(binary);
                     break;
+
+                // CLAUDE.md's own named hard cases (CASE/COALESCE/NULLIF) plus IIF, the shorthand
+                // for a two-branch CASE - none of these are FunctionCall nodes (a distinct
+                // ScriptDom node type each), so they were invisible here even though ISNULL(...)
+                // (which IS a FunctionCall) was already caught above. A column wrapped in any of
+                // them is exactly as non-sargable as a column wrapped in a scalar function: the
+                // engine can't seek through a CASE/COALESCE/NULLIF/IIF result any more than it can
+                // through UPPER(col). Reused under the existing FunctionWrappedColumn kind rather
+                // than inventing one per construct, matching how ISNULL already shares it with
+                // every other function-wrapped-column case.
+                //
+                // Searches BOTH the value positions (THEN/ELSE/argument expressions, via
+                // FindAnyColumn) AND, for CASE/IIF, the boolean test itself (a SearchedCaseExpression's
+                // WhenExpression / IIfCall's Predicate, via FindAnyColumnInBoolean) - a real,
+                // documented repro (Microsoft Q&A, Erland Sommarskog: "CASE expressions are not
+                // sargable", `WHERE (CASE WHEN MobileNumber = 'x' THEN CAST(1 AS BIT) END) = 1`
+                // measured as a 199-read index scan vs a 122-read seek for the unwrapped
+                // equivalent) wraps the column in exactly the WHEN-test position, not the THEN
+                // value - so both positions have to be covered to catch the shape this rule is
+                // actually named for.
+                case CoalesceExpression or NullIfExpression or IIfCall or SearchedCaseExpression or SimpleCaseExpression
+                    when FindAnyColumn(expression) is { } wrapped:
+                    Add(SargabilityFindingKind.FunctionWrappedColumn, wrapped.Name, WrapConstructName(expression), expression, wrapped.Ref);
+                    break;
             }
         }
+
+        private static string WrapConstructName(ScalarExpression expression) => expression switch
+        {
+            CoalesceExpression => "COALESCE",
+            NullIfExpression => "NULLIF",
+            IIfCall => "IIF",
+            CaseExpression => "CASE",
+            _ => expression.GetType().Name,
+        };
 
         private void InspectArithmetic(BinaryExpression binary)
         {
@@ -381,6 +426,42 @@ public static class NonSargablePredicateScanner
             ConvertCall convertCall => FindAnyColumn(convertCall.Parameter),
             BinaryExpression binary => FindAnyColumn(binary.FirstExpression) ?? FindAnyColumn(binary.SecondExpression),
             FunctionCall functionCall => functionCall.Parameters.Select(FindAnyColumn).FirstOrDefault(r => r is not null),
+            CoalesceExpression coalesce => coalesce.Expressions.Select(FindAnyColumn).FirstOrDefault(r => r is not null),
+            NullIfExpression nullIf => FindAnyColumn(nullIf.FirstExpression) ?? FindAnyColumn(nullIf.SecondExpression),
+            // IIF's own boolean test is searched too, not just its Then/Else values - see the
+            // CASE case below for why (same construct, shorthand two-branch form).
+            IIfCall iif => FindAnyColumnInBoolean(iif.Predicate) ?? FindAnyColumn(iif.ThenExpression) ?? FindAnyColumn(iif.ElseExpression),
+            SimpleCaseExpression simpleCase => FindAnyColumn(simpleCase.InputExpression)
+                ?? simpleCase.WhenClauses.Select(w => FindAnyColumn(w.ThenExpression)).FirstOrDefault(r => r is not null)
+                ?? (simpleCase.ElseExpression is { } elseExpr ? FindAnyColumn(elseExpr) : null),
+            // Searches each WHEN's own boolean test (FindAnyColumnInBoolean) as well as every
+            // THEN/ELSE value - a real, documented repro (Microsoft Q&A, Erland Sommarskog)
+            // wraps the column in exactly the WHEN-test position (`CASE WHEN MobileNumber = 'x'
+            // THEN CAST(1 AS BIT) END = 1`), not the THEN value, so only searching THEN/ELSE
+            // would miss the shape this rule is actually named for.
+            SearchedCaseExpression searchedCase => searchedCase.WhenClauses.Select(w => FindAnyColumnInBoolean(w.WhenExpression)).FirstOrDefault(r => r is not null)
+                ?? searchedCase.WhenClauses.Select(w => FindAnyColumn(w.ThenExpression)).FirstOrDefault(r => r is not null)
+                ?? (searchedCase.ElseExpression is { } elseExpr ? FindAnyColumn(elseExpr) : null),
+            _ => null,
+        };
+
+        /// <summary>
+        /// Mirrors <see cref="FindAnyColumn"/> but over the boolean-expression grammar (a CASE
+        /// WHEN test, an IIF predicate) rather than the scalar-expression one - a column
+        /// referenced only inside the boolean TEST that decides which branch to take is just as
+        /// wrapped/non-sargable as one in the THEN/ELSE value (both are inside the same opaque
+        /// CASE/IIF the engine can't seek through). Deliberately does not descend into a
+        /// subquery-bearing predicate (EXISTS/IN/quantified comparison) - a column inside a
+        /// nested SELECT belongs to that subquery's own filter context, not this one, matching
+        /// <see cref="FindAnyColumn"/>'s own subquery exclusion.
+        /// </summary>
+        private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumnInBoolean(BooleanExpression expression) => expression switch
+        {
+            BooleanComparisonExpression comparison => FindAnyColumn(comparison.FirstExpression) ?? FindAnyColumn(comparison.SecondExpression),
+            BooleanBinaryExpression binary => FindAnyColumnInBoolean(binary.FirstExpression) ?? FindAnyColumnInBoolean(binary.SecondExpression),
+            BooleanNotExpression not => FindAnyColumnInBoolean(not.Expression),
+            BooleanParenthesisExpression parenthesis => FindAnyColumnInBoolean(parenthesis.Expression),
+            BooleanIsNullExpression isNull => FindAnyColumn(isNull.Expression),
             _ => null,
         };
 

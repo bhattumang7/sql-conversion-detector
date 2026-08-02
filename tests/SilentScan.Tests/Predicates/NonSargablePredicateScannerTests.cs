@@ -73,6 +73,104 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void FunctionWrappedColumn_CoalesceOnColumn_Fires()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_coalesce_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("ClosedDate", finding.ColumnName);
+        Assert.Equal("COALESCE", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_CoalesceSargableRewrite_DoesNotFire()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_coalesce_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_CaseWhenTestWrapsColumn_Fires()
+    {
+        // The exact, measured Microsoft Q&A repro (Erland Sommarskog): the column is wrapped in
+        // the CASE's own WHEN test, not its THEN value - a naive "only search THEN/ELSE"
+        // implementation would miss this.
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_case_when_test_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("MobileNumber", finding.ColumnName);
+        Assert.Equal("CASE", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_CaseWhenTestSargableRewrite_DoesNotFire()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_case_when_test_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_CaseThenValueWrapsColumn_Fires()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_case_then_value_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("DomesticStatus", finding.ColumnName);
+        Assert.Equal("CASE", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_CaseThenValueSargableRewrite_DoesNotFire()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_case_then_value_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_NullIfOnColumn_Fires()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_nullif_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("Region", finding.ColumnName);
+        Assert.Equal("NULLIF", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_NullIfSargableRewrite_DoesNotFire()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_nullif_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_IifPredicateWrapsColumn_Fires()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_iif_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("MobileNumber", finding.ColumnName);
+        Assert.Equal("IIF", finding.Detail);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_IifSargableRewrite_DoesNotFire()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_iif_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void CastOnColumn_CastOnLiteralBounds_DoesNotFire()
     {
         var findings = ScanFixture("CAST_CONVERT_ON_COLUMN_clean.sql");
