@@ -7,6 +7,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <ProjectReference Include="../SilentScan.Core/SilentScan.Core.csproj" />
+    <!-- Reuses SilentScan.Verify.Oracle.ConvertImplicitDetector for plan-cache ranking
+         (LivePlanCacheReader) - a pure, I/O-free plan-XML parser with no coupling to Verify's
+         disposable-oracle machinery (SqlServerOptions, DatabaseProvisioner), so depending on it
+         from here doesn't pull in anything Docker/oracle-specific. -->
+    <ProjectReference Include="../SilentScan.Verify/SilentScan.Verify.csproj" />
   </ItemGroup>
 
   <ItemGroup>

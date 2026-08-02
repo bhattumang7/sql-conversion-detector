@@ -37,23 +37,32 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => "json",
         };
 
+        var planCacheEvidenceOption = new Option<bool>("--plan-cache-evidence")
+        {
+            Description = "Also read the live plan cache and rank findings by whether they are actually observed converting in a real cached plan, with execution counts. Requires VIEW SERVER STATE; off by default.",
+            DefaultValueFactory = _ => false,
+        };
+
         var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for sargability findings.")
         {
             connectionStringArgument,
             formatOption,
+            planCacheEvidenceOption,
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var connectionString = parseResult.GetValue(connectionStringArgument)!;
             var format = parseResult.GetValue(formatOption)!;
-            return await RunAsync(connectionString, format, Console.Out, Console.Error, cancellationToken);
+            var planCacheEvidence = parseResult.GetValue(planCacheEvidenceOption);
+            return await RunAsync(connectionString, format, planCacheEvidence, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
-    internal static async Task<int> RunAsync(string connectionString, string format, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
+    internal static async Task<int> RunAsync(
+        string connectionString, string format, bool includePlanCacheEvidence, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
     {
         if (format is not ("json" or "sarif"))
         {
@@ -64,7 +73,7 @@ public static class ScanDbCommand
         LiveScanResult result;
         try
         {
-            result = await LiveScanRunner.RunAsync(connectionString, cancellationToken);
+            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, cancellationToken);
         }
         catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
         {

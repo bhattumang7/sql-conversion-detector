@@ -1,5 +1,6 @@
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Live.Catalog;
 
@@ -17,7 +18,18 @@ namespace SilentScan.Live;
 /// </summary>
 public static class LiveScanRunner
 {
-    public static async Task<LiveScanResult> RunAsync(string connectionString, CancellationToken cancellationToken = default)
+    /// <param name="connectionString">Live database connection string.</param>
+    /// <param name="includePlanCacheEvidence">
+    /// When true, additionally reads the live plan cache (<see cref="LivePlanCacheReader"/>) and
+    /// ranks findings by whether they are actually observed converting in a real cached plan,
+    /// with execution counts - turning "this predicate could scan" into "this one is scanning
+    /// right now". Off by default: it requires <c>VIEW SERVER STATE</c>, a permission a live-mode
+    /// caller may not have, and reads a chunk of the plan cache that an ordinary catalog+module
+    /// scan has no need to touch.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task<LiveScanResult> RunAsync(
+        string connectionString, bool includePlanCacheEvidence = false, CancellationToken cancellationToken = default)
     {
         var catalog = await new LiveCatalogReader(connectionString).ReadAsync(cancellationToken);
         var moduleResult = await new LiveModuleReader(connectionString).ReadAsync(cancellationToken);
@@ -36,23 +48,54 @@ public static class LiveScanRunner
 
         var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog: catalog);
 
+        PlanCacheEvidenceResult? planCacheEvidence = null;
+        IReadOnlyList<RankedFinding> rankedFindings = [];
+        if (includePlanCacheEvidence)
+        {
+            planCacheEvidence = await new LivePlanCacheReader(connectionString).ReadObservedConversionsAsync(cancellationToken: cancellationToken);
+            rankedFindings = RankByPlanCacheEvidence(report.TypedFindings, planCacheEvidence);
+        }
+
         return new LiveScanResult(
-            report, LiveCatalogSummary.From(catalog), moduleResult.Modules.Count, parityMismatches, moduleResult.Unanalyzable);
+            report, LiveCatalogSummary.From(catalog), moduleResult.Modules.Count, parityMismatches,
+            moduleResult.Unanalyzable, planCacheEvidence, rankedFindings);
+    }
+
+    private static List<RankedFinding> RankByPlanCacheEvidence(
+        IReadOnlyList<TypedPredicateFinding> findings, PlanCacheEvidenceResult evidence)
+    {
+        // OrderByDescending is a stable sort - ties (including "no plan-cache evidence for
+        // either") keep ScanReportBuilder's own CLAUDE.md Pass-4 rank (ScanForced + indexed +
+        // depth>=1 first) as the secondary ordering, rather than losing it.
+        return findings
+            .Select(f =>
+            {
+                var observed = evidence.TryGetExecutionCount(f.Column.TableQualifiedName, f.Column.ColumnName, out var count);
+                return new RankedFinding(f, observed, count);
+            })
+            .OrderByDescending(r => r.ObservedInLivePlanCache)
+            .ThenByDescending(r => r.ObservedExecutionCount)
+            .ToList();
     }
 }
 
 /// <summary>
 /// A live scan's findings plus the catalog-connectivity summary, how many modules were parsed
-/// and analyzed, the environment parity gate's result, and every module this pass saw but could
-/// not read a T-SQL body for (CLR-assembly-backed or encrypted - CLAUDE.md's same-honesty
-/// dynamic-SQL rule, applied to modules with no body to analyze at all). CLAUDE.md: "any
-/// mismatch is a P0 lineage bug", so <paramref name="LineageParityMismatches"/> is never merely
-/// informational; a non-empty list means this run's findings rest on at least one type the
-/// pipeline got wrong.
+/// and analyzed, the environment parity gate's result, every module this pass saw but could not
+/// read a T-SQL body for (CLR-assembly-backed or encrypted - CLAUDE.md's same-honesty dynamic-
+/// SQL rule, applied to modules with no body to analyze at all), and - when requested - the
+/// plan-cache ranking signal. CLAUDE.md: "any mismatch is a P0 lineage bug", so
+/// <paramref name="LineageParityMismatches"/> is never merely informational; a non-empty list
+/// means this run's findings rest on at least one type the pipeline got wrong.
 /// </summary>
 public sealed record LiveScanResult(
     ScanReport Report,
     LiveCatalogSummary CatalogSummary,
     int ModulesAnalyzed,
     IReadOnlyList<LiveLineageParityMismatch> LineageParityMismatches,
-    IReadOnlyList<UnanalyzableModule> UnanalyzableModules);
+    IReadOnlyList<UnanalyzableModule> UnanalyzableModules,
+    PlanCacheEvidenceResult? PlanCacheEvidence,
+    IReadOnlyList<RankedFinding> RankedFindings);
+
+/// <summary>One static finding plus whether the live plan cache actually shows it converting right now, and how often.</summary>
+public sealed record RankedFinding(TypedPredicateFinding Finding, bool ObservedInLivePlanCache, long ObservedExecutionCount);
