@@ -354,13 +354,17 @@ public sealed class VerdictClassifierTests
 
     [Theory]
     [MemberData(nameof(AllMatrixEntries))]
-    public void Classify_NeverDisagreesWithItsOwnOracleProbedMatrix(TypePairOutcome entry)
+    public void Classify_NeverDisagreesWithItsOwnOracleProbedMatrix(
+        SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string? collationName, bool columnConverts, bool compileFailed, bool dynamicRangeSeekAvailable)
     {
         // Guard rail for the architectural invariant: the matrix is the SOLE verdict
         // authority. For every probed cell, feeding the classifier the same category pair
         // (and collation, for string-family cells) must reproduce exactly what the cell says
         // - the classifier must never have its own opinion that drifts from the data it is
-        // supposed to be a pure lookup over.
+        // supposed to be a pure lookup over. Unpacked to primitive theory parameters (rather
+        // than the TypePairOutcome record itself) because xUnit's Test Explorer enumeration
+        // needs each data row to be independently serializable, which a plain record isn't.
+        var entry = new TypePairOutcome(columnCategory, otherCategory, collationName, columnConverts, compileFailed, dynamicRangeSeekAvailable);
         var columnType = BuildProbedType(entry.ColumnCategory, entry.CollationName);
         var otherType = BuildProbedType(entry.OtherCategory, entry.CollationName);
 
@@ -380,8 +384,16 @@ public sealed class VerdictClassifierTests
         }
     }
 
-    public static IEnumerable<object[]> AllMatrixEntries() =>
-        TypePairMatrix.Instance.Entries.Select(e => new object[] { e });
+    public static TheoryData<SqlTypeCategory, SqlTypeCategory, string?, bool, bool, bool> AllMatrixEntries()
+    {
+        var data = new TheoryData<SqlTypeCategory, SqlTypeCategory, string?, bool, bool, bool>();
+        foreach (var e in TypePairMatrix.Instance.Entries)
+        {
+            data.Add(e.ColumnCategory, e.OtherCategory, e.CollationName, e.ColumnConverts, e.CompileFailed, e.DynamicRangeSeekAvailable);
+        }
+
+        return data;
+    }
 
     private static SqlType BuildProbedType(SqlTypeCategory category, string? collationName)
     {

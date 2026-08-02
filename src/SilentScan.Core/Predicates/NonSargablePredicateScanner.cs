@@ -208,13 +208,27 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            // BETWEEN: "col BETWEEN a AND b" - the tested value is FirstExpression; the
-            // range bounds (Second/Third) are typically literals and not inspected here.
+            // BETWEEN: "col BETWEEN a AND b" - the tested value is FirstExpression, but a
+            // wrapped column can just as easily appear as a range BOUND ("'m' BETWEEN
+            // LOWER(LowCode) AND HighCode") - all three positions get the same inspection.
             if (node.TernaryExpressionType == BooleanTernaryExpressionType.Between
                 || node.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween)
             {
                 InspectSide(node.FirstExpression);
+                InspectSide(node.SecondExpression);
+                InspectSide(node.ThirdExpression);
             }
+        }
+
+        /// <summary>UPPER(col) IN (...) defeats the index exactly like UPPER(col) = '...' - the tested Expression side gets the identical dispatch a comparison's own operand gets. The Values list (and any Subquery) are not inspected: a wrapped literal/subquery element isn't a sargability concern the way the tested expression is.</summary>
+        public override void Visit(InPredicate node)
+        {
+            if (!_inFilterContext)
+            {
+                return;
+            }
+
+            InspectSide(node.Expression);
         }
 
         public override void Visit(LikePredicate node)
@@ -254,12 +268,12 @@ public static class NonSargablePredicateScanner
                     Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
                     break;
 
-                case CastCall { Parameter: ColumnReferenceExpression columnRef } castCall when ColumnName(columnRef) is { } name:
-                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CAST", castCall, columnRef);
+                case CastCall castCall when FindAnyColumn(castCall.Parameter) is { } found:
+                    Add(SargabilityFindingKind.CastOrConvertOnColumn, found.Name, "CAST", castCall, found.Ref);
                     break;
 
-                case ConvertCall { Parameter: ColumnReferenceExpression columnRef } convertCall when ColumnName(columnRef) is { } name:
-                    Add(SargabilityFindingKind.CastOrConvertOnColumn, name, "CONVERT", convertCall, columnRef);
+                case ConvertCall convertCall when FindAnyColumn(convertCall.Parameter) is { } found:
+                    Add(SargabilityFindingKind.CastOrConvertOnColumn, found.Name, "CONVERT", convertCall, found.Ref);
                     break;
 
                 case BinaryExpression binary:
@@ -270,15 +284,33 @@ public static class NonSargablePredicateScanner
 
         private void InspectArithmetic(BinaryExpression binary)
         {
-            if (binary.FirstExpression is ColumnReferenceExpression leftColumn && ColumnName(leftColumn) is { } leftName)
+            var found = FindAnyColumn(binary.FirstExpression) ?? FindAnyColumn(binary.SecondExpression);
+            if (found is { } column)
             {
-                Add(SargabilityFindingKind.ColumnArithmetic, leftName, binary.BinaryExpressionType.ToString(), binary, leftColumn);
-            }
-            else if (binary.SecondExpression is ColumnReferenceExpression rightColumn && ColumnName(rightColumn) is { } rightName)
-            {
-                Add(SargabilityFindingKind.ColumnArithmetic, rightName, binary.BinaryExpressionType.ToString(), binary, rightColumn);
+                Add(SargabilityFindingKind.ColumnArithmetic, column.Name, binary.BinaryExpressionType.ToString(), binary, column.Ref);
             }
         }
+
+        /// <summary>
+        /// Recursively searches an expression subtree for the first genuine column reference -
+        /// shared by CastOrConvertOnColumn and ColumnArithmetic so a wrapped column doesn't have
+        /// to be the DIRECT parameter/operand to be caught (e.g. <c>CAST(ISNULL(col, 0) AS
+        /// int)</c>). Deliberately does not descend into a subquery (<see cref="ScalarSubquery"/>
+        /// isn't a case here at all, since it's not a <see cref="ScalarExpression"/> subtype this
+        /// switch matches) - a column inside a nested SELECT belongs to that subquery's own
+        /// filter context, not this one.
+        /// </summary>
+        private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumn(ScalarExpression expression) => expression switch
+        {
+            ColumnReferenceExpression columnRef when ColumnName(columnRef) is { } name => (columnRef, name),
+            ParenthesisExpression parenthesis => FindAnyColumn(parenthesis.Expression),
+            UnaryExpression unary => FindAnyColumn(unary.Expression),
+            CastCall castCall => FindAnyColumn(castCall.Parameter),
+            ConvertCall convertCall => FindAnyColumn(convertCall.Parameter),
+            BinaryExpression binary => FindAnyColumn(binary.FirstExpression) ?? FindAnyColumn(binary.SecondExpression),
+            FunctionCall functionCall => functionCall.Parameters.Select(FindAnyColumn).FirstOrDefault(r => r is not null),
+            _ => null,
+        };
 
         /// <summary>The first parameter that's a genuine named column reference - COUNT(*) etc. have a Wildcard ColumnReferenceExpression with no MultiPartIdentifier, which isn't "a column" for this rule's purposes.</summary>
         private static (ColumnReferenceExpression Ref, string Name)? FirstNamedColumn(IList<ScalarExpression> parameters)

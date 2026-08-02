@@ -89,9 +89,9 @@
     {
       "construct": "AlterIndexStatement",
       "group": "IndexDefiner",
-      "status": "Gap",
-      "verifiedBy": "Catalog.CatalogBuilderTests",
-      "rationale": "Found by the StatementVariantParityTests reflection backstop, not by manual audit. ALTER INDEX ... DISABLE makes a previously-seekable index genuinely unusable; this pass tracks only whether an index was ever created, not whether it is currently enabled, so a disabled index still reports Indexed=true - the wrong direction for CLAUDE.md's precision discipline. Ledgered (not silently dropped) rather than fixed, since fixing it needs index-name -> CatalogIndex state tracking this pass doesn't have yet. Real risk is low: REBUILD/REORGANIZE (the common cases) don't change seekability at all."
+      "status": "Handled",
+      "verifiedBy": "Predicates.DisabledIndexPipelineTests",
+      "rationale": "ALTER INDEX ... DISABLE/REBUILD flip CatalogIndex.IsDisabled by index name (or every index on the table for ALTER INDEX ALL), so IsIndexedColumn correctly stops/resumes counting a column as seekable. Other alter types (REORGANIZE, SET, ...) never affect seekability and are ledgered rather than modeled."
     },
     {
       "construct": "CreateColumnStoreIndexStatement",
@@ -173,9 +173,9 @@
     {
       "construct": "CreateFunctionStatement (scalar)",
       "group": "ViewOrFunctionDefiner",
-      "status": "Gap",
-      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
-      "rationale": "No return-type registry exists (ScalarFunctionReturnType is matched nowhere). WHERE VarcharCol = dbo.fn_ReturnsNvarchar(@x) types the right side null and resolves Unknown - a guaranteed false negative on the classic pattern, though now ledgered rather than silently dropped. Still the highest-value single gap in this plan (coverage-remediation-plan.md Phase 3.1)."
+      "status": "Handled",
+      "verifiedBy": "Predicates.ScalarUdfPipelineTests",
+      "rationale": "CatalogBuilder registers every scalar CREATE/ALTER FUNCTION's RETURNS type under its qualified name (DatabaseCatalog.AddScalarFunctionReturnType); TypedPredicateExtractor.ResolveFunctionCallOperand consults the registry for any call that isn't a curated built-in, so WHERE VarcharCol = dbo.fn_ReturnsNvarchar(@x) now types the right side and classifies normally instead of always resolving Unknown."
     },
     {
       "construct": "AlterFunctionStatement (view-layer forms)",

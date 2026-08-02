@@ -39,6 +39,6 @@ public sealed record CatalogTable(
     /// them at all).
     /// </summary>
     public bool IsIndexedColumn(string columnName) =>
-        Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0
+        Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && i.KeyColumns.Count > 0
             && string.Equals(i.KeyColumns[0], columnName, StringComparison.OrdinalIgnoreCase));
 }

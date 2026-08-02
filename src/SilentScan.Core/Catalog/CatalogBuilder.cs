@@ -235,19 +235,14 @@ public static class CatalogBuilder
         }
 
         // ALTER INDEX (REBUILD/REORGANIZE/DISABLE/...) - also found by the reflection backstop.
-        // Not modeled: this pass tracks which columns HAVE an index, not per-statement index
-        // state changes. The precision-relevant case is ALTER INDEX ... DISABLE, which makes a
-        // previously-seekable index genuinely unusable - underreporting that (still counting the
-        // column Indexed=true) is the wrong direction for CLAUDE.md's precision discipline, but
-        // implementing it needs index-name -> CatalogIndex state tracking this pass doesn't have
-        // yet. Ledgered rather than silently dropped; tracked as follow-up work, not fixed here.
+        // DISABLE/REBUILD flip CatalogIndex.IsDisabled (the only two that change whether the
+        // engine can actually use the index); other alter types (REORGANIZE, SET, ...) never
+        // affect seekability, so they're ledgered rather than modeled.
         public override void ExplicitVisit(AlterIndexStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
-                catalog.Skipped.Record(
-                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
-                    "ALTER INDEX", $"'{node.Name?.Value ?? "ALL"}' on '{SchemaObjectNameHelper.Qualify(node.OnName)}': index state changes (REBUILD/REORGANIZE/DISABLE) are not modeled - Indexed reflects only whether an index was ever created, not whether it is currently enabled");
+                VisitAlterIndex(node);
             }
 
             node.AcceptChildren(this);
@@ -416,6 +411,17 @@ public static class CatalogBuilder
         /// </summary>
         private void VisitFunctionBody(TSqlFragment node, SchemaObjectName name, FunctionReturnType returnType)
         {
+            if (phase == BuildPhase.ApplyEverythingElse && returnType is ScalarFunctionReturnType scalarReturn)
+            {
+                var resolvedType = SqlTypeReferenceResolver.Resolve(scalarReturn.DataType, columnCollation: null, catalog.TypeAliases);
+                if (resolvedType is { IsStringFamily: true, Collation: null } && catalog.DefaultCollation is not null)
+                {
+                    resolvedType = resolvedType with { Collation = catalog.DefaultCollation };
+                }
+
+                catalog.AddScalarFunctionReturnType(SchemaObjectNameHelper.Qualify(name), resolvedType);
+            }
+
             if (phase == BuildPhase.ApplyEverythingElse
                 && returnType is TableValuedFunctionReturnType { DeclareTableVariableBody: { VariableName: { } variableName, Definition: { } definition } body })
             {
@@ -455,6 +461,36 @@ public static class CatalogBuilder
             }
 
             catalog.AddTypeAlias(qualifiedName, underlyingType);
+        }
+
+        private void VisitAlterIndex(AlterIndexStatement alterIndex)
+        {
+            if (alterIndex.AlterIndexType is not (AlterIndexType.Disable or AlterIndexType.Rebuild))
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, alterIndex.StartLine, alterIndex.StartColumn,
+                    "ALTER INDEX", $"'{alterIndex.Name?.Value ?? "ALL"}' on '{SchemaObjectNameHelper.Qualify(alterIndex.OnName)}': {alterIndex.AlterIndexType} does not affect seekability and is not modeled");
+                return;
+            }
+
+            var qualifiedName = SchemaObjectNameHelper.Qualify(alterIndex.OnName);
+            var existing = catalog.Find(qualifiedName, _currentScope);
+            if (existing is null)
+            {
+                RecordUnresolvedTarget("ALTER INDEX", qualifiedName, alterIndex);
+                return;
+            }
+
+            var targetDisabledState = alterIndex.AlterIndexType == AlterIndexType.Disable;
+            var indexName = alterIndex.Name?.Value;
+
+            var updatedIndexes = existing.Indexes
+                .Select(i => indexName is null || string.Equals(i.Name, indexName, StringComparison.OrdinalIgnoreCase)
+                    ? i with { IsDisabled = targetDisabledState }
+                    : i)
+                .ToList();
+
+            catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, WriteScopeFor(existing));
         }
 
         private void VisitCreateTable(CreateTableStatement createTable)
@@ -582,17 +618,31 @@ public static class CatalogBuilder
                 .Select(e => e.Name.Value)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            if (droppedColumnNames.Count == 0)
+            // A PK/UNIQUE constraint's backing index is deterministically identifiable by name
+            // (CatalogIndex.Name is set from the constraint's own ConstraintIdentifier in
+            // BuildIndexesFromTableConstraints) - unlike an anonymous/system-named constraint,
+            // whose CatalogIndex.Name never matched anything to begin with, so this removal is
+            // a no-op for it rather than a guess. TableElementType.Index covers a plain
+            // `DROP INDEX ix_name` element inside the same ALTER TABLE DROP list.
+            var droppedConstraintOrIndexNames = dropStatement.AlterTableDropTableElements
+                .Where(e => e.TableElementType is TableElementType.Constraint or TableElementType.Index)
+                .Select(e => e.Name.Value)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (droppedColumnNames.Count == 0 && droppedConstraintOrIndexNames.Count == 0)
             {
-                // Only constraints/indexes were dropped, no columns - nothing to remove from
-                // the column list. Dropping a constraint by name isn't tracked back to a
-                // specific CatalogIndex today (constraints aren't named-and-keyed for lookup),
-                // so the index list is left as-is rather than guessing which one it was.
                 return;
             }
 
-            var remainingColumns = existing.Columns.Where(c => !droppedColumnNames.Contains(c.Name)).ToList();
-            catalog.AddOrReplace(existing with { Columns = remainingColumns }, WriteScopeFor(existing));
+            var remainingColumns = droppedColumnNames.Count == 0
+                ? existing.Columns
+                : existing.Columns.Where(c => !droppedColumnNames.Contains(c.Name)).ToList();
+
+            var remainingIndexes = droppedConstraintOrIndexNames.Count == 0
+                ? existing.Indexes
+                : existing.Indexes.Where(i => i.Name is null || !droppedConstraintOrIndexNames.Contains(i.Name)).ToList();
+
+            catalog.AddOrReplace(existing with { Columns = remainingColumns, Indexes = remainingIndexes }, WriteScopeFor(existing));
         }
 
         private void VisitCreateIndex(CreateIndexStatement createIndex)
@@ -745,51 +795,16 @@ public static class CatalogBuilder
     {
         var columns = new List<CatalogColumn>();
         var inlineIndexes = new List<CatalogIndex>();
+        var computedExpressions = new Dictionary<string, ScalarExpression>(StringComparer.OrdinalIgnoreCase);
+        var computedColumnLines = new Dictionary<string, (int Line, int Column)>(StringComparer.OrdinalIgnoreCase);
+        var context = new ColumnBuildContext(defaultCollation, typeAliases, ledger, sourcePath);
 
         foreach (var columnDefinition in definition.ColumnDefinitions)
         {
-            var name = columnDefinition.ColumnIdentifier.Value;
-            var isNullable = BuildColumnConstraints(columnDefinition, name, inlineIndexes);
-
-            if (columnDefinition.Index is { } inlineIndex)
-            {
-                inlineIndexes.Add(BuildInlineIndex(inlineIndex, name));
-            }
-
-            var declaredType = columnDefinition.DataType;
-            var resolvedType = declaredType is null ? null : SqlTypeReferenceResolver.Resolve(declaredType, columnDefinition.Collation, typeAliases);
-            if (resolvedType is null && sourcePath is not null && declaredType is not null)
-            {
-                // A computed column with no declared type (its type comes from the expression,
-                // out of scope here - a documented hard case, not a resolution failure) has a
-                // null DataType and is intentionally excluded from this: nothing to have
-                // resolved. What IS recorded: a table type (TVP shape), CLR UDT, or other
-                // explicitly-declared type this resolver declines to guess at (coverage-
-                // remediation-plan.md Phase 0.2) - the column still enters the catalog as
-                // Unknown (VerdictClassifier already treats a null Type as Unknown, never a
-                // guess), but until now nothing counted how often this happens, so it was safe
-                // but invisible in the study's coverage accounting.
-                ledger?.Record(
-                    AnalysisPass.Catalog, sourcePath, columnDefinition.StartLine, columnDefinition.StartColumn,
-                    "column type", $"column '{name}' has type '{SchemaObjectNameHelper.Qualify(declaredType.Name)}' which could not be resolved");
-            }
-
-            if (resolvedType is { IsStringFamily: true, Collation: null } && defaultCollation is not null)
-            {
-                // CLAUDE.md Pass 1: "database default collation from any CREATE DATABASE/
-                // manifest hint" - applied only when the column itself carries no explicit
-                // COLLATE, which always wins.
-                resolvedType = resolvedType with { Collation = defaultCollation };
-            }
-
-            columns.Add(new CatalogColumn(
-                name,
-                resolvedType,
-                isNullable,
-                IsIdentity: columnDefinition.IdentityOptions is not null,
-                IsComputed: columnDefinition.ComputedColumnExpression is not null,
-                IsPersisted: columnDefinition.IsPersisted));
+            columns.Add(BuildColumn(columnDefinition, context, inlineIndexes, computedExpressions, computedColumnLines));
         }
+
+        columns = ResolveComputedColumnTypes(columns, computedExpressions, computedColumnLines, context);
 
         // Table-level INDEX (...) definitions - e.g. WWI's `INDEX [IX_...] ([Col])` inside a
         // CREATE TYPE ... AS TABLE - live in TableDefinition.Indexes, a collection entirely
@@ -800,6 +815,90 @@ public static class CatalogBuilder
         inlineIndexes.AddRange(definition.Indexes.Select(i => BuildInlineIndex(i, columnName: string.Empty)));
 
         return (columns, inlineIndexes);
+    }
+
+    /// <summary>Bundles the fixed inputs BuildColumn/ResolveComputedColumnTypes both need but never vary per-column (S107: keeps their own parameter lists to just what varies per call).</summary>
+    private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath);
+
+    private static CatalogColumn BuildColumn(
+        ColumnDefinition columnDefinition, ColumnBuildContext context,
+        List<CatalogIndex> inlineIndexes, Dictionary<string, ScalarExpression> computedExpressions, Dictionary<string, (int Line, int Column)> computedColumnLines)
+    {
+        var name = columnDefinition.ColumnIdentifier.Value;
+        var isNullable = BuildColumnConstraints(columnDefinition, name, inlineIndexes);
+
+        if (columnDefinition.Index is { } inlineIndex)
+        {
+            inlineIndexes.Add(BuildInlineIndex(inlineIndex, name));
+        }
+
+        var declaredType = columnDefinition.DataType;
+        var resolvedType = declaredType is null ? null : SqlTypeReferenceResolver.Resolve(declaredType, columnDefinition.Collation, context.TypeAliases);
+        if (resolvedType is null && context.SourcePath is not null && declaredType is not null)
+        {
+            // A table type (TVP shape), CLR UDT, or other explicitly-declared type this
+            // resolver declines to guess at (coverage-remediation-plan.md Phase 0.2) - the
+            // column still enters the catalog as Unknown (VerdictClassifier already treats
+            // a null Type as Unknown, never a guess), but this counts how often it happens
+            // so it isn't invisible in the study's coverage accounting. A computed column
+            // has null DataType (its type comes from the expression, handled separately
+            // below) and never reaches this branch at all.
+            context.Ledger?.Record(
+                AnalysisPass.Catalog, context.SourcePath, columnDefinition.StartLine, columnDefinition.StartColumn,
+                "column type", $"column '{name}' has type '{SchemaObjectNameHelper.Qualify(declaredType.Name)}' which could not be resolved");
+        }
+
+        if (resolvedType is { IsStringFamily: true, Collation: null } && context.DefaultCollation is not null)
+        {
+            // CLAUDE.md Pass 1: "database default collation from any CREATE DATABASE/
+            // manifest hint" - applied only when the column itself carries no explicit
+            // COLLATE, which always wins.
+            resolvedType = resolvedType with { Collation = context.DefaultCollation };
+        }
+
+        if (columnDefinition.ComputedColumnExpression is { } computedExpression)
+        {
+            computedExpressions[name] = computedExpression;
+            computedColumnLines[name] = (columnDefinition.StartLine, columnDefinition.StartColumn);
+        }
+
+        return new CatalogColumn(
+            name,
+            resolvedType,
+            isNullable,
+            IsIdentity: columnDefinition.IdentityOptions is not null,
+            IsComputed: columnDefinition.ComputedColumnExpression is not null,
+            IsPersisted: columnDefinition.IsPersisted);
+    }
+
+    /// <summary>Infers computed columns' types (<see cref="ComputedColumnTypeResolver"/>), applies the default-collation fallback to any newly-resolved string type, and ledgers whichever computed columns are still untyped afterward - the same honesty policy <see cref="BuildColumn"/> applies to an unresolvable declared type.</summary>
+    private static List<CatalogColumn> ResolveComputedColumnTypes(
+        List<CatalogColumn> columns, Dictionary<string, ScalarExpression> computedExpressions, Dictionary<string, (int Line, int Column)> computedColumnLines, ColumnBuildContext context)
+    {
+        columns = ComputedColumnTypeResolver.ResolveAll(columns, computedExpressions, context.TypeAliases);
+        columns = [.. columns.Select(c => c.Type is { IsStringFamily: true, Collation: null } && context.DefaultCollation is not null
+            ? c with { Type = c.Type with { Collation = context.DefaultCollation } }
+            : c)];
+
+        if (context.SourcePath is null)
+        {
+            return columns;
+        }
+
+        foreach (var name in computedExpressions.Keys)
+        {
+            if (columns.Single(c => c.Name == name).Type is not null)
+            {
+                continue;
+            }
+
+            var (line, column) = computedColumnLines[name];
+            context.Ledger?.Record(
+                AnalysisPass.Catalog, context.SourcePath, line, column,
+                "computed column type", $"column '{name}' is computed but its expression type could not be inferred");
+        }
+
+        return columns;
     }
 
     /// <summary>Applies a column's inline constraints (NULL/NOT NULL, inline PK/UNIQUE), returning the resolved nullability.</summary>

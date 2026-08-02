@@ -11,6 +11,9 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, SqlType> _typeAliasesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, SqlType?> _scalarFunctionReturnTypesByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
 
     /// <summary>
@@ -23,6 +26,22 @@ public sealed class DatabaseCatalog
 
     public void AddTypeAlias(string qualifiedName, SqlType underlyingType) =>
         _typeAliasesByQualifiedName[qualifiedName] = underlyingType;
+
+    /// <summary>
+    /// A scalar UDF's <c>RETURNS &lt;type&gt;</c>, keyed by the function's own qualified name -
+    /// lets a predicate comparing a column against <c>dbo.SomeFunction(...)</c> type the
+    /// function side instead of falling to Unknown for lack of any type at all (the single
+    /// highest-value gap the construct coverage audit called out). Stored even when the return
+    /// type itself couldn't be resolved (null), mirroring how an unresolvable column type is
+    /// still recorded as Type=null rather than left absent - "we saw this function and could
+    /// not type it" is a different, honest state from "we never saw this function".
+    /// </summary>
+    public void AddScalarFunctionReturnType(string qualifiedName, SqlType? returnType) =>
+        _scalarFunctionReturnTypesByQualifiedName[qualifiedName] = returnType;
+
+    /// <summary>True only when a CREATE/ALTER FUNCTION with this qualified name was seen with a scalar (non-table) return type - a table-valued function or an unseen name both return false, so a caller can distinguish "not a scalar UDF" from "a scalar UDF whose type didn't resolve".</summary>
+    public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
+        _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
 
     public Collation? DefaultCollation { get; set; }
 

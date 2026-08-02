@@ -173,6 +173,106 @@ public sealed class CatalogBuilderTests
 
         Assert.True(total.IsComputed);
         Assert.True(total.IsPersisted);
+
+        // Price(decimal) * Quantity(int): different categories, decimal has the higher
+        // precedence ordinal (SqlTypeCategory.Decimal > SqlTypeCategory.Int) so it wins -
+        // proves ComputedColumnTypeResolver.Combine picks the higher-precedence category
+        // rather than leaving a numeric computed column permanently untyped.
+        Assert.Equal(SqlTypeCategory.Decimal, total.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnStringConcatenation_InfersType()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.People
+            (
+                FirstName VARCHAR(40) NOT NULL,
+                LastName  VARCHAR(40) NOT NULL,
+                FullName  AS (FirstName + ' ' + LastName)
+            );
+            """);
+
+        var fullName = catalog.Find("dbo.People")!.FindColumn("FullName")!;
+
+        Assert.Equal(SqlTypeCategory.VarChar, fullName.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnStringConcatenation_NvarcharSiblingWinsOverVarchar()
+    {
+        // Data type precedence, not "whichever comes first": NVarChar has the higher ordinal,
+        // so a varchar + nvarchar concatenation must resolve NVarChar regardless of which side
+        // of the + it appears on.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.People
+            (
+                FirstName VARCHAR(40) NOT NULL,
+                LastName  NVARCHAR(40) NOT NULL,
+                FullName  AS (FirstName + LastName)
+            );
+            """);
+
+        var fullName = catalog.Find("dbo.People")!.FindColumn("FullName")!;
+
+        Assert.Equal(SqlTypeCategory.NVarChar, fullName.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnCastExpression_InfersTargetType()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Code VARCHAR(10) NOT NULL,
+                CodeAsInt AS (CAST(Code AS INT))
+            );
+            """);
+
+        var codeAsInt = catalog.Find("dbo.T")!.FindColumn("CodeAsInt")!;
+
+        Assert.Equal(SqlTypeCategory.Int, codeAsInt.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnReferencingAnotherComputedColumn_ResolvesViaFixedPoint()
+    {
+        // Total depends on Subtotal, itself computed - declared in an order T-SQL allows
+        // regardless of which is defined first. ResolveAll's fixed-point loop must resolve
+        // Subtotal before Total can use its type, not give up after a single pass.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders
+            (
+                Price    DECIMAL(18,2) NOT NULL,
+                Quantity INT NOT NULL,
+                Subtotal AS (Price * Quantity),
+                Total    AS (Subtotal * 2)
+            );
+            """);
+
+        var total = catalog.Find("dbo.Orders")!.FindColumn("Total")!;
+
+        Assert.Equal(SqlTypeCategory.Decimal, total.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithUnresolvableExpression_StaysUnknownAndLedgered()
+    {
+        // A function call inside a computed column expression is a deliberately unresolved
+        // case (out of ComputedColumnTypeResolver's narrow scope) - it must stay Unknown AND
+        // reach the skip ledger, never silently vanish with no trace.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Created DATETIME NOT NULL,
+                CreatedYear AS (YEAR(Created))
+            );
+            """);
+
+        var createdYear = catalog.Find("dbo.T")!.FindColumn("CreatedYear")!;
+
+        Assert.Null(createdYear.Type);
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "computed column type" && e.Reason.Contains("CreatedYear", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -795,11 +895,11 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
-    public void Build_AlterIndexDisable_Ledgered()
+    public void Build_AlterIndexDisable_ColumnNoLongerReportsIndexed()
     {
-        // Found by the same reflection backstop. Not fixed - the precision-relevant case
-        // (DISABLE) needs index-name -> state tracking this pass doesn't have; ledgered so it's
-        // at least counted rather than silently reporting a disabled index as still seekable.
+        // Found by the same reflection backstop, later fixed: DISABLE now flips
+        // CatalogIndex.IsDisabled by name, so a disabled index genuinely stops counting as
+        // seekable rather than silently reporting a disabled index as still seekable.
         var catalog = BuildFrom(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);
@@ -807,7 +907,57 @@ public sealed class CatalogBuilderTests
             ALTER INDEX IX_T_Col ON dbo.T DISABLE;
             """);
 
+        var table = catalog.Find("dbo.T")!;
+        Assert.False(table.IsIndexedColumn("Col"));
+    }
+
+    [Fact]
+    public void Build_AlterIndexRebuild_ReEnablesAPreviouslyDisabledIndex()
+    {
+        var catalog = BuildFrom(
+            """
+            CREATE TABLE dbo.T (Col INT NOT NULL);
+            CREATE INDEX IX_T_Col ON dbo.T(Col);
+            ALTER INDEX IX_T_Col ON dbo.T DISABLE;
+            ALTER INDEX IX_T_Col ON dbo.T REBUILD;
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+        Assert.True(table.IsIndexedColumn("Col"));
+    }
+
+    [Fact]
+    public void Build_AlterIndexDisableAll_DisablesEveryIndexOnTheTable()
+    {
+        var catalog = BuildFrom(
+            """
+            CREATE TABLE dbo.T (A INT NOT NULL, B INT NOT NULL);
+            CREATE INDEX IX_T_A ON dbo.T(A);
+            CREATE INDEX IX_T_B ON dbo.T(B);
+            ALTER INDEX ALL ON dbo.T DISABLE;
+            """);
+
+        var table = catalog.Find("dbo.T")!;
+        Assert.False(table.IsIndexedColumn("A"));
+        Assert.False(table.IsIndexedColumn("B"));
+    }
+
+    [Fact]
+    public void Build_AlterIndexReorganize_StillLedgeredAsNotAffectingSeekability()
+    {
+        // REORGANIZE never changes whether an index is usable, so it's ledgered rather than
+        // modeled - the real risk this pass guards against is limited to DISABLE/REBUILD.
+        var catalog = BuildFrom(
+            """
+            CREATE TABLE dbo.T (Col INT NOT NULL);
+            CREATE INDEX IX_T_Col ON dbo.T(Col);
+            ALTER INDEX IX_T_Col ON dbo.T REORGANIZE;
+            """);
+
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "ALTER INDEX" && e.Reason.Contains("IX_T_Col", StringComparison.Ordinal));
+
+        var table = catalog.Find("dbo.T")!;
+        Assert.True(table.IsIndexedColumn("Col"));
     }
 
     [Fact]

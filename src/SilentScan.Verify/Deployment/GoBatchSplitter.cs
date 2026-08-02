@@ -94,70 +94,57 @@ public static partial class GoBatchSplitter
         var i = 0;
         while (i < line.Length)
         {
-            switch (state)
+            (i, state) = state switch
             {
-                case LexState.Default:
-                    if (line[i] == '\'')
-                    {
-                        state = LexState.InString;
-                        i++;
-                    }
-                    else if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '*')
-                    {
-                        state = LexState.InBlockComment;
-                        i += 2;
-                    }
-                    else if (i + 1 < line.Length && line[i] == '-' && line[i + 1] == '-')
-                    {
-                        // Line comment: nothing after this point on the line is code, but
-                        // whatever preceded it still is - just stop scanning this line.
-                        i = line.Length;
-                    }
-                    else
-                    {
-                        i++;
-                    }
-
-                    break;
-
-                case LexState.InString:
-                    if (line[i] == '\'')
-                    {
-                        // A doubled '' is an escaped quote, not the string's end.
-                        if (i + 1 < line.Length && line[i + 1] == '\'')
-                        {
-                            i += 2;
-                        }
-                        else
-                        {
-                            state = LexState.Default;
-                            i++;
-                        }
-                    }
-                    else
-                    {
-                        i++;
-                    }
-
-                    break;
-
-                case LexState.InBlockComment:
-                    if (i + 1 < line.Length && line[i] == '*' && line[i + 1] == '/')
-                    {
-                        state = LexState.Default;
-                        i += 2;
-                    }
-                    else
-                    {
-                        i++;
-                    }
-
-                    break;
-            }
+                LexState.Default => ScanDefault(line, i),
+                LexState.InString => ScanInString(line, i),
+                LexState.InBlockComment => ScanInBlockComment(line, i),
+                _ => (i + 1, state),
+            };
         }
 
         return (line, state);
     }
+
+    private static (int NextIndex, LexState NextState) ScanDefault(string line, int i)
+    {
+        if (line[i] == '\'')
+        {
+            return (i + 1, LexState.InString);
+        }
+
+        if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '*')
+        {
+            return (i + 2, LexState.InBlockComment);
+        }
+
+        if (i + 1 < line.Length && line[i] == '-' && line[i + 1] == '-')
+        {
+            // Line comment: nothing after this point on the line is code, but whatever
+            // preceded it still is - just stop scanning this line.
+            return (line.Length, LexState.Default);
+        }
+
+        return (i + 1, LexState.Default);
+    }
+
+    private static (int NextIndex, LexState NextState) ScanInString(string line, int i)
+    {
+        if (line[i] != '\'')
+        {
+            return (i + 1, LexState.InString);
+        }
+
+        // A doubled '' is an escaped quote, not the string's end.
+        return i + 1 < line.Length && line[i + 1] == '\''
+            ? (i + 2, LexState.InString)
+            : (i + 1, LexState.Default);
+    }
+
+    private static (int NextIndex, LexState NextState) ScanInBlockComment(string line, int i) =>
+        i + 1 < line.Length && line[i] == '*' && line[i + 1] == '/'
+            ? (i + 2, LexState.Default)
+            : (i + 1, LexState.InBlockComment);
 
     private enum LexState
     {

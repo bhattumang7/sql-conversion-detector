@@ -35,6 +35,9 @@ public static class TypedPredicateExtractor
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
         SkipLedger ledger) : TSqlFragmentVisitor
     {
+        /// <summary>Skip-ledger construct kind shared by every "this operand has no type resolution" entry below - one label for the whole family of unresolved-operand reasons.</summary>
+        private const string PredicateOperandConstructKind = "predicate operand";
+
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
         private string? _currentProcScope;
@@ -580,7 +583,7 @@ public static class TypedPredicateExtractor
                     // counted instead of silently falling through.
                     ledger.Record(
                         AnalysisPass.Predicates, sourcePath, expression.StartLine, expression.StartColumn,
-                        "predicate operand", $"operand of kind '{expression.GetType().Name}' has no type resolution - resolved Unknown");
+                        PredicateOperandConstructKind, $"operand of kind '{expression.GetType().Name}' has no type resolution - resolved Unknown");
                     return new PredicateOperand.Value(Type: null);
             }
         }
@@ -596,7 +599,7 @@ public static class TypedPredicateExtractor
             {
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, globalVariable.StartLine, globalVariable.StartColumn,
-                    "predicate operand", $"global variable '{globalVariable.Name}' has no type resolution - resolved Unknown");
+                    PredicateOperandConstructKind, $"global variable '{globalVariable.Name}' has no type resolution - resolved Unknown");
             }
 
             return new PredicateOperand.Value(type);
@@ -631,14 +634,43 @@ public static class TypedPredicateExtractor
             }
 
             var fixedType = Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
-            if (fixedType is null)
+            if (fixedType is not null)
             {
-                ledger.Record(
-                    AnalysisPass.Predicates, sourcePath, functionCall.StartLine, functionCall.StartColumn,
-                    "predicate operand", $"function '{name}' has no return-type resolution - resolved Unknown");
+                return new PredicateOperand.Value(fixedType);
             }
 
-            return new PredicateOperand.Value(fixedType);
+            // Not a built-in - try the scalar UDF return-type registry (CatalogBuilder
+            // registers every CREATE/ALTER FUNCTION with a scalar RETURNS clause under its
+            // qualified name). A function this scan never saw declared, or one whose RETURNS
+            // clause is itself unresolvable, still resolves Unknown - never guessed.
+            var qualifiedName = ResolveFunctionQualifiedName(functionCall);
+            if (catalog.TryGetScalarFunctionReturnType(qualifiedName, out var udfType))
+            {
+                if (udfType is null)
+                {
+                    ledger.Record(
+                        AnalysisPass.Predicates, sourcePath, functionCall.StartLine, functionCall.StartColumn,
+                        PredicateOperandConstructKind, $"function '{qualifiedName}' RETURNS type could not be resolved - resolved Unknown");
+                }
+
+                return new PredicateOperand.Value(udfType);
+            }
+
+            ledger.Record(
+                AnalysisPass.Predicates, sourcePath, functionCall.StartLine, functionCall.StartColumn,
+                PredicateOperandConstructKind, $"function '{name}' has no return-type resolution - resolved Unknown");
+
+            return new PredicateOperand.Value(Type: null);
+        }
+
+        /// <summary>schema.name for a function call target, defaulting to dbo exactly like <see cref="SchemaObjectNameHelper.Resolve"/> does for tables - a function call has no dedicated SchemaObjectName of its own (FunctionName and CallTarget are separate properties), so this rebuilds the same shape by hand.</summary>
+        private static string ResolveFunctionQualifiedName(FunctionCall functionCall)
+        {
+            var schema = functionCall.CallTarget is MultiPartIdentifierCallTarget { MultiPartIdentifier.Identifiers: [.., { } last] }
+                ? last.Value
+                : SchemaObjectNameHelper.DefaultSchema;
+
+            return $"{schema}.{functionCall.FunctionName.Value}";
         }
 
         /// <summary>
@@ -659,7 +691,7 @@ public static class TypedPredicateExtractor
             {
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
-                    "predicate operand", "CAST/CONVERT target type could not be resolved - resolved Unknown");
+                    PredicateOperandConstructKind, "CAST/CONVERT target type could not be resolved - resolved Unknown");
                 return new PredicateOperand.Value(Type: null);
             }
 
@@ -780,7 +812,7 @@ public static class TypedPredicateExtractor
                 // clean" contract every other unresolvable path in this file honors.
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, columnRef.StartLine, columnRef.StartColumn,
-                    "predicate operand", $"column '{columnName}' resolves through a UNION view - branches are not eligible for a single verdict, never guessed");
+                    PredicateOperandConstructKind, $"column '{columnName}' resolves through a UNION view - branches are not eligible for a single verdict, never guessed");
             }
 
             // Cast/Expression (reported above)/Union (reported above)/Unknown/Declared - not

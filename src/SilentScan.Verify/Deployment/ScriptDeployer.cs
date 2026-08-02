@@ -126,6 +126,23 @@ public sealed class ScriptDeployer
         IReadOnlyList<(string Label, string Script)> scripts, string? initialDatabase = null, int maxPasses = 5, CancellationToken cancellationToken = default)
     {
         var messages = new List<string>();
+        var pending = CollectWhitelistedBatches(scripts, messages);
+
+        await using var connection = new SqlConnection(_options.BuildConnectionString(initialDatabase));
+        await connection.OpenAsync(cancellationToken);
+
+        var lastFailureByBatch = new Dictionary<(string Label, string BatchText), string>();
+        pending = await RunRetryPassesAsync(connection, pending, maxPasses, lastFailureByBatch, cancellationToken);
+
+        messages.AddRange(pending.Select(item => $"{item.Label}: {lastFailureByBatch[item]}"));
+
+        return messages;
+    }
+
+    /// <summary>Parses every script, skips (with a message) any batch containing a non-whitelisted statement kind or a parse error, and returns the rest as raw batch text ready to execute.</summary>
+    private static List<(string Label, string BatchText)> CollectWhitelistedBatches(
+        IReadOnlyList<(string Label, string Script)> scripts, List<string> messages)
+    {
         var pending = new List<(string Label, string BatchText)>();
 
         foreach (var (label, script) in scripts)
@@ -159,10 +176,14 @@ public sealed class ScriptDeployer
             }
         }
 
-        await using var connection = new SqlConnection(_options.BuildConnectionString(initialDatabase));
-        await connection.OpenAsync(cancellationToken);
+        return pending;
+    }
 
-        var lastFailureByBatch = new Dictionary<(string Label, string BatchText), string>();
+    /// <summary>Retries whatever failed in earlier passes (see the type-level doc comment for why) until either everything deploys, a full pass makes no forward progress, or <paramref name="maxPasses"/> is reached. <paramref name="lastFailureByBatch"/> is filled in with each still-pending batch's most recent failure message.</summary>
+    private static async Task<List<(string Label, string BatchText)>> RunRetryPassesAsync(
+        SqlConnection connection, List<(string Label, string BatchText)> pending, int maxPasses,
+        Dictionary<(string Label, string BatchText), string> lastFailureByBatch, CancellationToken cancellationToken)
+    {
         for (var pass = 0; pass < maxPasses && pending.Count > 0; pass++)
         {
             var stillPending = new List<(string Label, string BatchText)>();
@@ -189,8 +210,6 @@ public sealed class ScriptDeployer
             }
         }
 
-        messages.AddRange(pending.Select(item => $"{item.Label}: {lastFailureByBatch[item]}"));
-
-        return messages;
+        return pending;
     }
 }

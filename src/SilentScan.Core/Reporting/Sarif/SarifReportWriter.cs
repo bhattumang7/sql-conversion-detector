@@ -114,13 +114,6 @@ public static class SarifReportWriter
         return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
-    private static string DowngradeOneLevel(string level) => level switch
-    {
-        LevelError => LevelWarning,
-        LevelWarning => LevelNote,
-        _ => LevelNote,
-    };
-
     private static SarifResult ToResult(DynamicSqlFinding finding)
     {
         var ruleId = SarifRuleCatalog.DynamicSqlRuleId(finding.Outcome);
@@ -137,6 +130,13 @@ public static class SarifReportWriter
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
+
+    private static string DowngradeOneLevel(string level) => level switch
+    {
+        LevelError => LevelWarning,
+        LevelWarning => LevelNote,
+        _ => LevelNote,
+    };
 
     private static string IndexedDisplay(bool? indexed) => indexed is { } value ? value.ToString() : "unknown";
 

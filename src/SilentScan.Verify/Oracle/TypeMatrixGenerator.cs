@@ -140,8 +140,9 @@ public sealed class TypeMatrixGenerator
             try
             {
                 await DeployFamilyTablesAsync(familyDb, numericFamily.Concat(dateTimeFamily).ToList(), collationName: null, cancellationToken);
-                await ProbeFamilyAsync(familyDb, numericFamily, collationName: null, entries, v => serverVersion ??= v, cancellationToken);
-                await ProbeFamilyAsync(familyDb, dateTimeFamily, collationName: null, entries, v => serverVersion ??= v, cancellationToken);
+                var familyContext = new ProbeContext(familyDb, CollationName: null, entries, v => serverVersion ??= v, cancellationToken);
+                await ProbeFamilyAsync(numericFamily, familyContext);
+                await ProbeFamilyAsync(dateTimeFamily, familyContext);
 
                 // Non-string column vs a string-typed value (e.g. `WHERE IntColumn = '123'`) is
                 // not collation-sensitive - the target isn't a string, so which collation family
@@ -157,7 +158,7 @@ public sealed class TypeMatrixGenerator
                     {
                         foreach (var (stringCategory, stringSyntax) in stringFamily)
                         {
-                            await ProbeOnePairAsync(familyDb, otherCategory, stringCategory, stringSyntax, collationName: null, entries, v => serverVersion ??= v, cancellationToken);
+                            await ProbeOnePairAsync(otherCategory, stringCategory, stringSyntax, familyContext);
                         }
                     }
                 }
@@ -181,7 +182,8 @@ public sealed class TypeMatrixGenerator
             try
             {
                 await DeployFamilyTablesAsync(stringDb, stringFamily, collation, cancellationToken);
-                await ProbeFamilyAsync(stringDb, stringFamily, collation, entries, v => serverVersion ??= v, cancellationToken);
+                var stringContext = new ProbeContext(stringDb, collation, entries, v => serverVersion ??= v, cancellationToken);
+                await ProbeFamilyAsync(stringFamily, stringContext);
 
                 // String column vs a non-string value: collation-sensitive because it decides
                 // whether a resulting dynamic seek is available, so this direction IS probed
@@ -193,7 +195,7 @@ public sealed class TypeMatrixGenerator
                     {
                         foreach (var (otherCategory, otherSyntax) in crossFamilyOther)
                         {
-                            await ProbeOnePairAsync(stringDb, stringCategory, otherCategory, otherSyntax, collation, entries, v => serverVersion ??= v, cancellationToken);
+                            await ProbeOnePairAsync(stringCategory, otherCategory, otherSyntax, stringContext);
                         }
                     }
                 }
@@ -222,13 +224,7 @@ public sealed class TypeMatrixGenerator
         await _deployer.DeployAsync(script.ToString(), database, cancellationToken);
     }
 
-    private async Task ProbeFamilyAsync(
-        string database,
-        IReadOnlyList<(SqlTypeCategory Category, string Syntax)> family,
-        string? collationName,
-        List<TypePairProbeResult> entries,
-        Action<string> recordServerVersion,
-        CancellationToken cancellationToken)
+    private async Task ProbeFamilyAsync(IReadOnlyList<(SqlTypeCategory Category, string Syntax)> family, ProbeContext context)
     {
         foreach (var (columnCategory, _) in family)
         {
@@ -239,35 +235,31 @@ public sealed class TypeMatrixGenerator
                     continue;
                 }
 
-                await ProbeOnePairAsync(database, columnCategory, otherCategory, otherSyntax, collationName, entries, recordServerVersion, cancellationToken);
+                await ProbeOnePairAsync(columnCategory, otherCategory, otherSyntax, context);
             }
         }
     }
 
-    private async Task ProbeOnePairAsync(
-        string database,
-        SqlTypeCategory columnCategory,
-        SqlTypeCategory otherCategory,
-        string otherSyntax,
-        string? collationName,
-        List<TypePairProbeResult> entries,
-        Action<string> recordServerVersion,
-        CancellationToken cancellationToken)
+    private async Task ProbeOnePairAsync(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string otherSyntax, ProbeContext context)
     {
         var probe = $"DECLARE @p {otherSyntax}; SELECT Col FROM dbo.T_{columnCategory} WHERE Col = @p;";
         try
         {
-            var xml = await _capture.CaptureAsync(database, probe, cancellationToken);
-            recordServerVersion(ExtractBuild(xml));
+            var xml = await _capture.CaptureAsync(context.Database, probe, context.CancellationToken);
+            context.RecordServerVersion(ExtractBuild(xml));
             var columnConverts = ConvertImplicitDetector.FindColumnConversions(xml).Count > 0;
             var dynamicRangeSeek = xml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
-            entries.Add(new TypePairProbeResult(columnCategory, otherCategory, collationName, columnConverts, CompileFailed: false, dynamicRangeSeek));
+            context.Entries.Add(new TypePairProbeResult(columnCategory, otherCategory, context.CollationName, columnConverts, CompileFailed: false, dynamicRangeSeek));
         }
         catch (SqlException)
         {
-            entries.Add(new TypePairProbeResult(columnCategory, otherCategory, collationName, ColumnConverts: false, CompileFailed: true, DynamicRangeSeekAvailable: false));
+            context.Entries.Add(new TypePairProbeResult(columnCategory, otherCategory, context.CollationName, ColumnConverts: false, CompileFailed: true, DynamicRangeSeekAvailable: false));
         }
     }
+
+    /// <summary>Bundles a probe run's fixed context (S107: keeps ProbeFamilyAsync/ProbeOnePairAsync's own parameter lists to just what varies per call).</summary>
+    private sealed record ProbeContext(
+        string Database, string? CollationName, List<TypePairProbeResult> Entries, Action<string> RecordServerVersion, CancellationToken CancellationToken);
 
     private static string SanitizeForIdentifier(string collation)
     {
