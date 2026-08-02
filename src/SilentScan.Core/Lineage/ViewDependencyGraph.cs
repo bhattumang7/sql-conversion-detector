@@ -12,7 +12,7 @@ public static class ViewDependencyGraph
 {
     /// <returns>Views in dependency order (a view's dependencies appear before it), and the set of qualified names involved in a dependency cycle.</returns>
     public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicViews) TopologicalSort(
-        IReadOnlyList<ViewDefinition> views)
+        IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
         // A corpus scan can see the same view name defined more than once - e.g. incremental
         // upgrade scripts that each re-issue CREATE VIEW for the same object across a
@@ -28,7 +28,7 @@ public static class ViewDependencyGraph
         var dedupedViews = byName.Values.ToList();
         var edges = dedupedViews.ToDictionary(
             v => v.QualifiedName,
-            v => FindReferencedViewNames(v.SelectStatement, byName.Keys),
+            v => FindReferencedViewNames(v.SelectStatement, byName.Keys, catalog),
             StringComparer.OrdinalIgnoreCase);
 
         var state = new TraversalState(byName, edges);
@@ -76,13 +76,18 @@ public static class ViewDependencyGraph
         state.Order.Add(state.ByName[name]);
     }
 
-    private static HashSet<string> FindReferencedViewNames(SelectStatement selectStatement, IEnumerable<string> knownViewNames)
+    private static HashSet<string> FindReferencedViewNames(SelectStatement selectStatement, IEnumerable<string> knownViewNames, DatabaseCatalog catalog)
     {
         var collector = new TableReferenceCollector();
         selectStatement.Accept(collector);
 
+        // A view defined over a synonym for another view must still get a dependency edge to
+        // that view - collector.QualifiedNames names the synonym itself, which never matches
+        // knownViewNames on its own, so topological order could resolve the outer view before
+        // the inner one and its columns would silently degrade to Unknown (the same failure
+        // mode the TVF-to-TVF edge fix below already guards against).
         var known = new HashSet<string>(knownViewNames, StringComparer.OrdinalIgnoreCase);
-        return [.. collector.QualifiedNames.Where(known.Contains)];
+        return [.. collector.QualifiedNames.Select(catalog.ResolveSynonymName).Where(known.Contains)];
     }
 
     private sealed class TableReferenceCollector : TSqlFragmentVisitor

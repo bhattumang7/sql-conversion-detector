@@ -76,22 +76,16 @@ public sealed class KnownGapCharacterizationTests
     // ScanForced (that literal is always "coercible default" and never conflicts) - see the
     // same test file's LiteralWithDifferingExplicitCollate_ForcesColumnScanForced.
 
-    [Fact]
-    public void SameCategoryFacetDifference_IsInvisible_ClassifiesSeekPreserved()
-    {
-        // decimal(10,2) column vs a decimal(9,8) literal: same category, so the classifier
-        // returns SeekPreserved without ever looking at precision/scale. Facet-aware
-        // classification (oracle-grounded, like TypePairMatrix) may well revise pairs like
-        // this; today the comparison is simply not inspected beyond its category.
-        var report = Scan("""
-            CREATE TABLE dbo.Ledger (Amount decimal(10,2) NOT NULL, INDEX IX_Amount (Amount));
-            GO
-            SELECT 1 FROM dbo.Ledger WHERE Amount = 1.23456789;
-            """);
-
-        Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
-        Assert.Empty(report.TypedFindings);
-    }
+    // SameCategoryFacetDifference was pinned here and turned out to be a NON-GAP, not a fix -
+    // direct oracle probing (Docker SQL Server, compile-only SHOWPLAN_XML) across
+    // varchar(10)/varchar(100)/varchar(max), nvarchar(10)/nvarchar(max), decimal(10,2) vs
+    // decimal(9,8)/decimal(38,10)/a high-precision literal, and char(10)/char(50) all showed a
+    // clean Index Seek with no CONVERT_IMPLICIT anywhere - length/precision/scale differences
+    // within the same category never defeat sargability. VerdictClassifier's unconditional
+    // SeekPreserved for a same-category pair is therefore already correct; no facet-aware
+    // classification workstream is needed. See Rules/VerdictClassifierTests.cs's
+    // Classify_SameCategoryFacetDifference_* tests for the positive assertions this evidence
+    // backs.
 
     // The three Tier-1 structural holes pinned here (function-wrapped column inside an IN
     // predicate, as a BETWEEN bound, and CAST wrapping an expression that merely CONTAINS a
@@ -120,72 +114,25 @@ public sealed class KnownGapCharacterizationTests
     // Lineage: constructs that silently give up
     // ------------------------------------------------------------------
 
-    [Fact]
-    public void Synonym_IsNeverResolved_QueryThroughItYieldsNoTypedFinding()
-    {
-        // dbo.Stock is a synonym for a table whose DDL was scanned in the same run - a pure
-        // name aliasing the catalog could resolve - yet no pass models CREATE SYNONYM, so
-        // the mismatch behind it is invisible (only skip-ledger entries record the loss).
-        var report = Scan("""
-            CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
-            GO
-            CREATE SYNONYM dbo.Stock FOR dbo.Inventory;
-            GO
-            SELECT 1 FROM dbo.Stock WHERE Sku = N'S1';
-            """);
+    // Synonym was pinned here and is now CLOSED - DatabaseCatalog.ResolveSynonymName walks a
+    // synonym chain to the real base object it means, and FromScopeResolver canonicalizes every
+    // FROM-clause reference through it before either the catalog/view lookup, so a query
+    // through a synonym resolves exactly like the base table itself would - the finding names
+    // the REAL base table, not the synonym, matching what a SARIF consumer or the Verify oracle
+    // needs to act on it. Moved to Catalog/SynonymResolutionTests.cs.
 
-        Assert.Empty(report.TypedFindings);
-        Assert.NotEmpty(report.SkippedConstructs);
-    }
+    // RecursiveCte was pinned here and is now CLOSED - T-SQL enforces (Msg 240) that a
+    // recursive member's column types match the anchor's exactly, so CteResolver now uses the
+    // anchor's type directly instead of wrapping it in Union[BaseColumn, Unknown] (which made
+    // every predicate through any recursive CTE unclassifiable). The anchor's own index claim
+    // is downgraded to Declared (type kept, index dropped) since a recursive CTE materializes
+    // through a spool. Moved to Lineage/RecursiveCteAnchorTypeTests.cs.
 
-    [Fact]
-    public void RecursiveCte_RecursiveBranchIsUnknown_MismatchThroughCteNeverConfirmed()
-    {
-        // The recursive member resolves as Unknown (anchor-only resolution), so a column
-        // read through the CTE has Union[BaseColumn, Unknown] provenance and the nvarchar
-        // mismatch on the indexed varchar CategoryCode can never reach ScanForced.
-        var report = Scan("""
-            CREATE TABLE dbo.Categories (
-                CategoryCode varchar(20) NOT NULL,
-                ParentCode varchar(20) NULL,
-                INDEX IX_CategoryCode (CategoryCode));
-            GO
-            WITH Tree AS (
-                SELECT CategoryCode, ParentCode FROM dbo.Categories WHERE ParentCode IS NULL
-                UNION ALL
-                SELECT c.CategoryCode, c.ParentCode
-                FROM dbo.Categories c
-                INNER JOIN Tree t ON c.ParentCode = t.CategoryCode)
-            SELECT 1 FROM Tree WHERE CategoryCode = N'X';
-            """);
-
-        Assert.DoesNotContain(report.TypedFindings, f => f.Verdict == Verdict.ScanForced);
-    }
-
-    [Fact]
-    public void SelectIntoFromView_ColumnsStayUntyped_MismatchOnTempCopyIsSilentlyDropped()
-    {
-        // SELECT ... INTO resolution never consults views (pass-ordering constraint), so
-        // #snap.Badge - really dbo.Employees.Badge one trivial layer away - stays untyped.
-        // The nvarchar mismatch against it then vanishes ENTIRELY: no finding, no Unknown,
-        // no skip-ledger entry - the same silent-drop honesty hole the computed-column test
-        // pins (a null-typed column side never reaches the classifier OR the ledger).
-        var report = Scan("""
-            CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL, INDEX IX_Badge (Badge));
-            GO
-            CREATE VIEW dbo.vEmployees AS SELECT Badge FROM dbo.Employees;
-            GO
-            CREATE PROCEDURE dbo.usp_Snapshot AS
-            BEGIN
-                SELECT Badge INTO #snap FROM dbo.vEmployees;
-                SELECT 1 FROM #snap WHERE Badge = N'B1';
-            END;
-            """);
-
-        Assert.Empty(report.TypedFindings);
-        Assert.Empty(report.SkippedConstructs);
-        Assert.Equal(0, report.TypedPredicateSummary.TotalClassified);
-    }
+    // SelectIntoFromView was pinned here and is now CLOSED - SelectIntoLineagePass re-resolves
+    // every SELECT INTO target's columns after LineageResolver has run, through the same
+    // QueryExpressionResolver machinery a view's own SELECT list uses, so a target column
+    // sourced from a view (or a UNION) now types correctly instead of vanishing with zero
+    // trace. Moved to Lineage/SelectIntoLineagePassTests.cs.
 
     [Fact]
     public void CrossDatabaseReference_GetsAKeyNothingPopulates_NoTypedFinding()

@@ -168,6 +168,25 @@ public static class FromScopeResolver
         _ => ResolveUnsupportedTableReference(tableReference, context),
     };
 
+    /// <summary>
+    /// SQL Server's four built-in system databases - real corpus DBA/admin scripts routinely
+    /// query these (msdb.dbo.sysjobs, master.sys.databases, tempdb.sys.tables, ...), and we will
+    /// never have DDL for any of them since there is nothing to CREATE. Corpus measurement
+    /// (466 three-part references across the pinned corpus, all of them msdb/master/tempdb/
+    /// model) proved multi-database catalog support would gain zero real findings - every
+    /// occurrence was already one of these four, never a genuine external user database. A
+    /// user-named external database (e.g. a cross-server logging DB some corpus repos
+    /// reference by name) is NOT in this set and stays the ordinary "no known DDL" case, since
+    /// it's a real, nameable gap rather than an intentional scope boundary.
+    /// </summary>
+    private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "master", "model", "msdb", "tempdb",
+    };
+
+    private static bool IsSystemDatabaseReference(SchemaObjectName schemaObject) =>
+        schemaObject.DatabaseIdentifier is { Value.Length: > 0 } db && SystemDatabaseNames.Contains(db.Value);
+
     private static (string? Alias, ScopeEntry Entry) ResolveNamedTableReference(NamedTableReference named, ResolutionContext context, string? aliasOverride)
     {
         var (catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope) = context;
@@ -183,7 +202,12 @@ public static class FromScopeResolver
             return (cteAlias, new ScopeEntry(cteRelation, IsViewLayer: false));
         }
 
-        var qualifiedName = SchemaObjectNameHelper.Qualify(named.SchemaObject);
+        // Canonicalized through any synonym chain BEFORE either lookup below - a synonym for a
+        // VIEW can only ever resolve via the resolvedViews dictionary (views are never in
+        // DatabaseCatalog at all), and a finding/probe against a synonym'd table must name the
+        // real base table, not the synonym, or SARIF/the Verify oracle's probe end up naming an
+        // object the rest of the pipeline never actually resolved anything about.
+        var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
         var isViewLayer = resolvedViews.TryGetValue(qualifiedName, out var view);
         var catalogTable = catalog.Find(qualifiedName, procScope);
 
@@ -200,9 +224,10 @@ public static class FromScopeResolver
 
         if (!isViewLayer && catalogTable is null && systemCatalogColumns is null)
         {
-            ledger?.Record(
-                AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn,
-                "FROM table reference", $"'{qualifiedName}' has no known DDL and is not a resolved view/TVF");
+            var reason = IsSystemDatabaseReference(named.SchemaObject)
+                ? $"'{qualifiedName}' references a SQL Server system database - intentionally out of scope (no DDL will ever exist to catalog it)"
+                : $"'{qualifiedName}' has no known DDL and is not a resolved view/TVF";
+            ledger?.Record(AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn, "FROM table reference", reason);
         }
 
         ResolvedRelation relation;
@@ -254,7 +279,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveTvfTableReference(SchemaObjectFunctionTableReference tvf, ResolutionContext context)
     {
-        var (_, resolvedViews, sourcePath, ledger, _, _) = context;
+        var (catalog, resolvedViews, sourcePath, ledger, _, _) = context;
 
         // A table-valued function invoked in a FROM clause (docs/audit-remediation-
         // plan.md Phase 4.2, audit finding B2). LineageResolver already resolves both
@@ -263,7 +288,9 @@ public static class FromScopeResolver
         // as the NamedTableReference view-layer case above, not a separate mechanism -
         // an inline TVF's own SELECT is exactly a view for lineage purposes, and a
         // multi-statement TVF's declared RETURNS shape is exactly Declared provenance.
-        var tvfQualifiedName = SchemaObjectNameHelper.Qualify(tvf.SchemaObject);
+        // Canonicalized through any synonym chain first, same reasoning as the ordinary
+        // table-reference case above.
+        var tvfQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(tvf.SchemaObject));
         if (!resolvedViews.TryGetValue(tvfQualifiedName, out var tvfRelation))
         {
             ledger?.Record(

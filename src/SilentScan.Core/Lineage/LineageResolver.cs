@@ -17,7 +17,7 @@ public static class LineageResolver
     {
         var ledger = new SkipLedger();
         var (views, tvfs) = ViewDefinitionExtractor.Extract(parseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger);
-        var (order, cyclicViews) = ViewDependencyGraph.TopologicalSort(views);
+        var (order, cyclicViews) = ViewDependencyGraph.TopologicalSort(views, catalog);
 
         var resolved = new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase);
 

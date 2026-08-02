@@ -69,6 +69,14 @@ public static class ScanReportBuilder
         // TableQualifiedName information instead of none at all.
         catalog ??= CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation);
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
+
+        // Pass 1 (CatalogBuilder) resolves a SELECT ... INTO target's columns against tables
+        // already known to the catalog only - views/CTEs/UNION sources are a Pass 2 concept
+        // catalog-building can't depend on without inverting the pass order. Re-resolves those
+        // targets now that lineage exists, mutating the same catalog instance every pass below
+        // reads (SelectIntoLineagePass docs: closes a silent-drop gap, not just an Unknown one).
+        SelectIntoLineagePass.Apply(catalog, lineage, usableParseResults);
+
         var tier1Findings = usableParseResults.SelectMany(r => NonSargablePredicateScanner.Scan(r, catalog, lineage)).ToList();
         var extractionResults = usableParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();

@@ -126,9 +126,13 @@ public sealed class SkipLedgerTests
         // docs/audit-remediation-plan.md Phase 4.1: UPDATE's WHERE clause previously had no
         // FROM-scope pushed at all, so this predicate was invisible to Pass 3 - it recorded a
         // "comparison outside FROM scope" skip instead of a real finding (see git history for
-        // the Phase 0.1 version of this test, which pinned that exact gap). Id outranks
-        // NVarChar in T-SQL's precedence list, so the parameter converts, not the column -
-        // SeekPreserved is the correct resolved verdict, not evidence of a remaining gap.
+        // the Phase 0.1 version of this test, which pinned that exact gap). This test's own
+        // subject is that scope fix (SkippedConstructs is empty), not the type-precedence
+        // claim - Int vs NVarChar -> SeekPreserved is oracle-probed and continuously
+        // re-verified in TypePairMatrix.json/TypePairMatrixLiveRegenerationTests.cs (the
+        // matrix, not this test, is this codebase's sole verdict authority per
+        // VerdictClassifierTests.Classify_NeverDisagreesWithItsOwnOracleProbedMatrix), so
+        // asserting the resulting Verdict here is a plumbing check, not an unverified guess.
         var sql = """
             CREATE TABLE dbo.Users (Id INT NOT NULL, DisplayName VARCHAR(40) NOT NULL);
             GO

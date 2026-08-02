@@ -14,6 +14,12 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, SqlType?> _scalarFunctionReturnTypesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>SQL Server forbids chaining (a synonym's target can't itself be a synonym), but a corpus can contain a broken/legacy script that does it anyway - bounds the walk so a real or accidental cycle can never loop instead of resolving.</summary>
+    private const int MaxSynonymHops = 8;
+
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
 
     /// <summary>
@@ -42,6 +48,40 @@ public sealed class DatabaseCatalog
     /// <summary>True only when a CREATE/ALTER FUNCTION with this qualified name was seen with a scalar (non-table) return type - a table-valued function or an unseen name both return false, so a caller can distinguish "not a scalar UDF" from "a scalar UDF whose type didn't resolve".</summary>
     public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
+
+    /// <summary>Registers <c>CREATE SYNONYM name FOR target</c> - a pure name-&gt;name mapping, so it belongs in the same phase type aliases do (nothing else needs to have been resolved first).</summary>
+    public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
+        _synonymTargetsByQualifiedName[qualifiedName] = targetQualifiedName;
+
+    /// <summary><c>DROP SYNONYM</c> - matches CatalogBuilder's single-phase, file-order-is-declaration-order treatment of every other name-only mapping.</summary>
+    public void RemoveSynonym(string qualifiedName) =>
+        _synonymTargetsByQualifiedName.Remove(qualifiedName);
+
+    /// <summary>
+    /// Walks a chain of synonyms to the real name a FROM-clause reference ultimately means -
+    /// <paramref name="qualifiedName"/> unchanged if it isn't a synonym at all. Real SQL Server
+    /// never chains synonyms, but this pass doesn't reject the DDL that tries to; a cycle or a
+    /// chain longer than <see cref="MaxSynonymHops"/> returns the ORIGINAL input rather than a
+    /// partially-walked name, so the caller's ordinary "no known DDL" path reports it honestly
+    /// instead of resolving to a guess.
+    /// </summary>
+    public string ResolveSynonymName(string qualifiedName)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var current = qualifiedName;
+
+        while (_synonymTargetsByQualifiedName.TryGetValue(current, out var next))
+        {
+            if (!seen.Add(current) || seen.Count > MaxSynonymHops)
+            {
+                return qualifiedName;
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
 
     public Collation? DefaultCollation { get; set; }
 

@@ -184,6 +184,30 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
+    public void Classify_SameCategoryFacetDifference_VarcharShorterColumnLongerValue_SeekPreserved()
+    {
+        // Oracle-verified directly (Docker SQL Server, compile-only SHOWPLAN_XML): varchar(10)
+        // column vs a varchar(100)/varchar(max) value seeks cleanly, no CONVERT_IMPLICIT
+        // anywhere - length differences within the same category never defeat sargability.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 100, Collation: SqlCollation);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_SameCategoryFacetDifference_DecimalDifferingPrecisionAndScale_SeekPreserved()
+    {
+        // Oracle-verified: decimal(10,2) column vs decimal(9,8)/decimal(38,10) value, and vs a
+        // high-precision literal (1.23456789), all seek cleanly - precision/scale differences
+        // within the same category never defeat sargability either.
+        var column = new SqlType(SqlTypeCategory.Decimal, Precision: 10, Scale: 2);
+        var value = new SqlType(SqlTypeCategory.Decimal, Precision: 9, Scale: 8);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
     public void Classify_NullColumnType_Unknown()
     {
         Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(null, new SqlType(SqlTypeCategory.Int)));

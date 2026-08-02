@@ -178,6 +178,35 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        /// <summary>
+        /// <c>CREATE SYNONYM name FOR target</c> - a pure name-&gt;name map with nothing else to
+        /// resolve first, so it belongs in the same phase type aliases do: a synonym declared in
+        /// a file that sorts after its consumers (routine in real repos that split DDL per
+        /// object) must still be visible regardless of file order.
+        /// </summary>
+        public override void ExplicitVisit(CreateSynonymStatement node)
+        {
+            if (phase == BuildPhase.CollectTypeAliases)
+            {
+                VisitCreateSynonym(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(DropSynonymStatement node)
+        {
+            if (phase == BuildPhase.CollectTypeAliases)
+            {
+                foreach (var target in node.Objects)
+                {
+                    catalog.RemoveSynonym(SchemaObjectNameHelper.Qualify(target));
+                }
+            }
+
+            node.AcceptChildren(this);
+        }
+
         // CLR constructs (coverage-remediation-plan.md Phase 0.2/3.6): no assembly-backed type,
         // aggregate, or CLR UDT is modeled - the decision is to count and decline, never guess at
         // a shape that lives outside the scanned script. Gated to one phase so a file walked
@@ -461,6 +490,26 @@ public static class CatalogBuilder
             }
 
             catalog.AddTypeAlias(qualifiedName, underlyingType);
+        }
+
+        private void VisitCreateSynonym(CreateSynonymStatement createSynonym)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(createSynonym.Name);
+
+            // SchemaObjectNameHelper.Qualify only reads Database/Schema/Base - it silently
+            // drops a ServerIdentifier, so a four-part linked-server target
+            // (FOR linkedserver.otherdb.dbo.T) would otherwise collide with an unrelated local
+            // key sharing the same database.schema.name tail. Ledgered, never registered under
+            // a name that could alias the wrong object.
+            if (createSynonym.ForName.ServerIdentifier is { Value.Length: > 0 })
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, createSynonym.StartLine, createSynonym.StartColumn,
+                    "CREATE SYNONYM", $"'{qualifiedName}': FOR target names a linked server - four-part cross-server synonyms are not modeled");
+                return;
+            }
+
+            catalog.AddSynonym(qualifiedName, SchemaObjectNameHelper.Qualify(createSynonym.ForName));
         }
 
         private void VisitAlterIndex(AlterIndexStatement alterIndex)

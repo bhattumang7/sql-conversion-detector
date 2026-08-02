@@ -463,12 +463,15 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
-    public void Resolve_RecursiveCte_AnchorResolvesRecursiveMemberIsUnknown()
+    public void Resolve_RecursiveCte_AnchorTypeIsUsedDirectly_IndexClaimDropped()
     {
-        // docs/audit-remediation-plan.md Phase 2.4: resolving a recursive CTE's own final
-        // output as if visible to its recursive member would be a guess - only the anchor
-        // (non-self-referencing) branch is resolved; the recursive branch is recorded as an
-        // explicit Unknown sibling in a Union, never silently dropped or guessed.
+        // Resolving a recursive CTE's own final output as if visible to its recursive member
+        // would be a guess - only the anchor (non-self-referencing) branch is resolved. But
+        // T-SQL enforces (Msg 240) that the recursive member's column types match the anchor's
+        // exactly, so the anchor's type IS the CTE's type by engine guarantee, not an
+        // unverified guess - no Union-with-Unknown wrapper (that made every predicate through
+        // any recursive CTE unclassifiable). The anchor's BaseColumn index claim IS downgraded
+        // to Declared: a recursive CTE materializes through a spool, not a direct index access.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Employees (EmployeeId INT NOT NULL, ManagerId INT NULL);",
             """
@@ -482,11 +485,10 @@ public sealed class LineageResolverTests
             """);
 
         var view = lineage.Find("dbo.vw_OrgChart")!;
-        var union = Assert.IsType<ColumnProvenance.Union>(view.FindColumn("EmployeeId")!.Provenance);
+        var declared = Assert.IsType<ColumnProvenance.Declared>(view.FindColumn("EmployeeId")!.Provenance);
 
-        Assert.Equal(2, union.Branches.Count);
-        Assert.IsType<ColumnProvenance.BaseColumn>(union.Branches[0]);
-        Assert.IsType<ColumnProvenance.Unknown>(union.Branches[1]);
+        Assert.Equal(SqlTypeCategory.Int, declared.Type.Category);
+        Assert.Equal("OrgChart", declared.TableQualifiedName);
     }
 
     [Fact]

@@ -66,10 +66,22 @@ public static class CteResolver
     /// A recursive CTE's own query text has no rows to compare against on the first (anchor)
     /// evaluation - resolving the recursive member as if it could see its own final output would
     /// be a guess, so only the anchor branch (the top-level UNION/UNION ALL side that does NOT
-    /// reference the CTE's own name) is resolved. The recursive branch's contribution is recorded
-    /// as <see cref="ColumnProvenance.Union"/> with an <see cref="ColumnProvenance.Unknown"/>
-    /// sibling per column - CLAUDE.md: "record ALL branch types," never silently drop the branch
-    /// that couldn't be resolved.
+    /// reference the CTE's own name) is resolved. Unlike a plain UNION, this is NOT reported as
+    /// a <see cref="ColumnProvenance.Union"/> of "anchor, Unknown": T-SQL enforces (Msg 240,
+    /// "Types don't match between the anchor and the recursive part") that the recursive
+    /// member's column types are IDENTICAL to the anchor's - a script that violates this simply
+    /// doesn't compile, so the anchor's type IS the CTE's type by engine guarantee, not an
+    /// unverified guess. The Union-with-Unknown wrapper this used to produce made every
+    /// TypedPredicateExtractor operand under it non-eligible for a verdict at all (a Union
+    /// branch is never a BaseColumn/Declared), so no predicate through any recursive CTE could
+    /// ever be classified - this fixes that for the whole class, not just this one construct.
+    ///
+    /// The INDEX claim is a different story: a recursive CTE materializes through a stack spool,
+    /// so the outer predicate is not reliably pushed into the anchor's own base-table access -
+    /// same reasoning as an INSTEAD OF trigger's pseudo-table (<see cref="FromScopeResolver.ToPseudoTableRelation(ResolvedRelation, string)"/>).
+    /// Any <see cref="ColumnProvenance.BaseColumn"/> in the anchor's own resolution is therefore
+    /// downgraded to <see cref="ColumnProvenance.Declared"/> here - the type is real and usable
+    /// for a verdict, the index is not.
     /// </summary>
     private static List<ResolvedColumn> ResolveRecursiveAnchor(
         CommonTableExpression cte, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
@@ -78,7 +90,7 @@ public static class CteResolver
         var name = cte.ExpressionName.Value;
         ledger?.Record(
             AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "recursive CTE",
-            $"'{name}' is a recursive CTE - only the anchor member was resolved; the recursive member's own contribution is Unknown");
+            $"'{name}' is a recursive CTE - only the anchor member was resolved; T-SQL requires the recursive member's column types to match the anchor's exactly (Msg 240), so the anchor's types are used directly, with any base-table index claim dropped (a recursive CTE materializes through a spool, not a direct index access)");
 
         if (cte.QueryExpression is not BinaryQueryExpression binary)
         {
@@ -93,7 +105,16 @@ public static class CteResolver
         var anchorColumns = QueryExpressionResolver.Resolve(anchorExpression, catalog, resolvedViews, sourcePath, ledger, priorCtes, procScope);
         return [.. anchorColumns.Select(c => c with
         {
-            Provenance = new ColumnProvenance.Union([c.Provenance, new ColumnProvenance.Unknown($"recursive member of CTE '{name}' not resolved - never guess")]),
+            Provenance = c.Provenance switch
+            {
+                ColumnProvenance.BaseColumn { Type: { } type } => new ColumnProvenance.Declared(type, TableQualifiedName: name),
+                // Same two-armed pattern FromScopeResolver.ToPseudoTableRelation uses for an
+                // INSTEAD OF trigger's pseudo-table: a BaseColumn with no resolved type at all
+                // can't become Declared (its Type is non-nullable) - Unknown, explicit, rather
+                // than silently left as a BaseColumn that would still claim a real index.
+                ColumnProvenance.BaseColumn => new ColumnProvenance.Unknown($"recursive CTE '{name}' anchor column has an unresolved declared type"),
+                _ => c.Provenance,
+            },
         })];
     }
 
