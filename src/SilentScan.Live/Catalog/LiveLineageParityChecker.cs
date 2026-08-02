@@ -78,8 +78,7 @@ public sealed class LiveLineageParityChecker
             ORDER BY c.column_id;
             """;
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
         command.Parameters.AddWithValue("@objectName", schemaQualifiedObjectName);
 
         var columns = new Dictionary<string, ActualColumn>(StringComparer.OrdinalIgnoreCase);

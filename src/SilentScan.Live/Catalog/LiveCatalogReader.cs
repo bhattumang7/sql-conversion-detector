@@ -61,8 +61,7 @@ public sealed class LiveCatalogReader
 
     private static async Task<Collation?> ReadDatabaseDefaultCollationAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT collation_name FROM sys.databases WHERE database_id = DB_ID();";
+        await using var command = connection.CreateReadOnlyCommand("SELECT collation_name FROM sys.databases WHERE database_id = DB_ID();");
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is string name ? new Collation(name, CollationSource.DatabaseDefaultFromDdl) : null;
     }
@@ -79,8 +78,7 @@ public sealed class LiveCatalogReader
             WHERE t.is_user_defined = 1 AND t.is_table_type = 0;
             """;
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
 
         var aliases = new List<(string, SqlType)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -115,8 +113,7 @@ public sealed class LiveCatalogReader
             ORDER BY s.name, t.name;
             """;
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
 
         var tables = new List<(int, string, string)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -144,8 +141,7 @@ public sealed class LiveCatalogReader
             ORDER BY c.object_id, c.column_id;
             """;
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
 
         var columnsByTable = new Dictionary<int, List<CatalogColumn>>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -204,8 +200,7 @@ public sealed class LiveCatalogReader
             ORDER BY i.object_id, i.index_id, ic.index_column_id;
             """;
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
 
         var rowsByIndex = new Dictionary<(int ObjectId, int IndexId), IndexRow>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

@@ -46,8 +46,7 @@ public sealed class LiveModuleReader
             ORDER BY s.name, o.name;
             """;
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
 
         var modules = new List<LiveModule>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -104,8 +103,7 @@ public sealed class LiveModuleReader
     private static async Task<List<UnanalyzableModule>> ReadUnanalyzableAsync(
         SqlConnection connection, string sql, UnanalyzableModuleReason reason, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        await using var command = connection.CreateReadOnlyCommand(sql);
 
         var results = new List<UnanalyzableModule>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

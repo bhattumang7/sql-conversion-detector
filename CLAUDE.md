@@ -40,6 +40,10 @@ When you have to make code changes and are just moving to the next stage and all
 * EF Core / ORM analysis is out of v1. SQL text only.
 * Corpus DML and procs are **never executed**, anywhere. The only execution is
   self-authored probes inside the disposable Docker SQL Server.
+* A connected live database (`scan-db`) is scanned **read-only**: only
+  catalog/metadata `SELECT` queries are issued, enforced in code
+  (`LiveReadOnlyGuard`) rather than left to review alone - no DDL, no DML,
+  nothing from a target database is ever executed.
 * .NET 10, C#. Ubuntu; Docker assumed available.
 * Corpus stays at the pinned 5-repo pilot set unless we decide otherwise.
 
@@ -150,7 +154,7 @@ published externally without Umang's explicit go-ahead.
   co-author. Write commit messages about what changed and why — never
   "resolve item #3", which means nothing to someone reading it back later. Do not 
   use "Phase 1", "gate 1" etc place holders in the commit message that have 
-  no meaning in the future.
+  no meaning in the future. Commit after each logical work unit finishes.
   
 # Mark down files
 Resist the urge to write down mark down files that wont have any meaning in 
