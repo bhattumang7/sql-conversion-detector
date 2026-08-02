@@ -1434,7 +1434,13 @@ public static class TypedPredicateExtractor
             {
                 // No traceable base column underneath (e.g. ROW_NUMBER(), a derived-table
                 // alias over another expression, an XML .value() shred) - true that it's
-                // expression-derived, but nothing actionable to point at, so not reported.
+                // expression-derived, but nothing actionable to point at, so no
+                // ExpressionDerivedFinding is reported. Still ledgered rather than silently
+                // dropped, so this deliberate decision is countable like every other "nothing to
+                // classify here" branch in this pass.
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, columnRef.StartLine, columnRef.StartColumn,
+                    "expression-derived predicate", $"'{columnName}' is expression-derived but no underlying base column could be traced (e.g. ROW_NUMBER(), a derived-table alias over another expression, an XML shred) - nothing actionable to report");
                 return;
             }
 

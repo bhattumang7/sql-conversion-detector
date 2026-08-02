@@ -110,6 +110,31 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
+    public void Resolve_UnionBranchesWithMismatchedColumnCounts_DegradesToUnknownAndLedgers()
+    {
+        // The bug this closes: a position-based Zip over two UNION branches with different
+        // column counts used to silently truncate to the shorter branch's length, dropping the
+        // longer branch's extra columns with no trace at all (worse than LineageResolver's own
+        // explicit-column-list Zip, which already degrades to Unknown + ledger on a count
+        // mismatch). `SELECT * FROM dbo.Missing` over an unresolvable table resolves to zero
+        // columns (ResolveStar's own documented behavior), so pairing it against a genuine
+        // 2-column SELECT is a reliable way to force the mismatch.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.OrdersReal (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
+            """
+            CREATE VIEW dbo.vw_MismatchedUnion AS
+                SELECT OrderId, OrderCode FROM dbo.OrdersReal
+                UNION ALL
+                SELECT * FROM dbo.Missing;
+            """);
+
+        var view = lineage.Find("dbo.vw_MismatchedUnion")!;
+
+        Assert.All(view.Columns, c => Assert.IsType<ColumnProvenance.Unknown>(c.Provenance));
+        Assert.Contains(lineage.Skipped.Entries, e => e.ConstructKind == "query expression" && e.Reason.Contains("different column counts", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Resolve_MixedCollationUnion_RecordsBothBranchProvenances()
     {
         var (_, lineage) = Build(

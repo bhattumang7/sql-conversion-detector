@@ -690,6 +690,27 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_PredicateAgainstUntraceableExpressionDerivedColumn_NoFindingButLedgered()
+    {
+        // The bug this closes: RecordExpressionDerivedFinding's own "no traceable base column
+        // underneath" branch (ROW_NUMBER(), a derived-table alias over another opaque
+        // expression) returned with zero trace - true that it's expression-derived, but nothing
+        // actionable to report, so no ExpressionDerivedFinding fired; that decision itself was
+        // never ledgered, unlike every other "nothing to classify here" branch in this pass.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL);",
+            """
+            SELECT rn FROM (
+                SELECT ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rn FROM dbo.T
+            ) AS x
+            WHERE x.rn = 1;
+            """);
+
+        Assert.Empty(result.ExpressionDerivedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "expression-derived predicate" && s.Reason.Contains("rn", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
     {
         // Roadmap Phase B: arithmetic (Other + 1) is now typeable through the shared

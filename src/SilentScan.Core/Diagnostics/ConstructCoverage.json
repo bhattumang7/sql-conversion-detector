@@ -10,6 +10,13 @@
       "rationale": null
     },
     {
+      "construct": "DefaultConstraintDefinition / CheckConstraintDefinition / ForeignKeyConstraintDefinition",
+      "group": "ColumnDefiner",
+      "status": "Gap",
+      "verifiedBy": null,
+      "rationale": "BuildIndexesFromTableConstraints filters table-level constraints to UniqueConstraintDefinition only (PK/UNIQUE, which define indexes) - DEFAULT/CHECK/FOREIGN KEY are silently dropped, not ledgered. Accepted as a permanent scope decision, not a bug to fix: none of the three carry type or seekability information this tool classifies (a CHECK constraint's predicate isn't a query-time comparison; a FOREIGN KEY doesn't create an index by itself). Gap rather than Ledgered because no code currently records an occurrence - wiring a ledger call through here would need threading sourcePath/SkipLedger into a static helper with six call sites for information with zero analytical value, judged not worth the churn."
+    },
+    {
       "construct": "AlterTableAddTableElementStatement",
       "group": "ColumnDefiner",
       "status": "Handled",

@@ -1141,6 +1141,12 @@ public static class CatalogBuilder
             var body = declareTableVar.Body;
             if (body.Definition is null)
             {
+                // Should not happen for a syntactically valid DECLARE @t TABLE(...) - ScriptDom's
+                // grammar requires a parenthesized definition - but ledgered defensively rather
+                // than silently returning, matching this pass's own policy everywhere else.
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, declareTableVar.StartLine, declareTableVar.StartColumn,
+                    "table variable", $"'{body.VariableName?.Value}' has no table definition to catalog");
                 return;
             }
 

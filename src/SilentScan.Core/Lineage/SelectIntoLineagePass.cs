@@ -105,6 +105,13 @@ public static class SelectIntoLineagePass
             var existing = catalog.Find(qualifiedName, isTemp ? _currentScope : null);
             if (existing is null)
             {
+                // Should not happen in a well-formed scan (Pass 1's CatalogBuilder.VisitSelectInto
+                // runs unconditionally on every SELECT INTO before this pass starts) - but ledgered
+                // rather than silently returning, since a future ordering bug here would otherwise
+                // vanish with zero trace instead of surfacing as a visible skip.
+                catalog.Skipped.Record(
+                    AnalysisPass.Lineage, sourcePath, select.StartLine, select.StartColumn, "SELECT INTO",
+                    $"'{qualifiedName}' has no Pass-1 catalog entry to merge into - the SELECT INTO statement may not have reached CatalogBuilder");
                 return;
             }
 
