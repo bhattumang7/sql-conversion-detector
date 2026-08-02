@@ -54,6 +54,7 @@ public static class NonSargablePredicateScanner
     public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope);
+        visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
         return visitor.Findings;
     }
@@ -66,6 +67,15 @@ public static class NonSargablePredicateScanner
         private bool _inFilterContext;
 
         public List<SargabilityFinding> Findings { get; } = [];
+
+        /// <summary>Mirrors TypedPredicateExtractor's identical seed - pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack before the visitor starts walking, so a reparsed dynamic SQL fragment found inside a trigger body sees them too.</summary>
+        public void SeedEnclosingScope(TSqlFragment rootFragment)
+        {
+            if (enclosingScope?.TriggerTarget is { } target)
+            {
+                _cteStack.Push(BuildTriggerPseudoTableRelations(target, rootFragment));
+            }
+        }
 
         /// <summary>
         /// Resets filter context to false for every part of a query specification except its
@@ -158,6 +168,12 @@ public static class NonSargablePredicateScanner
 
         public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
 
+        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
+
+        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
+
+        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
+
         public override void ExplicitVisit(WhereClause node)
         {
             var previous = _inFilterContext;
@@ -195,6 +211,55 @@ public static class NonSargablePredicateScanner
             _currentProcScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
             _currentProcScope = previousScope;
+        }
+
+        /// <summary>Mirrors TypedPredicateExtractor's identical override - without it, a #temp table declared in a trigger body resolved under no scope key at all in Tier-1, and inserted/deleted were never visible here regardless.</summary>
+        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
+        {
+            var previousScope = _currentProcScope;
+            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+
+            // A DDL/LOGON trigger has no target object and no inserted/deleted rowset (it gets
+            // its data from EVENTDATA()) - nothing to seed, but still walk the body, since it may
+            // still contain ordinary predicates against real tables.
+            if (triggerObject.Name is not { } targetTableName)
+            {
+                node.AcceptChildren(this);
+                _currentProcScope = previousScope;
+                return;
+            }
+
+            _cteStack.Push(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName, node)));
+            node.AcceptChildren(this);
+            _cteStack.Pop();
+
+            _currentProcScope = previousScope;
+        }
+
+        /// <summary>Mirrors TypedPredicateExtractor's identical helper - inserted/deleted are shaped like the trigger's own target table or view, but never claim its index (they're a version-store rowset with none of their own).</summary>
+        private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
+        {
+            var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
+
+            ResolvedRelation relation;
+            if (resolvedViews.TryGetValue(qualifiedName, out var viewRelation))
+            {
+                relation = FromScopeResolver.ToPseudoTableRelation(viewRelation, qualifiedName);
+            }
+            else if (catalog.Find(qualifiedName) is { } table)
+            {
+                relation = FromScopeResolver.ToPseudoTableRelation(table, qualifiedName);
+            }
+            else
+            {
+                return EmptyResolvedViews;
+            }
+
+            return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["inserted"] = relation,
+                ["deleted"] = relation,
+            };
         }
 
         public override void Visit(BooleanComparisonExpression node)
@@ -367,9 +432,14 @@ public static class NonSargablePredicateScanner
                     baseColumn.TableQualifiedName,
                     catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false),
 
-                // A multi-statement TVF's own RETURNS TABLE(...) column - a real type, but never
-                // backed by a real catalog table/index (CLAUDE.md never guesses an index for it).
-                ColumnProvenance.Declared => (null, false),
+                // A multi-statement TVF's own RETURNS TABLE(...) column has no real backing
+                // table, so TableQualifiedName stays null there - but a trigger's inserted/
+                // deleted DOES carry one (FromScopeResolver.ToPseudoTableRelation keeps the
+                // real target table's name so the finding stays attributable to where the data
+                // actually lives), so it must not be discarded the way TypedPredicateExtractor's
+                // identical Declared case doesn't discard it either. Indexed is always false
+                // regardless: neither shape is backed by a real catalog index.
+                ColumnProvenance.Declared declared => (declared.TableQualifiedName, false),
 
                 _ => (null, null),
             };
