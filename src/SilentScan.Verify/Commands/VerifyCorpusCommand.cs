@@ -93,7 +93,7 @@ public static class VerifyCorpusCommand
         }
 
         var context = new VerifyContext(
-            new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
+            new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), new CollationConflictVerifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
         var summaries = new SortedDictionary<string, RepoVerificationSummary>(StringComparer.Ordinal);
         var hadMissingRepo = false;
 
@@ -136,7 +136,7 @@ public static class VerifyCorpusCommand
     }
 
     private sealed record VerifyContext(
-        DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
+        DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, CollationConflictVerifier CollationConflictVerifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
 
     private static async Task<RepoVerificationSummary> VerifyRepoAsync(
         CorpusRepoEntry repo,
@@ -233,6 +233,15 @@ public static class VerifyCorpusCommand
                 results.Add(await context.Verifier.VerifyAsync(databaseName, finding, cancellationToken));
             }
 
+            // Every CollationConflictFinding is probe-worthy, unlike TypedFindings' ScanForced/
+            // RangeSeek-only filter above - the finding's whole claim (this comparison does not
+            // compile) is checkable regardless of verdict, since there is no verdict at all here.
+            var collationConflictResults = new List<CollationConflictResult>();
+            foreach (var finding in report.CollationConflictFindings)
+            {
+                collationConflictResults.Add(await context.CollationConflictVerifier.VerifyAsync(databaseName, finding, cancellationToken));
+            }
+
             return new RepoVerificationSummary(
                 TotalDdlFiles: ddlFiles.Count,
                 DeploymentErrors: deploymentErrors,
@@ -245,6 +254,9 @@ public static class VerifyCorpusCommand
                 ProbeFailed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ProbeFailed)],
                 ConfirmedUnindexed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ConfirmedUnindexed)],
                 ConfirmedViaScratchIndex: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ConfirmedViaScratchIndex)],
+                CollationConflictConfirmed: [.. collationConflictResults.Where(r => r.Outcome == CollationConflictOutcome.Confirmed)],
+                CollationConflictNotConfirmed: [.. collationConflictResults.Where(r => r.Outcome == CollationConflictOutcome.NotConfirmed)],
+                CollationConflictProbeFailed: [.. collationConflictResults.Where(r => r.Outcome == CollationConflictOutcome.ProbeFailed)],
                 DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
@@ -288,6 +300,9 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<CorpusFindingResult> ProbeFailed,
     IReadOnlyList<CorpusFindingResult> ConfirmedUnindexed,
     IReadOnlyList<CorpusFindingResult> ConfirmedViaScratchIndex,
+    IReadOnlyList<CollationConflictResult> CollationConflictConfirmed,
+    IReadOnlyList<CollationConflictResult> CollationConflictNotConfirmed,
+    IReadOnlyList<CollationConflictResult> CollationConflictProbeFailed,
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,
