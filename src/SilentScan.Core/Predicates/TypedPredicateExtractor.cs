@@ -389,17 +389,39 @@ public static class TypedPredicateExtractor
 
         public override void Visit(BooleanTernaryExpression node)
         {
-            if (node.TernaryExpressionType is BooleanTernaryExpressionType.Between or BooleanTernaryExpressionType.NotBetween)
+            if (node.TernaryExpressionType is not (BooleanTernaryExpressionType.Between or BooleanTernaryExpressionType.NotBetween))
             {
-                // BETWEEN decomposes into `col >= lower AND col <= upper` - both bounds are
-                // independent comparisons against the same column and either one alone can
-                // force the conversion (docs/audit-remediation-plan.md Phase 4.3), e.g.
-                // `Col BETWEEN 1 AND N'x'` where only the upper bound carries the
-                // higher-precedence literal. Reporting only the lower bound (as this used to)
-                // silently dropped that case.
-                TryAddFinding(node.FirstExpression, node.SecondExpression, ">=", node);
-                TryAddFinding(node.FirstExpression, node.ThirdExpression, "<=", node);
+                return;
             }
+
+            // Roadmap Phase E2: NOT BETWEEN was previously treated identically to BETWEEN,
+            // reporting `>= lower` / `<= upper` findings for what the engine actually evaluates
+            // as `< lower OR > upper` - a WRONG verdict (same failure class the NOT-polarity fix
+            // above addressed), not a missing one. Oracle-verified directly: `Col NOT BETWEEN
+            // 'a' AND N'z'` produces an Index Scan with BOTH comparisons OR'd together, even
+            // when both bounds already match the column's own type - non-sargable regardless of
+            // type match, the identical pattern <>/NOT LIKE/NOT IN/<> ALL already follow. A NOT-
+            // wrapped ordinary BETWEEN is the same predicate under different syntax, so _negated
+            // routes through the same path (this was deliberately deferred when the NOT-polarity
+            // fix landed, pending this oracle probe).
+            var isNotBetween = node.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween || _negated;
+            if (isNotBetween)
+            {
+                if (_scopeStack.Count > 0 && _inFilterContext)
+                {
+                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT BETWEEN is not sargable regardless of type match - not attributed to a type-conversion verdict");
+                }
+
+                return;
+            }
+
+            // BETWEEN decomposes into `col >= lower AND col <= upper` - both bounds are
+            // independent comparisons against the same column and either one alone can force
+            // the conversion (docs/audit-remediation-plan.md Phase 4.3), e.g. `Col BETWEEN 1
+            // AND N'x'` where only the upper bound carries the higher-precedence literal.
+            // Reporting only the lower bound (as this used to) silently dropped that case.
+            TryAddFinding(node.FirstExpression, node.SecondExpression, ">=", node);
+            TryAddFinding(node.FirstExpression, node.ThirdExpression, "<=", node);
         }
 
         public override void Visit(LikePredicate node)

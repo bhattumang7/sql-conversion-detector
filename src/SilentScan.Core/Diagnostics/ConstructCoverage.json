@@ -301,7 +301,14 @@
       "group": "PredicateCarrier",
       "status": "Handled",
       "verifiedBy": "Predicates.TypedPredicateExtractorTests",
-      "rationale": "Roadmap Phase E2: previously invisible to the extractor entirely - the default traversal recursed straight into whatever the NOT wrapped, so `NOT (Col = @p)` reported an ordinary = finding for what the engine evaluates as <> (a WRONG verdict, not a missing one). Fixed: negation tracked as a toggled bool applied to comparison operators (inverted to their T-SQL negation) and to LIKE/IN (routed to the existing non-sargable-regardless-of-type ledgered-skip path NOT LIKE/NOT IN already use). BETWEEN-under-NOT is deliberately not covered - it decomposes into a disjunction, not a simple operator inversion."
+      "rationale": "Roadmap Phase E2: previously invisible to the extractor entirely - the default traversal recursed straight into whatever the NOT wrapped, so `NOT (Col = @p)` reported an ordinary = finding for what the engine evaluates as <> (a WRONG verdict, not a missing one). Fixed: negation tracked as a toggled bool applied to comparison operators (inverted to their T-SQL negation), to LIKE/IN (routed to the existing non-sargable-regardless-of-type ledgered-skip path NOT LIKE/NOT IN already use), and to BETWEEN (see BooleanTernaryExpression (NOT BETWEEN) below - initially deferred pending that construct's own oracle verification, closed once it landed)."
+    },
+    {
+      "construct": "BooleanTernaryExpression (NOT BETWEEN)",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Roadmap Phase E2: previously treated identically to plain BETWEEN, reporting `>= lower`/`<= upper` findings for what the engine actually evaluates as `< lower OR > upper` - a WRONG verdict, not a missing one. Oracle-verified directly: `Col NOT BETWEEN 'a' AND N'z'` produces an Index Scan with both comparisons OR'd together, even when both bounds already match the column's own type - non-sargable regardless of type match, the same pattern <>/NOT LIKE/NOT IN/<> ALL already follow. A NOT-wrapped ordinary BETWEEN (`NOT (Col BETWEEN x AND y)`) is routed through the identical path."
     },
     {
       "construct": "BooleanIsNullExpression",

@@ -735,6 +735,49 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_NotBetweenKeyword_IsNotAttributedToTypeConversionVerdict()
+    {
+        // Roadmap Phase E2: oracle-verified directly - `Col NOT BETWEEN 'a' AND N'z'` produces
+        // an Index Scan (both comparisons OR'd together), even when both bounds already match
+        // the column's own type - non-sargable regardless of type match, previously
+        // misclassified as if it were a plain BETWEEN (`>=`/`<=` findings for a materially
+        // different predicate - a wrong verdict, not a missing one).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col NOT BETWEEN N'a' AND N'z';");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT BETWEEN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_NotWrappedBetween_IsTreatedTheSameAsNotBetweenKeyword()
+    {
+        // NOT (Col BETWEEN x AND y) is the same predicate as Col NOT BETWEEN x AND y under
+        // different syntax - deliberately deferred when the NOT-polarity fix landed, closed here
+        // once NOT BETWEEN's own oracle-verified behavior was established.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (Col BETWEEN N'a' AND N'z');");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT BETWEEN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_DoubleNotWrappedBetween_ClassifiesAsOrdinaryBetween()
+    {
+        // NOT NOT X == X - proves this follows the same negation-parity model as every other
+        // wrapped predicate, not a special case.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE NOT (NOT (Col BETWEEN N'a' AND N'z'));");
+
+        Assert.Equal(2, result.TypedFindings.Count);
+        Assert.All(result.TypedFindings, f => Assert.Equal(Verdict.ScanForced, f.Verdict));
+    }
+
+    [Fact]
     public void Extract_IsNullPredicate_ProducesNoFindingAndNoLedgerNoise()
     {
         // Roadmap Phase E2: IS NULL is its own distinct SQL operation, not a value comparison -
