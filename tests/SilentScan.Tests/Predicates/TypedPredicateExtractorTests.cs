@@ -622,6 +622,42 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_ColumnWrappedInCoalesceComparedToLiteral_NoTypedFinding_ButLedgered()
+    {
+        // The bug this closes: a column wrapped in COALESCE (or CASE/NULLIF/IIF) resolves
+        // through ResolveOperand's ExpressionTypeInferencer branch into a Value operand, not a
+        // Column - so neither side of `WHERE COALESCE(Col, '') = N'x'` is a PredicateOperand.Column
+        // and this used to hit a silent `return` with zero trace: no typed finding AND no ledger
+        // entry, even though the enclosing context is a genuine WHERE clause and Tier-1 (a
+        // completely separate pass) independently flags the exact same construct as a syntactic
+        // FunctionWrappedColumn finding. The typed tier must leave its own trace too - "nothing
+        // classified here" should always be a ledger entry somewhere, never silence.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE COALESCE(Col, '') = N'x';");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "no column operand");
+    }
+
+    [Fact]
+    public void Extract_InSubqueryWithMultipleOutputColumns_ResolvesUnknownAndLedgers_NotWrongColumn()
+    {
+        // ResolveInSubqueryType used to take columns[0] unconditionally regardless of how many
+        // columns the subquery actually resolved to - a genuinely multi-column subquery would
+        // silently type the IN comparison off whichever column happened to resolve first, with
+        // no check or ledger trace. `IN (SELECT ...)` only has a well-defined single output
+        // column when there IS exactly one; more than one is Unknown, not a guess.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Other (A INT NOT NULL, B INT NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col IN (SELECT A, B FROM dbo.Other);");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "IN predicate");
+    }
+
+    [Fact]
     public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
     {
         // Roadmap Phase B: arithmetic (Other + 1) is now typeable through the shared
@@ -650,6 +686,115 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.TypedFindings);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT IN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_ComparisonInsideCaseWhenBranchWithinWhere_NotAFinding_ButLedgered()
+    {
+        // The bug this closes: ScriptDom's default traversal still walks into a
+        // SearchedCaseExpression's WhenClauses after ResolveOperand has already typed the CASE
+        // as a whole, so `WHERE CASE WHEN Col = N'X' THEN 1 ELSE 0 END = 1` used to visit the
+        // inner `Col = N'X'` with filter context still true (inherited from the enclosing
+        // WHERE) and report it as an independent, verdict-bearing finding - a comparison the
+        // optimizer never uses as a seek predicate. The outer `CASE(...) = 1` comparison is the
+        // only real predicate here and must still classify normally.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE CASE WHEN Col = N'X' THEN 1 ELSE 0 END = 1;");
+
+        // The outer `CASE(...) = 1` comparison has no column on either side (the CASE result is
+        // a Value operand, and so is the literal 1), so it produces no typed finding of its own
+        // either - that both-sides-non-column case is ledgered too now ("no column operand",
+        // covered in its own test), not silent. The point under test here is narrower: the INNER
+        // `Col = N'X'` must not produce a SECOND, spurious finding, and must leave a ledger
+        // trace precisely because it looked like a real WHERE predicate.
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Contains(
+            result.SkippedConstructs,
+            s => s.ConstructKind == "comparison inside scalar expression" && s.Reason.Contains("CASE/IIF/COALESCE/NULLIF", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_ComparisonInsideIifPredicateWithinWhere_NotAFinding_ButLedgered()
+    {
+        // Same leak, via IIF's own Predicate (a BooleanExpression, structurally identical to a
+        // SearchedCaseExpression's WhenExpression).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE IIF(Col = N'X', 1, 0) = 1;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "comparison inside scalar expression");
+    }
+
+    [Fact]
+    public void Extract_CaseInSelectList_StillSilentlyExcluded_NotLedgered()
+    {
+        // Near-miss for the fix above: a CASE branch's inner comparison that was NEVER inside an
+        // active filter clause to begin with (a SELECT-list CASE) must stay silently excluded,
+        // exactly as before - only a comparison that suspended a genuinely active filter context
+        // gets the new ledger entry, or every SELECT-list CASE in the corpus would start
+        // generating ledger noise.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT CASE WHEN Col = N'X' THEN 1 ELSE 0 END FROM dbo.T;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "comparison inside scalar expression");
+    }
+
+    [Fact]
+    public void Extract_MergeUpdateSetClauseWithCase_NoFindingFromSetClause_OnAndActionConditionStillFire()
+    {
+        // The MERGE half of the same bug class: the previous implementation held filter context
+        // true across the ENTIRE MergeSpecification subtree (rationale: "no SELECT-list analog
+        // inside a MergeSpecification") - wrong, since UpdateMergeAction.SetClauses IS exactly
+        // that analog. `WHEN MATCHED THEN UPDATE SET t.Flag = CASE WHEN t.Code = N'x' THEN 1
+        // ELSE 0 END` used to report a false finding for the inner `t.Code = N'x'`. The ON clause
+        // and the action's own "AND <cond>" extra condition are genuine filter positions and
+        // must keep firing.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TargetMergeCase (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Flag INT NOT NULL);",
+            "CREATE TABLE dbo.SourceMergeCase (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);",
+            """
+            MERGE INTO dbo.TargetMergeCase AS t
+            USING dbo.SourceMergeCase AS s
+            ON t.Id = s.Id
+            WHEN MATCHED AND t.Code = N'y' THEN UPDATE SET t.Flag = CASE WHEN t.Code = N'x' THEN 1 ELSE 0 END;
+            """);
+
+        // The action-clause condition (t.Code = N'y') fires; the SET clause's inner CASE
+        // comparison (t.Code = N'x') must not produce a second, spurious finding for the same
+        // column. Unlike the WHERE-clause case above, the SET clause was never itself a filter
+        // position to begin with (an assignment target, structurally the same as a SELECT list),
+        // so there is no active filter context to suspend - the inner comparison stays silently
+        // excluded exactly like a SELECT-list CASE, not ledgered.
+        var codeFindings = result.TypedFindings.Where(f => f.Column.ColumnName == "Code").ToList();
+        var finding = Assert.Single(codeFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "comparison inside scalar expression");
+    }
+
+    [Fact]
+    public void Extract_NotExistsWithInnerComparison_ClassifiesNormally_NotNegated()
+    {
+        // _negated previously wasn't reset when descending into a nested QuerySpecification, so
+        // `WHERE NOT EXISTS (SELECT ... WHERE a.x = b.y)` visited the inner `=` with _negated
+        // still true from the outer NOT, wrongly negating it to `<>` and routing a genuinely
+        // seekable predicate to the non-seekable-operator ledger skip instead of classifying it.
+        // The NOT applies to the whole EXISTS(...), not to the subquery's own, independent
+        // boolean structure.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Flags (CustomerId NVARCHAR(20) NOT NULL);",
+            """
+            SELECT 1 FROM dbo.Orders o
+            WHERE NOT EXISTS (SELECT 1 FROM dbo.Flags f WHERE f.CustomerId = o.CustomerId);
+            """);
+
+        var finding = Assert.Single(result.TypedFindings, f => f.Column.ColumnName == "CustomerId" && f.Column.TableQualifiedName == "dbo.Orders");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("<>", StringComparison.Ordinal));
     }
 
     [Fact]
