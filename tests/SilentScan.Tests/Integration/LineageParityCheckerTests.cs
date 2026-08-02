@@ -159,6 +159,23 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CheckAsync_NullInferredCollation_SkipsFacetRatherThanReportingMismatch()
+    {
+        // An unpinned repo's column carries Collation=null on purpose (VerdictClassifier's
+        // never-guess contract) - sys.columns always reports a real, resolved collation for
+        // every string column regardless, so this must never be compared as a mismatch (an
+        // audit finding: this previously flagged every unpinned repo's every string column,
+        // burying real lineage bugs under 47-of-48 false positives on the DNN Platform corpus).
+        var lineage = Catalog(
+            "dbo.vw_Orders", "OrderCode",
+            new ColumnProvenance.BaseColumn("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null)));
+
+        var mismatches = await _checker.CheckAsync(DatabaseName, lineage);
+
+        Assert.Empty(mismatches);
+    }
+
+    [Fact]
     public async Task CheckAsync_UnicodeColumnLength_AccountsForByteDoublingInSysColumns()
     {
         await new ScriptDeployer(_options).DeployAsync(

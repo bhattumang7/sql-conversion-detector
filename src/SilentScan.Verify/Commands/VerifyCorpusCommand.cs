@@ -15,12 +15,14 @@ namespace SilentScan.Verify.Commands;
 
 /// <summary>
 /// `silentscan-verify verify-corpus` — the formal Verify pass for corpus findings (CLAUDE.md
-/// Verification workflow): deploys each repo's own DDL to a disposable database, then
+/// Verification workflow): deploys each repo's own schema-shaped DDL (tables, indexes, views,
+/// functions - never procedure bodies or DML, enforced by <see cref="DdlStatementWhitelist"/>
+/// regardless of which manifest path list a file came from) to a disposable database, then
 /// oracle-probes every SCAN_FORCED/RANGE_SEEK finding for that repo via CONVERT_IMPLICIT in
-/// plan XML, rather than trusting the static classifier alone. Only ddlPaths are deployed
-/// (never procPaths) - findings always resolve to base-table columns (CLAUDE.md Pass 3), so
-/// the tables alone are sufficient, and this keeps deployment scoped to schema, never the
-/// repo's own procedural logic.
+/// plan XML, rather than trusting the static classifier alone. Views/functions declared only
+/// under procPaths are deployed too (AFTER ddlPaths, so their table dependencies exist) - a
+/// depth&gt;=1 finding's probe queries the view it actually came from, which needs that view to
+/// exist as a real deployed object.
 /// </summary>
 public static class VerifyCorpusCommand
 {
@@ -176,21 +178,6 @@ public static class VerifyCorpusCommand
         {
             var ddlFiles = CorpusFileResolver.ResolveDdlFiles(repo, repoRoot);
             var deployer = new ScriptDeployer(context.SqlOptions);
-            foreach (var ddlFile in ddlFiles)
-            {
-                // Real-world corpus DDL routinely contains statements our disposable oracle
-                // can't (or, per CLAUDE.md's "corpus DML is never executed, anywhere" hard
-                // scope, must NOT) execute - permission grants, filegroup references, ordering
-                // dependencies across files, or an ordinary DML/seed statement sharing a file
-                // with real schema DDL. DeployWhitelistedDdlAsync is the code-level enforcement
-                // of that scope (previously resting entirely on manifest curation): only
-                // statement kinds the analysis passes themselves consume actually run, and
-                // deployment is best-effort per BATCH, not per file, so one skipped/failed
-                // batch doesn't drop every later CREATE TABLE/CREATE INDEX in that same file.
-                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, await File.ReadAllTextAsync(ddlFile, cancellationToken));
-                var batchErrors = await deployer.DeployWhitelistedDdlAsync(text, databaseName, cancellationToken);
-                deploymentErrors.AddRange(batchErrors.Select(e => $"{ddlFile}: {e}"));
-            }
 
             // A repo whose manifest keeps views/functions in procPaths, separate from ddlPaths
             // (WideWorldImporters' own Views/*.sql, Functions/*.sql), never had its views
@@ -201,18 +188,38 @@ public static class VerifyCorpusCommand
             // keep DML/procedure BODIES from running, not to leave every view undeployed) - the
             // same whitelist (CreateViewStatement/CreateOrAlterViewStatement/
             // CreateFunctionStatement are already allowed, CreateProcedureStatement is not)
-            // still filters out actual procedure bodies at the batch level. Deployed AFTER
-            // ddlFiles so a view's own table dependencies already exist; only the files not
-            // already deployed as ddlFiles (repos where ddlPaths and procPaths are the identical
+            // still filters out actual procedure bodies at the batch level. Only the files not
+            // already covered by ddlFiles (repos where ddlPaths and procPaths are the identical
             // glob - DNN, First Responder Kit, Ola Hallengren - would otherwise deploy the same
             // file twice and fail on "there is already an object named ...").
             var procOnlyFiles = CorpusFileResolver.ResolveProcFiles(repo, repoRoot).Except(ddlFiles, StringComparer.Ordinal);
+
+            // Real-world corpus DDL routinely contains statements our disposable oracle can't
+            // (or, per CLAUDE.md's "corpus DML is never executed, anywhere" hard scope, must
+            // NOT) execute - permission grants, filegroup references, or an ordinary DML/seed
+            // statement sharing a file with real schema DDL. DeployWhitelistedDdlWithRetryAsync
+            // is the code-level enforcement of that scope (previously resting entirely on
+            // manifest curation): only statement kinds the analysis passes themselves consume
+            // actually run. Every file is handed over TOGETHER, not one at a time, so a batch
+            // whose foreign key or sequence reference only exists in a file that sorts LATER in
+            // glob order (Wide World Importers ships one file per table, each referencing
+            // others) simply succeeds on a later retry pass instead of failing outright -
+            // ordering across files is not assumed to match dependency order.
+            var scripts = new List<(string Label, string Script)>();
+            foreach (var ddlFile in ddlFiles)
+            {
+                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, await File.ReadAllTextAsync(ddlFile, cancellationToken));
+                scripts.Add((ddlFile, text));
+            }
+
             foreach (var procFile in procOnlyFiles)
             {
                 var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, await File.ReadAllTextAsync(procFile, cancellationToken));
-                var batchErrors = await deployer.DeployWhitelistedDdlAsync(text, databaseName, cancellationToken);
-                deploymentErrors.AddRange(batchErrors.Select(e => $"{procFile}: {e}"));
+                scripts.Add((procFile, text));
             }
+
+            var batchErrors = await deployer.DeployWhitelistedDdlWithRetryAsync(scripts, databaseName, cancellationToken: cancellationToken);
+            deploymentErrors.AddRange(batchErrors);
 
             // CLAUDE.md Verify workflow: "diff inferred view column types/collations against
             // sys.columns - any mismatch is a P0 lineage bug." Runs after deployment so views
@@ -236,7 +243,7 @@ public static class VerifyCorpusCommand
                 NotConfirmed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.NotConfirmed)],
                 NotProbeable: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.NotProbeable)],
                 ProbeFailed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ProbeFailed)],
-                IndexNotDeployed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.IndexNotDeployed)],
+                ConfirmedUnindexed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ConfirmedUnindexed)],
                 DynamicSql: DynamicSqlSummary.From(report.DynamicSqlFindings),
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
@@ -274,7 +281,7 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<CorpusFindingResult> NotConfirmed,
     IReadOnlyList<CorpusFindingResult> NotProbeable,
     IReadOnlyList<CorpusFindingResult> ProbeFailed,
-    IReadOnlyList<CorpusFindingResult> IndexNotDeployed,
+    IReadOnlyList<CorpusFindingResult> ConfirmedUnindexed,
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,

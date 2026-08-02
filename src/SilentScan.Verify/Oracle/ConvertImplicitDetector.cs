@@ -18,7 +18,7 @@ public static class ConvertImplicitDetector
         var doc = XDocument.Parse(planXml);
 
         return doc.Descendants(ShowPlanNs + "Convert")
-            .Where(convert => (string?)convert.Attribute("Implicit") == "1")
+            .Where(convert => IsImplicit((string?)convert.Attribute("Implicit")))
             .Select(convert => new
             {
                 Convert = convert,
@@ -44,4 +44,10 @@ public static class ConvertImplicitDetector
 
     private static string? TrimBrackets(string? bracketedIdentifier) =>
         bracketedIdentifier?.Trim('[', ']');
+
+    // Showplan XML's Implicit attribute is typed xsd:boolean, which permits both the "1"/"0"
+    // and "true"/"false" lexical forms - verified against the schema (and this class's own
+    // original doc comment, which already said "true" while the code only ever checked "1").
+    // Different SQL Server versions/serialization paths are free to emit either.
+    private static bool IsImplicit(string? value) => value is "1" or "true";
 }

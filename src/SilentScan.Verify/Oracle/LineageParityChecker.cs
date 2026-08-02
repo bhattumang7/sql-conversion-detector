@@ -85,9 +85,21 @@ public sealed class LineageParityChecker
             return;
         }
 
-        if (type.IsStringFamily && !string.Equals(type.Collation?.Name, oracleColumn.CollationName, StringComparison.OrdinalIgnoreCase))
+        // A null inferred collation is never "the resolved answer happens to be nothing" - it's
+        // VerdictClassifier's own never-guess contract: no per-column COLLATE clause and no
+        // manifest-declared collation to fall back to means this pass deliberately left the
+        // facet unresolved (CLAUDE.md: "collation unknown and unpinned -> UNKNOWN, never
+        // guess"). sys.columns, by contrast, ALWAYS reports a real resolved collation - every
+        // string column has one whether or not any DDL statement said so explicitly - so
+        // comparing "intentionally unresolved" against "the database's actual default" reports
+        // a mismatch on every single unpinned repo, which is exactly the false-positive this
+        // gate must not produce (an audit finding: 47 of 48 DNN Platform "P0 lineage bugs" were
+        // this, burying the one real bug underneath them). Only compare the facet when this
+        // pass actually claimed to know the answer.
+        if (type.IsStringFamily && type.Collation is not null
+            && !string.Equals(type.Collation.Name, oracleColumn.CollationName, StringComparison.OrdinalIgnoreCase))
         {
-            mismatches.Add(new LineageParityMismatch(qualifiedName, columnName, "collation", type.Collation?.Name ?? "(null)", oracleColumn.CollationName ?? "(null)"));
+            mismatches.Add(new LineageParityMismatch(qualifiedName, columnName, "collation", type.Collation.Name, oracleColumn.CollationName ?? "(null)"));
         }
 
         if (IsStringOrBinaryFamily(type.Category) && !LengthMatches(type, oracleColumn, out var inferredLength, out var actualLength))

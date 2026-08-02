@@ -284,13 +284,15 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task VerifyAsync_ScanForcedColumnHasNoDeployedIndex_ReturnsIndexNotDeployedNotConfirmed()
+    public async Task VerifyAsync_ScanForcedColumnHasNoDeployedIndex_ReturnsConfirmedUnindexed()
     {
-        // The P0 fix this locks in: a heap table with no index on the finding's column also
-        // shows no GetRangeThroughConvert in its plan - identical to what a genuine ScanForced
-        // finding's plan looks like. Before the index-deployment gate, this would have been
-        // silently Confirmed even though the environment never actually tested a seek/scan
-        // decision for this column at all.
+        // The fix this locks in: the probe runs regardless of indexing, and a genuinely
+        // unindexed column (the common case in real-world corpora, not the exception) still
+        // gets its core claim - CONVERT_IMPLICIT lands on the column - confirmed. Only the
+        // RangeSeek-vs-ScanForced shape distinction (which needs an index to seek/scan through)
+        // stays unverified, which is what ConfirmedUnindexed communicates - distinct from a
+        // silent Confirmed (would overclaim the shape was tested) and from NotConfirmed (would
+        // wrongly say the conversion itself didn't happen).
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Unindexed", "UnindexedCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))),
@@ -302,17 +304,18 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
-        Assert.Equal(CorpusFindingOutcome.IndexNotDeployed, result.Outcome);
+        Assert.Equal(CorpusFindingOutcome.ConfirmedUnindexed, result.Outcome);
         Assert.NotEqual(CorpusFindingOutcome.Confirmed, result.Outcome);
     }
 
     [Fact]
-    public async Task VerifyAsync_ScanForcedColumnNoLongerExistsInDeployedSchema_ReturnsIndexNotDeployed()
+    public async Task VerifyAsync_ScanForcedColumnNoLongerExistsInDeployedSchema_ReturnsProbeFailed()
     {
-        // The index-deployment gate runs before the probe for ScanForced/RangeSeek verdicts: a
-        // table that was never deployed at all has, definitionally, no leading-key index for
-        // the finding's column - IndexNotDeployed is the honest outcome (the environment never
-        // tested this finding), not a probe compile failure.
+        // The index check now runs AFTER the probe, only once a conversion is already confirmed -
+        // a table that was never deployed at all fails to compile the probe itself (invalid
+        // object name), which is the honest, uniform outcome for "this reference doesn't exist
+        // in the deployed schema" regardless of which side of the comparison it's on (mirrors
+        // VerifyAsync_ColumnToColumnProbeAgainstUndeployedTable_ReturnsProbeFailed below).
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.DoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
@@ -324,7 +327,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
-        Assert.Equal(CorpusFindingOutcome.IndexNotDeployed, result.Outcome);
+        Assert.Equal(CorpusFindingOutcome.ProbeFailed, result.Outcome);
     }
 
     [Fact]

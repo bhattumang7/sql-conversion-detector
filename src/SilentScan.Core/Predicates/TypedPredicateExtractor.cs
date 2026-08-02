@@ -514,17 +514,127 @@ public static class TypedPredicateExtractor
                 case Literal literal:
                     return new PredicateOperand.Value(Rules.LiteralTypeResolver.Resolve(literal), IsLiteral: true, Rules.LiteralTextRenderer.Render(literal));
 
+                case GlobalVariableExpression globalVariable:
+                    return ResolveGlobalVariableOperand(globalVariable);
+
+                case FunctionCall functionCall:
+                    return ResolveFunctionCallOperand(functionCall, scopeChain);
+
+                case CastCall castCall:
+                    return ResolveCastOrConvertOperand(castCall.DataType, castCall.Parameter, scopeChain, castCall);
+
+                case ConvertCall convertCall:
+                    return ResolveCastOrConvertOperand(convertCall.DataType, convertCall.Parameter, scopeChain, convertCall);
+
                 default:
-                    // Most commonly a function call (scalar UDF or builtin - neither has a return
-                    // type registry; coverage-remediation-plan.md Phase 3.1/0.2), but also any
-                    // other scalar expression kind this pass doesn't type. The operand still
-                    // resolves Unknown, exactly as before - this only makes it counted instead of
-                    // silently falling through.
+                    // Most commonly a scalar UDF (no return-type registry - only built-in
+                    // functions are curated), but also any other scalar expression kind this
+                    // pass doesn't type (e.g. CASE/COALESCE - CLAUDE.md hard cases needing their
+                    // own explicit precedence-aware rule, not a blanket resolution here). The
+                    // operand still resolves Unknown, exactly as before - this only makes it
+                    // counted instead of silently falling through.
                     ledger.Record(
                         AnalysisPass.Predicates, sourcePath, expression.StartLine, expression.StartColumn,
                         "predicate operand", $"operand of kind '{expression.GetType().Name}' has no type resolution - resolved Unknown");
                     return new PredicateOperand.Value(Type: null);
             }
+        }
+
+        /// <summary>
+        /// <c>@@SPID</c>, <c>@@ROWCOUNT</c>, etc. - typed from the curated, oracle-verified
+        /// table (<see cref="Rules.BuiltinFunctionTypeResolver"/>), never guessed.
+        /// </summary>
+        private PredicateOperand.Value ResolveGlobalVariableOperand(GlobalVariableExpression globalVariable)
+        {
+            var type = Rules.BuiltinFunctionTypeResolver.ResolveGlobalVariable(globalVariable.Name);
+            if (type is null)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, globalVariable.StartLine, globalVariable.StartColumn,
+                    "predicate operand", $"global variable '{globalVariable.Name}' has no type resolution - resolved Unknown");
+            }
+
+            return new PredicateOperand.Value(type);
+        }
+
+        /// <summary>
+        /// A built-in scalar function call - typed from the curated, oracle-verified table
+        /// (<see cref="Rules.BuiltinFunctionTypeResolver"/>). ISNULL is the one function in that
+        /// table whose return type is its own first argument's type rather than a fixed type
+        /// (oracle-verified: ISNULL never applies data type precedence across its arguments the
+        /// way COALESCE does), so it recurses into that argument through the same operand
+        /// resolution every other expression goes through. A function not in the table - most
+        /// commonly a scalar UDF, or a built-in this curated table doesn't cover yet - still
+        /// resolves Unknown, never guessed.
+        /// </summary>
+        private PredicateOperand.Value ResolveFunctionCallOperand(
+            FunctionCall functionCall, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            var name = functionCall.FunctionName.Value;
+
+            if (Rules.BuiltinFunctionTypeResolver.TakesFirstArgumentType(name) && functionCall.Parameters.Count > 0)
+            {
+                var firstArgument = ResolveOperand(functionCall.Parameters[0], scopeChain);
+                var firstArgumentType = firstArgument switch
+                {
+                    PredicateOperand.Value v => v.Type,
+                    PredicateOperand.Column c => c.Type,
+                    _ => null,
+                };
+
+                return new PredicateOperand.Value(firstArgumentType);
+            }
+
+            var fixedType = Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
+            if (fixedType is null)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, functionCall.StartLine, functionCall.StartColumn,
+                    "predicate operand", $"function '{name}' has no return-type resolution - resolved Unknown");
+            }
+
+            return new PredicateOperand.Value(fixedType);
+        }
+
+        /// <summary>
+        /// CAST/CONVERT's explicit target type - always knowable, never a guess. Mirrors Pass
+        /// 2's identical collation propagation (<see cref="ScalarExpressionResolver"/>): a
+        /// CAST/CONVERT to a string-family type has no inline COLLATE syntax of its own, and the
+        /// real engine propagates a string INPUT's own collation into the result
+        /// (oracle-verified there, not re-derived here) - a non-string input's result collation
+        /// stays unresolved (Unknown), not guessed.
+        /// </summary>
+        private PredicateOperand.Value ResolveCastOrConvertOperand(
+            DataTypeReference dataType, ScalarExpression parameter,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            TSqlFragment node)
+        {
+            var type = Parsing.SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases);
+            if (type is null)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
+                    "predicate operand", "CAST/CONVERT target type could not be resolved - resolved Unknown");
+                return new PredicateOperand.Value(Type: null);
+            }
+
+            if (type.IsStringFamily)
+            {
+                var innerOperand = ResolveOperand(parameter, scopeChain);
+                var innerType = innerOperand switch
+                {
+                    PredicateOperand.Value v => v.Type,
+                    PredicateOperand.Column c => c.Type,
+                    _ => null,
+                };
+
+                if (innerType is { IsStringFamily: true, Collation: { } innerCollation })
+                {
+                    type = type with { Collation = innerCollation };
+                }
+            }
+
+            return new PredicateOperand.Value(type);
         }
 
         // T-SQL applies data type precedence once across the WHOLE IN list, not element by

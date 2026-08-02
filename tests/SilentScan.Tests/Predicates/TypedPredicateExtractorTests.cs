@@ -1614,15 +1614,121 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToFunctionCall_ResolvesUnknownAndLedgersOperand()
     {
-        // No return-type registry exists for scalar UDFs or builtins (coverage-remediation-
-        // plan.md Phase 3.1) - the right side resolves Unknown, same as before this pass, but
-        // now it's counted instead of silently falling through the default switch arm.
+        // No return-type registry entry exists for a scalar UDF (BuiltinFunctionTypeResolver is
+        // a curated allowlist of built-in functions only) - the right side resolves Unknown,
+        // same as before this pass, but now it's counted instead of silently falling through
+        // the default switch arm.
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col = dbo.fn_DisplayName(1);");
 
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.Unknown, finding.Verdict);
-        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("FunctionCall", StringComparison.Ordinal));
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("fn_DisplayName", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToBuiltinFunctionCall_ResolvesFixedReturnType()
+    {
+        // BuiltinFunctionTypeResolver's curated, oracle-verified table: GETDATE() types as
+        // DATETIME, so a DATETIME column compared against it classifies normally instead of
+        // falling to Unknown - the single biggest driver of this tool's Unknown-verdict rate in
+        // real corpora before this existed.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Orders (CreatedOn DATETIME NOT NULL);",
+            "SELECT 1 FROM dbo.Orders WHERE CreatedOn > GETDATE();");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "predicate operand");
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLenOfNvarcharLiteral_MixedCategoryClassifiesNormally()
+    {
+        // LEN() types as INT (oracle-verified) - an INT column compared against it should
+        // classify exactly like any other int-vs-int comparison, not fall to Unknown.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (NameLength INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE NameLength = LEN(N'hello');");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToGlobalVariable_ResolvesFixedType()
+    {
+        // @@ROWCOUNT types as INT (oracle-verified) - a GlobalVariableExpression previously fell
+        // through the same generic default arm as an unhandled function call.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Total INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Total = @@ROWCOUNT;");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToUnknownGlobalVariable_ResolvesUnknownAndLedgers()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Total INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Total = @@CURSOR_ROWS;");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("@@CURSOR_ROWS", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToIsNullOfHigherPrecedenceLiteral_UsesFirstArgumentType()
+    {
+        // Oracle-verified: ISNULL(check_expression, replacement_value) returns check_expression's
+        // own type, even when replacement_value would otherwise outrank it in precedence -
+        // ISNULL(@intVar, N'x') still types as int, not nvarchar. Distinct from COALESCE, which
+        // CLAUDE.md's hard-cases list calls out separately.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find @Id INT
+            AS
+            BEGIN
+                SELECT 1 FROM dbo.T WHERE Id = ISNULL(@Id, 0);
+            END
+            """);
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToCastToInt_ResolvesTargetType()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL);",
+            "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.T, dbo.Raw WHERE Id = CAST(Value AS INT);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToConvertToNvarcharOfVarcharColumn_PropagatesInputCollation()
+    {
+        // Mirrors Pass 2's identical collation propagation (ScalarExpressionResolver): CAST/
+        // CONVERT to a string type has no inline COLLATE syntax, and the real engine propagates
+        // the input's own collation into the result. Code carries its OWN explicit (different)
+        // collation so ClassifySameCategory's null-collation short-circuit can't fire on either
+        // side - only then does a genuinely-different-collation Unknown verdict prove the
+        // CONVERT result's collation actually came from Value, not from being left uncollated.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Code NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.T, dbo.Raw WHERE Code = CONVERT(NVARCHAR(20), Value);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
     }
 }

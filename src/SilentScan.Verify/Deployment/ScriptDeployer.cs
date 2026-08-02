@@ -105,4 +105,92 @@ public sealed class ScriptDeployer
         command.CommandTimeout = 60;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Deploys every whitelisted batch across ALL of <paramref name="scripts"/> together, retrying
+    /// whatever failed in earlier passes rather than giving up on the first error - real-world
+    /// multi-file corpora (Wide World Importers' Tables/*.sql, one file per table) routinely
+    /// declare a foreign key or a DEFAULT NEXT VALUE FOR sequence reference to an object that
+    /// only exists because a LATER file in glob order creates it. Splitting deployment into a
+    /// table-only pass and a constraint-only pass would need to parse apart inline FK constraints
+    /// from CREATE TABLE bodies (nontrivial SQL rewriting, and risky to get subtly wrong); a
+    /// blind multi-pass retry gets the same ordering-independence for free, since a batch that
+    /// fails on a missing dependency simply succeeds once that dependency exists after a later
+    /// batch in the same or a later pass deploys it. Stops once a full pass makes no forward
+    /// progress (every remaining batch failed again) or <paramref name="maxPasses"/> is reached,
+    /// whichever comes first - a batch that's simply broken (not just late) would otherwise retry
+    /// forever. Returns one message per batch that was skipped (whitelist) or that still failed
+    /// after every pass, each prefixed with the label of the script it came from.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> DeployWhitelistedDdlWithRetryAsync(
+        IReadOnlyList<(string Label, string Script)> scripts, string? initialDatabase = null, int maxPasses = 5, CancellationToken cancellationToken = default)
+    {
+        var messages = new List<string>();
+        var pending = new List<(string Label, string BatchText)>();
+
+        foreach (var (label, script) in scripts)
+        {
+            var parseResult = SqlScriptParser.ParseText(label, script);
+            foreach (var error in parseResult.Errors)
+            {
+                messages.Add($"{label}: parse error at line {error.Line}: {error.Message}");
+            }
+
+            if (parseResult.Fragment is not TSqlScript { Batches: { Count: > 0 } scriptBatches })
+            {
+                continue;
+            }
+
+            foreach (var batch in scriptBatches)
+            {
+                var disallowed = DdlStatementWhitelist.DisallowedStatementTypeNames(batch);
+                if (disallowed.Count > 0)
+                {
+                    messages.Add($"{label}: batch at line {batch.StartLine} skipped - contains non-whitelisted statement kind(s): {string.Join(", ", disallowed)}");
+                    continue;
+                }
+
+                if (batch.Statements.Count == 0)
+                {
+                    continue;
+                }
+
+                pending.Add((label, script.Substring(batch.StartOffset, batch.FragmentLength)));
+            }
+        }
+
+        await using var connection = new SqlConnection(_options.BuildConnectionString(initialDatabase));
+        await connection.OpenAsync(cancellationToken);
+
+        var lastFailureByBatch = new Dictionary<(string Label, string BatchText), string>();
+        for (var pass = 0; pass < maxPasses && pending.Count > 0; pass++)
+        {
+            var stillPending = new List<(string Label, string BatchText)>();
+            var progressed = false;
+
+            foreach (var item in pending)
+            {
+                try
+                {
+                    await ExecuteBatchAsync(connection, item.BatchText, cancellationToken);
+                    progressed = true;
+                }
+                catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+                {
+                    lastFailureByBatch[item] = ex.Message;
+                    stillPending.Add(item);
+                }
+            }
+
+            pending = stillPending;
+            if (!progressed)
+            {
+                break;
+            }
+        }
+
+        messages.AddRange(pending.Select(item => $"{item.Label}: {lastFailureByBatch[item]}"));
+
+        return messages;
+    }
 }

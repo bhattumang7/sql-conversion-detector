@@ -15,7 +15,12 @@ namespace SilentScan.Verify.Oracle;
 /// ScanForced needs its absence - verified directly against the real engine before relying on
 /// this signal (SQL_* collation: Convert present, GetRangeThroughConvert absent, plan is an
 /// Index Scan; Windows collation: Convert present, GetRangeThroughConvert present, plan is an
-/// Index Seek).
+/// Index Seek). The index-deployment check runs AFTER the probe, only when the column did
+/// convert and the verdict makes a shape claim - it used to gate the probe itself, which meant
+/// a genuinely unindexed column (the common case in real-world corpora, not the exception)
+/// produced no oracle signal at all rather than the CONVERT_IMPLICIT confirmation that's fully
+/// provable without an index (an audit finding: this silently discarded the tool's primary
+/// signal for most real corpus findings).
 /// </summary>
 public sealed class CorpusFindingVerifier
 {
@@ -37,23 +42,6 @@ public sealed class CorpusFindingVerifier
             return new CorpusFindingResult(finding, CorpusFindingOutcome.NotProbeable, NotProbeableReason(finding));
         }
 
-        // The plan-shape confirmation below (absence/presence of GetRangeThroughConvert) is
-        // only a meaningful signal if the finding's column actually has a deployed index - a
-        // trivial heap scan produces the identical "no dynamic range seek" shape as a genuine
-        // ScanForced verdict, which would otherwise silently confirm a verdict the environment
-        // never tested (best-effort DDL deployment can drop a CREATE INDEX batch).
-        if (finding.Verdict is Verdict.ScanForced or Verdict.RangeSeek)
-        {
-            var hasIndex = await _indexChecker.HasLeadingKeyIndexAsync(
-                database, finding.Column.TableQualifiedName, finding.Column.ColumnName, cancellationToken);
-            if (!hasIndex)
-            {
-                return new CorpusFindingResult(
-                    finding, CorpusFindingOutcome.IndexNotDeployed,
-                    $"No deployed index has '{finding.Column.ColumnName}' as its leading key on {finding.Column.TableQualifiedName}.");
-            }
-        }
-
         string planXml;
         try
         {
@@ -70,6 +58,32 @@ public sealed class CorpusFindingVerifier
             string.Equals(c.Table, table, StringComparison.OrdinalIgnoreCase)
             && (schema is null || string.Equals(c.Schema, schema, StringComparison.OrdinalIgnoreCase))
             && string.Equals(c.Column, finding.Column.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+        if (!columnConverts)
+        {
+            return new CorpusFindingResult(finding, CorpusFindingOutcome.NotConfirmed, DescribeMismatch(finding.Verdict, columnConverts: false, planXml, conversions));
+        }
+
+        if (finding.Verdict is not (Verdict.ScanForced or Verdict.RangeSeek))
+        {
+            // No shape claim to check for any other verdict - the column-side conversion alone
+            // is what this outcome confirms.
+            return new CorpusFindingResult(finding, CorpusFindingOutcome.Confirmed, Detail: null);
+        }
+
+        // The plan-shape confirmation below (absence/presence of GetRangeThroughConvert) is
+        // only a meaningful signal if the finding's column actually has a deployed index - a
+        // trivial heap scan produces the identical "no dynamic range seek" shape as a genuine
+        // ScanForced verdict, which would otherwise silently confirm a verdict the environment
+        // never actually tested that distinction for.
+        var hasIndex = await _indexChecker.HasLeadingKeyIndexAsync(
+            database, finding.Column.TableQualifiedName, finding.Column.ColumnName, cancellationToken);
+        if (!hasIndex)
+        {
+            return new CorpusFindingResult(
+                finding, CorpusFindingOutcome.ConfirmedUnindexed,
+                $"CONVERT_IMPLICIT confirmed on '{finding.Column.ColumnName}', but no deployed index has it as its leading key on {finding.Column.TableQualifiedName} - the {finding.Verdict} shape distinction could not be verified.");
+        }
 
         var confirmed = MatchesPredictedPlanShape(finding.Verdict, columnConverts, planXml);
 

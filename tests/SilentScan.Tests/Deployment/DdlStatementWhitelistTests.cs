@@ -68,4 +68,44 @@ public sealed class DdlStatementWhitelistTests
 
         Assert.Equal(["InsertStatement"], disallowed);
     }
+
+    [Theory]
+    [InlineData("SET ANSI_NULLS ON;")]
+    [InlineData("SET QUOTED_IDENTIFIER ON;")]
+    [InlineData("SET ANSI_NULLS ON; SET QUOTED_IDENTIFIER ON; CREATE TABLE dbo.T (Id INT NOT NULL);")]
+    public void DisallowedStatementTypeNames_PredicateSetStatements_Allowed(string sql)
+    {
+        var batch = ParseSingleBatch(sql);
+
+        Assert.Empty(DdlStatementWhitelist.DisallowedStatementTypeNames(batch));
+    }
+
+    [Theory]
+    [InlineData("IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'T') CREATE TABLE dbo.T (Id INT NOT NULL);")]
+    [InlineData("IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'T') BEGIN CREATE TABLE dbo.T (Id INT NOT NULL); CREATE INDEX IX_T ON dbo.T(Id); END")]
+    [InlineData("IF OBJECT_ID('dbo.T') IS NULL CREATE TABLE dbo.T (Id INT NOT NULL); ELSE ALTER TABLE dbo.T ADD Code VARCHAR(10) NULL;")]
+    public void DisallowedStatementTypeNames_DdlGuardedByIfNotExists_Allowed(string sql)
+    {
+        var batch = ParseSingleBatch(sql);
+
+        Assert.Empty(DdlStatementWhitelist.DisallowedStatementTypeNames(batch));
+    }
+
+    [Fact]
+    public void DisallowedStatementTypeNames_IfBranchWithDisallowedStatement_ReportsIt()
+    {
+        var batch = ParseSingleBatch("IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'T') BEGIN CREATE TABLE dbo.T (Id INT NOT NULL); INSERT INTO dbo.T (Id) VALUES (1); END");
+
+        var disallowed = DdlStatementWhitelist.DisallowedStatementTypeNames(batch);
+
+        Assert.Equal(["InsertStatement"], disallowed);
+    }
+
+    [Fact]
+    public void DisallowedStatementTypeNames_CreateSequence_Allowed()
+    {
+        var batch = ParseSingleBatch("CREATE SEQUENCE dbo.Seq_T START WITH 1 INCREMENT BY 1;");
+
+        Assert.Empty(DdlStatementWhitelist.DisallowedStatementTypeNames(batch));
+    }
 }

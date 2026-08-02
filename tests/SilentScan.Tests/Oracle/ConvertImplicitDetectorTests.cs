@@ -36,6 +36,26 @@ public sealed class ConvertImplicitDetectorTests
     }
 
     [Fact]
+    public void FindColumnConversions_ImplicitAttributeAsLexicalTrue_IsReported()
+    {
+        // The showplan XSD types Implicit as xsd:boolean, which permits both "1"/"0" and
+        // "true"/"false" lexical forms - not every SQL Server version/serialization path is
+        // guaranteed to emit "1" specifically.
+        var xml = Wrap("""
+            <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
+              <Convert DataType="nvarchar" Length="40" Style="0" Implicit="true">
+                <ScalarOperator><Identifier><ColumnReference Database="[SilentScanSpike]" Schema="[dbo]" Table="[Orders]" Column="OrderCode" /></Identifier></ScalarOperator>
+              </Convert>
+            </ScalarOperator></Compare></ScalarOperator>
+            """);
+
+        var findings = ConvertImplicitDetector.FindColumnConversions(xml);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Orders", finding.Table);
+    }
+
+    [Fact]
     public void FindColumnConversions_ConvertOverParameterReference_IsNotReported()
     {
         // Real fragment captured investigating a Phase 4 corpus pilot false positive:

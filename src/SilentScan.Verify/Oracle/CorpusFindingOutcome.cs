@@ -24,12 +24,15 @@ public enum CorpusFindingOutcome
     ProbeFailed,
 
     /// <summary>
-    /// A ScanForced/RangeSeek verdict's plan-shape confirmation (absence/presence of dynamic
-    /// range-seek machinery) depends on the finding's column actually having a deployed index -
-    /// otherwise a trivial heap scan would produce the same "no GetRangeThroughConvert" signal
-    /// as a real ScanForced verdict and falsely confirm it. This repo's DDL deployment did not
-    /// produce that index (best-effort deployment dropped the CREATE INDEX batch, an ordering
-    /// dependency, or a permission error), so the environment never actually tested this finding.
+    /// The plan confirmed the finding's core claim - CONVERT_IMPLICIT lands on the column, which
+    /// is provable regardless of indexing - but the column has no deployed leading-key index, so
+    /// the RangeSeek-vs-ScanForced shape distinction (which depends on an index existing to seek
+    /// or scan through) could not be checked. The probe always runs first regardless of whether
+    /// an index deployed (an audit finding: gating the probe itself behind an index check meant
+    /// a column that is genuinely unindexed by the corpus's own DDL - the common case, not the
+    /// exception - produced no oracle signal at all, when the conversion claim itself was fully
+    /// provable without one). A missing/undeployed table or column instead fails the probe
+    /// itself and reports <see cref="ProbeFailed"/>, not this.
     /// </summary>
-    IndexNotDeployed,
+    ConfirmedUnindexed,
 }
