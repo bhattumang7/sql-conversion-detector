@@ -750,6 +750,68 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_EqualsAnySubquery_ClassifiesLikeInSubquery()
+    {
+        // Roadmap Phase E2: oracle-verified to produce the identical CONVERT_IMPLICIT signature
+        // as the equivalent IN (subquery) form.
+        var result = ExtractAll(
+            """
+            CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.U (Code NVARCHAR(20) NOT NULL);
+            """,
+            "SELECT Code FROM dbo.T WHERE Code = ANY (SELECT Code FROM dbo.U);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.Equal("IN", finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_EqualsSomeSubquery_ClassifiesTheSameAsEqualsAny()
+    {
+        // SOME is a pure syntactic synonym for ANY - ScriptDOM itself normalizes it to the same
+        // SubqueryComparisonPredicateType.Any enum value.
+        var result = ExtractAll(
+            """
+            CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.U (Code NVARCHAR(20) NOT NULL);
+            """,
+            "SELECT Code FROM dbo.T WHERE Code = SOME (SELECT Code FROM dbo.U);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+    }
+
+    [Fact]
+    public void Extract_NotEqualsAllSubquery_IsNotAttributedToTypeConversionVerdict()
+    {
+        // Oracle-verified: <> ALL scans regardless of type match, same as NOT IN - not routed
+        // through the type-conversion verdict machinery at all.
+        var result = ExtractAll(
+            """
+            CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.U (Code NVARCHAR(20) NOT NULL);
+            """,
+            "SELECT Code FROM dbo.T WHERE Code <> ALL (SELECT Code FROM dbo.U);");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("<> ALL", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_GreaterThanAnySubquery_IsLedgeredNotModeled()
+    {
+        // A range comparison against a whole result set - deliberately not modeled (not the
+        // same shape as = ANY/<> ALL), ledgered rather than guessed.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Amount INT NOT NULL); CREATE TABLE dbo.U (Amount INT NOT NULL);",
+            "SELECT Amount FROM dbo.T WHERE Amount > ANY (SELECT Amount FROM dbo.U);");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "subquery comparison predicate");
+    }
+
+    [Fact]
     public void Extract_TriggerBody_InsertedPseudoTable_ResolvesToTargetTableColumn()
     {
         // INSERTED is a pseudo-table that only exists inside a real trigger firing on a real DML
@@ -2154,6 +2216,26 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
             CREATE TABLE dbo.CustomersInSub (Id NVARCHAR(20) NOT NULL);
             """,
             "SELECT CustomerId FROM dbo.OrdersInSub WHERE CustomerId IN (SELECT Id FROM dbo.CustomersInSub);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("CustomerId", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task EqualsAnySubquery_ClassifiesLikeInSubquery_OracleConfirmed()
+    {
+        // Roadmap Phase E2: reuses the IN-subquery fixture tables - = ANY (subquery) is oracle-
+        // verified to produce the identical CONVERT_IMPLICIT signature as IN (subquery).
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.OrdersInSub (CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.CustomersInSub (Id NVARCHAR(20) NOT NULL);
+            """,
+            "SELECT CustomerId FROM dbo.OrdersInSub WHERE CustomerId = ANY (SELECT Id FROM dbo.CustomersInSub);");
 
         var finding = Assert.Single(findings);
         Assert.Equal("CustomerId", finding.Column.ColumnName);

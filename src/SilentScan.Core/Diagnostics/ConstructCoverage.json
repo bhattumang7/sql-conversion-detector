@@ -311,6 +311,20 @@
       "rationale": "Roadmap Phase E2: IS NULL/IS NOT NULL is its own distinct SQL operation, not a value comparison - no CONVERT_IMPLICIT is possible when comparing to NULL, so there is nothing for the verdict engine to classify. Previously fell through the default traversal with zero trace; now an explicit no-op so it is accounted for rather than invisible."
     },
     {
+      "construct": "ExistsPredicate",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "EXISTS has no comparison operand of its own - nothing for the verdict engine to classify at the EXISTS node itself - but was already correctly handled by construction: the default traversal recurses into the inner subquery, whose own predicates (a correlated WHERE clause, typically) are visited normally through the same scope-chain machinery a derived table's predicates use. No code change needed; documented here so the construct has an explicit entry rather than an implicit one."
+    },
+    {
+      "construct": "SubqueryComparisonPredicate (= ANY/SOME, <> ALL)",
+      "group": "PredicateCarrier",
+      "status": "Handled",
+      "verifiedBy": "Predicates.TypedPredicateExtractorTests",
+      "rationale": "Roadmap Phase E2: `col = ANY/SOME (subquery)` and `col <> ALL (subquery)` are the IN/NOT IN equivalents - oracle-verified to produce the identical CONVERT_IMPLICIT signature (probed: `Code = ANY (SELECT Code FROM U)` and `Code IN (SELECT Code FROM U)` both show CONVERT_IMPLICIT on the identical column), so those two shapes route through the same machinery IN already uses. Every other operator+quantifier combination (> ANY, < ALL, etc.) is a range comparison against a whole result set with a materially different, uncharacterized plan shape - ledgered, not guessed. A NOT-wrapped ANY/ALL/SOME predicate is likewise ledgered rather than assumed to follow the simpler cases' pattern."
+    },
+    {
       "construct": "UpdateStatement",
       "group": "PredicateCarrier",
       "status": "Handled",

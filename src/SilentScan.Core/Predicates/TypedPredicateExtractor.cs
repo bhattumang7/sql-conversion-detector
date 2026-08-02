@@ -44,6 +44,9 @@ public static class TypedPredicateExtractor
         /// <summary>Skip-ledger construct kind shared by every "this operand has no type resolution" entry below - one label for the whole family of unresolved-operand reasons.</summary>
         private const string PredicateOperandConstructKind = "predicate operand";
 
+        /// <summary>Skip-ledger construct kind shared by every operator that is oracle-verified non-sargable regardless of type match (&lt;&gt;, NOT LIKE, NOT IN, &lt;&gt; ALL) - the type-conversion verdict machinery never applies to these.</summary>
+        private const string NonSeekableOperatorConstructKind = "non-seekable operator";
+
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
         private string? _currentProcScope = enclosingScope?.ProcScope;
@@ -415,7 +418,7 @@ public static class TypedPredicateExtractor
                 // filter context) - mirrors every other "not eligible for a verdict" skip below.
                 if (_scopeStack.Count > 0 && _inFilterContext)
                 {
-                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "non-seekable operator", "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
+                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
 
                 return;
@@ -453,7 +456,7 @@ public static class TypedPredicateExtractor
                 // (a varchar column compared against a matching-type NOT IN list still produces
                 // an Index Scan, where the equivalent IN seeks). Same reasoning as NOT LIKE
                 // above: the type-conversion verdict machinery does not apply here.
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "non-seekable operator", "NOT IN is not sargable regardless of type match - not attributed to a type-conversion verdict");
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT IN is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
 
@@ -475,6 +478,72 @@ public static class TypedPredicateExtractor
                 return;
             }
 
+            var verdict = VerdictClassifier.Classify(column.Type, otherType);
+            Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        /// <summary>
+        /// Roadmap Phase E2: `col = ANY/SOME (subquery)` and `col &lt;&gt; ALL (subquery)` -
+        /// oracle-verified to produce the IDENTICAL CONVERT_IMPLICIT signature as the equivalent
+        /// `IN`/`NOT IN` form respectively (probed directly: `Code = ANY (SELECT Code FROM U)`
+        /// and `Code IN (SELECT Code FROM U)` both show CONVERT_IMPLICIT(nvarchar(20), Code, 0)
+        /// on the identical column), so those two shapes route through the exact same machinery.
+        /// Every other operator+quantifier combination (`&gt; ANY`, `&lt; ALL`, etc.) is a range-
+        /// type comparison against a whole result set with materially different plan shapes this
+        /// pass has not characterized - ledgered rather than guessed. ANY/ALL/SOME under a NOT
+        /// wrapper is likewise not modeled (a fifth negation combination this pass has not
+        /// oracle-verified) rather than assumed to follow the same pattern as the simpler cases.
+        /// </summary>
+        public override void Visit(SubqueryComparisonPredicate node)
+        {
+            if (_scopeStack.Count == 0)
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
+                return;
+            }
+
+            if (!_inFilterContext)
+            {
+                return;
+            }
+
+            var isAnyEquals = node.SubqueryComparisonPredicateType == SubqueryComparisonPredicateType.Any && node.ComparisonType == BooleanComparisonType.Equals;
+            var isAllNotEquals = node.SubqueryComparisonPredicateType == SubqueryComparisonPredicateType.All
+                && node.ComparisonType is BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation;
+
+            if (_negated || (!isAnyEquals && !isAllNotEquals))
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "subquery comparison predicate", $"'{node.ComparisonType} {node.SubqueryComparisonPredicateType}' is not modeled - only '= ANY/SOME' and '<> ALL' are (the IN/NOT IN equivalents)");
+                return;
+            }
+
+            if (isAllNotEquals)
+            {
+                // Same reasoning as NOT IN/<> above: oracle-verified non-sargable regardless of
+                // type match, so the type-conversion verdict machinery does not apply.
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "<> ALL is not sargable regardless of type match - not attributed to a type-conversion verdict");
+                return;
+            }
+
+            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
+            {
+                return;
+            }
+
+            var otherType = ResolveInSubqueryType(node.Subquery);
+            if (otherType is null)
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "subquery comparison predicate", "the subquery's output column type could not be resolved");
+                return;
+            }
+
+            // Operator string is "IN", not "= ANY" - oracle-verified as the identical shape
+            // (same CONVERT_IMPLICIT signature), and CorpusFindingProbeBuilder already knows
+            // how to build a probe for "IN" (NormalizeOperatorForProbe treats it as "="); a
+            // novel "= ANY" string would need its own probe-shape support this pass has no
+            // reason to duplicate for what is, for every purpose downstream of this point, the
+            // same finding.
             var verdict = VerdictClassifier.Classify(column.Type, otherType);
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
@@ -566,7 +635,7 @@ public static class TypedPredicateExtractor
                 // predicate seek. !< and !> are NOT included here - T-SQL folds them to >= and
                 // <= respectively (oracle-verified), which seek exactly like any other range
                 // comparison, so ToOperatorText below still routes them through normally.
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "non-seekable operator", "<> is not sargable regardless of type match - not attributed to a type-conversion verdict");
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "<> is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
 
