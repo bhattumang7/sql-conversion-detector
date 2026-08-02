@@ -28,6 +28,7 @@ public sealed class TypedPredicateSummaryTests
         Assert.Equal(0, summary.UnknownCount);
         Assert.Equal(0, summary.DistinctRangeSeekCount);
         Assert.Equal(0, summary.DistinctScanForcedCount);
+        Assert.Equal(0, summary.DistinctTotalClassified);
     }
 
     [Fact]
@@ -76,5 +77,27 @@ public sealed class TypedPredicateSummaryTests
 
         Assert.Equal(4, summary.ScanForcedCount);
         Assert.Equal(2, summary.DistinctScanForcedCount);
+    }
+
+    [Fact]
+    public void From_RepeatedFindingsAcrossVerdicts_DistinctTotalClassifiedUsesSameBasisAsDistinctScanForced()
+    {
+        // Quoting "N distinct ScanForced out of M classified" mixes a deduplicated numerator
+        // with a non-deduplicated denominator unless the denominator is deduplicated the same
+        // way - the exact repeated-CREATE mechanism (DNN Platform's incremental upgrade scripts)
+        // that inflates the numerator inflates the denominator identically (an audit finding).
+        var findings = new[]
+        {
+            Finding(Verdict.ScanForced, "dbo.Documents", "CreatedByUser", line: 10),
+            Finding(Verdict.ScanForced, "dbo.Documents", "CreatedByUser", line: 40),
+            Finding(Verdict.SeekPreserved, "dbo.Orders", "OrderId", line: 1),
+            Finding(Verdict.SeekPreserved, "dbo.Orders", "OrderId", line: 2),
+            Finding(Verdict.Unknown, "dbo.Users", "Email", line: 3),
+        };
+
+        var summary = TypedPredicateSummary.From(findings);
+
+        Assert.Equal(5, summary.TotalClassified);
+        Assert.Equal(3, summary.DistinctTotalClassified);
     }
 }
