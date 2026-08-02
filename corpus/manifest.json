@@ -43,13 +43,37 @@
       "commitSha": "44015b80d2c821ac5dc956f047a875f1db9eeb22",
       "license": "MIT",
       "ddlPaths": [
-        "*.sql"
+        "sp_Blitz.sql",
+        "sp_BlitzAnalysis.sql",
+        "sp_BlitzBackups.sql",
+        "sp_BlitzCache.sql",
+        "sp_BlitzFirst.sql",
+        "sp_BlitzIndex.sql",
+        "sp_BlitzLock.sql",
+        "sp_BlitzWho.sql",
+        "sp_DatabaseRestore.sql",
+        "sp_ineachdb.sql",
+        "sp_kill.sql",
+        "SqlServerVersions.sql",
+        "Uninstall.sql"
       ],
       "procPaths": [
-        "*.sql"
+        "sp_Blitz.sql",
+        "sp_BlitzAnalysis.sql",
+        "sp_BlitzBackups.sql",
+        "sp_BlitzCache.sql",
+        "sp_BlitzFirst.sql",
+        "sp_BlitzIndex.sql",
+        "sp_BlitzLock.sql",
+        "sp_BlitzWho.sql",
+        "sp_DatabaseRestore.sql",
+        "sp_ineachdb.sql",
+        "sp_kill.sql",
+        "SqlServerVersions.sql",
+        "Uninstall.sql"
       ],
       "declaredCollation": null,
-      "notes": "Root-level scripts, each a single large stored procedure (sp_Blitz, sp_BlitzCache, sp_BlitzIndex, sp_BlitzFirst, sp_BlitzWho, sp_BlitzLock, sp_DatabaseRestore, etc.) built with idempotent IF OBJECT_ID(...) IS NULL EXEC('CREATE PROCEDURE ... AS RETURN 0;') then ALTER PROCEDURE pattern, plus heavy dynamic SQL construction. Same glob for ddl/proc paths since scripts mix incidental table creation with the procedure body. Collation left unpinned as a positive finding, not an unresearched gap: these are DBA diagnostic scripts meant to install into ANY customer database regardless of its collation, and the source is explicit about that - every temp-table string column is declared COLLATE DATABASE_DEFAULT (IndexOptimize-style tables aren't present here, but Uninstall.sql's COLLATE DATABASE_DEFAULT join and sp_DatabaseRestore.sql's own comment ('COLLATE Latin1_General_BIN2 is required so the LIKE pattern catches NCHAR(0) - under default collations the NUL byte is silently dropped') both show the authors deliberately coding around an unknown target collation. Pinning one here would misrepresent a tool that's collation-agnostic by design."
+      "notes": "Root-level scripts, each a single large stored procedure (sp_Blitz, sp_BlitzCache, sp_BlitzIndex, sp_BlitzFirst, sp_BlitzWho, sp_BlitzLock, sp_DatabaseRestore, etc.) built with idempotent IF OBJECT_ID(...) IS NULL EXEC('CREATE PROCEDURE ... AS RETURN 0;') then ALTER PROCEDURE pattern, plus heavy dynamic SQL construction. Same list for ddl/proc paths since scripts mix incidental table creation with the procedure body. Install-All-Scripts.sql and Install-Azure.sql are deliberately excluded from both lists (an audit finding): they're generated concatenations of every individual script above, not independent content - including them alongside the individual files triple-counted every procedure's predicates in prevalence figures, since TypedFindingDeduplicator collapses the resulting duplicate FINDINGS but the summary's classified-comparison denominator was never deduplicated. Collation left unpinned as a positive finding, not an unresearched gap: these are DBA diagnostic scripts meant to install into ANY customer database regardless of its collation, and the source is explicit about that - every temp-table string column is declared COLLATE DATABASE_DEFAULT (IndexOptimize-style tables aren't present here, but Uninstall.sql's COLLATE DATABASE_DEFAULT join and sp_DatabaseRestore.sql's own comment ('COLLATE Latin1_General_BIN2 is required so the LIKE pattern catches NCHAR(0) - under default collations the NUL byte is silently dropped') both show the authors deliberately coding around an unknown target collation. Pinning one here would misrepresent a tool that's collation-agnostic by design."
     },
     {
       "name": "ola-hallengren-maintenance-solution",
@@ -57,13 +81,25 @@
       "commitSha": "660acca46cecc9e94f1078ec4c24442e3f309e0c",
       "license": "MIT",
       "ddlPaths": [
-        "*.sql"
+        "CommandExecute.sql",
+        "CommandLog.sql",
+        "DatabaseBackup.sql",
+        "DatabaseIntegrityCheck.sql",
+        "IndexOptimize.sql",
+        "Queue.sql",
+        "QueueDatabase.sql"
       ],
       "procPaths": [
-        "*.sql"
+        "CommandExecute.sql",
+        "CommandLog.sql",
+        "DatabaseBackup.sql",
+        "DatabaseIntegrityCheck.sql",
+        "IndexOptimize.sql",
+        "Queue.sql",
+        "QueueDatabase.sql"
       ],
       "declaredCollation": null,
-      "notes": "Root-level scripts (CommandLog.sql, Queue.sql, QueueDatabase.sql, DatabaseBackup.sql, DatabaseIntegrityCheck.sql, IndexOptimize.sql, MaintenanceSolution.sql). CommandLog.sql/Queue.sql/QueueDatabase.sql contain real CREATE TABLE DDL; the rest are large parameterized stored procedures. Widely deployed in production DBA shops. Collation left unpinned as a positive finding, not an unresearched gap: IndexOptimize.sql declares every temp-table string column (#SelectedIndexes, #Info, #ExistingObjects, and more) COLLATE DATABASE_DEFAULT explicitly, because this maintenance solution installs into and operates against arbitrary customer databases whose collation isn't known at authoring time. Pinning one would misrepresent a tool that's collation-agnostic by design."
+      "notes": "Root-level scripts (CommandLog.sql, Queue.sql, QueueDatabase.sql, DatabaseBackup.sql, DatabaseIntegrityCheck.sql, IndexOptimize.sql, CommandExecute.sql). CommandLog.sql/Queue.sql/QueueDatabase.sql contain real CREATE TABLE DDL; the rest are large parameterized stored procedures. Widely deployed in production DBA shops. MaintenanceSolution.sql and MaintenanceSolutionAzureSQLDatabase.sql are deliberately excluded (an audit finding, same pattern as the First Responder Kit entry above): both are generated all-in-one installers that embed the identical CREATE PROCEDURE bodies from DatabaseBackup.sql/IndexOptimize.sql/DatabaseIntegrityCheck.sql/CommandExecute.sql verbatim (verified: `CREATE PROCEDURE [dbo].[DatabaseBackup] AS` appears in both DatabaseBackup.sql and MaintenanceSolution.sql), not independent content - including them would multiply-count the same predicates in prevalence figures. Collation left unpinned as a positive finding, not an unresearched gap: IndexOptimize.sql declares every temp-table string column (#SelectedIndexes, #Info, #ExistingObjects, and more) COLLATE DATABASE_DEFAULT explicitly, because this maintenance solution installs into and operates against arbitrary customer databases whose collation isn't known at authoring time. Pinning one would misrepresent a tool that's collation-agnostic by design."
     },
     {
       "name": "mojoportal",
@@ -79,7 +115,7 @@
         "mojoPortal.Data.MSSQL/devSiteOfficeProcs.sql"
       ],
       "declaredCollation": null,
-      "notes": "Fork of the original mojoPortal.org CMS, still maintained. dev3CreateStoredProcedures.sql wraps its CREATE PROCEDURE statements as string literal arguments to EXEC dbo.sp_executesql (idempotent-create pattern), which CLAUDE.md's dynamic SQL policy says is parseable in principle (single string literal, no concatenation) - a good real-world exercise of that rule, distinct from the other 4 repos' plain top-level DDL. mojoPortal.Data.MSSQL/legacyscripts/ contains older upgrade deltas, intentionally excluded here in favor of the dev*.sql full-install scripts. Collation genuinely unresearched, not a positive finding either way: mojoPortal.Data.MSSQL/legacyscripts/1CreateDatabase.sql's CREATE DATABASE has no COLLATE clause (inherits whatever the target SQL Server instance's own default is), and no install doc in this repo states a required collation - unlike DNN/First Responder Kit/Ola Hallengren, there was no positive evidence either pinning a value or explaining why one is deliberately absent."
+      "notes": "Fork of the original mojoPortal.org CMS, still maintained. dev3CreateStoredProcedures.sql wraps its CREATE PROCEDURE statements as string literal arguments to EXEC dbo.sp_executesql (idempotent-create pattern), which CLAUDE.md's dynamic SQL policy says is parseable in principle (single string literal, no concatenation) - a good real-world exercise of that rule, distinct from the other 4 repos' plain top-level DDL. mojoPortal.Data.MSSQL/legacyscripts/ contains older upgrade deltas, intentionally excluded here in favor of the dev*.sql full-install scripts. These 4 files are genuinely this repo's ENTIRE standalone-.sql surface, not an under-scoped glob (an audit finding, checked directly): mojoPortal.Data.MSSQL/ and mojoPortal.Features.Data.MSSQL/ contain no other .sql files at all - the rest of this repo's SQL lives as string literals embedded inside its ADO.NET data-access .cs files (DBBlog.cs, DBEvents.cs, etc.), which is out of this tool's SQL-text-only v1 scope (CLAUDE.md hard scope: ScriptDOM parses T-SQL, not C#-embedded SQL string extraction - a materially different problem from the EXEC/sp_executesql dynamic SQL this tool does handle, since here the SQL never appears as a T-SQL literal ScriptDOM can parse at all, only as a C# string this tool has no C# parser for). Widening the glob would not surface more content; there is none to surface without a C#-string-extraction pass this project does not have. Collation genuinely unresearched, not a positive finding either way: mojoPortal.Data.MSSQL/legacyscripts/1CreateDatabase.sql's CREATE DATABASE has no COLLATE clause (inherits whatever the target SQL Server instance's own default is), and no install doc in this repo states a required collation - unlike DNN/First Responder Kit/Ola Hallengren, there was no positive evidence either pinning a value or explaining why one is deliberately absent."
     }
   ]
 }
