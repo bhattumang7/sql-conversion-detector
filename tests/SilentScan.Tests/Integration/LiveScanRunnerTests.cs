@@ -1,5 +1,6 @@
 using SilentScan.Core.Rules;
 using SilentScan.Live;
+using SilentScan.Live.Catalog;
 using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;
@@ -59,5 +60,28 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
         Assert.Equal(1, result.CatalogSummary.TableCount);
         Assert.Equal(2, result.ModulesAnalyzed);
         Assert.Empty(result.CatalogSummary.SkippedConstructs);
+    }
+
+    [Fact]
+    public async Task RunAsync_EncryptedProcedure_IsReportedUnanalyzableNotSilentlyDropped()
+    {
+        // sys.sql_modules.definition is genuinely NULL for a WITH ENCRYPTION module - there is
+        // no T-SQL body to recover from metadata at all (unlike a corpus file this project just
+        // chose not to parse). This must surface as an accounted-for gap, never a module that
+        // silently vanishes from the module count with no trace.
+        const string encryptedProcSql = """
+            CREATE PROCEDURE dbo.usp_EncryptedLookup WITH ENCRYPTION AS
+                SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'x';
+            """;
+        await new SilentScan.Verify.Deployment.ScriptDeployer(Options).DeployAsync(encryptedProcSql, DatabaseName);
+
+        var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
+
+        // The two plaintext modules from the class-level Ddl are unaffected.
+        Assert.Equal(2, result.ModulesAnalyzed);
+
+        var unanalyzable = Assert.Single(result.UnanalyzableModules, m => m.ObjectName == "usp_EncryptedLookup");
+        Assert.Equal(UnanalyzableModuleReason.Encrypted, unanalyzable.Reason);
+        Assert.Equal("dbo.usp_EncryptedLookup", unanalyzable.QualifiedName);
     }
 }
