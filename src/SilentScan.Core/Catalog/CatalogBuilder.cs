@@ -1313,12 +1313,28 @@ public static class CatalogBuilder
         return isNullable;
     }
 
+    private static bool IsColumnstoreIndexType(IndexType? indexType) =>
+        indexType?.IndexTypeKind is IndexTypeKind.ClusteredColumnStore or IndexTypeKind.NonClusteredColumnStore;
+
+    /// <summary>
+    /// Table-level (<c>INDEX ix (col) WHERE ...</c>/<c>INDEX ix CLUSTERED COLUMNSTORE</c>) and
+    /// column-level (<c>col INT INDEX ix WHERE ...</c>) inline index definitions share this same
+    /// ScriptDom node, which carries <see cref="IndexDefinition.FilterPredicate"/> and
+    /// <see cref="IndexDefinition.IndexType"/> exactly like the standalone <c>CREATE INDEX</c>/
+    /// <c>CREATE COLUMNSTORE INDEX</c> paths read (see VisitCreateIndex/VisitCreateColumnStoreIndex
+    /// above) - before this fix, this method dropped both flags, so a filtered or columnstore
+    /// index declared inline reported <c>IsFiltered</c>/<c>IsColumnstore</c> as false and passed
+    /// <see cref="CatalogTable.IsIndexedColumn"/>'s check as an ordinary seekable index, a false
+    /// "Indexed=true" for the ranking claim this tool leads with.
+    /// </summary>
     private static CatalogIndex BuildInlineIndex(IndexDefinition inlineIndex, string columnName) => new(
         inlineIndex.Name?.Value,
         CatalogIndexKind.Index,
         inlineIndex.Unique,
         inlineIndex.Columns.Count > 0 ? [.. inlineIndex.Columns.Select(ColumnName)] : [columnName],
-        [.. inlineIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)]);
+        [.. inlineIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
+        IsFiltered: inlineIndex.FilterPredicate is not null,
+        IsColumnstore: IsColumnstoreIndexType(inlineIndex.IndexType));
 
     private static string ColumnName(ColumnWithSortOrder columnWithSortOrder) =>
         columnWithSortOrder.Column.MultiPartIdentifier.Identifiers[^1].Value;

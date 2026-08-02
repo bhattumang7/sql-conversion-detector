@@ -780,6 +780,80 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_TableLevelInlineFilteredIndex_NotCountedAsSeekableForRanking()
+    {
+        // The bug this closes: BuildInlineIndex used to drop FilterPredicate/IndexType entirely,
+        // so a table-level inline INDEX(...) WHERE ... reported Indexed=true - a false positive
+        // for the ranking claim this tool leads with (ScanForced + indexed + depth >= 1 first).
+        // The standalone CREATE INDEX ... WHERE ... path (Build_FilteredIndex_NotCountedAsSeekableForRanking
+        // above) already got this right; this is the same construct via table-level inline syntax.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders
+                (
+                    Id INT NOT NULL,
+                    Status VARCHAR(20) NOT NULL,
+                    INDEX IX_Orders_Status (Status) WHERE Status = 'Open'
+                );
+                """)]);
+
+        Assert.False(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_TableLevelInlineColumnstoreIndex_NotCountedAsSeekableForRanking()
+    {
+        // Same bug as the filtered case above, for the columnstore flag: a table-level inline
+        // `INDEX ix CLUSTERED COLUMNSTORE` used to report Indexed=true.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders
+                (
+                    Id INT NOT NULL,
+                    Status VARCHAR(20) NOT NULL,
+                    INDEX IX_Orders_CS CLUSTERED COLUMNSTORE
+                );
+                """)]);
+
+        Assert.False(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_ColumnLevelInlineFilteredIndex_NotCountedAsSeekableForRanking()
+    {
+        // Same bug, for the column-level inline form (columnDefinition.Index), e.g.
+        // `Status VARCHAR(20) INDEX ix WHERE ...` - a distinct code path from the table-level
+        // TableDefinition.Indexes collection above (BuildColumn's own inlineIndex branch).
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders
+                (
+                    Id INT NOT NULL,
+                    Status VARCHAR(20) INDEX IX_Orders_Status WHERE Status = 'Open'
+                );
+                """)]);
+
+        Assert.False(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
+    public void Build_ColumnLevelInlineOrdinaryIndex_StillCountsAsSeekable()
+    {
+        // Near-miss for the two fixes above: a plain (non-filtered, non-columnstore) inline
+        // column-level index must keep counting as seekable - the fix must not overcorrect.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders
+                (
+                    Id INT NOT NULL,
+                    Status VARCHAR(20) INDEX IX_Orders_Status
+                );
+                """)]);
+
+        Assert.True(catalog.Find("dbo.Orders")!.IsIndexedColumn("Status"));
+    }
+
+    [Fact]
     public void Build_SelectIntoTempTable_InfersColumnTypesFromSourceTable()
     {
         var catalog = CatalogBuilder.Build(
