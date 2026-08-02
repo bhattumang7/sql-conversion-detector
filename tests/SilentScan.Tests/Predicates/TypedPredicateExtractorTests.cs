@@ -1221,17 +1221,21 @@ public sealed class TypedPredicateExtractorTests
         // CONVERT to a string type has no inline COLLATE syntax, and the real engine propagates
         // the input's own collation into the result. Code carries its OWN explicit (different)
         // collation so ClassifySameCategory's null-collation short-circuit can't fire on either
-        // side - only then does a genuinely-different-collation Unknown verdict prove the
+        // side - only then does a genuinely-different-collation OperandClash verdict prove the
         // CONVERT result's collation actually came from Value, not from being left uncollated.
-        // Unknown is a claim about our own uncertainty, not the engine's behavior - nothing to
-        // oracle-confirm.
+        // Oracle-verified directly (Docker SQL Server): this exact shape does not compile at all
+        // (Msg 468, "Cannot resolve the collation conflict between SQL_Latin1_General_CP1_CI_AS
+        // and Latin1_General_CI_AS") - a CAST/CONVERT result with no COLLATE of its own carries
+        // its source column's "implicit" coercibility tier, and comparing two differing
+        // "implicit" collations is a compile failure, not a silent convert. This used to assert
+        // Unknown (an admitted, unverified guess); now a confirmed compile failure.
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Code NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);",
             "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT 1 FROM dbo.T, dbo.Raw WHERE Code = CONVERT(NVARCHAR(20), Value);");
 
         var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.Equal(Verdict.OperandClash, finding.Verdict);
     }
 
     [Fact]

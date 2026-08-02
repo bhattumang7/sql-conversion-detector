@@ -150,17 +150,62 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_SameCategoryDifferentCollation_OtherNotProvenLiteral_Unknown()
+    public void Classify_SameCategoryDifferentCollation_OtherNotProvenLiteral_OperandClash()
     {
         // otherIsLiteral defaults to false - a real column, a CAST/CONVERT result, or anything
-        // else not provably a source-text literal keeps the conservative Unknown: whether it's
-        // a Msg 468 compile-error conflict or a silent convert depends on a coercibility tier
-        // this pass has not oracle-verified for that shape.
+        // else not provably a source-text literal is "implicit" coercibility, and comparing two
+        // differing "implicit" collations does not compile at all (Msg 468, oracle-verified
+        // directly: Docker SQL Server, a CAST result inheriting a foreign column's collation
+        // compared against a target column of the same category raises Msg 468 identically to
+        // two real columns). Confirmed compile failure, not a guessed verdict.
         var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: SqlCollation);
         var value = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: WindowsCollation);
 
-        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
-        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value, otherIsLiteral: false));
+        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
+        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value, otherIsLiteral: false));
+    }
+
+    [Fact]
+    public void Classify_CrossCategoryStringPair_DifferentCollation_OtherNotProvenLiteral_OperandClash()
+    {
+        // The gap this fix closes: CHAR vs VARCHAR is a different type CATEGORY, but a genuine
+        // collation mismatch does not care about category - oracle-verified directly (Docker SQL
+        // Server): CHAR column vs VARCHAR column with differing collations raises Msg 468
+        // identically to VARCHAR vs VARCHAR with differing collations. Before this fix, the
+        // category-equality gate meant this fell through to the type-pair matrix and reported
+        // whatever Char|VarChar's same-collation cell says (SeekPreserved) - a compile error
+        // reported as clean, the worst kind of false negative for this tool.
+        var column = new SqlType(SqlTypeCategory.Char, Length: 10, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: WindowsCollation);
+
+        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_CrossCategoryStringPair_DifferentCollation_OtherIsLiteral_NotOperandClash()
+    {
+        // A literal never conflicts (always "coercible default"), so cross-category collation
+        // differences don't matter for it either - falls through to the normal matrix-driven
+        // cross-category verdict (Char vs VarChar, both string columns share the same category
+        // family behavior as VarChar vs VarChar: the column does not convert regardless of
+        // collation, since Char's own COLLATE is what a differing-collation literal would force
+        // convert, and Char vs VarChar same-width never converts the column - oracle-probed).
+        var column = new SqlType(SqlTypeCategory.Char, Length: 10, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: WindowsCollation);
+
+        Assert.NotEqual(Verdict.OperandClash, VerdictClassifier.Classify(column, value, otherIsLiteral: true));
+    }
+
+    [Fact]
+    public void Classify_CrossCategoryStringPair_SameCollation_NoConflict()
+    {
+        // Matching collations never conflict, category difference or not (oracle-verified:
+        // CHAR vs VARCHAR joins cleanly when both sides share one collation) - falls through to
+        // the ordinary matrix-driven cross-category verdict, not OperandClash.
+        var column = new SqlType(SqlTypeCategory.Char, Length: 10, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: SqlCollation);
+
+        Assert.NotEqual(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]

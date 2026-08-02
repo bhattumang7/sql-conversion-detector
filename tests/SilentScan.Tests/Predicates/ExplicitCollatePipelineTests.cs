@@ -198,15 +198,17 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     }
 
     [Fact]
-    public void ConvertResultInheritingColumnCollation_VsDifferentlyCollatedColumn_StaysUnknown()
+    public void ConvertResultInheritingColumnCollation_VsDifferentlyCollatedColumn_IsOperandClash()
     {
         // A CAST/CONVERT result with no COLLATE clause of its own inherits its source column's
         // collation AND that column's coercibility tier ("implicit", per official T-SQL rules -
-        // the same tier a real column carries) - not oracle-verified here whether comparing it
-        // against a differently-collated column silently converts or hits the same Msg 468
-        // conflict a real column pair does, so this must stay Unknown, not be swept into the
-        // literal-only ScanForced rule. Unknown is a claim about our own uncertainty, not the
-        // engine's behavior, so there is nothing to oracle-confirm.
+        // the same tier a real column carries). Oracle-verified directly (Docker SQL Server):
+        // this exact shape does not compile at all (Msg 468, "Cannot resolve the collation
+        // conflict between SQL_Latin1_General_CP1_CI_AS and Latin1_General_CI_AS") - identically
+        // to two real columns with differing collations and no CONVERT anywhere. This used to be
+        // reported as Unknown (an admitted, unverified guess); it is now a confirmed compile
+        // failure. There is no plan XML for a statement that fails to compile, so nothing for a
+        // per-test SHOWPLAN_XML probe to confirm beyond the sqlcmd compile failure itself.
         var report = Scan("""
             CREATE TABLE dbo.T (Code nvarchar(20) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO
@@ -216,6 +218,32 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
             """);
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
-        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.Equal(Verdict.OperandClash, finding.Verdict);
+    }
+
+    [Fact]
+    public void CrossCategoryColumnVsColumn_DifferingCollations_ReportsCollationConflict()
+    {
+        // The gap this fix closes: CHAR vs VARCHAR is a different type CATEGORY from each other,
+        // but a genuine collation mismatch does not care about category - oracle-verified
+        // directly (Docker SQL Server): CHAR column vs VARCHAR column with differing collations
+        // raises Msg 468 identically to two same-category columns. Before this fix,
+        // TryRecordCollationConflict's category-equality gate let this fall through to the
+        // type-pair matrix, which reports Char|VarChar's same-collation cell (SeekPreserved) -
+        // a compile error reported as clean.
+        var report = Scan("""
+            CREATE TABLE dbo.CharSide (Code char(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Code (Code));
+            GO
+            CREATE TABLE dbo.VarCharSide (Code varchar(10) COLLATE Latin1_General_CI_AS NOT NULL);
+            GO
+            SELECT 1 FROM dbo.CharSide c INNER JOIN dbo.VarCharSide v ON c.Code = v.Code;
+            """);
+
+        Assert.Empty(report.TypedFindings);
+        var conflict = Assert.Single(report.CollationConflictFindings);
+        Assert.Equal("dbo.CharSide", conflict.FirstTableQualifiedName);
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", conflict.FirstCollationName);
+        Assert.Equal("dbo.VarCharSide", conflict.SecondTableQualifiedName);
+        Assert.Equal("Latin1_General_CI_AS", conflict.SecondCollationName);
     }
 }

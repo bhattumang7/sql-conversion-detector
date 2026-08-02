@@ -955,18 +955,24 @@ public static class TypedPredicateExtractor
 
         /// <summary>
         /// True (and a <see cref="CollationConflictFinding"/> recorded) when two real columns
-        /// are the same string category with genuinely different, both-resolved collations -
-        /// the one shape oracle-verified to not compile at all (Msg 468). Neither side can have
-        /// gone through a self-differing explicit COLLATE here: that's diverted to an
-        /// <see cref="ExpressionDerivedFinding"/> before either operand ever becomes a
-        /// <see cref="PredicateOperand.Column"/> (<see cref="Lineage.ScalarExpressionResolver"/>'s
+        /// are both string-family with genuinely different, both-resolved collations - the one
+        /// shape oracle-verified to not compile at all (Msg 468). This is a collation-label
+        /// mismatch, not a type-category one: probed directly, `CHAR` vs `VARCHAR` (different
+        /// category) with differing collations raises the identical Msg 468 as `VARCHAR` vs
+        /// `VARCHAR` with differing collations, and matching collations compile fine regardless
+        /// of category (char vs varchar, same collation, joins cleanly). Checking category
+        /// equality here (as an earlier version of this method did) let a genuine cross-category
+        /// collation conflict fall through to the type-pair matrix and get reported
+        /// SeekPreserved for a predicate that does not compile at all - worse than an Unknown.
+        /// Neither side can have gone through a self-differing explicit COLLATE here: that's
+        /// diverted to an <see cref="ExpressionDerivedFinding"/> before either operand ever
+        /// becomes a <see cref="PredicateOperand.Column"/> (<see cref="Lineage.ScalarExpressionResolver"/>'s
         /// ApplyExplicitCollate runs earlier, in Pass 2/3's shared column resolution).
         /// </summary>
         private bool TryRecordCollationConflict(PredicateOperand.Column first, PredicateOperand.Column second, string operatorText, TSqlFragment node)
         {
-            if (first.Type is not { IsStringFamily: true, Collation: { } firstCollation } firstType
-                || second.Type is not { IsStringFamily: true, Collation: { } secondCollation } secondType
-                || firstType.Category != secondType.Category
+            if (first.Type is not { IsStringFamily: true, Collation: { } firstCollation }
+                || second.Type is not { IsStringFamily: true, Collation: { } secondCollation }
                 || string.Equals(firstCollation.Name, secondCollation.Name, StringComparison.OrdinalIgnoreCase))
             {
                 return false;

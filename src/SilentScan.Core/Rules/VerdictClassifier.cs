@@ -45,9 +45,29 @@ public static class VerdictClassifier
             return Verdict.Unknown;
         }
 
+        // A genuine, resolved collation mismatch between two string-family operands that are
+        // BOTH "implicit" coercibility (a real column, or a CAST/CONVERT result that inherited
+        // its input's collation with no explicit COLLATE of its own) does not compile at all
+        // (Msg 468, oracle-verified) - independent of type CATEGORY. `CHAR` vs `VARCHAR` with
+        // differing collations fails identically to `VARCHAR` vs `VARCHAR` with differing
+        // collations, and a CAST result carrying a foreign column's collation conflicts with a
+        // target column exactly like a second real column would (both probed directly). Checked
+        // before the category split below so it applies uniformly to same-category AND
+        // cross-category pairs - reporting a routine SeekPreserved/ScanForced verdict for a
+        // predicate that does not compile at all would be worse than an Unknown. A literal is
+        // always "coercible default" (never conflicts) and is excluded here; it is handled by
+        // <see cref="ClassifySameCategory"/>'s own literal branch instead.
+        if (!otherIsLiteral
+            && columnType.IsStringFamily && otherType.IsStringFamily
+            && columnType.Collation is { } columnCollation && otherType.Collation is { } otherCollation
+            && !string.Equals(columnCollation.Name, otherCollation.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return Verdict.OperandClash;
+        }
+
         if (columnType.Category == otherType.Category)
         {
-            return ClassifySameCategory(columnType, otherType, otherIsLiteral);
+            return ClassifySameCategory(columnType, otherType);
         }
 
         // Every other cross-category pair - same family (int vs bigint, char vs nvarchar,
@@ -59,7 +79,12 @@ public static class VerdictClassifier
         // representable in float) and cases where same-category-looking pairs never convert
         // the column at all (char vs varchar). A cell with no recorded probe is UNKNOWN, never
         // guessed from precedence direction - the precedence list is used elsewhere only to
-        // decide operand *typing* (e.g. literal widening), never a verdict.
+        // decide operand *typing* (e.g. literal widening), never a verdict. A genuine collation
+        // MISMATCH between two resolved, non-literal string-family operands was already routed
+        // to OperandClash above, so by construction the only reason `columnType`'s own collation
+        // matters here is to pick which probed collation family's matrix column applies -
+        // `otherType`'s collation is irrelevant from this point on (either it agrees with
+        // columnType's, or the other operand is a literal, which never conflicts).
         var collationName = columnType.IsStringFamily ? columnType.Collation?.Name : null;
 
         var outcome = columnType.IsStringFamily && collationName is null
@@ -97,7 +122,7 @@ public static class VerdictClassifier
         category is SqlTypeCategory.SqlVariant or SqlTypeCategory.Xml or SqlTypeCategory.UserDefined
             or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image;
 
-    private static Verdict ClassifySameCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral)
+    private static Verdict ClassifySameCategory(SqlType columnType, SqlType otherType)
     {
         if (!columnType.IsStringFamily || columnType.Collation is null || otherType.Collation is null)
         {
@@ -113,13 +138,14 @@ public static class VerdictClassifier
             return Verdict.SeekPreserved;
         }
 
-        // Same string category, genuinely different, both-resolved collations. A literal is
-        // always "coercible default" (never conflicts) and forces CONVERT_IMPLICIT onto the
-        // column - oracle-confirmed ScanForced, never RangeSeek (the dynamic-range-seek
-        // optimization is cross-category-only, never observed for a same-category collation
-        // mismatch in any probed shape). Anything else (a real column, or a CAST/CONVERT/
-        // function result whose own coercibility tier this pass has not verified) stays
-        // Unknown rather than guess which of "compile error" or "silent convert" applies.
-        return otherIsLiteral ? Verdict.ScanForced : Verdict.Unknown;
+        // Same string category, genuinely different, both-resolved collations. Classify's own
+        // early check (above the category split) already returns OperandClash for any
+        // non-literal instance of this - the only way to reach this point with a collation
+        // mismatch still on the table is otherIsLiteral being true. A literal is always
+        // "coercible default" (never conflicts) and forces CONVERT_IMPLICIT onto the column -
+        // oracle-confirmed ScanForced, never RangeSeek (the dynamic-range-seek optimization is
+        // cross-category-only, never observed for a same-category collation mismatch in any
+        // probed shape).
+        return Verdict.ScanForced;
     }
 }
