@@ -46,6 +46,18 @@ When you have to make code changes and are just moving to the next stage and all
   nothing from a target database is ever executed.
 * .NET 10, C#. Ubuntu; Docker assumed available.
 * Corpus stays at the pinned 5-repo pilot set unless we decide otherwise.
+* **Everything goes via the database — no file-parsed catalog, no file-only
+  scan.** Schema truth AND module text come from a real SQL Server: `scan-db`
+  reads a live target; corpus scanning deploys the repo's (whitelist-filtered)
+  DDL to the disposable Docker instance, then reads the catalog
+  (`LiveCatalogReader`) and module text (`sys.sql_modules`) back out. Repo
+  files are read for exactly one purpose: deployment. Do NOT invest in
+  file-parsed DDL→catalog fidelity (statement ordering, ALTER merge, SELECT
+  INTO, computed-column typing, …) — replicating the engine's DDL semantics is
+  reinventing the database-project wheel. The only parser-derived catalog data
+  is module-body objects the engine can't expose: temp tables created inside
+  proc bodies, table variables, TVPs, MSTVF return shapes. Corpus findings
+  still map back to the defining repo file, since the study cites repos.
 
 ## Layout
 
