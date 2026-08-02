@@ -62,6 +62,7 @@ public static class ScanReportBuilder
         var extractionResults = usableParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
+        var collationConflictFindings = extractionResults.SelectMany(r => r.CollationConflictFindings).ToList();
         var skippedConstructs = new List<SkippedConstruct>();
         skippedConstructs.AddRange(catalog.Skipped.Entries);
         skippedConstructs.AddRange(lineage.Skipped.Entries);
@@ -75,6 +76,7 @@ public static class ScanReportBuilder
         tier1Findings = [.. tier1Findings, .. dynamicSqlResult.Tier1Findings];
         typedFindings = [.. typedFindings, .. dynamicSqlResult.TypedFindings];
         expressionDerivedFindings = [.. expressionDerivedFindings, .. dynamicSqlResult.ExpressionDerivedFindings];
+        collationConflictFindings = [.. collationConflictFindings, .. dynamicSqlResult.CollationConflictFindings];
         skippedConstructs.AddRange(dynamicSqlResult.SkippedConstructs);
 
         // Captured before SeekPreserved findings are dropped below - the report's only
@@ -102,6 +104,7 @@ public static class ScanReportBuilder
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
             .ThenBy(f => f.Line)];
         expressionDerivedFindings = [.. expressionDerivedFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
+        collationConflictFindings = [.. collationConflictFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
         var orderedSkippedConstructs = skippedConstructs
             .OrderBy(s => s.Pass)
             .ThenBy(s => s.SourcePath, StringComparer.Ordinal)
@@ -110,7 +113,7 @@ public static class ScanReportBuilder
             .ToList();
 
         return new ScanReport(
-            new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings,
+            new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

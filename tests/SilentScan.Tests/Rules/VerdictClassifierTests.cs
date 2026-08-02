@@ -148,12 +148,30 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_SameCategoryDifferentCollation_Unknown()
+    public void Classify_SameCategoryDifferentCollation_OtherNotProvenLiteral_Unknown()
     {
+        // otherIsLiteral defaults to false - a real column, a CAST/CONVERT result, or anything
+        // else not provably a source-text literal keeps the conservative Unknown: whether it's
+        // a Msg 468 compile-error conflict or a silent convert depends on a coercibility tier
+        // this pass has not oracle-verified for that shape.
         var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: SqlCollation);
         var value = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: WindowsCollation);
 
         Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value, otherIsLiteral: false));
+    }
+
+    [Fact]
+    public void Classify_SameCategoryDifferentCollation_OtherIsLiteral_ScanForced()
+    {
+        // Oracle-verified directly (Docker SQL Server, compile-only SHOWPLAN_XML): a literal is
+        // T-SQL's "coercible default" tier and never conflicts, so a differing collation there
+        // forces CONVERT_IMPLICIT onto the COLUMN even though nothing about the column's own
+        // syntax changed - ScanForced, never RangeSeek (that optimization is cross-category-only).
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: WindowsCollation);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value, otherIsLiteral: true));
     }
 
     [Fact]

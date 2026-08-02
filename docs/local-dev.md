@@ -23,11 +23,11 @@ dotnet test
 `Directory.Build.props` treats warnings as errors and enables recommended
 analyzers solution-wide; a red build is a real defect, not noise to suppress.
 
-`tests/SilentScan.Tests/Integration/` requires the Docker SQL Server above to
-be running — there is no mock/skip path (CLAUDE.md: not everything can be
-covered with unit tests). Each integration test class creates and drops its
-own disposable database per run via `SilentScan.Verify.Deployment.DatabaseProvisioner`
-so reruns don't accumulate state.
+The Docker SQL Server above is a hard requirement for `dotnet test` overall,
+not just for `Integration/`: verdict-bearing tests across `Predicates/` also
+deploy their fixture DDL and confirm against a real SHOWPLAN_XML plan
+(`[Trait("Category", "Oracle")]` / `OracleTestFixture`), not just that the
+static pipeline agrees with itself. No mock/skip path.
 
 ## Benchmark harness
 

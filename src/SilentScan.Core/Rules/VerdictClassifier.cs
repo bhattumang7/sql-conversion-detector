@@ -9,7 +9,22 @@ namespace SilentScan.Core.Rules;
 /// </summary>
 public static class VerdictClassifier
 {
-    public static Verdict Classify(SqlType? columnType, SqlType? otherType)
+    /// <param name="columnType">The indexed side's resolved type, or null when unresolvable.</param>
+    /// <param name="otherType">The other operand's resolved type, or null when unresolvable.</param>
+    /// <param name="otherIsLiteral">
+    /// Whether the other operand is a genuine source-text literal, rather than a real column, a
+    /// parameter/variable, or a CAST/CONVERT/function result - only matters for the same-
+    /// category collation-mismatch branch (<see cref="ClassifySameCategory"/>). A literal is
+    /// always T-SQL's "coercible default" coercibility tier: it never conflicts, so a differing
+    /// collation there compiles fine and forces CONVERT_IMPLICIT onto the column - oracle-
+    /// confirmed ScanForced. A real column, and (per official T-SQL coercibility rules) a CAST/
+    /// CONVERT result that inherits a column's collation with no COLLATE clause of its own, both
+    /// carry "implicit" coercibility instead - comparing two differing "implicit" collations is
+    /// a compile error (Msg 468), not a seek-loss verdict, and this pass has not oracle-verified
+    /// what a parameter/variable's own coercibility tier does here, so anything not provably a
+    /// literal stays Unknown rather than guessed. Defaults to false (the conservative case).
+    /// </param>
+    public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false)
     {
         if (columnType is null || otherType is null)
         {
@@ -32,7 +47,7 @@ public static class VerdictClassifier
 
         if (columnType.Category == otherType.Category)
         {
-            return ClassifySameCategory(columnType, otherType);
+            return ClassifySameCategory(columnType, otherType, otherIsLiteral);
         }
 
         // Every other cross-category pair - same family (int vs bigint, char vs nvarchar,
@@ -75,13 +90,14 @@ public static class VerdictClassifier
         category is SqlTypeCategory.SqlVariant or SqlTypeCategory.Xml or SqlTypeCategory.UserDefined
             or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image;
 
-    private static Verdict ClassifySameCategory(SqlType columnType, SqlType otherType)
+    private static Verdict ClassifySameCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral)
     {
         if (!columnType.IsStringFamily || columnType.Collation is null || otherType.Collation is null)
         {
             // Same category, no collation to conflict on (or collation unresolved on a
             // non-comparison-relevant side) - length/precision differences alone don't
-            // defeat sargability.
+            // defeat sargability (oracle-verified across varchar/nvarchar/decimal facet
+            // pairs: every same-category, same-collation-status pair seeks cleanly).
             return Verdict.SeekPreserved;
         }
 
@@ -90,10 +106,13 @@ public static class VerdictClassifier
             return Verdict.SeekPreserved;
         }
 
-        // Same string category, genuinely different collations: T-SQL's coercibility
-        // precedence rules for resolving which collation wins are a distinct, non-trivial
-        // rule set this pass does not implement (CLAUDE.md precision discipline: never
-        // guess).
-        return Verdict.Unknown;
+        // Same string category, genuinely different, both-resolved collations. A literal is
+        // always "coercible default" (never conflicts) and forces CONVERT_IMPLICIT onto the
+        // column - oracle-confirmed ScanForced, never RangeSeek (the dynamic-range-seek
+        // optimization is cross-category-only, never observed for a same-category collation
+        // mismatch in any probed shape). Anything else (a real column, or a CAST/CONVERT/
+        // function result whose own coercibility tier this pass has not verified) stays
+        // Unknown rather than guess which of "compile error" or "silent convert" applies.
+        return otherIsLiteral ? Verdict.ScanForced : Verdict.Unknown;
     }
 }

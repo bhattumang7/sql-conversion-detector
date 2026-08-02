@@ -2,6 +2,7 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -12,17 +13,24 @@ namespace SilentScan.Tests.Predicates;
 /// project layout) and is intentionally synthetic per the plan's own wording - distinct from
 /// the tier1/ corpus fixtures, which are real-world-sourced per CLAUDE.md's separate rule.
 /// Runs through <see cref="ScanReportBuilder"/> (not the individual scanners directly) so the
-/// dynamic SQL Tier A pass (reparse + remap) is exercised end to end, same as production.
+/// dynamic SQL Tier A pass (reparse + remap) is exercised end to end, same as production - and
+/// every planted verdict-bearing finding is additionally confirmed against the real oracle
+/// (CLAUDE.md: verify the real thing), deployed from the mini-project's own schema/view DDL
+/// (01_schema.sql, 02_views.sql - the procs in 03_procs.sql are never deployed, since the
+/// oracle probes reconstruct their own minimal SELECTs against the tables/views directly rather
+/// than calling the procs, per CorpusFindingProbeBuilder).
 /// </summary>
-public sealed class FullPipelineSyntheticMiniProjectTests
+[Trait("Category", "Oracle")]
+public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
 {
+    private static readonly string ProjectDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "mini_project");
+
     private readonly string _fixtureFile;
     private readonly ScanReport _report;
 
     public FullPipelineSyntheticMiniProjectTests()
     {
-        var projectDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "mini_project");
-        var files = SqlFileDiscovery.EnumerateSqlFiles(projectDir);
+        var files = SqlFileDiscovery.EnumerateSqlFiles(ProjectDir);
         _fixtureFile = files.Single(f => f.EndsWith("03_procs.sql", StringComparison.Ordinal));
         _report = ScanReportBuilder.Build(files);
 
@@ -32,8 +40,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         }
     }
 
+    protected override string DatabaseName => nameof(FullPipelineSyntheticMiniProjectTests);
+
+    protected override string Ddl =>
+        File.ReadAllText(Path.Combine(ProjectDir, "01_schema.sql")) + "\nGO\n" +
+        File.ReadAllText(Path.Combine(ProjectDir, "02_views.sql"));
+
     [Fact]
-    public void DirectTableScanForced_IsPlantedAndFound()
+    public async Task DirectTableScanForced_IsPlantedAndFound_OracleConfirmed()
     {
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "DisplayName" && f.Column.TableQualifiedName == "dbo.Users");
 
@@ -41,25 +55,39 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         Assert.Equal(0, finding.Column.Depth);
         Assert.True(finding.Column.Indexed);
         Assert.Null(finding.DynamicSqlCallSite);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
-    public void WindowsCollationRangeSeek_IsPlantedAndFound()
+    public async Task WindowsCollationRangeSeek_IsPlantedAndFound_OracleConfirmed()
     {
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Region");
 
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
         Assert.False(finding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
-    public void DepthTwoThroughViewChain_IsPlantedAndFound()
+    public async Task DepthTwoThroughViewChain_IsPlantedAndFound_OracleConfirmed()
     {
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal(2, finding.Column.Depth);
         Assert.True(finding.Column.Indexed);
+
+        // The tool's core differentiator - a predicate written two view layers away from the
+        // base column still resolves to a real seek-losing conversion on the base table. Probed
+        // through the view it was actually written against (vw_OrdersLevel2), per
+        // CorpusFindingProbeBuilder's ImmediateRelationQualifiedName use - the optimizer inlines
+        // the view either way, so the plan-level CONVERT_IMPLICIT still lands on dbo.Orders.
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
@@ -67,7 +95,10 @@ public sealed class FullPipelineSyntheticMiniProjectTests
     {
         // usp_FindUserByName_Clean's VARCHAR param against Users.DisplayName - same family
         // and collation, so no actionable verdict should exist for it anywhere in the batch.
-        // Only one actionable DisplayName finding total (the planted NVARCHAR one).
+        // Only one actionable DisplayName finding total (the planted NVARCHAR one). SeekPreserved
+        // isn't one of the three verdict-bearing enum values PipelineOracleVerification exists
+        // for, and this test makes no Verdict claim of its own - it's a count assertion, so
+        // there is nothing to add an oracle round-trip for beyond the direct-table test above.
         Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "DisplayName");
     }
 
@@ -141,7 +172,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests
     }
 
     [Fact]
-    public void DynamicSqlTierCAccumulated_IsPlantedAndFound()
+    public async Task DynamicSqlTierCAccumulated_IsPlantedAndFound_OracleConfirmed()
     {
         // usp_DynamicTierCAccumulated_Fires builds its EXEC text via a straight-line
         // DECLARE + SET accumulation across two source lines with no branch in between -
@@ -156,10 +187,16 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         Assert.Equal(90, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(91, finding.DynamicSqlCallSite!.Value.Line);
+
+        // The dynamic-SQL provenance is purely a source-location concern - the underlying
+        // comparison the oracle probes is the same "AccountCode = <nvarchar literal>" against
+        // dbo.Users regardless of whether it was written statically or folded from Tier C.
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
-    public void DynamicSqlSpExecuteSqlDeclaredParam_TierB_IsPlantedAndFound()
+    public async Task DynamicSqlSpExecuteSqlDeclaredParam_TierB_IsPlantedAndFound_OracleConfirmed()
     {
         // sp_executesql's own params declaration string ("N'@Phone nvarchar(20)'") is exact
         // type info - Phone is VARCHAR/SQL_* vs a declared nvarchar param, so this must
@@ -171,10 +208,13 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         Assert.True(finding.Column.Indexed);
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(_fixtureFile, finding.DynamicSqlCallSite!.Value.SourcePath);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
-    public void DynamicSqlLiteral_InnerPredicateIsReparsedAndRemappedToSourceLine()
+    public async Task DynamicSqlLiteral_InnerPredicateIsReparsedAndRemappedToSourceLine_OracleConfirmed()
     {
         // EXEC('SELECT UserId FROM dbo.Users WHERE Email = N''x''') on line 69 of
         // 03_procs.sql - Email is VARCHAR/SQL_* collation vs an nvarchar literal, so Tier A
@@ -190,5 +230,8 @@ public sealed class FullPipelineSyntheticMiniProjectTests
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(_fixtureFile, finding.DynamicSqlCallSite!.Value.SourcePath);
         Assert.Equal(69, finding.DynamicSqlCallSite.Value.Line);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 }

@@ -11,11 +11,11 @@ public static class LiteralTypeResolver
 {
     public static SqlType? Resolve(Literal literal) => literal switch
     {
-        StringLiteral { IsNational: true } s => new SqlType(SqlTypeCategory.NVarChar, Length: EmptyStringAwareLength(s.Value)),
+        StringLiteral { IsNational: true } s => new SqlType(SqlTypeCategory.NVarChar, Length: EmptyStringAwareLength(s.Value), Collation: ExplicitCollation(s)),
 
         // Date/time literals are untyped strings until compared against a typed column -
         // that comparison-time typing is a Pass 3 concern, not this pass's.
-        StringLiteral s => new SqlType(SqlTypeCategory.VarChar, Length: EmptyStringAwareLength(s.Value)),
+        StringLiteral s => new SqlType(SqlTypeCategory.VarChar, Length: EmptyStringAwareLength(s.Value), Collation: ExplicitCollation(s)),
 
         IntegerLiteral => new SqlType(SqlTypeCategory.Int),
 
@@ -38,6 +38,16 @@ public static class LiteralTypeResolver
     // N'') types with length 1, not 0 - a zero-length varchar/nvarchar isn't a real T-SQL type
     // (docs/audit-remediation-plan.md Phase 5.3, audit finding C4).
     private static int EmptyStringAwareLength(string value) => value.Length == 0 ? 1 : value.Length;
+
+    // `'x' COLLATE X` gives the literal an explicit collation that outranks every other source
+    // (an explicit COLLATE clause has the highest coercibility precedence in T-SQL) - oracle-
+    // verified directly: WHERE VarcharCol = 'x' COLLATE <different collation> puts
+    // CONVERT_IMPLICIT on the COLUMN, not the literal, even though nothing about the column's
+    // own syntax changed. A plain literal with no COLLATE clause carries no collation of its
+    // own here (null) - it is "coercible default" and always yields to whatever the other side
+    // needs, never forcing a conversion by itself.
+    private static Collation? ExplicitCollation(Literal literal) =>
+        literal.Collation is { Value: { } name } ? new Collation(name) : null;
 
     private static SqlType ResolveNumeric(NumericLiteral literal)
     {

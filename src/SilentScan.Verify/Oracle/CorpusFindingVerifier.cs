@@ -8,6 +8,10 @@ namespace SilentScan.Verify.Oracle;
 /// finding's own repo DDL has already been deployed to (CLAUDE.md Verify workflow): builds a
 /// self-authored probe, compiles it under SHOWPLAN_XML, and checks for CONVERT_IMPLICIT
 /// applied to the finding's own column - never on whether the tiny/empty table seeks or scans.
+/// A SeekPreserved finding claims the opposite of every other verdict - that the column does
+/// NOT convert - so its confirmation is the absence of that column-side CONVERT_IMPLICIT, not
+/// its presence; the other operand (or a joined column) converting instead is expected, not a
+/// mismatch.
 /// A RangeSeek and a ScanForced finding both produce that same column-side convert
 /// (docs/audit-remediation-plan.md Phase 5.1, audit finding C1), so for those two verdicts
 /// confirmation additionally requires the plan's seek/scan SHAPE to match: RangeSeek needs the
@@ -59,6 +63,19 @@ public sealed class CorpusFindingVerifier
             && (schema is null || string.Equals(c.Schema, schema, StringComparison.OrdinalIgnoreCase))
             && string.Equals(c.Column, finding.Column.ColumnName, StringComparison.OrdinalIgnoreCase));
 
+        if (finding.Verdict == Verdict.SeekPreserved)
+        {
+            // SeekPreserved's whole claim is the opposite of every other verdict's: the
+            // predicate does NOT force this column to convert (the value/other side may still
+            // convert instead, or nothing converts at all). Confirmation is therefore the
+            // absence of a column-side CONVERT_IMPLICIT, not its presence - reusing the
+            // "columnConverts == Confirmed" logic below for this verdict would demand the one
+            // plan shape SeekPreserved specifically predicts will never happen.
+            return columnConverts
+                ? new CorpusFindingResult(finding, CorpusFindingOutcome.NotConfirmed, DescribeMismatch(finding.Verdict, columnConverts: true, planXml, conversions))
+                : new CorpusFindingResult(finding, CorpusFindingOutcome.Confirmed, Detail: null);
+        }
+
         if (!columnConverts)
         {
             return new CorpusFindingResult(finding, CorpusFindingOutcome.NotConfirmed, DescribeMismatch(finding.Verdict, columnConverts: false, planXml, conversions));
@@ -96,6 +113,11 @@ public sealed class CorpusFindingVerifier
     private static string DescribeMismatch(
         Verdict verdict, bool columnConverts, string planXml, IReadOnlyList<ConvertImplicitFinding> observedConversions)
     {
+        if (verdict == Verdict.SeekPreserved && columnConverts)
+        {
+            return "Expected no column-side conversion for verdict SeekPreserved, but CONVERT_IMPLICIT was observed on the column.";
+        }
+
         if (!columnConverts)
         {
             var observed = observedConversions.Count == 0

@@ -40,6 +40,7 @@ public static class SarifReportWriter
         results.AddRange(report.TypedFindings.Select(ToResult));
         results.AddRange(report.DynamicSqlFindings.Select(ToResult));
         results.AddRange(report.ExpressionDerivedFindings.Select(ToResult));
+        results.AddRange(report.CollationConflictFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -112,6 +113,17 @@ public static class SarifReportWriter
         var level = anyUnderlyingIndexed ? LevelError : DowngradeOneLevel(LevelError);
 
         return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+    }
+
+    private static SarifResult ToResult(CollationConflictFinding finding)
+    {
+        // Always error, regardless of whether either column is indexed - this isn't a
+        // sargability downgrade candidate the way an ordinary verdict or expression-derived
+        // finding is; the query does not compile at all (oracle-verified: SQL Server Msg 468),
+        // which outranks every seek-versus-scan concern.
+        var message = $"Collation conflict: '{finding.FirstTableQualifiedName}.{finding.FirstColumnName}' (COLLATE {finding.FirstCollationName}) {finding.Operator} '{finding.SecondTableQualifiedName}.{finding.SecondColumnName}' (COLLATE {finding.SecondCollationName}) does not compile.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
+
+        return BuildResult(SarifRuleCatalog.CollationConflictRuleId, LevelError, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
     private static SarifResult ToResult(DynamicSqlFinding finding)

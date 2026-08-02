@@ -25,7 +25,7 @@ public static class TypedPredicateExtractor
         var ledger = new SkipLedger();
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, ledger.Entries);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, ledger.Entries);
     }
 
     private sealed class Visitor(
@@ -56,6 +56,8 @@ public static class TypedPredicateExtractor
         public List<TypedPredicateFinding> Findings { get; } = [];
 
         public List<ExpressionDerivedFinding> ExpressionDerivedFindings { get; } = [];
+
+        public List<CollationConflictFinding> CollationConflictFindings { get; } = [];
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -505,6 +507,16 @@ public static class TypedPredicateExtractor
 
             if (left is PredicateOperand.Column leftColumn && right is PredicateOperand.Column rightColumn)
             {
+                // Two real columns, same string category, genuinely different resolved
+                // collations: this doesn't compile at all (Msg 468, oracle-verified) - not a
+                // sargability verdict for either direction, so report the conflict once and
+                // skip the normal AddFinding calls rather than also emitting a routine Unknown
+                // that would understate what's actually wrong here.
+                if (TryRecordCollationConflict(leftColumn, rightColumn, operatorText, node))
+                {
+                    return;
+                }
+
                 // `ON a.x = b.y`: classifying only one side (as this used to, always picking
                 // the left operand) misses whichever column is actually on the LOWER-precedence
                 // side - a join predicate implicitly converting the right-hand join key is one
@@ -542,10 +554,37 @@ public static class TypedPredicateExtractor
 
         private void AddFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
         {
+            var otherIsLiteral = other is PredicateOperand.Value { IsLiteral: true };
             var otherType = other is PredicateOperand.Value value ? value.Type : ((PredicateOperand.Column)other).Type;
-            var verdict = VerdictClassifier.Classify(column.Type, otherType);
+            var verdict = VerdictClassifier.Classify(column.Type, otherType, otherIsLiteral);
 
             Findings.Add(new TypedPredicateFinding(verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        /// <summary>
+        /// True (and a <see cref="CollationConflictFinding"/> recorded) when two real columns
+        /// are the same string category with genuinely different, both-resolved collations -
+        /// the one shape oracle-verified to not compile at all (Msg 468). Neither side can have
+        /// gone through a self-differing explicit COLLATE here: that's diverted to an
+        /// <see cref="ExpressionDerivedFinding"/> before either operand ever becomes a
+        /// <see cref="PredicateOperand.Column"/> (<see cref="Lineage.ScalarExpressionResolver"/>'s
+        /// ApplyExplicitCollate runs earlier, in Pass 2/3's shared column resolution).
+        /// </summary>
+        private bool TryRecordCollationConflict(PredicateOperand.Column first, PredicateOperand.Column second, string operatorText, TSqlFragment node)
+        {
+            if (first.Type is not { IsStringFamily: true, Collation: { } firstCollation } firstType
+                || second.Type is not { IsStringFamily: true, Collation: { } secondCollation } secondType
+                || firstType.Category != secondType.Category
+                || string.Equals(firstCollation.Name, secondCollation.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            CollationConflictFindings.Add(new CollationConflictFinding(
+                first.TableQualifiedName, first.ColumnName, firstCollation.Name,
+                second.TableQualifiedName, second.ColumnName, secondCollation.Name,
+                operatorText, sourcePath, node.StartLine, node.StartColumn));
+            return true;
         }
 
         private PredicateOperand ResolveOperand(

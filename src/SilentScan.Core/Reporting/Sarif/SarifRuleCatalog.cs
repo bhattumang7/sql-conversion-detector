@@ -10,6 +10,7 @@ public static class SarifRuleCatalog
     public const string DynamicSqlUnanalyzableRuleId = "silentscan/dynamic-sql/unanalyzable";
     public const string DynamicSqlInnerParseFailedRuleId = "silentscan/dynamic-sql/inner-parse-failed";
     public const string ExpressionDerivedRuleId = "silentscan/lineage/expression-derived-column";
+    public const string CollationConflictRuleId = "silentscan/verdict/collation-conflict";
 
     public static string DynamicSqlRuleId(DynamicSqlOutcome outcome) => outcome switch
     {
@@ -53,6 +54,7 @@ public static class SarifRuleCatalog
         Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed."),
         Rule(DynamicSqlInnerParseFailedRuleId, "A dynamic SQL call site's argument was provably constant but its reassembled text did not parse as T-SQL."),
         Rule(ExpressionDerivedRuleId, "A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement's own derived table, or upstream in a view/TVF's SELECT list) - no index seek is possible regardless of the comparison's types."),
+        Rule(CollationConflictRuleId, "Two columns with genuinely different, incompatible collations are compared directly - this does not compile (SQL Server error 468, \"Cannot resolve the collation conflict\"), not a seek/scan question."),
     ];
 
     private static SarifRule Rule(string id, string description) => new(id, new SarifMessage(description));

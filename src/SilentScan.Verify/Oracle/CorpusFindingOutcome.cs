@@ -7,13 +7,17 @@ public enum CorpusFindingOutcome
     /// The plan showed CONVERT_IMPLICIT on the finding's own column, and - for a RangeSeek or
     /// ScanForced finding - the plan's seek/scan shape matches what that verdict predicts
     /// (docs/audit-remediation-plan.md Phase 5.1, audit finding C1: both verdicts produce a
-    /// column-side convert, so conversion presence alone can't tell them apart).
+    /// column-side convert, so conversion presence alone can't tell them apart). For a
+    /// SeekPreserved finding the claim is inverted, so this instead means the plan showed NO
+    /// CONVERT_IMPLICIT on the finding's own column.
     /// </summary>
     Confirmed,
 
     /// <summary>
-    /// The probe compiled cleanly but showed no column-side conversion, or - for a RangeSeek/
-    /// ScanForced finding - showed one with the wrong plan shape for that verdict.
+    /// The probe compiled cleanly but showed no column-side conversion where the verdict
+    /// required one, or - for a RangeSeek/ScanForced finding - showed one with the wrong plan
+    /// shape for that verdict, or - for a SeekPreserved finding - showed a column-side
+    /// conversion the verdict says should not happen.
     /// </summary>
     NotConfirmed,
 

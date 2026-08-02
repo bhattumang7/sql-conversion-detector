@@ -94,6 +94,34 @@ public sealed class LiteralTypeResolverTests
     }
 
     [Fact]
+    public void Resolve_StringLiteralWithNoCollateClause_HasNullCollation()
+    {
+        // A plain literal carries no collation of its own here - it's T-SQL's "coercible
+        // default" tier, always yielding to whatever the other side needs, never forcing a
+        // conversion by itself (Rules.VerdictClassifier's otherIsLiteral rule depends on this).
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("'hello'"));
+
+        Assert.Null(type!.Collation);
+    }
+
+    [Fact]
+    public void Resolve_StringLiteralWithExplicitCollate_PropagatesCollationOntoType()
+    {
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("'hello' COLLATE Latin1_General_CI_AS"));
+
+        Assert.Equal("Latin1_General_CI_AS", type!.Collation!.Name);
+    }
+
+    [Fact]
+    public void Resolve_NationalStringLiteralWithExplicitCollate_PropagatesCollationOntoType()
+    {
+        var type = LiteralTypeResolver.Resolve(ParseLiteral("N'hello' COLLATE SQL_Latin1_General_CP1_CI_AS"));
+
+        Assert.Equal(SqlTypeCategory.NVarChar, type!.Category);
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", type.Collation!.Name);
+    }
+
+    [Fact]
     public void Resolve_EmptyStringLiteral_ResolvesToLengthOneNotZero()
     {
         // Oracle-verified (sys.dm_exec_describe_first_result_set): '' types as varchar(1), not

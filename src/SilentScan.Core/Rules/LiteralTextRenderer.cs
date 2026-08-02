@@ -16,8 +16,8 @@ public static class LiteralTextRenderer
 {
     public static string? Render(Literal literal) => literal switch
     {
-        StringLiteral { IsNational: true } s => $"N'{Escape(s.Value)}'",
-        StringLiteral s => $"'{Escape(s.Value)}'",
+        StringLiteral { IsNational: true } s => $"N'{Escape(s.Value)}'{CollateSuffix(literal)}",
+        StringLiteral s => $"'{Escape(s.Value)}'{CollateSuffix(literal)}",
 
         // These kinds' Value is the original token text verbatim (already valid SQL syntax,
         // including any prefix like BinaryLiteral's "0x" or MoneyLiteral's "$") - safe to reuse
@@ -32,4 +32,16 @@ public static class LiteralTextRenderer
     };
 
     private static string Escape(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+
+    // `'x' COLLATE X` carries its COLLATE clause on the Literal node itself (ScriptDOM's
+    // Literal.Collation), not a separate wrapper expression - LiteralTypeResolver already reads
+    // this to give the literal its explicit collation (VerdictClassifier's Rule 2: an explicit
+    // COLLATE outranks everything and forces the COLUMN to convert). Found while oracle-
+    // confirming ExplicitCollatePipelineTests: omitting this suffix here silently reconstructed
+    // a probe with no COLLATE clause at all - not equivalent to the source predicate, and the
+    // one case this renderer exists specifically to avoid (a probe that misrepresents fidelity).
+    // Only string literals carry a COLLATE clause in T-SQL; other literal kinds have no such
+    // syntax, so this is applied to the two StringLiteral arms only.
+    private static string CollateSuffix(Literal literal) =>
+        literal.Collation is { Value: { } name } ? $" COLLATE {name}" : string.Empty;
 }

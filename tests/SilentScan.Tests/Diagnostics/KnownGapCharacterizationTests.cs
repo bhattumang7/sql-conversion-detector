@@ -65,28 +65,16 @@ public sealed class KnownGapCharacterizationTests
     // column now reaches the skip ledger (Diagnostics/AnalysisPass.Catalog, "computed column
     // type") rather than the comparison disappearing with no trace at all.
 
-    [Fact]
-    public void SameCategoryDifferentCollations_CoercibilityUnimplemented_FallsToUnknown()
-    {
-        // varchar-vs-varchar across SQL_* and Windows collations is a real production
-        // seek-killer (collation coercion converts one side), but same-category collation
-        // divergence has no coercibility rules yet - both directions classify Unknown.
-        var report = Scan("""
-            CREATE TABLE dbo.LocalCustomers (
-                Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
-                INDEX IX_Email (Email));
-            GO
-            CREATE TABLE dbo.VendorCustomers (
-                Email varchar(100) COLLATE Latin1_General_CI_AS NOT NULL);
-            GO
-            SELECT 1
-            FROM dbo.LocalCustomers l
-            INNER JOIN dbo.VendorCustomers v ON l.Email = v.Email;
-            """);
-
-        Assert.NotEmpty(report.TypedFindings);
-        Assert.All(report.TypedFindings, f => Assert.Equal(Verdict.Unknown, f.Verdict));
-    }
+    // SameCategoryDifferentCollations was pinned here and is now CLOSED - oracle-verified
+    // directly (Msg 468, "Cannot resolve the collation conflict"): two real columns, same
+    // string category, differing native collations, and no explicit COLLATE anywhere does not
+    // compile at all - not a seek-loss verdict to leave Unknown. Reported as a dedicated
+    // CollationConflictFinding (TypedPredicateExtractor.TryRecordCollationConflict) instead of a
+    // routine TypedPredicateFinding. Moved to
+    // Predicates/ExplicitCollatePipelineTests.cs#ColumnVsColumnDifferingCollations_NoExplicitCollateAnywhere_ReportsCollationConflict.
+    // A column vs. a literal with an explicit, differing COLLATE is a DIFFERENT, real
+    // ScanForced (that literal is always "coercible default" and never conflicts) - see the
+    // same test file's LiteralWithDifferingExplicitCollate_ForcesColumnScanForced.
 
     [Fact]
     public void SameCategoryFacetDifference_IsInvisible_ClassifiesSeekPreserved()

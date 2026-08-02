@@ -3,6 +3,9 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
+using SilentScan.Verify.Deployment;
+using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -25,61 +28,12 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_VarcharColumnVsNVarcharParam_SqlCollation_ScanForced()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
-            AS
-            BEGIN
-                SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
-        Assert.Equal("DisplayName", finding.Column.ColumnName);
-        Assert.False(finding.Column.Indexed);
-    }
-
-    [Fact]
-    public void Extract_IndexedColumn_IsFlaggedIndexed()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE INDEX IX_Orders_OrderCode ON dbo.Orders(OrderCode);",
-            """
-            CREATE PROCEDURE dbo.usp_Find @OrderCode NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT OrderId FROM dbo.Orders WHERE OrderCode = @OrderCode;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.True(finding.Column.Indexed);
-    }
-
-    [Fact]
-    public void Extract_LiteralComparison_TypesTheLiteralSide()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
-            "SELECT OrderId FROM dbo.Orders WHERE OrderId = 5;");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-        var value = Assert.IsType<PredicateOperand.Value>(finding.OtherOperand);
-        Assert.Equal(SqlTypeCategory.Int, value.Type!.Category);
-    }
-
-    [Fact]
     public void Extract_LiteralComparison_CarriesLiteralTextForProbeReconstruction()
     {
         // docs/audit-remediation-plan.md Phase 5.2: the finding must carry enough to
         // reconstruct the exact literal later during oracle verification, not just its type.
+        // (This is itself infrastructure the oracle-confirmed tests below depend on, not a
+        // verdict claim of its own - nothing to oracle-confirm here.)
         var findings = Extract(
             "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);",
             "SELECT DisplayName FROM dbo.Users WHERE DisplayName = N'Alice';");
@@ -107,68 +61,6 @@ public sealed class TypedPredicateExtractorTests
         var value = Assert.IsType<PredicateOperand.Value>(finding.OtherOperand);
         Assert.False(value.IsLiteral);
         Assert.Null(value.LiteralText);
-    }
-
-    [Fact]
-    public void Extract_SysnameVariableVsVarcharColumn_ScanForced()
-    {
-        // docs/audit-remediation-plan.md Phase 6.2: sysname (nvarchar(128)) outranks varchar in
-        // precedence exactly like an ordinary nvarchar parameter would - oracle-verified in
-        // SysnameOracleTests.
-        var findings = Extract(
-            "CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_Find
-            AS
-            BEGIN
-                DECLARE @p sysname = N'x';
-                SELECT Code FROM dbo.T WHERE Code = @p;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_CatalogedTypeAliasColumn_ResolvesThroughToUnderlyingType()
-    {
-        var findings = Extract(
-            "CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;",
-            "CREATE TABLE dbo.Orders (OrderId dbo.MyIntAlias NOT NULL);",
-            "SELECT OrderId FROM dbo.Orders WHERE OrderId = 5;");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-        Assert.Equal(SqlTypeCategory.Int, finding.Column.Type!.Category);
-    }
-
-    [Fact]
-    public void Extract_PredicateThroughViewLayer_CarriesDepthFromLineage()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE VIEW dbo.vw_Orders AS SELECT OrderCode FROM dbo.Orders;",
-            """
-            CREATE PROCEDURE dbo.usp_Find @OrderCode NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT OrderCode FROM dbo.vw_Orders WHERE OrderCode = @OrderCode;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(1, finding.Column.Depth);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-
-        // TableQualifiedName/ColumnName always name the ultimate base column (needed for the
-        // oracle's plan-matching signal), but ImmediateRelation* must name the VIEW the source
-        // predicate actually queried - the Verify oracle probes this, not the base table
-        // directly, or a depth>=1 finding is never actually tested through the view layer it
-        // claims to be inherited through.
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal("dbo.vw_Orders", finding.Column.ImmediateRelationQualifiedName);
-        Assert.Equal("OrderCode", finding.Column.ImmediateColumnName);
     }
 
     [Fact]
@@ -205,32 +97,6 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_LikeColumnVsNvarcharPattern_ColumnConverts_ScanForced()
-    {
-        // The classic ORM-generated pattern: `varcharCol LIKE @nvarcharPattern`. LIKE was
-        // previously invisible to the typed pipeline entirely - only Tier-1's wildcard-shape
-        // check ran against it, never the type-conversion question.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT Code FROM dbo.Orders WHERE Code LIKE N'ABC%';");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("LIKE", finding.Operator);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_LikeColumnVsVarcharLiteralPattern_NoConversion_SeekPreserved()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);",
-            "SELECT Code FROM dbo.Orders WHERE Code LIKE 'ABC%';");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_ComparisonInSelectListCaseExpression_ProducesNoFinding()
     {
         // The false-positive this guards: a comparison that never filters rows (a SELECT-list
@@ -252,20 +118,6 @@ public sealed class TypedPredicateExtractorTests
             "SELECT Code FROM dbo.Orders ORDER BY CASE WHEN Code = N'X' THEN 1 ELSE 0 END;");
 
         Assert.Empty(findings);
-    }
-
-    [Fact]
-    public void Extract_SameComparisonMovedFromSelectListIntoWhere_NowProducesAFinding()
-    {
-        // The positive control for the two tests above: the identical comparison, in a genuine
-        // filter position, must still fire - proving the gate is scoped to non-filter positions
-        // specifically, not a blanket regression.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT Code FROM dbo.Orders WHERE Code = N'X';");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 
     [Fact]
@@ -292,89 +144,6 @@ public sealed class TypedPredicateExtractorTests
             "CREATE PROCEDURE dbo.usp_Test @Id INT AS BEGIN IF @Id = 1 BEGIN RETURN; END END;");
 
         Assert.Contains(result.SkippedConstructs, c => c.Reason.Contains("no FROM scope in effect", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Extract_JoinOnClausePredicate_IsResolved()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (CustomerCode VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.Customers (CustomerCode NVARCHAR(10) NOT NULL);",
-            """
-            SELECT o.CustomerCode
-            FROM dbo.Orders o
-            JOIN dbo.Customers c ON o.CustomerCode = c.CustomerCode;
-            """);
-
-        // Both directions of the join predicate are now classified (the join-direction fix):
-        // the varchar side genuinely converts (ScanForced), and the nvarchar side - reported
-        // separately - never converts regardless of collation (its own outcome, correctly
-        // SeekPreserved, not swallowed by only checking the other column).
-        Assert.Equal(2, findings.Count);
-        var varcharSide = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Orders");
-        Assert.Equal(Verdict.ScanForced, varcharSide.Verdict);
-        var nvarcharSide = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Customers");
-        Assert.Equal(Verdict.SeekPreserved, nvarcharSide.Verdict);
-    }
-
-    [Fact]
-    public void Extract_HavingClausePredicate_IsResolved()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL);",
-            """
-            SELECT CustomerId, COUNT(*)
-            FROM dbo.Orders
-            GROUP BY CustomerId
-            HAVING CustomerId = 5;
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_BetweenPredicate_IsResolved()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (OrderDate DATETIME NOT NULL);",
-            "SELECT OrderDate FROM dbo.Orders WHERE OrderDate BETWEEN '20240101' AND '20240201';");
-
-        // BETWEEN decomposes into two independent comparisons (col >= lower AND col <= upper) -
-        // both bounds are reported.
-        Assert.Equal(2, findings.Count);
-        // datetime outranks varchar in T-SQL precedence, so the literal bounds convert.
-        Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
-    }
-
-    [Fact]
-    public void Extract_BetweenPredicate_UpperBoundAloneForcesConversion_IsReported()
-    {
-        // Only the upper bound carries a higher-precedence literal (nvarchar) - a scanner that
-        // only checked the lower bound would miss this entirely.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT Code FROM dbo.Orders WHERE Code BETWEEN 'A' AND N'Z';");
-
-        Assert.Equal(2, findings.Count);
-        Assert.Equal(Verdict.SeekPreserved, findings[0].Verdict);
-        Assert.Equal(Verdict.ScanForced, findings[1].Verdict);
-    }
-
-    [Fact]
-    public void Extract_ColumnVsColumnSameType_NoConversionAnywhere_SeekPreserved()
-    {
-        // A column-vs-column comparison is classified in BOTH directions (the join-predicate
-        // fix: `ON a.x = b.y` can convert either side depending on which one has lower
-        // precedence, so only checking one side silently misses the other's verdict).
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, CustomerId INT NOT NULL);",
-            "SELECT OrderId FROM dbo.Orders WHERE OrderId = CustomerId;");
-
-        Assert.Equal(2, findings.Count);
-        Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
-        Assert.Equal("OrderId", findings[0].Column.ColumnName);
-        Assert.Equal("CustomerId", findings[1].Column.ColumnName);
     }
 
     [Fact]
@@ -407,6 +176,8 @@ public sealed class TypedPredicateExtractorTests
     {
         // A parameter declared in a different, unrelated batch: our per-proc variable scope
         // deliberately resets, so this must resolve Unknown rather than leaking a stale type.
+        // Unknown is a claim about our own uncertainty, not the engine's behavior - nothing to
+        // oracle-confirm (CLAUDE.md: never guess).
         var findings = Extract(
             "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);",
             "SELECT OrderCode FROM dbo.Orders WHERE OrderCode = @UndeclaredParam;");
@@ -642,62 +413,6 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_CorrectQualifier_SameShapeAsAboveNearMiss_ProducesFinding()
-    {
-        // The near-miss sibling of the test above: same tables, same predicate, but the
-        // qualifier ('s') is the real alias - this must still resolve and fire normally, proving
-        // the fix rejects only genuinely-unresolvable qualifiers, not qualified references
-        // generally.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
-            "CREATE TABLE dbo.Shipments (Id INT NOT NULL, TrackingCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_FindShipment @p NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT o.Id
-                FROM dbo.Orders AS o
-                JOIN dbo.Shipments AS s ON o.Id = s.Id
-                WHERE s.TrackingCode = @p;
-            END
-            """);
-
-        // Same join-condition SeekPreserved noise as the near-miss above; the TrackingCode
-        // predicate is the one under test here.
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "TrackingCode");
-        Assert.Equal("dbo.Shipments", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_CorrelatedExistsSubquery_OuterAliasResolvesThroughScopeChain()
-    {
-        // docs/audit-remediation-plan.md Phase 2.2: the EXISTS subquery's own FROM scope (d)
-        // is innermost when its WHERE clause is visited; "o.CustomerId" refers to the *outer*
-        // query's alias, one level up the scope chain, not anything in the subquery's own FROM
-        // clause. Before this fix only the innermost scope was ever consulted, so the outer
-        // reference could never resolve at all (Phase 2.1 made that failure produce no finding
-        // instead of a wrong one - this test proves it now correctly produces the right one).
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.OrderDetails (OrderId INT NOT NULL, Sku VARCHAR(20) NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT o.Id
-                FROM dbo.Orders AS o
-                WHERE o.CustomerId = @CustomerId
-                    AND EXISTS (SELECT 1 FROM dbo.OrderDetails AS d WHERE d.OrderId = o.Id);
-            END
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_InnerScopeAliasShadowsOuterOfSameName_ResolvesToInnerFirst()
     {
         // The scope chain must try the INNERMOST level first - a self-referencing correlated
@@ -721,153 +436,21 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_AlterProcedureAfterCreateStub_UsesAlterProcsOwnParameterType()
-    {
-        // docs/audit-remediation-plan.md Phase 2.3: the idempotent-deploy pattern seen verbatim
-        // in the First Responder Kit corpus repo - a body-less CREATE PROCEDURE stub, then the
-        // real body via ALTER PROCEDURE. Before the fix, ALTER PROCEDURE's parameters were never
-        // recorded at all (only CreateProcedureStatement/CreateFunctionStatement were handled),
-        // so @DisplayName here would resolve to an untyped variable and produce no finding.
-        var findings = Extract(
-            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE PROCEDURE dbo.usp_FindUser AS RETURN 0;",
-            """
-            ALTER PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
-            AS
-            BEGIN
-                SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("DisplayName", finding.Column.ColumnName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_CreateOrAlterProcedure_UsesOwnParameterType()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE OR ALTER PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
-            AS
-            BEGIN
-                SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_TwoProceduresInSequence_SecondProcDoesNotInheritFirstProcsVariableTypes()
-    {
-        // The core staleness bug: before the fix, only CreateProcedureStatement/
-        // CreateFunctionStatement reset _variables, but every CREATE PROCEDURE already did that
-        // correctly - the real gap was ALTER's total non-handling. This test guards the
-        // more basic regression (two ordinary CREATE PROCEDUREs in a row must never leak
-        // variable types between them) so it can't quietly break again while fixing the ALTER
-        // gap above.
-        var findings = Extract(
-            "CREATE TABLE dbo.Ints (Col INT NOT NULL);",
-            "CREATE TABLE dbo.Strings (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_First @Id INT
-            AS
-            BEGIN
-                SELECT Col FROM dbo.Ints WHERE Col = @Id;
-            END
-            """,
-            """
-            CREATE PROCEDURE dbo.usp_Second @Id NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT Col FROM dbo.Strings WHERE Col = @Id;
-            END
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.Strings");
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_PredicateInsideCte_ResolvesToRealBaseColumn()
-    {
-        // docs/audit-remediation-plan.md Phase 2.4: the predicate lives inside the CTE body
-        // itself, not the outer query - proves CteResolver's own resolution (not just the outer
-        // SELECT referencing the finished CTE) goes through the normal typed-predicate pipeline.
-        var findings = Extract(
-            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
-            AS
-            BEGIN
-                WITH Matches AS (SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName)
-                SELECT DisplayName FROM Matches;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_CteNameShadowsRealTable_PredicateAgainstOuterQueryResolvesThroughCte()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Region VARCHAR(10) NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
-            AS
-            BEGIN
-                WITH Users AS (SELECT DisplayName FROM dbo.Users WHERE Region = 'US')
-                SELECT DisplayName FROM Users WHERE DisplayName = @DisplayName;
-            END
-            """);
-
-        // Region = 'US' inside the CTE body resolves against the real dbo.Users (VarChar vs a
-        // literal - SeekPreserved, filtered out below); the outer DisplayName predicate is
-        // against the CTE's own single-column shape, still tracing back to dbo.Users.DisplayName.
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "DisplayName");
-        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_CteVisibleInsideNestedSubquery_ResolvesCorrelatedReference()
-    {
-        // A CTE is visible for the whole containing statement, including a correlated subquery
-        // nested inside the main query - not just the top-level FROM clause.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.Flags (OrderId INT NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_Check @CustomerId NVARCHAR(20)
-            AS
-            BEGIN
-                WITH RecentOrders AS (SELECT Id, CustomerId FROM dbo.Orders)
-                SELECT Id
-                FROM RecentOrders AS ro
-                WHERE ro.CustomerId = @CustomerId
-                    AND EXISTS (SELECT 1 FROM dbo.Flags AS f WHERE f.OrderId = ro.Id);
-            END
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_SameNamedTempTableInTwoProcedures_EachProcedureResolvesItsOwnShape()
     {
         // docs/audit-remediation-plan.md Phase 2.5 "Done when": two procedures with same-named
         // temp tables of different shapes each resolve correctly - proves the scoped catalog
         // lookup Phase 2.5 added reaches all the way through predicate extraction, not just the
         // catalog's own storage (see CatalogBuilderTests for the catalog-level version of this).
+        //
+        // Not oracle-round-tripped: #temp tables only exist for the lifetime of the session/
+        // batch that created them (CREATE TABLE #t is not on DdlStatementWhitelist - it lives
+        // inside a CREATE PROCEDURE body, which isn't whitelisted DDL either), so there is no
+        // way to deploy this shape and query it back from a separate probe connection. The
+        // verdict correctness itself (VarChar column vs NVarChar literal, SQL collation) is
+        // already oracle-confirmed by the plain-table cases in
+        // TypedPredicateExtractorOracleTests; this test's own job is proving the scoped-catalog
+        // lookup, not re-proving the type rule.
         var findings = Extract(
             """
             CREATE PROCEDURE dbo.usp_First
@@ -899,186 +482,6 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_UpdateWhereClause_NoFromExtension_ResolvesAgainstTarget()
-    {
-        // docs/audit-remediation-plan.md Phase 4.1, audit finding B1 ("the single biggest
-        // coverage gap in the tool"): UPDATE's WHERE clause previously had no FROM-scope pushed
-        // at all, so this predicate was invisible to Pass 3 no matter what it contained.
-        var findings = Extract(
-            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_RenameUser @DisplayName NVARCHAR(40)
-            AS
-            BEGIN
-                UPDATE dbo.Users SET DisplayName = @DisplayName WHERE DisplayName = @DisplayName;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_UpdateWithFromExtension_ResolvesJoinedTableAliases()
-    {
-        // UPDATE ... FROM ... JOIN ... WHERE - the extended FROM syntax, where the WHERE clause
-        // references aliases established only in the FROM clause, not the bare target name.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.Flags (OrderId INT NOT NULL, IsStale BIT NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_MarkStale @CustomerId NVARCHAR(20)
-            AS
-            BEGIN
-                UPDATE f
-                SET f.IsStale = 1
-                FROM dbo.Flags AS f
-                JOIN dbo.Orders AS o ON o.Id = f.OrderId
-                WHERE o.CustomerId = @CustomerId;
-            END
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_DeleteWhereClause_NoFromExtension_ResolvesAgainstTarget()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Sessions (Token VARCHAR(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_ExpireSession @Token NVARCHAR(64)
-            AS
-            BEGIN
-                DELETE FROM dbo.Sessions WHERE Token = @Token;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("dbo.Sessions", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_DeleteWithFromExtension_ResolvesJoinedTableAliases()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.OrderLines (OrderId INT NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_PurgeOrderLines @CustomerId NVARCHAR(20)
-            AS
-            BEGIN
-                DELETE ol
-                FROM dbo.OrderLines AS ol
-                JOIN dbo.Orders AS o ON o.Id = ol.OrderId
-                WHERE o.CustomerId = @CustomerId;
-            END
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_MergeOnClause_ResolvesTargetAndSourceAliases()
-    {
-        // MergeSpecification's own TableReference property is the USING SOURCE, not the INTO
-        // target (verified empirically against the real parser output while implementing this -
-        // the target's alias lives in the separate TableAlias property). This test pins that
-        // both sides resolve correctly regardless of that naming trap.
-        var findings = Extract(
-            "CREATE TABLE dbo.Target (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.Source (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);",
-            """
-            MERGE INTO dbo.Target AS t
-            USING dbo.Source AS s
-            ON t.Code = s.Code
-            WHEN MATCHED THEN UPDATE SET t.Id = s.Id
-            WHEN NOT MATCHED THEN INSERT (Id, Code) VALUES (s.Id, s.Code);
-            """);
-
-        // Both directions of the ON clause's column-vs-column comparison are now reported.
-        var targetSide = Assert.Single(findings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.Target");
-        Assert.Equal(Verdict.ScanForced, targetSide.Verdict);
-        var sourceSide = Assert.Single(findings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.Source");
-        Assert.Equal(Verdict.SeekPreserved, sourceSide.Verdict);
-    }
-
-    [Fact]
-    public void Extract_MergeActionClauseAdditionalCondition_Resolves()
-    {
-        // WHEN MATCHED AND <extra condition> - the additional predicate on the action clause
-        // itself, not just the top-level ON clause, must resolve through the same scope.
-        var findings = Extract(
-            "CREATE TABLE dbo.Target (Id INT NOT NULL, Status VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE TABLE dbo.Source (Id INT NOT NULL);",
-            """
-            MERGE INTO dbo.Target AS t
-            USING dbo.Source AS s
-            ON t.Id = s.Id
-            WHEN MATCHED AND t.Status = N'Active' THEN UPDATE SET t.Id = s.Id;
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "Status");
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_CteThenUpdateFrom_CteVisibleInUpdatesFromClause()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, IsFlagged BIT NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_FlagOrders @CustomerId NVARCHAR(20)
-            AS
-            BEGIN
-                WITH TargetOrders AS (SELECT Id, CustomerId FROM dbo.Orders)
-                UPDATE o
-                SET o.IsFlagged = 1
-                FROM dbo.Orders AS o
-                JOIN TargetOrders AS t ON t.Id = o.Id
-                WHERE t.CustomerId = @CustomerId;
-            END
-            """);
-
-        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_InlineTvfInFromClause_PredicateResolvesToBaseColumnWithDepth()
-    {
-        // docs/audit-remediation-plan.md Phase 4.2, audit finding B2: FromScopeResolver only
-        // handled NamedTableReference and QueryDerivedTable - a table-valued function call in a
-        // FROM clause (SchemaObjectFunctionTableReference) fell to the unhandled default and
-        // resolved to an empty relation, so a predicate over one of its columns could never
-        // trace back to the real base column at all. "Done when": resolves to the base column
-        // with depth >= 1, exactly like reading through a view.
-        var findings = Extract(
-            "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "CREATE FUNCTION dbo.fn_GetOrders(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.Orders);",
-            """
-            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT Id FROM dbo.fn_GetOrders(1) WHERE CustomerId = @CustomerId;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
-        Assert.Equal("CustomerId", finding.Column.ColumnName);
-        Assert.True(finding.Column.Depth >= 1);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_InlineTvfWithAlias_QualifiedColumnResolves()
     {
         var findings = Extract(
@@ -1098,41 +501,20 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_MultiStatementTvfInFromClause_UsesDeclaredReturnColumnType()
-    {
-        // A multi-statement TVF's columns are Declared provenance (its RETURNS @t TABLE(...)
-        // shape), not a chain back to a base column - this is the complementary case to the
-        // inline-TVF test above, proving both TVF kinds resolve through the FROM clause now.
-        var findings = Extract(
-            """
-            CREATE FUNCTION dbo.fn_GetCodes(@Ignored INT)
-            RETURNS @t TABLE (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL)
-            AS
-            BEGIN
-                RETURN;
-            END
-            """,
-            """
-            CREATE PROCEDURE dbo.usp_FindCodes @Code NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT Id FROM dbo.fn_GetCodes(1) WHERE Code = @Code;
-            END
-            """);
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("Code", finding.Column.ColumnName);
-        Assert.Equal(SqlTypeCategory.VarChar, finding.Column.Type!.Category);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_DeclaredTableVariableInFromClause_Resolves()
     {
         // FROM @t parses as VariableTableReference, a distinct ScriptDOM node kind
         // FromScopeResolver never matched at all - it fell through to the same default arm as
         // OPENROWSET/PIVOT (coverage-remediation-plan.md Phase 3.4/3.5's neighbor). This is the
         // ordinary DECLARE @t TABLE(...) case, not the MSTVF return-variable case below.
+        //
+        // Not oracle-round-tripped: a table variable is scoped to the batch/procedure that
+        // declares it, and DECLARE ... TABLE is not on DdlStatementWhitelist - there is no way
+        // to stand this shape up outside a procedure body and query it back from a separate
+        // probe connection. The ScanForced verdict itself (VarChar column vs NVarChar literal,
+        // SQL collation) is already oracle-confirmed elsewhere in this project (e.g.
+        // TypedPredicateExtractorOracleTests); this test's own job is proving @t resolves as a
+        // FROM-clause relation at all.
         var findings = Extract(
             """
             CREATE PROCEDURE dbo.usp_UseTableVar
@@ -1179,6 +561,15 @@ public sealed class TypedPredicateExtractorTests
         // RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a
         // DeclareTableVariableStatement, so @t was never cataloged and a predicate inside the
         // body over FROM @t resolved to no known table (coverage-remediation-plan.md Phase 3.4).
+        //
+        // Not oracle-round-tripped: this predicate only exists inside a multi-statement TVF's
+        // own body, evaluated against rows this same function body INSERTs into its return
+        // variable - there is no way to compile-only probe it without actually invoking the
+        // function (which requires the INSERT INTO @t that feeds it to run for real, i.e. DML
+        // execution - CLAUDE.md's hard scope forbids that anywhere outside a self-authored
+        // Docker probe). The ScanForced verdict itself is already oracle-confirmed by the
+        // simpler table-vs-literal cases in TypedPredicateExtractorOracleTests; this test's own
+        // job is proving the return-variable table gets cataloged and resolves at all.
         var findings = Extract(
             """
             CREATE FUNCTION dbo.fn_GetCodes()
@@ -1223,65 +614,6 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_InListHomogeneousVarchar_SqlCollation_SeekPreserved()
-    {
-        // Oracle-verified (docs/audit-remediation-plan.md Phase 4.3): a homogeneous varchar IN
-        // list against a varchar column produces no conversion at all.
-        var findings = Extract(
-            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT Col FROM dbo.T WHERE Col IN ('a', 'b', 'c');");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("IN", finding.Operator);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_InListOneNvarcharLiteralAmongVarchar_SqlCollation_ScanForced()
-    {
-        // Oracle-verified: a SINGLE higher-precedence literal anywhere in an otherwise-
-        // homogeneous list is enough to force the column to convert for the whole comparison -
-        // this is the case a naive "type the first element only" implementation would miss.
-        var findings = Extract(
-            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT Col FROM dbo.T WHERE Col IN ('a', N'b', 'c');");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_InListHomogeneousNvarchar_AgainstVarcharColumn_ScanForced()
-    {
-        // Oracle-verified: matches ordinary single-comparison precedence (nvarchar outranks
-        // varchar), just applied across the whole list.
-        var findings = Extract(
-            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT Col FROM dbo.T WHERE Col IN (N'a', N'b', N'c');");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_InListWithParameter_ResolvesParameterType()
-    {
-        var findings = Extract(
-            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_Find @A VARCHAR(20), @B NVARCHAR(20)
-            AS
-            BEGIN
-                SELECT Col FROM dbo.T WHERE Col IN (@A, @B);
-            END
-            """);
-
-        // nvarchar outranks varchar, so Col converts.
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
     {
         var findings = ExtractAll(
@@ -1290,21 +622,6 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(findings.TypedFindings);
         Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "IN predicate");
-    }
-
-    [Fact]
-    public void Extract_InSubquery_ResolvesSubqueryOutputColumnThroughLineage()
-    {
-        var findings = Extract(
-            """
-            CREATE TABLE dbo.Orders (CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
-            CREATE TABLE dbo.Customers (Id NVARCHAR(20) NOT NULL);
-            """,
-            "SELECT CustomerId FROM dbo.Orders WHERE CustomerId IN (SELECT Id FROM dbo.Customers);");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal("CustomerId", finding.Column.ColumnName);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 
     [Fact]
@@ -1351,26 +668,16 @@ public sealed class TypedPredicateExtractorTests
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT LIKE", StringComparison.Ordinal));
     }
 
-    [Theory]
-    [InlineData("!<")]
-    [InlineData("!>")]
-    public void Extract_NotLessThanAndNotGreaterThan_ClassifyNormally(string sqlOperator)
-    {
-        // T-SQL folds !< to >= and !> to <= (oracle-verified: identical plan shape, a genuine
-        // range seek) - these are NOT non-seekable like <>/NOT IN/NOT LIKE, so they route
-        // through the type-conversion verdict machinery exactly like any other comparison.
-        var findings = Extract(
-            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            $"SELECT Col FROM dbo.T WHERE Col {sqlOperator} N'a';");
-
-        var finding = Assert.Single(findings);
-        Assert.Equal(sqlOperator, finding.Operator);
-        Assert.Equal(Verdict.ScanForced, finding.Verdict);
-    }
-
     [Fact]
     public void Extract_TriggerBody_InsertedPseudoTable_ResolvesToTargetTableColumn()
     {
+        // INSERTED is a pseudo-table that only exists inside a real trigger firing on a real DML
+        // statement - this project never executes DML (CLAUDE.md hard scope), so there is no
+        // plan to capture here; CREATE TRIGGER is also not on DdlStatementWhitelist, so the
+        // trigger itself can't even be deployed standalone. The ScanForced verdict correctness
+        // is already covered by the oracle-confirmed VerdictClassifier/type-matrix tests
+        // elsewhere in this project - this test's own job is lineage resolution (does
+        // inserted.Code trace back to dbo.Orders.Code).
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1397,6 +704,9 @@ public sealed class TypedPredicateExtractorTests
         // through the ordinary BaseColumn path and wrongly inherited the real table's index,
         // which would have ranked this finding first under CLAUDE.md's ranking rule despite not
         // being a real index-killing conversion.
+        //
+        // No oracle round-trip for the inserted-pseudo-table half of this test: same reasoning
+        // as the test above (no DML execution, CREATE TRIGGER not whitelisted DDL).
         var findings = Extract(
             """
             CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -1471,6 +781,12 @@ public sealed class TypedPredicateExtractorTests
         // CreateOrAlterTriggerStatement is a distinct ScriptDOM node type from
         // CreateTriggerStatement/AlterTriggerStatement - procedures and functions already got
         // all three variants; triggers didn't (coverage-remediation-plan.md Phase 2.1).
+        //
+        // No oracle round-trip: INSERTED only exists inside a real trigger firing on a real DML
+        // statement, which this project never executes (CLAUDE.md hard scope), and CREATE OR
+        // ALTER TRIGGER is not on DdlStatementWhitelist either. The ScanForced verdict itself is
+        // already oracle-confirmed elsewhere; this test's own job is proving the CREATE OR ALTER
+        // spelling gets the same trigger-body handling as CREATE/ALTER.
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1495,6 +811,10 @@ public sealed class TypedPredicateExtractorTests
         // omission rather than by design (docs/coverage-remediation-plan.md Phase 5). This test
         // is what turns that "works by omission" claim into something checked, so a future
         // change that starts branching on TriggerType cannot silently break it.
+        //
+        // No oracle round-trip: same reasoning as the other trigger-body tests (no DML
+        // execution, CREATE TRIGGER not whitelisted DDL) - the ScanForced verdict itself is
+        // already oracle-confirmed elsewhere.
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1518,6 +838,8 @@ public sealed class TypedPredicateExtractorTests
         // catalog.Find only, so an INSTEAD OF trigger on a view dropped every predicate with the
         // misleading reason "has no known DDL" while the view sat fully resolved in resolvedViews
         // (coverage-remediation-plan.md Phase 3.3).
+        //
+        // No oracle round-trip: same reasoning as the other trigger-body tests.
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT Code FROM dbo.Orders;",
@@ -1647,6 +969,14 @@ public sealed class TypedPredicateExtractorTests
         // A DDL trigger has no inserted/deleted, but its body can still contain ordinary
         // predicates against real tables - those must not be lost just because the trigger
         // itself has no target.
+        //
+        // No oracle round-trip: CREATE TRIGGER (DDL-trigger form included) is not on
+        // DdlStatementWhitelist at all, so this predicate's containing statement can't be
+        // deployed standalone even though the predicate itself is an ordinary column-vs-literal
+        // comparison with nothing trigger-specific about it. The ScanForced verdict for exactly
+        // this shape (VarChar column vs NVarChar literal, SQL collation) is already
+        // oracle-confirmed by TypedPredicateExtractorOracleTests; this test's own job is proving
+        // a DDL trigger body doesn't get skipped wholesale just because it has no pseudo-tables.
         var findings = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1667,7 +997,8 @@ public sealed class TypedPredicateExtractorTests
         // No return-type registry entry exists for a scalar UDF (BuiltinFunctionTypeResolver is
         // a curated allowlist of built-in functions only) - the right side resolves Unknown,
         // same as before this pass, but now it's counted instead of silently falling through
-        // the default switch arm.
+        // the default switch arm. Unknown makes no claim about engine behavior, so nothing to
+        // oracle-confirm.
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col = dbo.fn_DisplayName(1);");
@@ -1675,48 +1006,6 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.Unknown, finding.Verdict);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("fn_DisplayName", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Extract_ColumnComparedToBuiltinFunctionCall_ResolvesFixedReturnType()
-    {
-        // BuiltinFunctionTypeResolver's curated, oracle-verified table: GETDATE() types as
-        // DATETIME, so a DATETIME column compared against it classifies normally instead of
-        // falling to Unknown - the single biggest driver of this tool's Unknown-verdict rate in
-        // real corpora before this existed.
-        var result = ExtractAll(
-            "CREATE TABLE dbo.Orders (CreatedOn DATETIME NOT NULL);",
-            "SELECT 1 FROM dbo.Orders WHERE CreatedOn > GETDATE();");
-
-        var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "predicate operand");
-    }
-
-    [Fact]
-    public void Extract_ColumnComparedToLenOfNvarcharLiteral_MixedCategoryClassifiesNormally()
-    {
-        // LEN() types as INT (oracle-verified) - an INT column compared against it should
-        // classify exactly like any other int-vs-int comparison, not fall to Unknown.
-        var result = ExtractAll(
-            "CREATE TABLE dbo.T (NameLength INT NOT NULL);",
-            "SELECT 1 FROM dbo.T WHERE NameLength = LEN(N'hello');");
-
-        var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_ColumnComparedToGlobalVariable_ResolvesFixedType()
-    {
-        // @@ROWCOUNT types as INT (oracle-verified) - a GlobalVariableExpression previously fell
-        // through the same generic default arm as an unhandled function call.
-        var result = ExtractAll(
-            "CREATE TABLE dbo.T (Total INT NOT NULL);",
-            "SELECT 1 FROM dbo.T WHERE Total = @@ROWCOUNT;");
-
-        var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
     }
 
     [Fact]
@@ -1732,39 +1021,6 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_ColumnComparedToIsNullOfHigherPrecedenceLiteral_UsesFirstArgumentType()
-    {
-        // Oracle-verified: ISNULL(check_expression, replacement_value) returns check_expression's
-        // own type, even when replacement_value would otherwise outrank it in precedence -
-        // ISNULL(@intVar, N'x') still types as int, not nvarchar. Distinct from COALESCE, which
-        // CLAUDE.md's hard-cases list calls out separately.
-        var result = ExtractAll(
-            "CREATE TABLE dbo.T (Id INT NOT NULL);",
-            """
-            CREATE PROCEDURE dbo.usp_Find @Id INT
-            AS
-            BEGIN
-                SELECT 1 FROM dbo.T WHERE Id = ISNULL(@Id, 0);
-            END
-            """);
-
-        var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_ColumnComparedToCastToInt_ResolvesTargetType()
-    {
-        var result = ExtractAll(
-            "CREATE TABLE dbo.T (Id INT NOT NULL);",
-            "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
-            "SELECT 1 FROM dbo.T, dbo.Raw WHERE Id = CAST(Value AS INT);");
-
-        var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-    }
-
-    [Fact]
     public void Extract_ColumnComparedToConvertToNvarcharOfVarcharColumn_PropagatesInputCollation()
     {
         // Mirrors Pass 2's identical collation propagation (ScalarExpressionResolver): CAST/
@@ -1773,6 +1029,8 @@ public sealed class TypedPredicateExtractorTests
         // collation so ClassifySameCategory's null-collation short-circuit can't fire on either
         // side - only then does a genuinely-different-collation Unknown verdict prove the
         // CONVERT result's collation actually came from Value, not from being left uncollated.
+        // Unknown is a claim about our own uncertainty, not the engine's behavior - nothing to
+        // oracle-confirm.
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Code NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);",
             "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -1780,29 +1038,6 @@ public sealed class TypedPredicateExtractorTests
 
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.Unknown, finding.Verdict);
-    }
-
-    [Fact]
-    public void Extract_PredicateAgainstSysObjectsIntColumnVsNvarcharValue_ResolvesAndClassifies()
-    {
-        // sys.objects has no CREATE DDL anywhere (it's a built-in system catalog view), and
-        // before SystemCatalogViewRegistry existed a predicate against it fell through as an
-        // unresolved FROM table reference - the single dominant cause of skipped predicates
-        // across this project's own pinned corpus, since DBA/admin scripts (a large share of it)
-        // query sys.objects/sysobjects constantly. type_desc is NVARCHAR(60) (oracle-verified);
-        // comparing it to a lower-precedence VARCHAR value converts the VALUE side, not the
-        // column - SeekPreserved is the correct, harmless verdict here (proves direction is
-        // still respected even for a system view), and the point of this test is that a real
-        // verdict was reached at all, not that it happened to be ScanForced.
-        var result = ExtractAll(
-            "CREATE PROCEDURE dbo.usp_Find @T VARCHAR(20) AS BEGIN SELECT name FROM sys.objects WHERE type_desc = @T; END");
-
-        var finding = Assert.Single(result.TypedFindings);
-        Assert.Equal("sys.objects", finding.Column.TableQualifiedName);
-        Assert.Equal("type_desc", finding.Column.ColumnName);
-        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-        Assert.False(finding.Column.Indexed);
-        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
     }
 
     [Fact]
@@ -1814,6 +1049,8 @@ public sealed class TypedPredicateExtractorTests
         // (oracle-verified); its collation is deliberately left unresolved by the registry
         // (never guessed), so a cross-category comparison against NVARCHAR correctly reaches
         // Unknown rather than either being skipped (the old behavior) or a guessed verdict.
+        // Unknown is a claim about our own uncertainty, not the engine's behavior - nothing to
+        // oracle-confirm.
         var result = ExtractAll(
             "CREATE PROCEDURE dbo.usp_Find @T NVARCHAR(2) AS BEGIN SELECT name FROM sysobjects WHERE xtype = @T; END");
 
@@ -1834,5 +1071,1124 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.TypedFindings);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference" && s.Reason.Contains("sys.dm_exec_requests", StringComparison.Ordinal));
+    }
+}
+
+/// <summary>
+/// Oracle-confirmed companion to <see cref="TypedPredicateExtractorTests"/>: the subset of that
+/// file's tests whose claim is a real <c>Verdict</c> (not lineage/scope mechanics, not
+/// <see cref="ExpressionDerivedFinding"/>, not <c>Unknown</c>) AND whose fixture is deployable
+/// with ordinary whitelisted DDL (CREATE TABLE/VIEW/INDEX/FUNCTION/TYPE - no triggers, temp
+/// tables, table variables, or table-valued parameters). Split into its own
+/// <see cref="OracleTestFixture"/>-derived class rather than mixed into
+/// <see cref="TypedPredicateExtractorTests"/> because xUnit provisions a fresh instance (and
+/// fresh database, per <see cref="OracleTestFixture.InitializeAsync"/>) per test method - paying
+/// that cost for the large majority of this file's tests that assert lineage mechanics and never
+/// touch a live database would slow every one of them down for no verification benefit.
+/// CLAUDE.md: verify the real thing, not just that the static pipeline agrees with itself.
+/// </summary>
+[Trait("Category", "Oracle")]
+public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
+{
+    private static IReadOnlyList<TypedPredicateFinding> Extract(params string[] batches) =>
+        ExtractAll(batches).TypedFindings;
+
+    private static PredicateExtractionResult ExtractAll(params string[] batches)
+    {
+        var sql = string.Join("\nGO\n", batches);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        return TypedPredicateExtractor.Extract(result, catalog, lineage);
+    }
+
+    // xUnit gives every [Fact]/[Theory] case its own instance of this class, but a shared
+    // literal DatabaseName (the pattern every other, smaller OracleTestFixture subclass in this
+    // project uses) let two instances' InitializeAsync/DisposeAsync race on the SAME database
+    // name once this class grew to ~40 oracle-confirmed cases - "Cannot drop the database ...
+    // because it does not exist" from one instance's CREATE racing another's DROP, observed
+    // running this file's full suite. A GUID suffix per instance gives every test method a
+    // genuinely disposable database of its own, sidestepping the race outright rather than
+    // relying on xUnit's parallelization defaults not changing under us.
+    protected override string DatabaseName { get; } = $"{nameof(TypedPredicateExtractorOracleTests)}_{Guid.NewGuid():N}";
+
+    protected override string Ddl => string.Join(
+        "\nGO\n",
+        "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersIdx (OrderId INT NOT NULL PRIMARY KEY, OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE INDEX IX_OrdersIdx_OrderCode ON dbo.OrdersIdx(OrderCode);
+        """,
+        "CREATE TABLE dbo.OrdersLit (OrderId INT NOT NULL);",
+        "CREATE TABLE dbo.TSysname (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        // CREATE TYPE must be in its own batch - referencing it in the same batch that
+        // creates it hits SQL Server's compile-time metadata cache and fails to resolve.
+        "CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;",
+        "CREATE TABLE dbo.OrdersAlias (OrderId dbo.MyIntAlias NOT NULL);",
+        // CREATE VIEW must be the first (and only) statement in its batch.
+        "CREATE TABLE dbo.OrdersView (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        "CREATE VIEW dbo.vw_OrdersView AS SELECT OrderCode FROM dbo.OrdersView;",
+        "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersJoin (CustomerCode VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.CustomersJoin (CustomerCode NVARCHAR(10) NOT NULL);
+        """,
+        "CREATE TABLE dbo.OrdersHaving (CustomerId INT NOT NULL);",
+        "CREATE TABLE dbo.OrdersBetween (OrderDate DATETIME NOT NULL);",
+        "CREATE TABLE dbo.OrdersBetweenCode (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        "CREATE TABLE dbo.OrdersColColCompare (OrderId INT NOT NULL, CustomerId INT NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersQualifier (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);
+        CREATE TABLE dbo.ShipmentsQualifier (Id INT NOT NULL, TrackingCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        """,
+        """
+        CREATE TABLE dbo.OrdersExists (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.OrderDetailsExists (OrderId INT NOT NULL, Sku VARCHAR(20) NOT NULL);
+        """,
+        "CREATE TABLE dbo.UsersAlterStub (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        "CREATE TABLE dbo.UsersCreateOrAlter (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.IntsSeq (Col INT NOT NULL);
+        CREATE TABLE dbo.StringsSeq (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        """,
+        "CREATE TABLE dbo.UsersCte (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        "CREATE TABLE dbo.UsersCteShadow (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Region VARCHAR(10) NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersCteNested (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.FlagsCteNested (OrderId INT NOT NULL);
+        """,
+        "CREATE TABLE dbo.UsersUpdate (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersUpdateFrom (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.FlagsUpdateFrom (OrderId INT NOT NULL, IsStale BIT NOT NULL);
+        """,
+        "CREATE TABLE dbo.SessionsDelete (Token VARCHAR(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersDeleteFrom (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.OrderLinesDeleteFrom (OrderId INT NOT NULL);
+        """,
+        """
+        CREATE TABLE dbo.TargetMerge (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.SourceMerge (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);
+        """,
+        """
+        CREATE TABLE dbo.TargetMerge2 (Id INT NOT NULL, Status VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.SourceMerge2 (Id INT NOT NULL);
+        """,
+        "CREATE TABLE dbo.OrdersCteUpdate (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, IsFlagged BIT NOT NULL);",
+        // CREATE FUNCTION must be the first (and only) statement in its batch.
+        "CREATE TABLE dbo.OrdersTvf (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        "CREATE FUNCTION dbo.fn_GetOrdersTvf(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.OrdersTvf);",
+        "CREATE FUNCTION dbo.fn_GetCodesMstvf(@Ignored INT) RETURNS @t TABLE (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL) AS BEGIN RETURN; END",
+        "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.OrdersInSub (CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.CustomersInSub (Id NVARCHAR(20) NOT NULL);
+        """,
+        "CREATE TABLE dbo.OrdersGetDate (CreatedOn DATETIME NOT NULL);",
+        "CREATE TABLE dbo.TLen (NameLength INT NOT NULL);",
+        "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
+        "CREATE TABLE dbo.TIsNull (Id INT NOT NULL);",
+        """
+        CREATE TABLE dbo.TCastInt (Id INT NOT NULL);
+        CREATE TABLE dbo.RawCastInt (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        """);
+
+    /// <summary>
+    /// <see cref="PipelineOracleVerification.VerifyAsync"/>/<c>AssertAllConfirmed</c> only
+    /// confirms a verdict that CLAIMS a conversion (<see cref="CorpusFindingVerifier"/>
+    /// unconditionally reports <c>NotConfirmed</c> when the probe's plan shows no column-side
+    /// CONVERT_IMPLICIT at all - it exists to confirm ScanForced/RangeSeek, per its own class
+    /// doc). A <see cref="Verdict.SeekPreserved"/> finding claims the OPPOSITE - that no
+    /// conversion happens - so it needs the opposite check: build the same self-authored probe
+    /// <see cref="CorpusFindingProbeBuilder"/> would, but assert the column is ABSENT from the
+    /// plan's conversions instead of present. Mirrors the direct
+    /// <c>ConvertImplicitDetector.FindColumnConversions</c>/<c>DoesNotContain</c> idiom
+    /// <see cref="ExplicitCollatePipelineTests"/> already established for its own no-conversion
+    /// cases.
+    /// </summary>
+    private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
+    {
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+        Assert.NotNull(probe);
+
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe!);
+        var conversions = ConvertImplicitDetector.FindColumnConversions(planXml);
+        var table = finding.Column.TableQualifiedName.Split('.', 2)[^1];
+        Assert.DoesNotContain(conversions, c =>
+            string.Equals(c.Table, table, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.Column, finding.Column.ColumnName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task VarcharColumnVsNVarcharParam_SqlCollation_ScanForced_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.Equal("dbo.Users", finding.Column.TableQualifiedName);
+        Assert.Equal("DisplayName", finding.Column.ColumnName);
+        Assert.False(finding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task IndexedColumn_IsFlaggedIndexed_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersIdx (OrderId INT NOT NULL PRIMARY KEY, OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE INDEX IX_OrdersIdx_OrderCode ON dbo.OrdersIdx(OrderCode);",
+            """
+            CREATE PROCEDURE dbo.usp_Find @OrderCode NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT OrderId FROM dbo.OrdersIdx WHERE OrderCode = @OrderCode;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.True(finding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task LiteralComparison_TypesTheLiteralSide_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersLit (OrderId INT NOT NULL);",
+            "SELECT OrderId FROM dbo.OrdersLit WHERE OrderId = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        var value = Assert.IsType<PredicateOperand.Value>(finding.OtherOperand);
+        Assert.Equal(SqlTypeCategory.Int, value.Type!.Category);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task SysnameVariableVsVarcharColumn_ScanForced_OracleConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 6.2: sysname (nvarchar(128)) outranks varchar in
+        // precedence exactly like an ordinary nvarchar parameter would - also directly
+        // oracle-verified in SysnameOracleTests, this is the pipeline-level confirmation.
+        var findings = Extract(
+            "CREATE TABLE dbo.TSysname (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find
+            AS
+            BEGIN
+                DECLARE @p sysname = N'x';
+                SELECT Code FROM dbo.TSysname WHERE Code = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task CatalogedTypeAliasColumn_ResolvesThroughToUnderlyingType_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;",
+            "CREATE TABLE dbo.OrdersAlias (OrderId dbo.MyIntAlias NOT NULL);",
+            "SELECT OrderId FROM dbo.OrdersAlias WHERE OrderId = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.Equal(SqlTypeCategory.Int, finding.Column.Type!.Category);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task PredicateThroughViewLayer_CarriesDepthFromLineage_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersView (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE VIEW dbo.vw_OrdersView AS SELECT OrderCode FROM dbo.OrdersView;",
+            """
+            CREATE PROCEDURE dbo.usp_Find @OrderCode NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT OrderCode FROM dbo.vw_OrdersView WHERE OrderCode = @OrderCode;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(1, finding.Column.Depth);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // TableQualifiedName/ColumnName always name the ultimate base column (needed for the
+        // oracle's plan-matching signal), but ImmediateRelation* must name the VIEW the source
+        // predicate actually queried - the Verify oracle probes this, not the base table
+        // directly, or a depth>=1 finding is never actually tested through the view layer it
+        // claims to be inherited through.
+        Assert.Equal("dbo.OrdersView", finding.Column.TableQualifiedName);
+        Assert.Equal("dbo.vw_OrdersView", finding.Column.ImmediateRelationQualifiedName);
+        Assert.Equal("OrderCode", finding.Column.ImmediateColumnName);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task LikeColumnVsNvarcharPattern_ColumnConverts_ScanForced_OracleConfirmed()
+    {
+        // The classic ORM-generated pattern: `varcharCol LIKE @nvarcharPattern`. LIKE was
+        // previously invisible to the typed pipeline entirely - only Tier-1's wildcard-shape
+        // check ran against it, never the type-conversion question.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.OrdersLike WHERE Code LIKE N'ABC%';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("LIKE", finding.Operator);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task LikeColumnVsVarcharLiteralPattern_NoConversion_SeekPreserved_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.OrdersLike WHERE Code LIKE 'ABC%';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task SameComparisonMovedFromSelectListIntoWhere_NowProducesAFinding_OracleConfirmed()
+    {
+        // The positive control for the filter-context gate (see TypedPredicateExtractorTests'
+        // SELECT-list/ORDER BY negative cases): the identical comparison, in a genuine filter
+        // position, must still fire.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.OrdersLike WHERE Code = N'X';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task JoinOnClausePredicate_IsResolved_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersJoin (CustomerCode VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.CustomersJoin (CustomerCode NVARCHAR(10) NOT NULL);",
+            """
+            SELECT o.CustomerCode
+            FROM dbo.OrdersJoin o
+            JOIN dbo.CustomersJoin c ON o.CustomerCode = c.CustomerCode;
+            """);
+
+        // Both directions of the join predicate are now classified (the join-direction fix):
+        // the varchar side genuinely converts (ScanForced), and the nvarchar side - reported
+        // separately - never converts regardless of collation (its own outcome, correctly
+        // SeekPreserved, not swallowed by only checking the other column).
+        Assert.Equal(2, findings.Count);
+        var varcharSide = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.OrdersJoin");
+        Assert.Equal(Verdict.ScanForced, varcharSide.Verdict);
+        var nvarcharSide = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.CustomersJoin");
+        Assert.Equal(Verdict.SeekPreserved, nvarcharSide.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [varcharSide]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+        await AssertNoColumnConversionAsync(nvarcharSide);
+    }
+
+    [Fact]
+    public async Task HavingClausePredicate_IsResolved_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersHaving (CustomerId INT NOT NULL);",
+            """
+            SELECT CustomerId, COUNT(*)
+            FROM dbo.OrdersHaving
+            GROUP BY CustomerId
+            HAVING CustomerId = 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task BetweenPredicate_IsResolved_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersBetween (OrderDate DATETIME NOT NULL);",
+            "SELECT OrderDate FROM dbo.OrdersBetween WHERE OrderDate BETWEEN '20240101' AND '20240201';");
+
+        // BETWEEN decomposes into two independent comparisons (col >= lower AND col <= upper) -
+        // both bounds are reported.
+        Assert.Equal(2, findings.Count);
+        // datetime outranks varchar in T-SQL precedence, so the literal bounds convert.
+        Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
+
+        await AssertNoColumnConversionAsync(findings[0]);
+        await AssertNoColumnConversionAsync(findings[1]);
+    }
+
+    [Fact]
+    public async Task BetweenPredicate_UpperBoundAloneForcesConversion_IsReported_OracleConfirmed()
+    {
+        // Only the upper bound carries a higher-precedence literal (nvarchar) - a scanner that
+        // only checked the lower bound would miss this entirely.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersBetweenCode (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Code FROM dbo.OrdersBetweenCode WHERE Code BETWEEN 'A' AND N'Z';");
+
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(Verdict.SeekPreserved, findings[0].Verdict);
+        Assert.Equal(Verdict.ScanForced, findings[1].Verdict);
+
+        await AssertNoColumnConversionAsync(findings[0]);
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [findings[1]]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task ColumnVsColumnSameType_NoConversionAnywhere_SeekPreserved_OracleConfirmed()
+    {
+        // A column-vs-column comparison is classified in BOTH directions (the join-predicate
+        // fix: `ON a.x = b.y` can convert either side depending on which one has lower
+        // precedence, so only checking one side silently misses the other's verdict).
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersColColCompare (OrderId INT NOT NULL, CustomerId INT NOT NULL);",
+            "SELECT OrderId FROM dbo.OrdersColColCompare WHERE OrderId = CustomerId;");
+
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
+        Assert.Equal("OrderId", findings[0].Column.ColumnName);
+        Assert.Equal("CustomerId", findings[1].Column.ColumnName);
+
+        await AssertNoColumnConversionAsync(findings[0]);
+        await AssertNoColumnConversionAsync(findings[1]);
+    }
+
+    [Fact]
+    public async Task CorrectQualifier_SameShapeAsAboveNearMiss_ProducesFinding_OracleConfirmed()
+    {
+        // The near-miss sibling (a bad qualifier producing no finding at all) is covered as pure
+        // static mechanics in TypedPredicateExtractorTests.
+        // Extract_QualifierNotInScope_NoFinding_NeverFallsBackToNameOnlyMatch - same tables, same
+        // predicate, but the qualifier here ('s') is the real alias, so it resolves and fires.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersQualifier (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
+            "CREATE TABLE dbo.ShipmentsQualifier (Id INT NOT NULL, TrackingCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindShipment @p NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT o.Id
+                FROM dbo.OrdersQualifier AS o
+                JOIN dbo.ShipmentsQualifier AS s ON o.Id = s.Id
+                WHERE s.TrackingCode = @p;
+            END
+            """);
+
+        // Same join-condition SeekPreserved noise as the near-miss above; the TrackingCode
+        // predicate is the one under test here.
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "TrackingCode");
+        Assert.Equal("dbo.ShipmentsQualifier", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // Only the TrackingCode finding is verified here - the join predicate's own o.Id = s.Id
+        // comparison also resolves (SeekPreserved noise, asserted nowhere in this test) but
+        // PipelineOracleVerification's harness only confirms verdicts that CLAIM a conversion.
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task CorrelatedExistsSubquery_OuterAliasResolvesThroughScopeChain_OracleConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 2.2: the EXISTS subquery's own FROM scope (d)
+        // is innermost when its WHERE clause is visited; "o.CustomerId" refers to the *outer*
+        // query's alias, one level up the scope chain, not anything in the subquery's own FROM
+        // clause.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersExists (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.OrderDetailsExists (OrderId INT NOT NULL, Sku VARCHAR(20) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT o.Id
+                FROM dbo.OrdersExists AS o
+                WHERE o.CustomerId = @CustomerId
+                    AND EXISTS (SELECT 1 FROM dbo.OrderDetailsExists AS d WHERE d.OrderId = o.Id);
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.OrdersExists", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings.Where(f => f.Column.ColumnName == "CustomerId").ToList());
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task AlterProcedureAfterCreateStub_UsesAlterProcsOwnParameterType_OracleConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 2.3: the idempotent-deploy pattern seen verbatim
+        // in the First Responder Kit corpus repo - a body-less CREATE PROCEDURE stub, then the
+        // real body via ALTER PROCEDURE.
+        var findings = Extract(
+            "CREATE TABLE dbo.UsersAlterStub (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE PROCEDURE dbo.usp_FindUser AS RETURN 0;",
+            """
+            ALTER PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                SELECT DisplayName FROM dbo.UsersAlterStub WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("DisplayName", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task CreateOrAlterProcedure_UsesOwnParameterType_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.UsersCreateOrAlter (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE OR ALTER PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                SELECT DisplayName FROM dbo.UsersCreateOrAlter WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task TwoProceduresInSequence_SecondProcDoesNotInheritFirstProcsVariableTypes_OracleConfirmed()
+    {
+        // The core staleness bug: before the fix, only CreateProcedureStatement/
+        // CreateFunctionStatement reset _variables, but every CREATE PROCEDURE already did that
+        // correctly - the real gap was ALTER's total non-handling. This test guards the
+        // more basic regression (two ordinary CREATE PROCEDUREs in a row must never leak
+        // variable types between them).
+        var findings = Extract(
+            "CREATE TABLE dbo.IntsSeq (Col INT NOT NULL);",
+            "CREATE TABLE dbo.StringsSeq (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_First @Id INT
+            AS
+            BEGIN
+                SELECT Col FROM dbo.IntsSeq WHERE Col = @Id;
+            END
+            """,
+            """
+            CREATE PROCEDURE dbo.usp_Second @Id NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Col FROM dbo.StringsSeq WHERE Col = @Id;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.StringsSeq");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var intFinding = Assert.Single(findings, f => f.Column.TableQualifiedName == "dbo.IntsSeq");
+        Assert.Equal(Verdict.SeekPreserved, intFinding.Verdict);
+        await AssertNoColumnConversionAsync(intFinding);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task PredicateInsideCte_ResolvesToRealBaseColumn_OracleConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 2.4: the predicate lives inside the CTE body
+        // itself, not the outer query - proves CteResolver's own resolution (not just the outer
+        // SELECT referencing the finished CTE) goes through the normal typed-predicate pipeline.
+        var findings = Extract(
+            "CREATE TABLE dbo.UsersCte (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                WITH Matches AS (SELECT DisplayName FROM dbo.UsersCte WHERE DisplayName = @DisplayName)
+                SELECT DisplayName FROM Matches;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.UsersCte", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task CteNameShadowsRealTable_PredicateAgainstOuterQueryResolvesThroughCte_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.UsersCteShadow (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Region VARCHAR(10) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                WITH UsersCteShadow AS (SELECT DisplayName FROM dbo.UsersCteShadow WHERE Region = 'US')
+                SELECT DisplayName FROM UsersCteShadow WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        // Region = 'US' inside the CTE body resolves against the real dbo.UsersCteShadow
+        // (VarChar vs a literal - SeekPreserved, filtered out below); the outer DisplayName
+        // predicate is against the CTE's own single-column shape, still tracing back to
+        // dbo.UsersCteShadow.DisplayName.
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "DisplayName");
+        Assert.Equal("dbo.UsersCteShadow", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task CteVisibleInsideNestedSubquery_ResolvesCorrelatedReference_OracleConfirmed()
+    {
+        // A CTE is visible for the whole containing statement, including a correlated subquery
+        // nested inside the main query - not just the top-level FROM clause.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersCteNested (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.FlagsCteNested (OrderId INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Check @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                WITH RecentOrders AS (SELECT Id, CustomerId FROM dbo.OrdersCteNested)
+                SELECT Id
+                FROM RecentOrders AS ro
+                WHERE ro.CustomerId = @CustomerId
+                    AND EXISTS (SELECT 1 FROM dbo.FlagsCteNested AS f WHERE f.OrderId = ro.Id);
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.OrdersCteNested", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task UpdateWhereClause_NoFromExtension_ResolvesAgainstTarget_OracleConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 4.1, audit finding B1 ("the single biggest
+        // coverage gap in the tool"): UPDATE's WHERE clause previously had no FROM-scope pushed
+        // at all, so this predicate was invisible to Pass 3 no matter what it contained.
+        var findings = Extract(
+            "CREATE TABLE dbo.UsersUpdate (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_RenameUser @DisplayName NVARCHAR(40)
+            AS
+            BEGIN
+                UPDATE dbo.UsersUpdate SET DisplayName = @DisplayName WHERE DisplayName = @DisplayName;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.UsersUpdate", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task UpdateWithFromExtension_ResolvesJoinedTableAliases_OracleConfirmed()
+    {
+        // UPDATE ... FROM ... JOIN ... WHERE - the extended FROM syntax, where the WHERE clause
+        // references aliases established only in the FROM clause, not the bare target name.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersUpdateFrom (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.FlagsUpdateFrom (OrderId INT NOT NULL, IsStale BIT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_MarkStale @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                UPDATE f
+                SET f.IsStale = 1
+                FROM dbo.FlagsUpdateFrom AS f
+                JOIN dbo.OrdersUpdateFrom AS o ON o.Id = f.OrderId
+                WHERE o.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.OrdersUpdateFrom", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task DeleteWhereClause_NoFromExtension_ResolvesAgainstTarget_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.SessionsDelete (Token VARCHAR(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_ExpireSession @Token NVARCHAR(64)
+            AS
+            BEGIN
+                DELETE FROM dbo.SessionsDelete WHERE Token = @Token;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.SessionsDelete", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task DeleteWithFromExtension_ResolvesJoinedTableAliases_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersDeleteFrom (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.OrderLinesDeleteFrom (OrderId INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_PurgeOrderLines @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                DELETE ol
+                FROM dbo.OrderLinesDeleteFrom AS ol
+                JOIN dbo.OrdersDeleteFrom AS o ON o.Id = ol.OrderId
+                WHERE o.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.OrdersDeleteFrom", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task MergeOnClause_ResolvesTargetAndSourceAliases_OracleConfirmed()
+    {
+        // MergeSpecification's own TableReference property is the USING SOURCE, not the INTO
+        // target (verified empirically against the real parser output while implementing this -
+        // the target's alias lives in the separate TableAlias property). This test pins that
+        // both sides resolve correctly regardless of that naming trap.
+        var findings = Extract(
+            "CREATE TABLE dbo.TargetMerge (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.SourceMerge (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);",
+            """
+            MERGE INTO dbo.TargetMerge AS t
+            USING dbo.SourceMerge AS s
+            ON t.Code = s.Code
+            WHEN MATCHED THEN UPDATE SET t.Id = s.Id
+            WHEN NOT MATCHED THEN INSERT (Id, Code) VALUES (s.Id, s.Code);
+            """);
+
+        // Both directions of the ON clause's column-vs-column comparison are now reported.
+        var targetSide = Assert.Single(findings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.TargetMerge");
+        Assert.Equal(Verdict.ScanForced, targetSide.Verdict);
+        var sourceSide = Assert.Single(findings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.SourceMerge");
+        Assert.Equal(Verdict.SeekPreserved, sourceSide.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [targetSide]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+        await AssertNoColumnConversionAsync(sourceSide);
+    }
+
+    [Fact]
+    public async Task MergeActionClauseAdditionalCondition_Resolves_OracleConfirmed()
+    {
+        // WHEN MATCHED AND <extra condition> - the additional predicate on the action clause
+        // itself, not just the top-level ON clause, must resolve through the same scope.
+        var findings = Extract(
+            "CREATE TABLE dbo.TargetMerge2 (Id INT NOT NULL, Status VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.SourceMerge2 (Id INT NOT NULL);",
+            """
+            MERGE INTO dbo.TargetMerge2 AS t
+            USING dbo.SourceMerge2 AS s
+            ON t.Id = s.Id
+            WHEN MATCHED AND t.Status = N'Active' THEN UPDATE SET t.Id = s.Id;
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "Status");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task CteThenUpdateFrom_CteVisibleInUpdatesFromClause_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersCteUpdate (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, IsFlagged BIT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FlagOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                WITH TargetOrders AS (SELECT Id, CustomerId FROM dbo.OrdersCteUpdate)
+                UPDATE o
+                SET o.IsFlagged = 1
+                FROM dbo.OrdersCteUpdate AS o
+                JOIN TargetOrders AS t ON t.Id = o.Id
+                WHERE t.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Column.ColumnName == "CustomerId");
+        Assert.Equal("dbo.OrdersCteUpdate", finding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task InlineTvfInFromClause_PredicateResolvesToBaseColumnWithDepth_OracleConfirmed()
+    {
+        // docs/audit-remediation-plan.md Phase 4.2, audit finding B2: FromScopeResolver only
+        // handled NamedTableReference and QueryDerivedTable - a table-valued function call in a
+        // FROM clause (SchemaObjectFunctionTableReference) fell to the unhandled default and
+        // resolved to an empty relation, so a predicate over one of its columns could never
+        // trace back to the real base column at all. "Done when": resolves to the base column
+        // with depth >= 1, exactly like reading through a view.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersTvf (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE FUNCTION dbo.fn_GetOrdersTvf(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.OrdersTvf);",
+            """
+            CREATE PROCEDURE dbo.usp_FindOrders @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Id FROM dbo.fn_GetOrdersTvf(1) WHERE CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.OrdersTvf", finding.Column.TableQualifiedName);
+        Assert.Equal("CustomerId", finding.Column.ColumnName);
+        Assert.True(finding.Column.Depth >= 1);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // The generic PipelineOracleVerification prober can't be used unmodified here: it
+        // queries finding.Column.ImmediateRelationQualifiedName bare (`FROM [dbo].[fn_GetOrdersTvf]`),
+        // but a table-valued function is not queryable without its call arguments - that's a
+        // probe-fidelity limitation of the generic prober (same class of issue
+        // ComputedColumnPipelineTests hit for non-persisted computed columns), not a claim about
+        // the tool's own verdict. Hand-build the equivalent probe WITH the call argument instead.
+        var probe = "DECLARE @p NVARCHAR(20); SELECT 1 FROM dbo.fn_GetOrdersTvf(1) WHERE CustomerId = @p;";
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
+        var conversions = ConvertImplicitDetector.FindColumnConversions(planXml);
+        Assert.Contains(conversions, c =>
+            string.Equals(c.Table, "OrdersTvf", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.Column, "CustomerId", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task MultiStatementTvfInFromClause_UsesDeclaredReturnColumnType_OracleConfirmed()
+    {
+        // A multi-statement TVF's columns are Declared provenance (its RETURNS @t TABLE(...)
+        // shape), not a chain back to a base column - this is the complementary case to the
+        // inline-TVF test above, proving both TVF kinds resolve through the FROM clause now.
+        var findings = Extract(
+            """
+            CREATE FUNCTION dbo.fn_GetCodesMstvf(@Ignored INT)
+            RETURNS @t TABLE (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL)
+            AS
+            BEGIN
+                RETURN;
+            END
+            """,
+            """
+            CREATE PROCEDURE dbo.usp_FindCodes @Code NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Id FROM dbo.fn_GetCodesMstvf(1) WHERE Code = @Code;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(SqlTypeCategory.VarChar, finding.Column.Type!.Category);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // Same TVF call-argument limitation as the inline-TVF test above: a multi-statement TVF
+        // is not queryable bare either, so the generic prober's immediate-relation probe can't
+        // be used unmodified - hand-build the equivalent probe with the call argument instead.
+        var probe = "DECLARE @p NVARCHAR(20); SELECT 1 FROM dbo.fn_GetCodesMstvf(1) WHERE Code = @p;";
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
+        var conversions = ConvertImplicitDetector.FindColumnConversions(planXml);
+        Assert.Contains(conversions, c => string.Equals(c.Column, "Code", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task InListHomogeneousVarchar_SqlCollation_SeekPreserved_OracleConfirmed()
+    {
+        // Oracle-verified (docs/audit-remediation-plan.md Phase 4.3): a homogeneous varchar IN
+        // list against a varchar column produces no conversion at all.
+        var findings = Extract(
+            "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.TInList WHERE Col IN ('a', 'b', 'c');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("IN", finding.Operator);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task InListOneNvarcharLiteralAmongVarchar_SqlCollation_ScanForced_OracleConfirmed()
+    {
+        // Oracle-verified: a SINGLE higher-precedence literal anywhere in an otherwise-
+        // homogeneous list is enough to force the column to convert for the whole comparison -
+        // this is the case a naive "type the first element only" implementation would miss.
+        var findings = Extract(
+            "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.TInList WHERE Col IN ('a', N'b', 'c');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task InListHomogeneousNvarchar_AgainstVarcharColumn_ScanForced_OracleConfirmed()
+    {
+        // Oracle-verified: matches ordinary single-comparison precedence (nvarchar outranks
+        // varchar), just applied across the whole list.
+        var findings = Extract(
+            "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.TInList WHERE Col IN (N'a', N'b', N'c');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task InListWithParameter_ResolvesParameterType_OracleConfirmed()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find @A VARCHAR(20), @B NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT Col FROM dbo.TInList WHERE Col IN (@A, @B);
+            END
+            """);
+
+        // nvarchar outranks varchar, so Col converts.
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Theory]
+    [InlineData("!<")]
+    [InlineData("!>")]
+    public async Task NotLessThanAndNotGreaterThan_ClassifyNormally_OracleConfirmed(string sqlOperator)
+    {
+        // T-SQL folds !< to >= and !> to <= (oracle-verified: identical plan shape, a genuine
+        // range seek) - these are NOT non-seekable like <>/NOT IN/NOT LIKE, so they route
+        // through the type-conversion verdict machinery exactly like any other comparison.
+        var findings = Extract(
+            "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            $"SELECT Col FROM dbo.TInList WHERE Col {sqlOperator} N'a';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(sqlOperator, finding.Operator);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task InSubquery_ResolvesSubqueryOutputColumnThroughLineage_OracleConfirmed()
+    {
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.OrdersInSub (CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.CustomersInSub (Id NVARCHAR(20) NOT NULL);
+            """,
+            "SELECT CustomerId FROM dbo.OrdersInSub WHERE CustomerId IN (SELECT Id FROM dbo.CustomersInSub);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("CustomerId", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToBuiltinFunctionCall_ResolvesFixedReturnType_OracleConfirmed()
+    {
+        // BuiltinFunctionTypeResolver's curated, oracle-verified table: GETDATE() types as
+        // DATETIME, so a DATETIME column compared against it classifies normally instead of
+        // falling to Unknown - the single biggest driver of this tool's Unknown-verdict rate in
+        // real corpora before this existed.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.OrdersGetDate (CreatedOn DATETIME NOT NULL);",
+            "SELECT 1 FROM dbo.OrdersGetDate WHERE CreatedOn > GETDATE();");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "predicate operand");
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToLenOfNvarcharLiteral_MixedCategoryClassifiesNormally_OracleConfirmed()
+    {
+        // LEN() types as INT (oracle-verified) - an INT column compared against it should
+        // classify exactly like any other int-vs-int comparison, not fall to Unknown.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TLen (NameLength INT NOT NULL);",
+            "SELECT 1 FROM dbo.TLen WHERE NameLength = LEN(N'hello');");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToGlobalVariable_ResolvesFixedType_OracleConfirmed()
+    {
+        // @@ROWCOUNT types as INT (oracle-verified) - a GlobalVariableExpression previously fell
+        // through the same generic default arm as an unhandled function call.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
+            "SELECT 1 FROM dbo.TRowcount WHERE Total = @@ROWCOUNT;");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToIsNullOfHigherPrecedenceLiteral_UsesFirstArgumentType_OracleConfirmed()
+    {
+        // Oracle-verified: ISNULL(check_expression, replacement_value) returns check_expression's
+        // own type, even when replacement_value would otherwise outrank it in precedence -
+        // ISNULL(@intVar, N'x') still types as int, not nvarchar. Distinct from COALESCE, which
+        // CLAUDE.md's hard-cases list calls out separately.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TIsNull (Id INT NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find @Id INT
+            AS
+            BEGIN
+                SELECT 1 FROM dbo.TIsNull WHERE Id = ISNULL(@Id, 0);
+            END
+            """);
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToCastToInt_ResolvesTargetType_OracleConfirmed()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TCastInt (Id INT NOT NULL);",
+            "CREATE TABLE dbo.RawCastInt (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT 1 FROM dbo.TCastInt, dbo.RawCastInt WHERE Id = CAST(Value AS INT);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task PredicateAgainstSysObjectsIntColumnVsNvarcharValue_ResolvesAndClassifies_OracleConfirmed()
+    {
+        // sys.objects has no CREATE DDL anywhere (it's a built-in system catalog view), and
+        // before SystemCatalogViewRegistry existed a predicate against it fell through as an
+        // unresolved FROM table reference - the single dominant cause of skipped predicates
+        // across this project's own pinned corpus, since DBA/admin scripts (a large share of it)
+        // query sys.objects/sysobjects constantly. type_desc is NVARCHAR(60) (oracle-verified);
+        // comparing it to a lower-precedence VARCHAR value converts the VALUE side, not the
+        // column - SeekPreserved is the correct, harmless verdict here (proves direction is
+        // still respected even for a system view), and the point of this test is that a real
+        // verdict was reached at all, not that it happened to be ScanForced. No fixture DDL is
+        // needed to deploy - sys.objects always exists.
+        var result = ExtractAll(
+            "CREATE PROCEDURE dbo.usp_Find @T VARCHAR(20) AS BEGIN SELECT name FROM sys.objects WHERE type_desc = @T; END");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("sys.objects", finding.Column.TableQualifiedName);
+        Assert.Equal("type_desc", finding.Column.ColumnName);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.False(finding.Column.Indexed);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
+
+        await AssertNoColumnConversionAsync(finding);
     }
 }

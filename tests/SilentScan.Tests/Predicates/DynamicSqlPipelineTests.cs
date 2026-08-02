@@ -3,6 +3,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -11,18 +12,28 @@ namespace SilentScan.Tests.Predicates;
 /// <see cref="DynamicSqlScanner"/> extraction into the real catalog/lineage/predicate pipeline,
 /// checking that findings inside a folded dynamic SQL string land back on their true source
 /// line - including the two cases that break naive index math: a literal spanning multiple
-/// source lines, and one containing an escaped quote.
+/// source lines, and one containing an escaped quote. Verdict-bearing (ScanForced) findings are
+/// additionally confirmed against the real oracle (CLAUDE.md: verify the real thing) - the
+/// dynamic-SQL folding/remapping machinery is provenance-only, so the same
+/// dbo.T/dbo.vw_T schema deployed below serves every test in this class regardless of how many
+/// EXEC/sp_executesql layers the predicate was folded through to reach it.
 /// </summary>
-public sealed class DynamicSqlPipelineTests
+[Trait("Category", "Oracle")]
+public sealed class DynamicSqlPipelineTests : OracleTestFixture
 {
+    private const string SchemaSql =
+        "CREATE TABLE dbo.T (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, CreatedAt DATETIME NOT NULL); " +
+        "CREATE INDEX IX_T_Col ON dbo.T(Col); \n" +
+        "GO\n" +
+        "CREATE VIEW dbo.vw_T AS SELECT CAST(Col AS INT) AS ColAsInt FROM dbo.T;";
+
+    protected override string DatabaseName => nameof(DynamicSqlPipelineTests);
+
+    protected override string Ddl => SchemaSql;
+
     private static (DatabaseCatalog Catalog, LineageCatalog Lineage) BuildCatalog()
     {
-        var schema = SqlScriptParser.ParseText(
-            "schema.sql",
-            "CREATE TABLE dbo.T (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, CreatedAt DATETIME NOT NULL); " +
-            "CREATE INDEX IX_T_Col ON dbo.T(Col); \n" +
-            "GO\n" +
-            "CREATE VIEW dbo.vw_T AS SELECT CAST(Col AS INT) AS ColAsInt FROM dbo.T;");
+        var schema = SqlScriptParser.ParseText("schema.sql", SchemaSql);
         Assert.False(schema.HasErrors, string.Join("; ", schema.Errors.Select(e => e.Message)));
 
         var catalog = CatalogBuilder.Build([schema]);
@@ -31,7 +42,7 @@ public sealed class DynamicSqlPipelineTests
     }
 
     [Fact]
-    public void Analyze_MultiLineConcatenatedLiteral_RemapsFindingToSecondSourceLine()
+    public async Task Analyze_MultiLineConcatenatedLiteral_RemapsFindingToSecondSourceLine_OracleConfirmed()
     {
         var (catalog, lineage) = BuildCatalog();
 
@@ -61,6 +72,9 @@ public sealed class DynamicSqlPipelineTests
         Assert.Equal(5, typedFinding.Line); // "WHERE Col = ..." is on the second source line
         Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal(4, typedFinding.DynamicSqlCallSite!.Value.Line);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
@@ -92,7 +106,7 @@ public sealed class DynamicSqlPipelineTests
     }
 
     [Fact]
-    public void Analyze_SpExecuteSqlWithDeclaredNvarcharParam_VarcharColumn_ScanForced()
+    public async Task Analyze_SpExecuteSqlWithDeclaredNvarcharParam_VarcharColumn_ScanForced_OracleConfirmed()
     {
         // Tier B: the classic ORM-generated shape - sp_executesql's own params declaration
         // string is exact, better type info than most static SQL gets. Col is
@@ -116,6 +130,9 @@ public sealed class DynamicSqlPipelineTests
         Assert.Equal("Col", typedFinding.Column.ColumnName);
         Assert.True(typedFinding.Column.Indexed);
         Assert.NotNull(typedFinding.DynamicSqlCallSite);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
@@ -163,7 +180,7 @@ public sealed class DynamicSqlPipelineTests
     }
 
     [Fact]
-    public void Analyze_TierCAccumulatedAcrossMultipleSourceLines_RemapsFindingToAssigningLine()
+    public async Task Analyze_TierCAccumulatedAcrossMultipleSourceLines_RemapsFindingToAssigningLine_OracleConfirmed()
     {
         // Tier C's folded text is stitched from segments scattered across several DECLARE/SET
         // statements at different source lines - the finding it produces must land on the
@@ -198,6 +215,9 @@ public sealed class DynamicSqlPipelineTests
         Assert.Equal(5, typedFinding.Line); // the SET statement that contributed "WHERE Col = ..."
         Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal(6, typedFinding.DynamicSqlCallSite!.Value.Line);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     /// <summary>Wraps <paramref name="sql"/> as the literal argument of one more level of EXEC('...'), escaping embedded quotes - builds an N-level-nested dynamic SQL chain without hand-deriving the quote-doubling at each level.</summary>
@@ -219,7 +239,7 @@ public sealed class DynamicSqlPipelineTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
-    public void Analyze_NestedExecChainWithinDepthLimit_FullyResolvesToScanForced(int levels)
+    public async Task Analyze_NestedExecChainWithinDepthLimit_FullyResolvesToScanForced_OracleConfirmed(int levels)
     {
         // Answers "how about 2/3/4/5 levels of recursion": each level is EXEC('...') wrapping
         // the next, with the real implicit-conversion predicate at the innermost level. All
@@ -246,6 +266,11 @@ public sealed class DynamicSqlPipelineTests
         Assert.Equal("app.sql", typedFinding.SourcePath);
         Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal("app.sql", typedFinding.DynamicSqlCallSite!.Value.SourcePath);
+
+        // The nesting depth is purely a provenance/remapping concern - the underlying comparison
+        // the oracle probes is the same "Col = N'x'" against dbo.T at every depth in this theory.
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]
@@ -345,7 +370,7 @@ public sealed class DynamicSqlPipelineTests
     }
 
     [Fact]
-    public void Analyze_LiteralWithCte_ResolvesCteColumnThroughToBaseTable()
+    public async Task Analyze_LiteralWithCte_ResolvesCteColumnThroughToBaseTable_OracleConfirmed()
     {
         // A reparsed dynamic-SQL fragment goes through the identical TypedPredicateExtractor
         // visitor and CteResolver static SQL uses (docs/coverage-remediation-plan.md Phase
@@ -366,6 +391,9 @@ public sealed class DynamicSqlPipelineTests
         Assert.Equal("Col", typedFinding.Column.ColumnName);
         Assert.True(typedFinding.Column.Indexed);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
     [Fact]

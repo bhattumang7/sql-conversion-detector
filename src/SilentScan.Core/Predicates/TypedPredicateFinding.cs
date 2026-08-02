@@ -19,8 +19,9 @@ public sealed record TypedPredicateFinding(
     int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null);
 
-/// <summary>Everything <see cref="TypedPredicateExtractor.Extract"/> found in one parsed file: type-precedence verdicts, and separately, predicates that compare an expression-derived (CAST/computed) column rather than a real one.</summary>
+/// <summary>Everything <see cref="TypedPredicateExtractor.Extract"/> found in one parsed file: type-precedence verdicts, predicates that compare an expression-derived (CAST/computed) column rather than a real one, and predicates that don't even compile (a collation conflict between two real columns).</summary>
 public sealed record PredicateExtractionResult(
     IReadOnlyList<TypedPredicateFinding> TypedFindings,
     IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
+    IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs);

@@ -151,7 +151,7 @@ public static class ScalarExpressionResolver
                 var column = entry.Relation.FindColumn(columnName);
                 return column is null
                     ? Unresolved($"column '{columnName}' not found on '{qualifier}'")
-                    : BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer);
+                    : ApplyExplicitCollate(columnRef, BumpDepthIfViewLayer(column.Provenance, entry.IsViewLayer), sourcePath);
             }
 
             return Unresolved($"unknown table alias '{qualifier}'");
@@ -166,7 +166,7 @@ public static class ScalarExpressionResolver
 
             if (matches.Count == 1)
             {
-                return BumpDepthIfViewLayer(matches[0].Column!.Provenance, matches[0].Entry.IsViewLayer);
+                return ApplyExplicitCollate(columnRef, BumpDepthIfViewLayer(matches[0].Column!.Provenance, matches[0].Entry.IsViewLayer), sourcePath);
             }
 
             if (matches.Count > 1)
@@ -272,5 +272,36 @@ public static class ScalarExpressionResolver
             // subtype and fails if one appears here uncovered.
             _ => provenance,
         };
+    }
+
+    /// <summary>
+    /// <c>col COLLATE X</c> where X genuinely differs from the column's own real collation
+    /// compiles to an explicit <c>CONVERT</c> applied to the column itself (oracle-verified
+    /// directly against Docker SQL Server: the plan shows <c>CONVERT(varchar(n), col, 0)</c>,
+    /// not <c>CONVERT_IMPLICIT</c>) - structurally identical to a literal <c>CAST(col AS ...)</c>,
+    /// so it reuses <see cref="ColumnProvenance.Cast"/> rather than inventing a parallel
+    /// provenance shape; the rendered "CAST/CONVERT to ..." finding text is accurate to what the
+    /// engine actually does, even though the source syntax was COLLATE, not CAST. When X
+    /// matches the column's real collation, SQL Server elides the CONVERT entirely (also
+    /// oracle-verified: a single clean Index Seek, no CONVERT anywhere in the plan) - a no-op,
+    /// left unwrapped. When the column's real collation isn't resolvable at all, wrapping would
+    /// assert a mismatch we can't prove, so the reference passes through unchanged (CLAUDE.md:
+    /// never guess) rather than risk a false positive in either direction.
+    /// </summary>
+    private static ColumnProvenance ApplyExplicitCollate(ColumnReferenceExpression columnRef, ColumnProvenance provenance, string sourcePath)
+    {
+        if (columnRef.Collation is not { Value: { } explicitCollationName })
+        {
+            return provenance;
+        }
+
+        if (ColumnProvenanceAnalysis.TryGetScalarType(provenance) is not { IsStringFamily: true, Collation: { } realCollation } type
+            || string.Equals(explicitCollationName, realCollation.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return provenance;
+        }
+
+        var recollatedType = type with { Collation = new Collation(explicitCollationName) };
+        return new ColumnProvenance.Cast(recollatedType, provenance, sourcePath, columnRef.StartLine);
     }
 }
