@@ -658,6 +658,38 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_CteThenInsertSelect_PredicateThroughCteClassifiesLikeBareSelect()
+    {
+        // ExplicitVisit(InsertStatement) pushes CTE scope exactly like SelectStatement/
+        // UpdateStatement/DeleteStatement/MergeStatement do - covering the shape that used to be
+        // the tool's own named gap: `WITH cte AS (...) INSERT INTO t SELECT ... FROM cte WHERE
+        // ...` losing the predicate because the CTE was invisible to the INSERT's own SELECT
+        // source. Asserts parity with the equivalent bare SELECT, not just "a finding exists".
+        var viaInsert = ExtractAll(
+            "CREATE TABLE dbo.Source (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.Target (Code VARCHAR(20) NOT NULL);",
+            """
+            WITH SourceCte AS (SELECT Code FROM dbo.Source)
+            INSERT INTO dbo.Target (Code)
+            SELECT Code FROM SourceCte WHERE Code = N'x';
+            """).TypedFindings;
+
+        var viaBareSelect = ExtractAll(
+            "CREATE TABLE dbo.Source (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            WITH SourceCte AS (SELECT Code FROM dbo.Source)
+            SELECT Code FROM SourceCte WHERE Code = N'x';
+            """).TypedFindings;
+
+        var insertFinding = Assert.Single(viaInsert);
+        var selectFinding = Assert.Single(viaBareSelect);
+        Assert.Equal("dbo.Source", insertFinding.Column.TableQualifiedName);
+        Assert.Equal(Verdict.ScanForced, insertFinding.Verdict);
+        Assert.Equal(selectFinding.Verdict, insertFinding.Verdict);
+        Assert.Equal(selectFinding.Column.Depth, insertFinding.Column.Depth);
+    }
+
+    [Fact]
     public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
     {
         // Roadmap Phase B: arithmetic (Other + 1) is now typeable through the shared

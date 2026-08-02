@@ -37,6 +37,57 @@ public sealed class StatementVariantParityTests
         AssertNoUndocumentedGap(GetExplicitVisitParameterTypeNames(typeof(TypedPredicateExtractor)));
     }
 
+    /// <summary>
+    /// A separate parity dimension from the Create/Alter one above: every concrete
+    /// <see cref="StatementWithCtesAndXmlNamespaces"/> subtype (SELECT/INSERT/UPDATE/DELETE/
+    /// MERGE, plus <see cref="SelectStatementSnippet"/>) must either push CTE scope
+    /// (<c>ExplicitVisit</c> override calling <c>PushCteScope</c>) or be a documented,
+    /// confirmed-unreachable exception - otherwise a CTE referenced from that statement kind's
+    /// own query silently fails to resolve. Found the hard way: INSERT had no override at all in
+    /// <c>NonSargablePredicateScanner</c> until this test was written (TypedPredicateExtractor
+    /// already had one), so `WITH cte AS (...) INSERT INTO t SELECT ... FROM cte WHERE
+    /// UPPER(cte.Col) = 'x'` failed to resolve <c>cte</c> in FromScopeResolver there.
+    /// </summary>
+    [Fact]
+    public void TypedPredicateExtractor_PushesCteScopeForEveryConcreteCteBearingStatement()
+    {
+        AssertHandlesEveryCteBearingStatement(GetExplicitVisitParameterTypeNames(typeof(TypedPredicateExtractor)));
+    }
+
+    [Fact]
+    public void NonSargablePredicateScanner_PushesCteScopeForEveryConcreteCteBearingStatement()
+    {
+        AssertHandlesEveryCteBearingStatement(GetExplicitVisitParameterTypeNames(typeof(NonSargablePredicateScanner)));
+    }
+
+    private static readonly Type CteBearingStatementBaseType =
+        ScriptDomAssembly.GetType("Microsoft.SqlServer.TransactSql.ScriptDom.StatementWithCtesAndXmlNamespaces")!;
+
+    /// <summary>
+    /// <see cref="SelectStatementSnippet"/> is a distinct ScriptDOM node from <see cref="SelectStatement"/>
+    /// (its own <c>ExplicitVisit</c> overload on <c>TSqlFragmentVisitor</c>, not reached by a plain
+    /// <c>ExplicitVisit(SelectStatement)</c> override), but it is only ever produced by ScriptDOM's
+    /// incremental/snippet parsing APIs (IntelliSense-style partial-statement parsing) - never by
+    /// <see cref="Microsoft.SqlServer.TransactSql.ScriptDom.TSql160Parser.Parse(System.IO.TextReader,out System.Collections.Generic.IList{ParseError})"/>,
+    /// the only entry point <c>SqlScriptParser</c> (and therefore every pass in this codebase) uses.
+    /// Confirmed unreachable from real parsed T-SQL, not merely unhandled.
+    /// </summary>
+    private static readonly HashSet<string> DocumentedUnreachableCteBearingTypes = new(StringComparer.Ordinal)
+    {
+        "SelectStatementSnippet",
+    };
+
+    private static void AssertHandlesEveryCteBearingStatement(HashSet<string> handledTypeNames)
+    {
+        var gaps = ScriptDomAssembly.GetTypes()
+            .Where(t => !t.IsAbstract && CteBearingStatementBaseType.IsAssignableFrom(t))
+            .Select(t => t.Name)
+            .Where(name => !handledTypeNames.Contains(name) && !DocumentedUnreachableCteBearingTypes.Contains(name))
+            .ToList();
+
+        Assert.True(gaps.Count == 0, string.Join("\n", gaps.Select(g => $"{g} is a concrete CTE-bearing statement with no ExplicitVisit override and no documented unreachability")));
+    }
+
     private static void AssertNoUndocumentedGap(HashSet<string> handledTypeNames)
     {
         var gaps = new List<string>();

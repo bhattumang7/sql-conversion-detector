@@ -151,6 +151,23 @@ public static class NonSargablePredicateScanner
             _cteStack.Pop();
         }
 
+        // SelectStatement/UpdateStatement/DeleteStatement/MergeStatement above all push CTE
+        // scope; INSERT had no override at all here (unlike TypedPredicateExtractor's identical
+        // ExplicitVisit(InsertStatement)), so `WITH cte AS (...) INSERT INTO t SELECT ... FROM
+        // cte WHERE UPPER(cte.Col) = 'x'` failed to resolve the `cte` alias in FromScopeResolver -
+        // the syntactic FunctionWrappedColumn finding still fired (InspectSide/FindAnyColumn work
+        // on the raw AST regardless of scope resolution), but Indexed silently resolved to
+        // false/unresolved instead of true, understating the finding for ranking purposes. No
+        // FROM scope is pushed for the INSERT target itself (mirrors TypedPredicateExtractor: an
+        // INSERT target is never referenced by a predicate), only CTEs, so a CTE referenced by
+        // the INSERT ... SELECT source still resolves.
+        public override void ExplicitVisit(InsertStatement node)
+        {
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            base.ExplicitVisit(node);
+            _cteStack.Pop();
+        }
+
         // Mirrors TypedPredicateExtractor's identical overrides (ScriptDOM's visitor binds
         // ExplicitVisit at compile time to the most specific node type, so a base-type-only
         // override never fires for e.g. AlterProcedureStatement) - needed here so a temp

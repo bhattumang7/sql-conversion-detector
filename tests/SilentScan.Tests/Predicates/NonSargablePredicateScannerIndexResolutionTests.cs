@@ -69,6 +69,31 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     }
 
     [Fact]
+    public void FunctionWrappedColumn_ReferencedThroughCteInsideInsertSelect_ResolvesIndexedTrue()
+    {
+        // The bug this closes: NonSargablePredicateScanner had no ExplicitVisit(InsertStatement)
+        // override at all, unlike TypedPredicateExtractor's identical one - so a CTE declared on
+        // an INSERT ... SELECT never got pushed, and a reference to it through the CTE alias
+        // failed to resolve in FromScopeResolver. The syntactic finding still fired (InspectSide
+        // works on the raw AST regardless of scope resolution), but Indexed silently resolved to
+        // false/unresolved instead of true - understating the finding for ranking purposes.
+        var findings = ScanWithCatalog("""
+            CREATE TABLE dbo.Orders (OrderDate DATETIME NOT NULL);
+            CREATE INDEX IX_Orders_OrderDate ON dbo.Orders(OrderDate);
+            GO
+            CREATE TABLE dbo.OrdersArchive (OrderDate DATETIME NOT NULL);
+            GO
+            WITH RecentOrders AS (SELECT OrderDate FROM dbo.Orders)
+            INSERT INTO dbo.OrdersArchive (OrderDate)
+            SELECT OrderDate FROM RecentOrders WHERE YEAR(OrderDate) = 2024;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Orders", finding.TableQualifiedName);
+        Assert.True(finding.Indexed);
+    }
+
+    [Fact]
     public void FunctionWrappedColumn_OnUnresolvableTable_LeavesIndexedNull()
     {
         // No CREATE TABLE for dbo.Missing anywhere in the scan - never guess.
