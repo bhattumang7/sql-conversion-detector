@@ -13,7 +13,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(FixturePath, "json", ".sql", stdout, stderr);
+        var exitCode = ScanCommand.Run(FixturePath, "json", ".sql", null, stdout, stderr);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\"TotalFiles\": 1", stdout.ToString());
@@ -27,7 +27,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(path, "json", ".sql", stdout, stderr);
+        var exitCode = ScanCommand.Run(path, "json", ".sql", null, stdout, stderr);
 
         Assert.Equal(0, exitCode);
         var output = stdout.ToString();
@@ -42,7 +42,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(path, "sarif", ".sql", stdout, stderr);
+        var exitCode = ScanCommand.Run(path, "sarif", ".sql", null, stdout, stderr);
 
         Assert.Equal(0, exitCode);
         var output = stdout.ToString();
@@ -56,7 +56,7 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run(FixturePath, "xml", ".sql", stdout, stderr);
+        var exitCode = ScanCommand.Run(FixturePath, "xml", ".sql", null, stdout, stderr);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("unknown --format", stderr.ToString());
@@ -68,10 +68,44 @@ public sealed class ScanCommandTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCommand.Run("/no/such/path/at/all.sql", "json", ".sql", stdout, stderr);
+        var exitCode = ScanCommand.Run("/no/such/path/at/all.sql", "json", ".sql", null, stdout, stderr);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not found", stderr.ToString());
+    }
+
+    [Fact]
+    public void Run_NoCollationSpecified_IncludesCollationSensitivityReport()
+    {
+        // phase0_spike.sql's OrderCode column carries no per-column COLLATE clause, so without
+        // --collation the flagship varchar-vs-nvarchar rule is structurally unreachable
+        // (VerdictClassifier never guesses) - the collationSensitivity report is what keeps
+        // that from looking like a silent "nothing here" instead of an honest "depends which
+        // collation family this database uses."
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        var exitCode = ScanCommand.Run(FixturePath, "json", ".sql", null, stdout, stderr);
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("\"CollationSensitivity\": {", output);
+        Assert.Contains("\"SqlFamilyCollation\": \"SQL_Latin1_General_CP1_CI_AS\"", output);
+        Assert.Contains("\"WindowsFamilyCollation\": \"Latin1_General_CI_AS\"", output);
+    }
+
+    [Fact]
+    public void Run_CollationSpecified_ClassifiesTheFlagshipRuleAndOmitsSensitivityReport()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        var exitCode = ScanCommand.Run(FixturePath, "json", ".sql", "SQL_Latin1_General_CP1_CI_AS", stdout, stderr);
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("\"CollationSensitivity\": null", output);
+        Assert.Contains("\"Verdict\": \"ScanForced\"", output);
     }
 
     [Fact]
@@ -84,7 +118,7 @@ public sealed class ScanCommandTests
             var stdout = new StringWriter();
             var stderr = new StringWriter();
 
-            var exitCode = ScanCommand.Run(tempDir.FullName, "json", ".sql", stdout, stderr);
+            var exitCode = ScanCommand.Run(tempDir.FullName, "json", ".sql", null, stdout, stderr);
 
             Assert.Equal(1, exitCode);
         }
