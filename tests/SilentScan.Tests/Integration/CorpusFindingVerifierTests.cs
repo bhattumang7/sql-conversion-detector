@@ -44,7 +44,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
             GO
             CREATE INDEX IX_Customers_CustomerCode ON dbo.Customers(CustomerCode);
             GO
-            CREATE TABLE dbo.Unindexed (UnindexedId INT NOT NULL, UnindexedCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.Unindexed (UnindexedId INT NOT NULL, UnindexedCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, UnindexedLob VARCHAR(MAX) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
             GO
             CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode FROM dbo.Orders;
             GO
@@ -284,15 +284,14 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task VerifyAsync_ScanForcedColumnHasNoDeployedIndex_ReturnsConfirmedUnindexed()
+    public async Task VerifyAsync_ScanForcedColumnHasNoDeployedIndex_ConfirmsViaScratchIndex()
     {
-        // The fix this locks in: the probe runs regardless of indexing, and a genuinely
-        // unindexed column (the common case in real-world corpora, not the exception) still
-        // gets its core claim - CONVERT_IMPLICIT lands on the column - confirmed. Only the
-        // RangeSeek-vs-ScanForced shape distinction (which needs an index to seek/scan through)
-        // stays unverified, which is what ConfirmedUnindexed communicates - distinct from a
-        // silent Confirmed (would overclaim the shape was tested) and from NotConfirmed (would
-        // wrongly say the conversion itself didn't happen).
+        // Roadmap Phase E3: the corpus's own DDL leaves this column unindexed - the previous
+        // fix's ConfirmedUnindexed outcome - but the RangeSeek-vs-ScanForced shape distinction
+        // no longer has to stay unverified for that reason alone: a scratch index deployed for
+        // this probe only lets the same plan-shape signal be checked, then the index is
+        // dropped again. Distinct from a plain Confirmed - the summary this feeds still knows
+        // the corpus repo itself never carried this index.
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Unindexed", "UnindexedCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))),
@@ -304,8 +303,31 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
+        Assert.Equal(CorpusFindingOutcome.ConfirmedViaScratchIndex, result.Outcome);
+        Assert.NotEqual(CorpusFindingOutcome.Confirmed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ScanForcedColumnTypeCannotBeIndexed_FallsBackToConfirmedUnindexed()
+    {
+        // A VARCHAR(MAX) column can never be an index key column at all (SQL Server rejects it
+        // outright) - the scratch-index deploy attempt fails cleanly and this falls back to the
+        // same ConfirmedUnindexed outcome an undeployed corpus index already produces, not a
+        // crash or a false Confirmed.
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            ColumnOperand("dbo.Unindexed", "UnindexedLob", new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20), IsLiteral: true, LiteralText: "N'ABC'"),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
         Assert.Equal(CorpusFindingOutcome.ConfirmedUnindexed, result.Outcome);
         Assert.NotEqual(CorpusFindingOutcome.Confirmed, result.Outcome);
+        Assert.NotEqual(CorpusFindingOutcome.ConfirmedViaScratchIndex, result.Outcome);
     }
 
     [Fact]

@@ -97,7 +97,8 @@ public sealed class CorpusFindingVerifier
             database, finding.Column.TableQualifiedName, finding.Column.ColumnName, cancellationToken);
         if (!hasIndex)
         {
-            return new CorpusFindingResult(
+            var scratchResult = await TryConfirmViaScratchIndexAsync(database, finding, probe, cancellationToken);
+            return scratchResult ?? new CorpusFindingResult(
                 finding, CorpusFindingOutcome.ConfirmedUnindexed,
                 $"CONVERT_IMPLICIT confirmed on '{finding.Column.ColumnName}', but no deployed index has it as its leading key on {finding.Column.TableQualifiedName} - the {finding.Verdict} shape distinction could not be verified.");
         }
@@ -108,6 +109,46 @@ public sealed class CorpusFindingVerifier
             finding,
             confirmed ? CorpusFindingOutcome.Confirmed : CorpusFindingOutcome.NotConfirmed,
             Detail: confirmed ? null : DescribeMismatch(finding.Verdict, columnConverts, planXml, conversions));
+    }
+
+    /// <summary>
+    /// Deploys a scratch index just for this probe, recaptures the plan against it, and drops
+    /// it again regardless of outcome - so a probe that fails after the index deployed never
+    /// leaks it into a later probe on the same column. Returns null (not a failure outcome) when
+    /// the column's own type couldn't be indexed at all, so the caller falls back to the
+    /// ordinary ConfirmedUnindexed message.
+    /// </summary>
+    private async Task<CorpusFindingResult?> TryConfirmViaScratchIndexAsync(
+        string database, TypedPredicateFinding finding, string probe, CancellationToken cancellationToken)
+    {
+        var indexName = await _indexChecker.TryDeployScratchIndexAsync(
+            database, finding.Column.TableQualifiedName, finding.Column.ColumnName, cancellationToken);
+        if (indexName is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var planXmlWithIndex = await _planXmlCapture.CaptureAsync(database, probe, cancellationToken);
+            var conversions = ConvertImplicitDetector.FindColumnConversions(planXmlWithIndex);
+            var confirmed = MatchesPredictedPlanShape(finding.Verdict, columnConverts: true, planXmlWithIndex);
+
+            return new CorpusFindingResult(
+                finding,
+                confirmed ? CorpusFindingOutcome.ConfirmedViaScratchIndex : CorpusFindingOutcome.NotConfirmed,
+                confirmed
+                    ? "Confirmed against a scratch index deployed for this probe only - the corpus's own DDL does not index this column."
+                    : DescribeMismatch(finding.Verdict, columnConverts: true, planXmlWithIndex, conversions));
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            return new CorpusFindingResult(finding, CorpusFindingOutcome.ProbeFailed, ex.Message);
+        }
+        finally
+        {
+            await _indexChecker.DropIndexIfExistsAsync(database, finding.Column.TableQualifiedName, indexName, cancellationToken);
+        }
     }
 
     private static string DescribeMismatch(

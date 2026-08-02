@@ -129,7 +129,7 @@ public static class VerifyCorpusCommand
         // static types disagree with sys.columns outright. CI must not go green on that.
         var hasLineageParityFailure = summaries.Values.Any(s => s.LineageParityMismatches.Count > 0);
         var hasZeroEffectiveCoverage = summaries.Values.Any(s =>
-            s.ProbeWorthyFindingCount > 0 && s.Confirmed.Count == 0 && s.NotConfirmed.Count == 0);
+            s.ProbeWorthyFindingCount > 0 && s.Confirmed.Count == 0 && s.NotConfirmed.Count == 0 && s.ConfirmedViaScratchIndex.Count == 0);
         var hasDialectSniffingFailure = summaries.Values.Any(s => !s.PassesDialectSniffing);
 
         return hadMissingRepo || hasLineageParityFailure || hasZeroEffectiveCoverage || hasDialectSniffingFailure ? 1 : 0;
@@ -244,6 +244,7 @@ public static class VerifyCorpusCommand
                 NotProbeable: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.NotProbeable)],
                 ProbeFailed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ProbeFailed)],
                 ConfirmedUnindexed: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ConfirmedUnindexed)],
+                ConfirmedViaScratchIndex: [.. results.Where(r => r.Outcome == CorpusFindingOutcome.ConfirmedViaScratchIndex)],
                 DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
@@ -286,6 +287,7 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<CorpusFindingResult> NotProbeable,
     IReadOnlyList<CorpusFindingResult> ProbeFailed,
     IReadOnlyList<CorpusFindingResult> ConfirmedUnindexed,
+    IReadOnlyList<CorpusFindingResult> ConfirmedViaScratchIndex,
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,

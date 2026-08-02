@@ -39,4 +39,14 @@ public enum CorpusFindingOutcome
     /// itself and reports <see cref="ProbeFailed"/>, not this.
     /// </summary>
     ConfirmedUnindexed,
+
+    /// <summary>
+    /// Roadmap Phase E3: the corpus's own DDL never indexed this column, but the RangeSeek-vs-
+    /// ScanForced plan-shape claim was still confirmed against a single-column NONCLUSTERED
+    /// index <see cref="IndexDeploymentChecker.TryDeployScratchIndexAsync"/> deployed for this
+    /// probe only (dropped immediately after). Distinct from <see cref="Confirmed"/> - a reader
+    /// comparing real-world prevalence should know the corpus repo itself does not carry this
+    /// index, only that the tool's mechanism was validated against one built to order.
+    /// </summary>
+    ConfirmedViaScratchIndex,
 }
