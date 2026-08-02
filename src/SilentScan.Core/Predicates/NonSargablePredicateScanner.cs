@@ -54,7 +54,7 @@ public static class NonSargablePredicateScanner
     public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope);
-        visitor.SeedEnclosingScope(parseResult.Fragment);
+        visitor.SeedEnclosingScope();
         parseResult.Fragment.Accept(visitor);
         return visitor.Findings;
     }
@@ -69,7 +69,7 @@ public static class NonSargablePredicateScanner
         public List<SargabilityFinding> Findings { get; } = [];
 
         /// <summary>Mirrors TypedPredicateExtractor's identical seed - pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack before the visitor starts walking, so a reparsed dynamic SQL fragment found inside a trigger body sees them too.</summary>
-        public void SeedEnclosingScope(TSqlFragment rootFragment)
+        public void SeedEnclosingScope()
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {

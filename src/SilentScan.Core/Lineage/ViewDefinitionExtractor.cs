@@ -34,116 +34,100 @@ public static class ViewDefinitionExtractor
 
             foreach (var statement in script.Batches.SelectMany(b => b.Statements))
             {
-                // ALTER VIEW / CREATE OR ALTER VIEW and the ALTER/CREATE OR ALTER forms of a
-                // view-shaped function are distinct ScriptDOM node types from their CREATE-only
-                // counterparts (the same double-dispatch trap TypedPredicateExtractor and
-                // CatalogBuilder both had to guard against for procedures/functions/triggers) -
-                // matched here on the same shape as CREATE so a redefinition through any of them
-                // resolves into lineage identically, not just CREATE (coverage-remediation-plan.md
-                // Phase 2.1).
-                switch (statement)
-                {
-                    case CreateViewStatement createView:
-                        viewsByName[SchemaObjectNameHelper.Qualify(createView.SchemaObjectName)] = new ViewDefinition(
-                            SchemaObjectNameHelper.Qualify(createView.SchemaObjectName),
-                            createView.SelectStatement,
-                            ExplicitColumnNames(createView.Columns),
-                            result.SourcePath,
-                            createView.StartLine);
-                        break;
-
-                    case AlterViewStatement alterView:
-                        viewsByName[SchemaObjectNameHelper.Qualify(alterView.SchemaObjectName)] = new ViewDefinition(
-                            SchemaObjectNameHelper.Qualify(alterView.SchemaObjectName),
-                            alterView.SelectStatement,
-                            ExplicitColumnNames(alterView.Columns),
-                            result.SourcePath,
-                            alterView.StartLine);
-                        break;
-
-                    case CreateOrAlterViewStatement createOrAlterView:
-                        viewsByName[SchemaObjectNameHelper.Qualify(createOrAlterView.SchemaObjectName)] = new ViewDefinition(
-                            SchemaObjectNameHelper.Qualify(createOrAlterView.SchemaObjectName),
-                            createOrAlterView.SelectStatement,
-                            ExplicitColumnNames(createOrAlterView.Columns),
-                            result.SourcePath,
-                            createOrAlterView.StartLine);
-                        break;
-
-                    case CreateFunctionStatement { ReturnType: SelectFunctionReturnType inlineReturn } createFunction:
-                        viewsByName[SchemaObjectNameHelper.Qualify(createFunction.Name)] = new ViewDefinition(
-                            SchemaObjectNameHelper.Qualify(createFunction.Name),
-                            inlineReturn.SelectStatement,
-                            ExplicitColumnNames: null,
-                            result.SourcePath,
-                            createFunction.StartLine);
-                        break;
-
-                    case AlterFunctionStatement { ReturnType: SelectFunctionReturnType alterInlineReturn } alterFunction:
-                        viewsByName[SchemaObjectNameHelper.Qualify(alterFunction.Name)] = new ViewDefinition(
-                            SchemaObjectNameHelper.Qualify(alterFunction.Name),
-                            alterInlineReturn.SelectStatement,
-                            ExplicitColumnNames: null,
-                            result.SourcePath,
-                            alterFunction.StartLine);
-                        break;
-
-                    case CreateOrAlterFunctionStatement { ReturnType: SelectFunctionReturnType coaInlineReturn } createOrAlterFunction:
-                        viewsByName[SchemaObjectNameHelper.Qualify(createOrAlterFunction.Name)] = new ViewDefinition(
-                            SchemaObjectNameHelper.Qualify(createOrAlterFunction.Name),
-                            coaInlineReturn.SelectStatement,
-                            ExplicitColumnNames: null,
-                            result.SourcePath,
-                            createOrAlterFunction.StartLine);
-                        break;
-
-                    // RETURNS TABLE always carries an explicit column list in valid T-SQL, whether
-                    // the body is a multi-statement RETURNS @t TABLE(...) or a CLR RETURNS TABLE
-                    // (...) AS EXTERNAL NAME - so DeclareTableVariableBody.Definition is never
-                    // null here on a successful parse; this covers both shapes identically (a
-                    // CLR TVF's declared return shape is exactly as authoritative as a T-SQL
-                    // MSTVF's, unlike a CLR scalar function's return type, which has no local
-                    // declaration to read at all).
-                    case CreateFunctionStatement { ReturnType: TableValuedFunctionReturnType tableReturn } createFunction:
-                        AddTvf(tvfsByName, createFunction.Name, tableReturn, createFunction.StartLine, result.SourcePath, tvfContext);
-                        break;
-
-                    case AlterFunctionStatement { ReturnType: TableValuedFunctionReturnType alterTableReturn } alterFunction:
-                        AddTvf(tvfsByName, alterFunction.Name, alterTableReturn, alterFunction.StartLine, result.SourcePath, tvfContext);
-                        break;
-
-                    case CreateOrAlterFunctionStatement { ReturnType: TableValuedFunctionReturnType coaTableReturn } createOrAlterFunction:
-                        AddTvf(tvfsByName, createOrAlterFunction.Name, coaTableReturn, createOrAlterFunction.StartLine, result.SourcePath, tvfContext);
-                        break;
-
-                    case DropViewStatement dropView:
-                        foreach (var target in dropView.Objects)
-                        {
-                            viewsByName.Remove(SchemaObjectNameHelper.Qualify(target));
-                        }
-
-                        break;
-
-                    // DROP FUNCTION doesn't say up front whether the function was scalar,
-                    // inline-TVF, or multi-statement TVF - a scalar UDF's registry entry lives in
-                    // DatabaseCatalog (removed by CatalogBuilder's own DropFunctionStatement
-                    // visitor), so this only needs to cover the two view-shaped forms this
-                    // extractor itself tracks. Removing a name from whichever dictionary never
-                    // held it is a harmless no-op.
-                    case DropFunctionStatement dropFunction:
-                        foreach (var target in dropFunction.Objects)
-                        {
-                            var qualifiedName = SchemaObjectNameHelper.Qualify(target);
-                            viewsByName.Remove(qualifiedName);
-                            tvfsByName.Remove(qualifiedName);
-                        }
-
-                        break;
-                }
+                ApplyStatement(statement, result.SourcePath, viewsByName, tvfsByName, tvfContext);
             }
         }
 
         return ([.. viewsByName.Values], [.. tvfsByName.Values]);
+    }
+
+    /// <summary>
+    /// ALTER VIEW / CREATE OR ALTER VIEW and the ALTER/CREATE OR ALTER forms of a view-shaped
+    /// function are distinct ScriptDOM node types from their CREATE-only counterparts (the same
+    /// double-dispatch trap TypedPredicateExtractor and CatalogBuilder both had to guard against
+    /// for procedures/functions/triggers) - matched here on the same shape as CREATE so a
+    /// redefinition through any of them resolves into lineage identically, not just CREATE
+    /// (coverage-remediation-plan.md Phase 2.1).
+    /// </summary>
+    private static void ApplyStatement(
+        TSqlStatement statement, string sourcePath,
+        Dictionary<string, ViewDefinition> viewsByName, Dictionary<string, MultiStatementTvfDefinition> tvfsByName, TvfContext tvfContext)
+    {
+        switch (statement)
+        {
+            case CreateViewStatement createView:
+                UpsertView(viewsByName, createView.SchemaObjectName, createView.SelectStatement, createView.Columns, sourcePath, createView.StartLine);
+                break;
+
+            case AlterViewStatement alterView:
+                UpsertView(viewsByName, alterView.SchemaObjectName, alterView.SelectStatement, alterView.Columns, sourcePath, alterView.StartLine);
+                break;
+
+            case CreateOrAlterViewStatement createOrAlterView:
+                UpsertView(viewsByName, createOrAlterView.SchemaObjectName, createOrAlterView.SelectStatement, createOrAlterView.Columns, sourcePath, createOrAlterView.StartLine);
+                break;
+
+            case CreateFunctionStatement { ReturnType: SelectFunctionReturnType inlineReturn } createFunction:
+                UpsertView(viewsByName, createFunction.Name, inlineReturn.SelectStatement, columns: null, sourcePath, createFunction.StartLine);
+                break;
+
+            case AlterFunctionStatement { ReturnType: SelectFunctionReturnType alterInlineReturn } alterFunction:
+                UpsertView(viewsByName, alterFunction.Name, alterInlineReturn.SelectStatement, columns: null, sourcePath, alterFunction.StartLine);
+                break;
+
+            case CreateOrAlterFunctionStatement { ReturnType: SelectFunctionReturnType coaInlineReturn } createOrAlterFunction:
+                UpsertView(viewsByName, createOrAlterFunction.Name, coaInlineReturn.SelectStatement, columns: null, sourcePath, createOrAlterFunction.StartLine);
+                break;
+
+            // RETURNS TABLE always carries an explicit column list in valid T-SQL, whether the
+            // body is a multi-statement RETURNS @t TABLE(...) or a CLR RETURNS TABLE (...) AS
+            // EXTERNAL NAME - so DeclareTableVariableBody.Definition is never null here on a
+            // successful parse; this covers both shapes identically (a CLR TVF's declared
+            // return shape is exactly as authoritative as a T-SQL MSTVF's, unlike a CLR scalar
+            // function's return type, which has no local declaration to read at all).
+            case CreateFunctionStatement { ReturnType: TableValuedFunctionReturnType tableReturn } createFunction:
+                AddTvf(tvfsByName, createFunction.Name, tableReturn, createFunction.StartLine, sourcePath, tvfContext);
+                break;
+
+            case AlterFunctionStatement { ReturnType: TableValuedFunctionReturnType alterTableReturn } alterFunction:
+                AddTvf(tvfsByName, alterFunction.Name, alterTableReturn, alterFunction.StartLine, sourcePath, tvfContext);
+                break;
+
+            case CreateOrAlterFunctionStatement { ReturnType: TableValuedFunctionReturnType coaTableReturn } createOrAlterFunction:
+                AddTvf(tvfsByName, createOrAlterFunction.Name, coaTableReturn, createOrAlterFunction.StartLine, sourcePath, tvfContext);
+                break;
+
+            case DropViewStatement dropView:
+                foreach (var target in dropView.Objects)
+                {
+                    viewsByName.Remove(SchemaObjectNameHelper.Qualify(target));
+                }
+
+                break;
+
+            // DROP FUNCTION doesn't say up front whether the function was scalar, inline-TVF, or
+            // multi-statement TVF - a scalar UDF's registry entry lives in DatabaseCatalog
+            // (removed by CatalogBuilder's own DropFunctionStatement visitor), so this only
+            // needs to cover the two view-shaped forms this extractor itself tracks. Removing a
+            // name from whichever dictionary never held it is a harmless no-op.
+            case DropFunctionStatement dropFunction:
+                foreach (var target in dropFunction.Objects)
+                {
+                    var qualifiedName = SchemaObjectNameHelper.Qualify(target);
+                    viewsByName.Remove(qualifiedName);
+                    tvfsByName.Remove(qualifiedName);
+                }
+
+                break;
+        }
+    }
+
+    private static void UpsertView(
+        Dictionary<string, ViewDefinition> viewsByName, SchemaObjectName name, SelectStatement selectStatement, IList<Identifier>? columns, string sourcePath, int startLine)
+    {
+        var qualifiedName = SchemaObjectNameHelper.Qualify(name);
+        viewsByName[qualifiedName] = new ViewDefinition(
+            qualifiedName, selectStatement, columns is null ? null : ExplicitColumnNames(columns), sourcePath, startLine);
     }
 
     private static void AddTvf(

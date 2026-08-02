@@ -31,7 +31,8 @@ public sealed class TypePairMatrixLiveRegenerationTests
             TypeMatrixGenerator.DateTimeFamily,
             TypeMatrixGenerator.StringFamily,
             TypeMatrixGenerator.Collations,
-            TypeMatrixGenerator.CrossFamilyOther);
+            TypeMatrixGenerator.CrossFamilyOther,
+            TypeMatrixGenerator.BinaryFamily);
 
         var checkedIn = TypePairMatrix.Instance;
         var mismatches = new List<string>();

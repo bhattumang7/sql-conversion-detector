@@ -15,6 +15,8 @@ namespace SilentScan.Core.Catalog;
 /// </summary>
 public static class CatalogBuilder
 {
+    private const string SpRenameConstructKind = "sp_rename";
+
     /// <summary>
     /// Builds the catalog. <paramref name="manifestDeclaredCollation"/> is the corpus manifest's
     /// declaredCollation hint (CLAUDE.md Pass 1: "database default collation from any CREATE
@@ -718,7 +720,7 @@ public static class CatalogBuilder
                 {
                     ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: { } procName,
                 } procedureReference
-                || !string.Equals(procName, "sp_rename", StringComparison.OrdinalIgnoreCase))
+                || !string.Equals(procName, SpRenameConstructKind, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -727,7 +729,7 @@ public static class CatalogBuilder
             {
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, execute.StartLine, execute.StartColumn,
-                    "sp_rename", "objname/newname argument is not a literal string - rename not applied, catalog keeps the pre-rename definition");
+                    SpRenameConstructKind, "objname/newname argument is not a literal string - rename not applied, catalog keeps the pre-rename definition");
                 return;
             }
 
@@ -747,7 +749,7 @@ public static class CatalogBuilder
             {
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, execute.StartLine, execute.StartColumn,
-                    "sp_rename", $"object type '{objType}' is not modeled");
+                    SpRenameConstructKind, $"object type '{objType}' is not modeled");
             }
         }
 
@@ -786,13 +788,13 @@ public static class CatalogBuilder
             {
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
-                    "sp_rename", $"'{objName}': three-part (database-qualified) rename target is not modeled");
+                    SpRenameConstructKind, $"'{objName}': three-part (database-qualified) rename target is not modeled");
                 return;
             }
 
             if (catalog.Find(oldQualifiedName, _currentScope) is not { } existing)
             {
-                RecordUnresolvedTarget("sp_rename", oldQualifiedName, node);
+                RecordUnresolvedTarget(SpRenameConstructKind, oldQualifiedName, node);
                 return;
             }
 

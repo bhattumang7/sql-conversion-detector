@@ -23,6 +23,9 @@ namespace SilentScan.Core.Reporting.Readable;
 /// </summary>
 public static class ReadableScanReportWriter
 {
+    /// <summary>Every finding table's first column header - a predicate's source location.</summary>
+    private const string WhereHeader = "Where";
+
     public static string Write(
         ScanReport report,
         CollationSensitivityReport? collationSensitivity,
@@ -110,6 +113,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Expression-derived columns in predicates", report.ExpressionDerivedFindings.Count);
         AddCount(counts, "Non-sargable predicate patterns", report.Tier1Findings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
+        AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
         AddCount(counts, "Files that failed to parse", health.FilesWithErrors);
         AddCount(counts, "Constructs skipped as out of scope", report.SkippedConstructSummary.TotalCount);
@@ -181,7 +185,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Heading(level, $"{title} ({findings.Count})");
         yield return new ReadableBlock.Paragraph(explanation);
         yield return new ReadableBlock.Table(
-            ["Where", "Column", "Column type", "Compared with", "Indexed", "Introduced by"],
+            [WhereHeader, "Column", "Column type", "Compared with", "Indexed", "Introduced by"],
             [.. findings.Select(f => TypedRow(f, pathBase))]);
     }
 
@@ -206,7 +210,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "These comparisons put two explicitly different collations on either side, which SQL Server rejects at compile time (Msg 468) - the query does not run at all. That outranks any seek-versus-scan question, so they are listed first.");
         yield return new ReadableBlock.Table(
-            ["Where", "Left", "Right", "Operator"],
+            [WhereHeader, "Left", "Right", "Operator"],
             [.. report.CollationConflictFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
@@ -227,7 +231,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "By the time these columns reach the predicate they are the result of an expression a view or function computed, not a stored column. An index on whatever feeds them cannot be seeked through that expression.");
         yield return new ReadableBlock.Table(
-            ["Where", "Column", "Computed by", "Underlying base columns"],
+            [WhereHeader, "Column", "Computed by", "Underlying base columns"],
             [.. report.ExpressionDerivedFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
@@ -265,7 +269,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{Tier1Title(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(Tier1Explanation(group.Key));
             yield return new ReadableBlock.Table(
-                ["Where", "Column", "Indexed", "Detail"],
+                [WhereHeader, "Column", "Indexed", "Detail"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
@@ -316,7 +320,7 @@ public static class ReadableScanReportWriter
             $"{summary.AnalyzedCount} of {Count(summary.TotalCallSites, "dynamic SQL call site")} had a provably-constant argument and were analyzed like ordinary SQL. " +
             "The rest are listed here rather than counted as clean: whatever they execute was never examined, so no statement above covers them.");
         yield return new ReadableBlock.Table(
-            ["Where", "Outcome", "Reason"],
+            [WhereHeader, "Outcome", "Reason"],
             [.. unresolved.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, null, pathBase),
@@ -444,9 +448,17 @@ public static class ReadableScanReportWriter
         }
 
         var layers = column.Depth == 1 ? "1 view layer" : $"{column.Depth.ToString(CultureInfo.InvariantCulture)} view layers";
-        var via = column.ImmediateRelationQualifiedName is { } relation
-            ? $" via {relation}{(column.ImmediateColumnName is { } name ? $".{name}" : string.Empty)}"
-            : string.Empty;
+        string via;
+        if (column.ImmediateRelationQualifiedName is { } relation)
+        {
+            var columnSuffix = column.ImmediateColumnName is { } name ? $".{name}" : string.Empty;
+            via = $" via {relation}{columnSuffix}";
+        }
+        else
+        {
+            via = string.Empty;
+        }
+
         var origin = ProvenanceOrigin(column.Provenance) is { } site
             ? $", introduced at {Relative(site.Path, pathBase)}:{site.Line.ToString(CultureInfo.InvariantCulture)}"
             : string.Empty;

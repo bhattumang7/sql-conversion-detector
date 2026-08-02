@@ -616,9 +616,13 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
     {
+        // Roadmap Phase B: arithmetic (Other + 1) is now typeable through the shared
+        // ExpressionTypeInferencer, so the genuinely still-unresolvable element here is a
+        // scalar function call with no return-type registry entry (never declared) - the
+        // remaining real "can't type this" case, not a guess.
         var findings = ExtractAll(
             "CREATE TABLE dbo.T (Col INT NOT NULL, Other INT NOT NULL);",
-            "SELECT Col FROM dbo.T WHERE Col IN (1, Other + 1);");
+            "SELECT Col FROM dbo.T WHERE Col IN (1, dbo.fn_NeverDeclared());");
 
         Assert.Empty(findings.TypedFindings);
         Assert.Contains(findings.SkippedConstructs, s => s.ConstructKind == "IN predicate");
@@ -2201,6 +2205,7 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         // @p is nvarchar types as nvarchar, so a varchar column under a SQL_* collation converts -
         // the flagship direction, reached through a function call rather than a bare value.
         var result = ExtractAll(
+            "CREATE TABLE dbo.TStringFn (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
             CREATE PROCEDURE dbo.usp_FindStringFn @P NVARCHAR(20)
             AS

@@ -96,16 +96,18 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_TimeColumnVsDateValue_NotComparableAtAll_Unknown()
+    public void Classify_TimeColumnVsDateValue_NotComparableAtAll_OperandClash()
     {
         // The Phase 0.2 probe found TIME and every other date/time category (DATE,
         // SMALLDATETIME, DATETIME, DATETIME2, DATETIMEOFFSET) are not implicitly comparable at
         // all - SQL Server rejects the comparison at compile time ("data types time and date
-        // are incompatible"). Not a seek/scan question; UNKNOWN, never guessed.
+        // are incompatible"). Not a seek/scan question; this is a probed, empirically-confirmed
+        // fact (Roadmap Phase A3: OperandClash), not an absence of data - so it is no longer
+        // folded into the generic Unknown bucket.
         var column = new SqlType(SqlTypeCategory.Time);
         var value = new SqlType(SqlTypeCategory.Date);
 
-        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]
@@ -392,19 +394,6 @@ public sealed class VerdictClassifierTests
         var value = new SqlType(SqlTypeCategory.Text);
 
         Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
-    }
-
-    [Fact]
-    public void Classify_TimeColumnVsDateValue_CompileFailedCell_OperandClash()
-    {
-        // Roadmap Phase A3: TIME vs the DATE family is one of the matrix's 14 oracle-probed
-        // CompileFailed cells - a definitively confirmed "this does not compile", not merely
-        // an absence of probe data, so it gets its own distinct verdict rather than folding
-        // into Unknown.
-        var column = new SqlType(SqlTypeCategory.Time);
-        var value = new SqlType(SqlTypeCategory.Date);
-
-        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]

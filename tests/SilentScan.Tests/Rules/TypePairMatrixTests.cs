@@ -26,7 +26,9 @@ public sealed class TypePairMatrixTests
 
     [Fact]
     public void Instance_HasAllExpectedEntries() =>
-        Assert.Equal(508, TypePairMatrix.Instance.Entries.Count);
+        // 508 numeric/datetime/string-family entries plus 6 binary-family entries (Roadmap
+        // Phase A3: Binary/VarBinary/Timestamp, all ordered cross-category pairs).
+        Assert.Equal(514, TypePairMatrix.Instance.Entries.Count);
 
     [Fact]
     public void Instance_ProbesEveryDeclaredCollationWithTheSameEntryCount()
