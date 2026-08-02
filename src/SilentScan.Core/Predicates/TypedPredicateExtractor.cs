@@ -628,19 +628,38 @@ public static class TypedPredicateExtractor
                 case ConvertCall convertCall:
                     return ResolveCastOrConvertOperand(convertCall.DataType, convertCall.Parameter, scopeChain, convertCall);
 
+                // Roadmap Phase B: arithmetic, CASE/COALESCE/NULLIF/IIF - CLAUDE.md's own named
+                // hard cases - now resolved through the shared ExpressionTypeInferencer instead
+                // of falling to Unknown. The leaf callback recurses back into ResolveOperand for
+                // any column/variable/function-call reachable inside a branch, so e.g.
+                // `CASE WHEN x THEN SomeColumn ELSE @p END` types SomeColumn through the exact
+                // same scope-aware path a bare column operand would.
+                case ParenthesisExpression or UnaryExpression or BinaryExpression
+                    or CoalesceExpression or NullIfExpression or IIfCall
+                    or SearchedCaseExpression or SimpleCaseExpression:
+                    return new PredicateOperand.Value(
+                        ExpressionTypeInferencer.Resolve(expression, e => OperandType(ResolveOperand(e, scopeChain)), catalog.TypeAliases));
+
                 default:
                     // Most commonly a scalar UDF (no return-type registry - only built-in
                     // functions are curated), but also any other scalar expression kind this
-                    // pass doesn't type (e.g. CASE/COALESCE - CLAUDE.md hard cases needing their
-                    // own explicit precedence-aware rule, not a blanket resolution here). The
-                    // operand still resolves Unknown, exactly as before - this only makes it
-                    // counted instead of silently falling through.
+                    // pass doesn't type (e.g. a scalar subquery). The operand still resolves
+                    // Unknown, exactly as before - this only makes it counted instead of
+                    // silently falling through.
                     ledger.Record(
                         AnalysisPass.Predicates, sourcePath, expression.StartLine, expression.StartColumn,
                         PredicateOperandConstructKind, $"operand of kind '{expression.GetType().Name}' has no type resolution - resolved Unknown");
                     return new PredicateOperand.Value(Type: null);
             }
         }
+
+        /// <summary>Extracts the resolved type out of either <see cref="PredicateOperand"/> shape - shared by every ExpressionTypeInferencer leaf callback in this pass.</summary>
+        private static SqlType? OperandType(PredicateOperand operand) => operand switch
+        {
+            PredicateOperand.Value v => v.Type,
+            PredicateOperand.Column c => c.Type,
+            _ => null,
+        };
 
         /// <summary>
         /// <c>@@SPID</c>, <c>@@ROWCOUNT</c>, etc. - typed from the curated, oracle-verified
@@ -676,15 +695,7 @@ public static class TypedPredicateExtractor
 
             if (Rules.BuiltinFunctionTypeResolver.TakesFirstArgumentType(name) && functionCall.Parameters.Count > 0)
             {
-                var firstArgument = ResolveOperand(functionCall.Parameters[0], scopeChain);
-                var firstArgumentType = firstArgument switch
-                {
-                    PredicateOperand.Value v => v.Type,
-                    PredicateOperand.Column c => c.Type,
-                    _ => null,
-                };
-
-                return new PredicateOperand.Value(firstArgumentType);
+                return new PredicateOperand.Value(OperandType(ResolveOperand(functionCall.Parameters[0], scopeChain)));
             }
 
             var fixedType = Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
@@ -751,13 +762,7 @@ public static class TypedPredicateExtractor
 
             if (type.IsStringFamily)
             {
-                var innerOperand = ResolveOperand(parameter, scopeChain);
-                var innerType = innerOperand switch
-                {
-                    PredicateOperand.Value v => v.Type,
-                    PredicateOperand.Column c => c.Type,
-                    _ => null,
-                };
+                var innerType = OperandType(ResolveOperand(parameter, scopeChain));
 
                 if (innerType is { IsStringFamily: true, Collation: { } innerCollation })
                 {
@@ -785,12 +790,7 @@ public static class TypedPredicateExtractor
             SqlType? best = null;
             foreach (var value in values)
             {
-                var type = ResolveOperand(value, scopeChain) switch
-                {
-                    PredicateOperand.Value v => v.Type,
-                    PredicateOperand.Column c => c.Type,
-                    _ => null,
-                };
+                var type = OperandType(ResolveOperand(value, scopeChain));
 
                 if (type is null)
                 {

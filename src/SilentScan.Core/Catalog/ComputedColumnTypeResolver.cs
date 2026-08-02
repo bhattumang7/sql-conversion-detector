@@ -7,14 +7,11 @@ namespace SilentScan.Core.Catalog;
 /// <summary>
 /// Infers a computed column's type from its defining expression (<c>Total AS (Price * Qty)</c>)
 /// - previously never attempted, so every computed column stayed Unknown forever regardless of
-/// how trivially inferable its expression was. Scoped deliberately narrow: sibling column
-/// references, literals, CAST/CONVERT, and binary expressions combined via T-SQL data type
-/// precedence (<see cref="SqlTypeCategory"/>'s ordinal IS the precedence rank - see its own
-/// doc comment - so combining two operand categories is exactly "higher ordinal wins", the
-/// same fact <see cref="Rules.VerdictClassifier"/> relies on). Function calls, CASE, and other
-/// expression kinds are explicitly NOT attempted here - those are CLAUDE.md's own named hard
-/// cases (CASE/COALESCE result typing) or need catalog data (scalar UDF registry) not yet built
-/// at this point in CatalogBuilder's pass ordering - and resolve null (Unknown), never a guess.
+/// how trivially inferable its expression was. Sibling column references, literals, CAST/
+/// CONVERT, arithmetic, and (via the shared <see cref="Rules.ExpressionTypeInferencer"/>, roadmap
+/// Phase B) CASE/COALESCE/NULLIF/IIF are all resolved; an ordinary function call still resolves
+/// null (Unknown) here - a scalar UDF's return-type registry isn't built yet at this point in
+/// CatalogBuilder's pass ordering, and this pass never guesses.
 /// </summary>
 internal static class ComputedColumnTypeResolver
 {
@@ -81,64 +78,23 @@ internal static class ComputedColumnTypeResolver
         return progressed;
     }
 
+    /// <summary>
+    /// Delegates to the shared <see cref="Rules.ExpressionTypeInferencer"/> (roadmap Phase B) for
+    /// every expression shape it owns (arithmetic, CASE/COALESCE/NULLIF/IIF, CAST/CONVERT,
+    /// parenthesis/unary) - the leaf callback resolves only a bare sibling-column reference,
+    /// which is all a computed column's own expression can legitimately contain beyond those
+    /// shapes (no catalog/scope machinery exists at this point in CatalogBuilder's pass
+    /// ordering for anything richer, e.g. a function call needing the scalar-UDF registry).
+    /// </summary>
     private static SqlType? Resolve(
-        ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) => expression switch
+        ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
+        Rules.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes), typeAliases);
+
+    private static SqlType? ResolveLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes) => expression switch
     {
         ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] } =>
             columnTypes.GetValueOrDefault(last.Value),
 
-        Literal literal => LiteralTypeResolver.Resolve(literal),
-
-        ParenthesisExpression parenthesis => Resolve(parenthesis.Expression, columnTypes, typeAliases),
-
-        UnaryExpression unary => Resolve(unary.Expression, columnTypes, typeAliases),
-
-        CastCall castCall => SqlTypeReferenceResolver.Resolve(castCall.DataType, columnCollation: null, typeAliases),
-
-        ConvertCall convertCall => SqlTypeReferenceResolver.Resolve(convertCall.DataType, columnCollation: null, typeAliases),
-
-        BinaryExpression binary => Combine(
-            Resolve(binary.FirstExpression, columnTypes, typeAliases),
-            Resolve(binary.SecondExpression, columnTypes, typeAliases)),
-
         _ => null,
     };
-
-    /// <summary>
-    /// T-SQL data type precedence for a binary operator's result: the LOWER-precedence operand
-    /// converts to the higher one's category (the same direction <see cref="SqlTypeCategory"/>'s
-    /// ordinal already encodes). Same category with differing, both-resolved string collations
-    /// is left null (Unknown) rather than guessed - the identical coercibility gap
-    /// <see cref="Rules.VerdictClassifier.ClassifySameCategory"/> already declines to resolve.
-    /// </summary>
-    private static SqlType? Combine(SqlType? left, SqlType? right)
-    {
-        if (left is null || right is null)
-        {
-            return null;
-        }
-
-        if (left.Category == right.Category)
-        {
-            if (!left.IsStringFamily)
-            {
-                return left;
-            }
-
-            if (left.Collation is null)
-            {
-                return right;
-            }
-
-            if (right.Collation is null || left.Collation.Name == right.Collation.Name)
-            {
-                return left;
-            }
-
-            return null;
-        }
-
-        var winner = left.Category > right.Category ? left : right;
-        return winner.IsStringFamily ? new SqlType(winner.Category, Collation: winner.Collation) : new SqlType(winner.Category);
-    }
 }

@@ -36,8 +36,28 @@ public static class ScalarExpressionResolver
         CastCall castCall => ResolveCastOrConvert(castCall.DataType, castCall.Parameter, context, castCall.StartLine),
         ConvertCall convertCall => ResolveCastOrConvert(convertCall.DataType, convertCall.Parameter, context, convertCall.StartLine),
         Literal literal => new ColumnProvenance.Expression(LiteralTypeResolver.Resolve(literal), Inputs: []),
+
+        // Roadmap Phase B: arithmetic, CASE/COALESCE/NULLIF/IIF - previously always
+        // InferredType: null via ResolveGenericExpression below, now typed through the shared
+        // ExpressionTypeInferencer while STILL collecting every reachable column reference for
+        // depth/indexed tracking, exactly as ResolveGenericExpression already did (a view column
+        // built from `Price * Qty` needs both base columns' indexed-ness tracked, regardless of
+        // whether the overall expression could be typed).
+        ParenthesisExpression or UnaryExpression or BinaryExpression
+            or CoalesceExpression or NullIfExpression or IIfCall
+            or SearchedCaseExpression or SimpleCaseExpression =>
+            ResolveTypedExpression(expression, context),
+
         _ => ResolveGenericExpression(expression, context),
     };
+
+    private static ColumnProvenance.Expression ResolveTypedExpression(ScalarExpression expression, ExpressionContext context)
+    {
+        var inputs = CollectColumnInputs(expression, context);
+        var inferredType = ExpressionTypeInferencer.Resolve(
+            expression, sub => ColumnProvenanceAnalysis.TryGetScalarType(Resolve(sub, context)), context.TypeAliases);
+        return new ColumnProvenance.Expression(inferredType, inputs, context.SourcePath, expression.StartLine);
+    }
 
     private static ColumnProvenance ResolveCastOrConvert(DataTypeReference dataType, ScalarExpression parameter, ExpressionContext context, int line)
     {
@@ -78,12 +98,14 @@ public static class ScalarExpressionResolver
     /// enough to tell whether a real, possibly-indexed base column sits underneath, without
     /// needing to mirror the expression's exact structure.
     /// </summary>
-    private static ColumnProvenance.Expression ResolveGenericExpression(ScalarExpression expression, ExpressionContext context)
+    private static ColumnProvenance.Expression ResolveGenericExpression(ScalarExpression expression, ExpressionContext context) =>
+        new(InferredType: null, CollectColumnInputs(expression, context), context.SourcePath, expression.StartLine);
+
+    private static List<ColumnProvenance> CollectColumnInputs(ScalarExpression expression, ExpressionContext context)
     {
         var collector = new ColumnReferenceCollector();
         expression.Accept(collector);
-        var inputs = collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.Scope, context.OrderedRelations, context.SourcePath, context.Ledger)).ToList();
-        return new ColumnProvenance.Expression(InferredType: null, inputs, context.SourcePath, expression.StartLine);
+        return collector.References.Select(columnRef => ResolveColumnReference(columnRef, context.Scope, context.OrderedRelations, context.SourcePath, context.Ledger)).ToList();
     }
 
     private sealed class ColumnReferenceCollector : TSqlFragmentVisitor

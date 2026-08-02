@@ -1190,6 +1190,7 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         "CREATE TABLE dbo.TLen (NameLength INT NOT NULL);",
         "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
         "CREATE TABLE dbo.TIsNull (Id INT NOT NULL);",
+        "CREATE TABLE dbo.TStringFn (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
         """
         CREATE TABLE dbo.TCastInt (Id INT NOT NULL);
         CREATE TABLE dbo.RawCastInt (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -2190,5 +2191,28 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
 
         await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToUpperOfNvarcharParam_UsesFirstArgumentType_ScanForced_OracleConfirmed()
+    {
+        // Roadmap Phase B: UPPER (and the rest of BuiltinFunctionTypeResolver's string-transform
+        // set) preserves its first argument's own type exactly, oracle-verified. UPPER(@p) where
+        // @p is nvarchar types as nvarchar, so a varchar column under a SQL_* collation converts -
+        // the flagship direction, reached through a function call rather than a bare value.
+        var result = ExtractAll(
+            """
+            CREATE PROCEDURE dbo.usp_FindStringFn @P NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT 1 FROM dbo.TStringFn WHERE Code = UPPER(@P);
+            END
+            """);
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
     }
 }

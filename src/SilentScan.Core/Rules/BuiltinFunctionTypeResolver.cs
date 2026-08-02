@@ -76,10 +76,33 @@ public static class BuiltinFunctionTypeResolver
     /// ISNULL never applies data type precedence across its two arguments the way COALESCE
     /// does). Distinct from COALESCE/NULLIF, which CLAUDE.md's hard-cases list calls out as
     /// needing their own explicit precedence-aware rule - this is deliberately not that.
+    ///
+    /// Roadmap Phase B: the common string-transform builtins (UPPER/LOWER/LTRIM/RTRIM/REVERSE/
+    /// REPLACE/LEFT/RIGHT/SUBSTRING/STUFF) verified the same way - each preserves its first
+    /// (the source string) argument's own category AND collation exactly (probed:
+    /// LOWER(nvarcharCol) returns nvarchar with the source's own collation; UPPER(varcharCol)
+    /// returns varchar, collation unchanged). Length/precision facets are NOT preserved
+    /// faithfully here (SQL Server computes a real per-function result length; this class
+    /// returns the first argument's OWN declared length) - an accepted approximation, since
+    /// <see cref="VerdictClassifier"/> never consults length/precision in a cross-category
+    /// decision, only category and collation. CONCAT is deliberately NOT included - its return
+    /// type depends on ALL arguments (nvarchar if any is unicode, varchar otherwise), a
+    /// genuinely different, multi-argument rule this single-argument mechanism can't express;
+    /// left as a documented gap rather than force-fit.
     /// </summary>
     private static readonly HashSet<string> FirstArgumentTypeFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
         "ISNULL",
+        "UPPER",
+        "LOWER",
+        "LTRIM",
+        "RTRIM",
+        "REVERSE",
+        "REPLACE",
+        "LEFT",
+        "RIGHT",
+        "SUBSTRING",
+        "STUFF",
     };
 
     /// <summary>The fixed return type for a built-in function call, or null if this function isn't in the curated table (never guessed).</summary>
