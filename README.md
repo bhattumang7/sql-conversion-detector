@@ -29,7 +29,7 @@ be running — there is no mock/skip path.
 ## Scan SQL for implicit-conversion findings
 
 ```
-dotnet run --project src/SilentScan.Cli -- scan <path-to-.sql-or-folder> [--format json|sarif] [--collation <collation>]
+dotnet run --project src/SilentScan.Cli -- scan <path-to-.sql-or-folder> [--format text|markdown|json|sarif] [--collation <collation>] [--output <file>]
 ```
 
 Parses every `.sql` file under a path (or a single file), reports ScriptDOM
@@ -40,7 +40,13 @@ varchar-vs-nvarchar rule for columns without their own `COLLATE` clause;
 omit it to instead get a collation-sensitivity report scored under both a
 representative `SQL_*` and Windows collation. `--extensions` lets you scan
 non-`.sql` DDL file extensions (e.g. DNN Platform's `.SqlDataProvider`).
-`--format sarif` emits SARIF for CI gating.
+Output defaults to `--format text`: a readable report that groups findings by
+what is wrong with them, explains each group once, and gives every finding its
+location, base column, indexed flag and the view layer that introduced the
+mismatch. `--format markdown` is the same report as a shareable document,
+`--format json` is the complete versioned findings schema, and `--format sarif`
+emits SARIF for CI gating. `--output <file>` writes the report to a file
+instead of standard output.
 
 ## Corpus study pipeline
 
@@ -49,11 +55,15 @@ paths, declared collation). Clone the pinned repos into `corpus/_clones/`
 first, then:
 
 ```
-dotnet run --project src/SilentScan.Cli -- scan-corpus [--manifest corpus/manifest.json] [--clones-root corpus/_clones]
+dotnet run --project src/SilentScan.Cli -- scan-corpus [--manifest corpus/manifest.json] [--clones-root corpus/_clones] [--format text|markdown|json] [--output <file>]
 ```
 
 Scans every manifest repo and reports per-repo findings, gated on each
-repo's ScriptDOM parse-health passing the dialect-sniffing bar.
+repo's ScriptDOM parse-health passing the dialect-sniffing bar. The readable
+formats lead with a one-row-per-repo rollup table — findings, parse rate,
+dialect-sniffing result, whether a collation was pinned — followed by each
+repo's full report. SARIF is not offered here: one log cannot honestly
+describe five separate trees.
 
 ```
 dotnet run --project src/SilentScan.Verify -- verify-corpus [--manifest corpus/manifest.json] [--clones-root corpus/_clones] [--repo <name>]

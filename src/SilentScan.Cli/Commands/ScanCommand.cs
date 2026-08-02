@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
+using SilentScan.Core.Reporting.Readable;
 using SilentScan.Core.Reporting.Sarif;
 
 namespace SilentScan.Cli.Commands;
@@ -11,7 +12,8 @@ namespace SilentScan.Cli.Commands;
 /// `silentscan scan &lt;path&gt;` — parses every .sql file under the given folder (or a single
 /// file), reports ScriptDOM parse health (Pass 0 / the corpus dialect-sniffing signal), and
 /// for files that parsed cleanly, the Tier-1 syntactic and typed-verdict sargability findings
-/// (CLAUDE.md Pass 1-4). Supports JSON (default) or SARIF output for CI gating.
+/// (CLAUDE.md Pass 1-4). Renders as readable text (default) or markdown, or as the full JSON
+/// findings schema or SARIF for CI gating.
 /// </summary>
 public static class ScanCommand
 {
@@ -32,8 +34,13 @@ public static class ScanCommand
 
         var formatOption = new Option<string>("--format")
         {
-            Description = "Output format: json (default) or sarif.",
-            DefaultValueFactory = _ => "json",
+            Description = ReportOutput.FormatOptionDescription,
+            DefaultValueFactory = _ => "text",
+        };
+
+        var outputOption = new Option<string?>("--output")
+        {
+            Description = ReportOutput.OutputOptionDescription,
         };
 
         var extensionsOption = new Option<string>("--extensions")
@@ -53,6 +60,7 @@ public static class ScanCommand
             formatOption,
             extensionsOption,
             collationOption,
+            outputOption,
         };
 
         command.SetAction(parseResult =>
@@ -61,13 +69,14 @@ public static class ScanCommand
             var format = parseResult.GetValue(formatOption)!;
             var extensions = parseResult.GetValue(extensionsOption)!;
             var collation = parseResult.GetValue(collationOption);
-            return Run(path, format, extensions, collation, Console.Out, Console.Error);
+            var output = parseResult.GetValue(outputOption);
+            return Run(path, format, extensions, collation, Console.Out, Console.Error, output);
         });
 
         return command;
     }
 
-    internal static int Run(string path, string format, string extensions, string? collation, TextWriter stdout, TextWriter stderr)
+    internal static int Run(string path, string format, string extensions, string? collation, TextWriter stdout, TextWriter stderr, string? outputPath = null)
     {
         if (!File.Exists(path) && !Directory.Exists(path))
         {
@@ -75,9 +84,9 @@ public static class ScanCommand
             return 1;
         }
 
-        if (format is not ("json" or "sarif"))
+        if (!ReportOutput.TryParseFormat(format, out var reportFormat))
         {
-            stderr.WriteLine($"error: unknown --format '{format}' (expected 'json' or 'sarif')");
+            stderr.WriteLine(ReportOutput.UnknownFormatMessage(format));
             return 1;
         }
 
@@ -86,23 +95,42 @@ public static class ScanCommand
         var parseResults = files.Select(SqlScriptParser.ParseFile).ToList();
         var report = ScanReportBuilder.BuildFromParseResults(parseResults, collation);
 
-        if (format == "sarif")
+        // No pinned collation means the flagship rule is structurally unreachable for any
+        // column relying on the database default (CollationSensitivityReport's own doc: an
+        // unqualified zero here looks identical to "we checked and there's nothing," a
+        // materially different and stronger claim than what was actually established) - the
+        // same honesty CLAUDE.md already requires scan-corpus to give an unpinned repo.
+        // Computed for every format except SARIF, which has no place to carry it.
+        var collationSensitivity = collation is null && reportFormat != ReportFormat.Sarif
+            ? CollationSensitivityReport.Analyze(parseResults)
+            : null;
+
+        var content = reportFormat switch
         {
-            stdout.WriteLine(SarifReportWriter.Write(report));
-        }
-        else
+            ReportFormat.Sarif => SarifReportWriter.Write(report),
+            ReportFormat.Json => JsonSerializer.Serialize(new ScanCommandResult(report, collationSensitivity), JsonOptions),
+            _ => ReadableScanReportWriter.Write(
+                report,
+                collationSensitivity,
+                $"SilentScan - {path}",
+                ReportOutput.ToStyle(reportFormat),
+                PathBaseFor(path)),
+        };
+
+        if (!ReportOutput.Emit(content, outputPath, stdout, stderr))
         {
-            // No pinned collation means the flagship rule is structurally unreachable for any
-            // column relying on the database default (CollationSensitivityReport's own doc: an
-            // unqualified zero here looks identical to "we checked and there's nothing," a
-            // materially different and stronger claim than what was actually established) - the
-            // same honesty CLAUDE.md already requires scan-corpus to give an unpinned repo.
-            var collationSensitivity = collation is null ? CollationSensitivityReport.Analyze(parseResults) : null;
-            stdout.WriteLine(JsonSerializer.Serialize(new ScanCommandResult(report, collationSensitivity), JsonOptions));
+            return 1;
         }
 
         return report.ParseHealth.FilesWithErrors == 0 ? 0 : 1;
     }
+
+    /// <summary>
+    /// The directory that finding paths in the readable report are shown relative to. A single
+    /// file's own path is not a base to trim - doing so would leave every finding in it with no
+    /// file name at all.
+    /// </summary>
+    private static string? PathBaseFor(string path) => Directory.Exists(path) ? path : null;
 }
 
 /// <summary>One `scan` run's ordinary report, plus a collation-sensitivity re-run when no --collation was pinned (null when one was - there's nothing to be sensitive to). Mirrors scan-corpus's identical CorpusRepoScanResult shape.</summary>

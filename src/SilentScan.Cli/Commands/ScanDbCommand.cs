@@ -14,7 +14,7 @@ namespace SilentScan.Cli.Commands;
 /// Lineage/Predicates/Rules pipeline <c>scan</c> uses against parsed files. Types, per-column
 /// collations, and the indexed flag are all facts read from the engine, not guesses. Issues
 /// metadata <c>SELECT</c>s only - nothing is ever executed against the connected database.
-/// Supports JSON (default) or SARIF output, matching <c>scan</c>'s surface.
+/// Renders as readable text (default) or markdown, or as JSON or SARIF, matching <c>scan</c>'s surface.
 /// </summary>
 public static class ScanDbCommand
 {
@@ -33,8 +33,13 @@ public static class ScanDbCommand
 
         var formatOption = new Option<string>("--format")
         {
-            Description = "Output format: json (default) or sarif.",
-            DefaultValueFactory = _ => "json",
+            Description = ReportOutput.FormatOptionDescription,
+            DefaultValueFactory = _ => "text",
+        };
+
+        var outputOption = new Option<string?>("--output")
+        {
+            Description = ReportOutput.OutputOptionDescription,
         };
 
         var planCacheEvidenceOption = new Option<bool>("--plan-cache-evidence")
@@ -48,6 +53,7 @@ public static class ScanDbCommand
             connectionStringArgument,
             formatOption,
             planCacheEvidenceOption,
+            outputOption,
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
@@ -55,18 +61,19 @@ public static class ScanDbCommand
             var connectionString = parseResult.GetValue(connectionStringArgument)!;
             var format = parseResult.GetValue(formatOption)!;
             var planCacheEvidence = parseResult.GetValue(planCacheEvidenceOption);
-            return await RunAsync(connectionString, format, planCacheEvidence, Console.Out, Console.Error, cancellationToken);
+            var output = parseResult.GetValue(outputOption);
+            return await RunAsync(connectionString, format, planCacheEvidence, Console.Out, Console.Error, cancellationToken, output);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string connectionString, string format, bool includePlanCacheEvidence, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
+        string connectionString, string format, bool includePlanCacheEvidence, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken, string? outputPath = null)
     {
-        if (format is not ("json" or "sarif"))
+        if (!ReportOutput.TryParseFormat(format, out var reportFormat))
         {
-            await stderr.WriteLineAsync($"error: unknown --format '{format}' (expected 'json' or 'sarif')");
+            await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(format));
             return 1;
         }
 
@@ -81,13 +88,16 @@ public static class ScanDbCommand
             return 1;
         }
 
-        if (format == "sarif")
+        var content = reportFormat switch
         {
-            await stdout.WriteLineAsync(SarifReportWriter.Write(result.Report));
-        }
-        else
+            ReportFormat.Sarif => SarifReportWriter.Write(result.Report),
+            ReportFormat.Json => JsonSerializer.Serialize(result, JsonOptions),
+            _ => ReadableLiveScanWriter.Write(result, ReadableLiveScanWriter.DescribeTarget(connectionString), ReportOutput.ToStyle(reportFormat)),
+        };
+
+        if (!ReportOutput.Emit(content, outputPath, stdout, stderr))
         {
-            await stdout.WriteLineAsync(JsonSerializer.Serialize(result, JsonOptions));
+            return 1;
         }
 
         // Non-zero on a P0 lineage bug (CLAUDE.md: "any mismatch is a P0 lineage bug") in

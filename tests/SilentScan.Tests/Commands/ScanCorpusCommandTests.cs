@@ -64,7 +64,7 @@ public sealed class ScanCorpusCommandTests : IDisposable
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCorpusCommand.Run("/no/such/manifest.json", Path.Combine(_root, "clones"), stdout, stderr);
+        var exitCode = ScanCorpusCommand.Run("/no/such/manifest.json", Path.Combine(_root, "clones"), stdout, stderr, "json");
 
         Assert.Equal(1, exitCode);
         Assert.Contains("manifest not found", stderr.ToString());
@@ -76,7 +76,7 @@ public sealed class ScanCorpusCommandTests : IDisposable
         WriteManifest(declaredCollation: null);
         var stdout = new StringWriter();
 
-        ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), stdout, new StringWriter());
+        ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), stdout, new StringWriter(), "json");
 
         using var document = JsonDocument.Parse(stdout.ToString());
         var repoResult = document.RootElement.GetProperty("example");
@@ -106,7 +106,7 @@ public sealed class ScanCorpusCommandTests : IDisposable
         WriteManifest(declaredCollation: "SQL_Latin1_General_CP1_CI_AS");
         var stdout = new StringWriter();
 
-        ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), stdout, new StringWriter());
+        ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), stdout, new StringWriter(), "json");
 
         using var document = JsonDocument.Parse(stdout.ToString());
         var repoResult = document.RootElement.GetProperty("example");
@@ -127,7 +127,7 @@ public sealed class ScanCorpusCommandTests : IDisposable
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 
-        var exitCode = ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), stdout, stderr);
+        var exitCode = ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), stdout, stderr, "json");
 
         Assert.Equal(1, exitCode);
         Assert.Contains("dialect-sniffing threshold", stderr.ToString(), StringComparison.Ordinal);
@@ -139,7 +139,7 @@ public sealed class ScanCorpusCommandTests : IDisposable
         WriteManifest(declaredCollation: "SQL_Latin1_General_CP1_CI_AS");
         var stderr = new StringWriter();
 
-        var exitCode = ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), new StringWriter(), stderr);
+        var exitCode = ScanCorpusCommand.Run(_manifestPath, Path.Combine(_root, "clones"), new StringWriter(), stderr, "json");
 
         Assert.Equal(0, exitCode);
         Assert.DoesNotContain("dialect-sniffing", stderr.ToString(), StringComparison.Ordinal);

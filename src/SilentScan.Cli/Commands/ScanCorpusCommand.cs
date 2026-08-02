@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using SilentScan.Core.Corpus;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
+using SilentScan.Core.Reporting.Readable;
 
 namespace SilentScan.Cli.Commands;
 
@@ -35,23 +36,38 @@ public static class ScanCorpusCommand
             DefaultValueFactory = _ => "corpus/_clones",
         };
 
+        var formatOption = new Option<string>("--format")
+        {
+            Description = ReportOutput.FormatOptionDescription,
+            DefaultValueFactory = _ => "text",
+        };
+
+        var outputOption = new Option<string?>("--output")
+        {
+            Description = ReportOutput.OutputOptionDescription,
+        };
+
         var command = new Command("scan-corpus", "Scan every repo declared in the corpus manifest and report per-repo findings.")
         {
             manifestOption,
             clonesRootOption,
+            formatOption,
+            outputOption,
         };
 
         command.SetAction(parseResult =>
         {
             var manifestPath = parseResult.GetValue(manifestOption)!;
             var clonesRoot = parseResult.GetValue(clonesRootOption)!;
-            return Run(manifestPath, clonesRoot, Console.Out, Console.Error);
+            var format = parseResult.GetValue(formatOption)!;
+            var output = parseResult.GetValue(outputOption);
+            return Run(manifestPath, clonesRoot, Console.Out, Console.Error, format, output);
         });
 
         return command;
     }
 
-    internal static int Run(string manifestPath, string clonesRoot, TextWriter stdout, TextWriter stderr)
+    internal static int Run(string manifestPath, string clonesRoot, TextWriter stdout, TextWriter stderr, string format = "text", string? outputPath = null)
     {
         if (!File.Exists(manifestPath))
         {
@@ -59,8 +75,25 @@ public static class ScanCorpusCommand
             return 1;
         }
 
+        if (!ReportOutput.TryParseFormat(format, out var reportFormat))
+        {
+            stderr.WriteLine(ReportOutput.UnknownFormatMessage(format));
+            return 1;
+        }
+
+        // A corpus run produces one report per repo, and a SARIF log describes a single run
+        // against a single tree - there is no honest way to merge five repos' findings into one
+        // without losing which repo each came from.
+        if (reportFormat == ReportFormat.Sarif)
+        {
+            stderr.WriteLine("error: scan-corpus does not support --format sarif; run `scan` against a single repo for a SARIF log.");
+            return 1;
+        }
+
         var manifest = CorpusManifestLoader.Load(manifestPath);
         var reportsByRepo = new SortedDictionary<string, CorpusRepoScanResult>(StringComparer.Ordinal);
+        var readableRepos = new List<ReadableCorpusRepo>();
+        var missingRepos = new List<string>();
         var hadMissingRepo = false;
         var hadDialectSniffingFailure = false;
 
@@ -70,6 +103,7 @@ public static class ScanCorpusCommand
             if (!Directory.Exists(repoRoot))
             {
                 stderr.WriteLine($"warning: '{repo.Name}' has no local clone at {repoRoot} - skipped.");
+                missingRepos.Add(repo.Name);
                 hadMissingRepo = true;
                 continue;
             }
@@ -106,9 +140,20 @@ public static class ScanCorpusCommand
                 : null;
 
             reportsByRepo[repo.Name] = new CorpusRepoScanResult(report, collationSensitivity);
+            readableRepos.Add(new ReadableCorpusRepo(repo.Name, report, collationSensitivity, repoRoot));
         }
 
-        stdout.WriteLine(JsonSerializer.Serialize(reportsByRepo, JsonOptions));
+        var content = reportFormat == ReportFormat.Json
+            ? JsonSerializer.Serialize(reportsByRepo, JsonOptions)
+            : ReadableCorpusReportWriter.Write(
+                [.. readableRepos.OrderBy(r => r.Name, StringComparer.Ordinal)],
+                [.. missingRepos.OrderBy(name => name, StringComparer.Ordinal)],
+                ReportOutput.ToStyle(reportFormat));
+
+        if (!ReportOutput.Emit(content, outputPath, stdout, stderr))
+        {
+            return 1;
+        }
 
         return hadMissingRepo || hadDialectSniffingFailure ? 1 : 0;
     }
