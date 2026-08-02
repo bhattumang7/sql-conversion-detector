@@ -5,6 +5,7 @@ var rootCommand = new RootCommand("silentscan — static analyzer for index-kill
 {
     ScanCommand.Create(),
     ScanCorpusCommand.Create(),
+    ScanDbCommand.Create(),
 };
 
 return await rootCommand.Parse(args).InvokeAsync();

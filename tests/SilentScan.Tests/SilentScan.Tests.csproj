@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/SilentScan.Core/SilentScan.Core.csproj" />
     <ProjectReference Include="../../src/SilentScan.Cli/SilentScan.Cli.csproj" />
+    <ProjectReference Include="../../src/SilentScan.Live/SilentScan.Live.csproj" />
     <ProjectReference Include="../../src/SilentScan.Verify/SilentScan.Verify.csproj" />
     <ProjectReference Include="../../src/SilentScan.Bench/SilentScan.Bench.csproj" />
   </ItemGroup>

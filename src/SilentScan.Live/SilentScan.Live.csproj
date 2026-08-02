@@ -1,15 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <AssemblyName>silentscan</AssemblyName>
-    <RootNamespace>SilentScan.Cli</RootNamespace>
+    <RootNamespace>SilentScan.Live</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
     <ProjectReference Include="../SilentScan.Core/SilentScan.Core.csproj" />
-    <ProjectReference Include="../SilentScan.Live/SilentScan.Live.csproj" />
   </ItemGroup>
 
   <ItemGroup>
