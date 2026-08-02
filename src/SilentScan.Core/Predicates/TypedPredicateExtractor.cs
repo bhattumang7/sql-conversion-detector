@@ -357,6 +357,23 @@ public static class TypedPredicateExtractor
 
         public override void Visit(LikePredicate node)
         {
+            if (node.NotDefined)
+            {
+                // NOT LIKE is not sargable regardless of type match - oracle-verified directly
+                // (a varchar column compared against a matching-type, non-leading-wildcard
+                // pattern still produces an Index Scan for NOT LIKE, where the equivalent LIKE
+                // seeks). Attributing that scan to a type-precedence verdict would blame the
+                // wrong cause: fixing the type mismatch would not make this predicate seek. Only
+                // recorded when this would otherwise have been a candidate (real scope, real
+                // filter context) - mirrors every other "not eligible for a verdict" skip below.
+                if (_scopeStack.Count > 0 && _inFilterContext)
+                {
+                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "non-seekable operator", "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
+                }
+
+                return;
+            }
+
             // `varcharCol LIKE @nvarcharPattern` converts the column exactly like `=` does -
             // one of the most common real-world instances of this bug class (ORM-generated N''
             // patterns compared against a non-unicode column), and previously invisible to the
@@ -380,6 +397,16 @@ public static class TypedPredicateExtractor
                 // Inside a query, just not in a filtering position (a SELECT-list CASE branch,
                 // an ORDER BY expression) - no seek to lose, not a predicate at all, so this is
                 // excluded silently exactly like Tier-1 already excludes it, not ledgered.
+                return;
+            }
+
+            if (node.NotDefined)
+            {
+                // NOT IN is not sargable regardless of type match - oracle-verified directly
+                // (a varchar column compared against a matching-type NOT IN list still produces
+                // an Index Scan, where the equivalent IN seeks). Same reasoning as NOT LIKE
+                // above: the type-conversion verdict machinery does not apply here.
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "non-seekable operator", "NOT IN is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
 
@@ -445,6 +472,21 @@ public static class TypedPredicateExtractor
                 // Inside a query, just not in a filtering position (a SELECT-list CASE branch,
                 // an ORDER BY expression) - no seek to lose, not a predicate at all, so this is
                 // excluded silently exactly like Tier-1 already excludes it, not ledgered.
+                return;
+            }
+
+            if (operatorText == "<>")
+            {
+                // <> is not sargable regardless of type match - oracle-verified directly (a
+                // varchar column compared against a matching-type value via <> still produces
+                // an Index Scan, where = seeks; an indexed int column's <> CAN sometimes split
+                // into a two-range seek, but that's an optimizer choice this pass has no basis
+                // to promise either way). Attributing that scan to a type-precedence verdict
+                // would blame the wrong cause: fixing the type mismatch would not make this
+                // predicate seek. !< and !> are NOT included here - T-SQL folds them to >= and
+                // <= respectively (oracle-verified), which seek exactly like any other range
+                // comparison, so ToOperatorText below still routes them through normally.
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "non-seekable operator", "<> is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
 

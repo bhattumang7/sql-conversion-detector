@@ -1308,13 +1308,63 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
-    public void Extract_NotInList_IsAlsoClassified()
+    public void Extract_NotInList_IsNotAttributedToTypeConversionVerdict()
     {
-        var findings = Extract(
+        // Oracle-verified: NOT IN scans the index regardless of type match (a matching-type
+        // NOT IN list still produces an Index Scan, where the equivalent IN seeks) - fixing the
+        // type mismatch would not make this predicate seek, so it's not routed through the
+        // type-conversion verdict machinery at all. No typed finding, but recorded in the skip
+        // ledger rather than silently dropped.
+        var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col NOT IN (N'a', N'b');");
 
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT IN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_NotEqualsOperator_IsNotAttributedToTypeConversionVerdict()
+    {
+        // Oracle-verified: <> scans a string-family index regardless of type match. Covers both
+        // the <> and != spellings (BooleanComparisonType.NotEqualToBrackets/
+        // NotEqualToExclamation both map to the same operator text).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col <> N'a';",
+            "SELECT Col FROM dbo.T WHERE Col != N'a';");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Equal(2, result.SkippedConstructs.Count(s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("<>", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void Extract_NotLikePredicate_IsNotAttributedToTypeConversionVerdict()
+    {
+        // Oracle-verified: NOT LIKE scans a string-family index regardless of type match, even
+        // for a non-leading-wildcard pattern that the equivalent LIKE would seek through.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "SELECT Col FROM dbo.T WHERE Col NOT LIKE N'a%';");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT LIKE", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("!<")]
+    [InlineData("!>")]
+    public void Extract_NotLessThanAndNotGreaterThan_ClassifyNormally(string sqlOperator)
+    {
+        // T-SQL folds !< to >= and !> to <= (oracle-verified: identical plan shape, a genuine
+        // range seek) - these are NOT non-seekable like <>/NOT IN/NOT LIKE, so they route
+        // through the type-conversion verdict machinery exactly like any other comparison.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            $"SELECT Col FROM dbo.T WHERE Col {sqlOperator} N'a';");
+
         var finding = Assert.Single(findings);
+        Assert.Equal(sqlOperator, finding.Operator);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
 
