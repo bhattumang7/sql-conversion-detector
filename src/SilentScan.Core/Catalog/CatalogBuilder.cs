@@ -249,6 +249,78 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        // Full-text/spatial/XML indexes and external (PolyBase) tables: ConstructCoverage.json
+        // carried "Ledgered" rows for these four with verifiedBy: null and no code anywhere
+        // actually recording them - a phantom claim (docs/coverage-remediation-plan.md's own
+        // "Ledgered" status means "every occurrence reaches a SkipLedger entry", which was false
+        // for all four). None of the four contribute a column shape or a seekable comparison
+        // this tool classifies (spatial/XML/full-text indexes support their own predicate
+        // families, not equality/range; an external table's columns live in a data source
+        // outside the scanned repo), so there's nothing to model - but an occurrence should still
+        // be counted rather than silently vanishing, exactly like the CLR constructs above.
+        public override void ExplicitVisit(CreateFullTextIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "full-text index", $"'{SchemaObjectNameHelper.Qualify(node.OnName)}': CREATE FULLTEXT INDEX is not modeled - supports CONTAINS/FREETEXT, not the comparison operators this tool classifies");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        // Found by the reflection backstop (StatementVariantParityTests) the moment
+        // CreateFullTextIndexStatement above got its own visitor - same out-of-scope reasoning,
+        // reusing the identical "full-text index" construct kind.
+        public override void ExplicitVisit(AlterFullTextIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "full-text index", $"'{SchemaObjectNameHelper.Qualify(node.OnName)}': ALTER FULLTEXT INDEX is not modeled - supports CONTAINS/FREETEXT, not the comparison operators this tool classifies");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateSpatialIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "spatial index", $"'{SchemaObjectNameHelper.Qualify(node.Object)}': CREATE SPATIAL INDEX is not modeled - supports spatial predicates (STIntersects etc.), not equality/range comparisons");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateXmlIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "XML index", $"CREATE XML INDEX on column '{node.XmlColumn.Value}' is not modeled - supports XQuery, not scalar comparisons");
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        public override void ExplicitVisit(CreateExternalTableStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "external table", $"'{SchemaObjectNameHelper.Qualify(node.SchemaObjectName)}': CREATE EXTERNAL TABLE is not modeled - column shapes live in the external data source, which this tool never connects to");
+            }
+
+            node.AcceptChildren(this);
+        }
+
         // ALTER ASSEMBLY (re-pointing an existing CLR assembly's file/version) - same CLR
         // decline-to-model decision as CREATE ASSEMBLY. Found by the reflection backstop
         // (coverage-remediation-plan.md Phase 2.1) while auditing CREATE/ALTER parity - was

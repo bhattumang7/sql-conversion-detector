@@ -958,6 +958,72 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_CreateFullTextIndex_Ledgered()
+    {
+        // ConstructCoverage.json carried this as "Ledgered" (verifiedBy: null) with no code
+        // anywhere actually recording it - a phantom claim, since "Ledgered" means every
+        // occurrence reaches a SkipLedger entry.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Documents (Id INT NOT NULL PRIMARY KEY, Body NVARCHAR(MAX) NULL);
+            GO
+            CREATE FULLTEXT INDEX ON dbo.Documents(Body) KEY INDEX PK__Document;
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "full-text index" && e.Reason.Contains("dbo.Documents", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_AlterFullTextIndex_Ledgered()
+    {
+        // Found by the reflection backstop (StatementVariantParityTests) the moment
+        // CreateFullTextIndexStatement above got its own visitor.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Documents2 (Id INT NOT NULL PRIMARY KEY, Body NVARCHAR(MAX) NULL);
+            GO
+            CREATE FULLTEXT INDEX ON dbo.Documents2(Body) KEY INDEX PK__Document2;
+            GO
+            ALTER FULLTEXT INDEX ON dbo.Documents2 ENABLE;
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "full-text index" && e.Reason.Contains("ALTER FULLTEXT INDEX", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateSpatialIndex_Ledgered()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Locations (Id INT NOT NULL PRIMARY KEY, GeoCol GEOGRAPHY NULL);
+            GO
+            CREATE SPATIAL INDEX SIdx_Locations ON dbo.Locations(GeoCol) USING GEOGRAPHY_GRID;
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "spatial index" && e.Reason.Contains("dbo.Locations", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateXmlIndex_Ledgered()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Configs (Id INT NOT NULL PRIMARY KEY, Payload XML NULL);
+            GO
+            CREATE PRIMARY XML INDEX PXmlIdx_Configs ON dbo.Configs(Payload);
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "XML index" && e.Reason.Contains("Payload", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateExternalTable_Ledgered()
+    {
+        var catalog = BuildFrom("""
+            CREATE EXTERNAL TABLE dbo.ExternalOrders (Id INT NOT NULL)
+            WITH (LOCATION = '/data/orders/', DATA_SOURCE = MyDataSource, FILE_FORMAT = MyFileFormat);
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "external table" && e.Reason.Contains("dbo.ExternalOrders", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Build_AlterAssembly_Ledgered()
     {
         // Found by StatementVariantParityTests' reflection backstop, not manual audit -

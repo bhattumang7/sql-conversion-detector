@@ -76,7 +76,7 @@
       "construct": "CreateExternalTableStatement",
       "group": "ColumnDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": "PolyBase/external table. Column shapes live outside the scanned repo (in the external data source); resolving them would require connecting to that source, which this tool never does. Absent from the pilot corpus."
     },
     {
@@ -104,22 +104,29 @@
       "construct": "CreateSpatialIndexStatement",
       "group": "IndexDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": "Spatial indexes support spatial predicates (STIntersects etc.), not the equality/range comparisons this tool classifies - out of scope by construction, not an oversight."
     },
     {
       "construct": "CreateXmlIndexStatement",
       "group": "IndexDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": "XML indexes support XQuery, not scalar comparisons - out of scope by construction."
     },
     {
       "construct": "CreateFullTextIndexStatement",
       "group": "IndexDefiner",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Catalog.CatalogBuilderTests",
       "rationale": "Full-text indexes support CONTAINS/FREETEXT, not the comparison operators this tool classifies - out of scope by construction."
+    },
+    {
+      "construct": "AlterFullTextIndexStatement",
+      "group": "IndexDefiner",
+      "status": "Ledgered",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Same out-of-scope reasoning as CreateFullTextIndexStatement - found by the reflection backstop (StatementVariantParityTests) the moment the CREATE form got its own visitor."
     },
     {
       "construct": "DeclareTableVariableStatement",
@@ -197,13 +204,6 @@
       "status": "Handled",
       "verifiedBy": "Lineage.LineageResolverTests",
       "rationale": "A CLR TVF still declares its RETURNS TABLE(...) column list in the script even though the body is EXTERNAL NAME - unlike a CLR scalar function, there is no missing type information, so it resolves through the identical declared-shape path an ordinary multi-statement TVF uses. Not a gap; corrects an earlier (wrong) assumption in this plan that it was."
-    },
-    {
-      "construct": "CreateExternalFunctionStatement",
-      "group": "ViewOrFunctionDefiner",
-      "status": "Ledgered",
-      "verifiedBy": null,
-      "rationale": "Azure ML / language-extension external function. No local body to analyze - out of scope by construction."
     },
     {
       "construct": "TVF-to-TVF dependency edge",
@@ -370,7 +370,7 @@
       "construct": "InsertStatement SELECT * / UNION / non-scalar source (write-loss)",
       "group": "WriteLoss",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Predicates.WriteLossExtractionTests",
       "rationale": "Roadmap Phase E1: only a plain, non-UNION SELECT with an explicit scalar select list can be paired positionally against the INSERT's target column list without guessing which source expression feeds which target column. SELECT * (target-vs-source arity depends on catalog state, not the statement's own text) and UNION/EXCEPT/INTERSECT (each branch could type differently) are out of scope, ledgered per occurrence via TypedPredicateExtractor's SkipLedger rather than silently skipped."
     },
     {
@@ -383,9 +383,9 @@
     {
       "construct": "MERGE WHEN [NOT] MATCHED THEN INSERT/UPDATE actions (write-loss)",
       "group": "WriteLoss",
-      "status": "Ledgered",
+      "status": "Gap",
       "verifiedBy": null,
-      "rationale": "Roadmap Phase E1 scoped write-loss analysis to standalone INSERT/UPDATE statements only. A MERGE action's own INSERT/UPDATE targets are structurally the same shape but are not yet wired to AnalyzeInsertWriteLoss/AssignmentSetClause - a deliberate scope decision (MERGE is rare in the pinned corpus set relative to plain INSERT/UPDATE), not a gap discovered and left unfixed."
+      "rationale": "Roadmap Phase E1 scoped write-loss analysis to standalone INSERT/UPDATE statements only. A MERGE action's own INSERT/UPDATE targets are structurally the same shape but are not yet wired to AnalyzeInsertWriteLoss/AssignmentSetClause - a deliberate scope decision (MERGE is rare in the pinned corpus set relative to plain INSERT/UPDATE). Corrected from a previous, inaccurate 'Ledgered' status: no code path actually records an occurrence of this shape, so it was neither resolved nor consistently ledgered - Gap is the honest label, not a downgrade in ambition."
     },
     {
       "construct": "WhileStatement / IfStatement boolean guard (no FROM scope)",
@@ -454,7 +454,7 @@
       "construct": "OpenRowsetTableReference / OpenQueryTableReference / PivotedTableReference / UnpivotedTableReference",
       "group": "ScopeIntroducer",
       "status": "Ledgered",
-      "verifiedBy": null,
+      "verifiedBy": "Lineage.FromScopeResolverUnsupportedTableReferenceTests",
       "rationale": "FromScopeResolver's default arm already records these to the ledger with the construct's real type name and resolves to an empty relation - the one pass in this codebase that ledgers unhandled node kinds by default rather than needing a dedicated fix per kind. Genuinely out of scope (external/reshaping sources), unlike VariableTableReference."
     },
     {
@@ -481,9 +481,9 @@
     {
       "construct": "Objects created inside dynamic SQL (EXEC('CREATE TABLE #x ...'))",
       "group": "DynamicSql",
-      "status": "Ledgered",
+      "status": "Gap",
       "verifiedBy": null,
-      "rationale": "Deliberately not resolved - feeding dynamically-created objects back into a catalog later passes have already consumed is a re-entrancy problem out of proportion to its value, and would require guessing which EXEC calls run before which. coverage-remediation-plan.md Phase 4.4."
+      "rationale": "Deliberately not resolved - feeding dynamically-created objects back into a catalog later passes have already consumed is a re-entrancy problem out of proportion to its value, and would require guessing which EXEC calls run before which. coverage-remediation-plan.md Phase 4.4. Corrected from a previous, inaccurate 'Ledgered' status: nothing scans a dynamic SQL string's contents for DDL to record an occurrence of this shape in the first place, so there is no ledger entry to point to - Gap is the honest label for a permanent, accepted scope boundary, not just a hole awaiting a fix."
     },
     {
       "construct": "DropTableStatement",

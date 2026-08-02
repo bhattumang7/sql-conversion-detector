@@ -49,17 +49,24 @@ public static class NonSargablePredicateScanner
     /// dynamic SQL fragment is considered inside, so a #temp table declared in the surrounding
     /// STATIC body resolves inside the dynamic text too - the reparsed fragment has no
     /// CREATE PROCEDURE wrapper of its own to discover the scope from. Null (the default) for
-    /// an ordinary top-level scan.
+    /// an ordinary top-level scan. <paramref name="ledger"/> is where an unresolved scope
+    /// reference (an unresolvable FROM table, CTE, or column) gets recorded - this pass used to
+    /// pass <c>ledger: null</c> to every shared resolver it calls (FromScopeResolver/
+    /// ScalarExpressionResolver/CteResolver), so a Tier-1 finding's own resolution failures were
+    /// the one pass with zero trace of what it couldn't resolve, unlike every other pass. Null
+    /// (the default) preserves the old silent behavior for callers that don't care.
     /// </summary>
-    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null)
+    public static IReadOnlyList<SargabilityFinding> Scan(
+        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope, ledger);
         visitor.SeedEnclosingScope();
         parseResult.Fragment.Accept(visitor);
         return visitor.Findings;
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, DynamicSqlScope? enclosingScope = null) : TSqlFragmentVisitor
+    private sealed class Visitor(
+        string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null) : TSqlFragmentVisitor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
@@ -86,7 +93,7 @@ public static class NonSargablePredicateScanner
         /// </summary>
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger: null, CurrentCteRelations(), _currentProcScope));
+            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope));
 
             var previous = _inFilterContext;
             _inFilterContext = false;
@@ -524,7 +531,7 @@ public static class NonSargablePredicateScanner
             }
 
             var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
+            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger);
 
             return provenance switch
             {
@@ -548,7 +555,7 @@ public static class NonSargablePredicateScanner
         private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
         {
             var currentCtes = CurrentCteRelations();
-            var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger: null, _currentProcScope);
+            var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger, _currentProcScope);
             _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
         }
 
@@ -556,7 +563,7 @@ public static class NonSargablePredicateScanner
             _cteStack.Count > 0 ? _cteStack.Peek() : EmptyResolvedViews;
 
         private FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
-            new(catalog, resolvedViews, sourcePath, Ledger: null, CurrentCteRelations(), _currentProcScope);
+            new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope);
 
         private static Dictionary<string, ResolvedRelation> MergeCtes(
             IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)

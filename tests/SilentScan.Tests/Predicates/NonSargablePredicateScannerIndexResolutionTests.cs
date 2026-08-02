@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
@@ -91,6 +92,28 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
         var finding = Assert.Single(findings);
         Assert.Equal("dbo.Orders", finding.TableQualifiedName);
         Assert.True(finding.Indexed);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_OnUnresolvableTable_RecordsSkipInsteadOfSilence()
+    {
+        // The bug this closes: NonSargablePredicateScanner passed ledger: null to every shared
+        // resolver it calls (FromScopeResolver/ScalarExpressionResolver/CteResolver) - the one
+        // pass with zero trace of what it couldn't resolve, unlike every other pass in this
+        // codebase. An unresolvable FROM table now leaves a real ledger entry, matching
+        // FunctionWrappedColumn_OnUnresolvableTable_LeavesIndexedNull's existing Indexed=null
+        // claim with an explicit reason instead of silence.
+        var result = SqlScriptParser.ParseText("test.sql", "SELECT 1 FROM dbo.Missing WHERE UPPER(Notes) = 'X';");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var ledger = new SkipLedger();
+        var findings = NonSargablePredicateScanner.Scan(result, catalog, lineage, ledger: ledger);
+
+        Assert.Single(findings);
+        Assert.NotEmpty(ledger.Entries);
+        Assert.Contains(ledger.Entries, e => e.Reason.Contains("dbo.Missing", StringComparison.Ordinal));
     }
 
     [Fact]

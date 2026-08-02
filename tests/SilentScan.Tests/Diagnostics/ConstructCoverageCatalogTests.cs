@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Tests.Diagnostics;
@@ -101,6 +102,55 @@ public sealed class ConstructCoverageCatalogTests
             .ToList();
 
         Assert.True(unverified.Count == 0, $"Handled rows with no fixture/test reference: {string.Join(", ", unverified)}");
+    }
+
+    /// <summary>
+    /// "Ledgered" means "every occurrence reaches a SkipLedger entry" (the enum's own doc
+    /// comment) - an unverifiable claim with no test/fixture backing it is exactly as stale-prone
+    /// as an unverified Handled row. Found the hard way: five Ledgered rows (full-text/spatial/
+    /// XML index, external table, plus a sixth referencing a ScriptDom type - see below - that
+    /// doesn't even exist) all had verifiedBy: null and no code anywhere actually recording them.
+    /// </summary>
+    [Fact]
+    public void LedgeredEntries_AlwaysCarryAVerifiedByReference()
+    {
+        var unverified = ConstructCoverageCatalog.Instance.Entries
+            .Where(e => e.Status == ConstructCoverageStatus.Ledgered && string.IsNullOrWhiteSpace(e.VerifiedBy))
+            .Select(e => e.Construct)
+            .ToList();
+
+        Assert.True(unverified.Count == 0, $"Ledgered rows with no fixture/test reference: {string.Join(", ", unverified)}");
+    }
+
+    /// <summary>
+    /// A construct name that reads as a bare ScriptDom type name (no spaces, parens, or other
+    /// annotation - "CreateFullTextIndexStatement", not "CreateFunctionStatement (scalar)" or
+    /// "MultiStatementTvfReturnVariable") is a claim that the type exists in the ScriptDom
+    /// assembly this project depends on. Found the hard way: "CreateExternalFunctionStatement"
+    /// did not exist in this ScriptDom version at all (no Azure ML/external-function DDL node is
+    /// modeled here) - a phantom reference that had sat in the matrix, Ledgered, unverifiable,
+    /// with nothing to grep for and nothing a reflection-based parity test (StatementVariantParityTests)
+    /// could ever have caught either, since it only walks types that DO exist.
+    /// </summary>
+    /// <summary>Not a ScriptDom type at all - a project-coined name for the RETURNS @t TABLE(...) return-variable shape (see its own rationale in the matrix). Documented here rather than silently excluded by a looser filter.</summary>
+    private static readonly HashSet<string> DocumentedNonScriptDomConstructNames = new(StringComparer.Ordinal)
+    {
+        "MultiStatementTvfReturnVariable",
+    };
+
+    [Fact]
+    public void BareTypeNameConstructs_ResolveToARealScriptDomType()
+    {
+        var scriptDomAssembly = typeof(TSqlFragment).Assembly;
+
+        var phantoms = ConstructCoverageCatalog.Instance.Entries
+            .Select(e => e.Construct)
+            .Where(name => name.Length > 0 && char.IsUpper(name[0]) && !name.Contains(' ', StringComparison.Ordinal))
+            .Where(name => !DocumentedNonScriptDomConstructNames.Contains(name))
+            .Where(name => scriptDomAssembly.GetType($"Microsoft.SqlServer.TransactSql.ScriptDom.{name}") is null)
+            .ToList();
+
+        Assert.True(phantoms.Count == 0, $"Construct names with no matching ScriptDom type: {string.Join(", ", phantoms)}");
     }
 
     private static string? FindRepoRoot()

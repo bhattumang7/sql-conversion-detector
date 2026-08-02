@@ -77,7 +77,15 @@ public static class ScanReportBuilder
         // reads (SelectIntoLineagePass docs: closes a silent-drop gap, not just an Unknown one).
         SelectIntoLineagePass.Apply(catalog, lineage, usableParseResults);
 
-        var tier1Findings = usableParseResults.SelectMany(r => NonSargablePredicateScanner.Scan(r, catalog, lineage)).ToList();
+        // Own ledger instance, not lineage.Skipped - the shared resolvers this pass calls
+        // (FromScopeResolver/ScalarExpressionResolver/CteResolver) hardcode AnalysisPass.Lineage
+        // on every entry they record regardless of which pass invoked them, so folding Tier-1's
+        // entries into lineage.Skipped would tag them identically anyway; keeping a distinct
+        // instance at least keeps this pass's own accounting separate and explicit, matching how
+        // the typed extraction results below carry their own SkippedConstructs list rather than
+        // writing into lineage's.
+        var tier1Ledger = new SkipLedger();
+        var tier1Findings = usableParseResults.SelectMany(r => NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: tier1Ledger)).ToList();
         var extractionResults = usableParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
@@ -86,6 +94,7 @@ public static class ScanReportBuilder
         var skippedConstructs = new List<SkippedConstruct>();
         skippedConstructs.AddRange(catalog.Skipped.Entries);
         skippedConstructs.AddRange(lineage.Skipped.Entries);
+        skippedConstructs.AddRange(tier1Ledger.Entries);
         skippedConstructs.AddRange(extractionResults.SelectMany(r => r.SkippedConstructs));
 
         // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/

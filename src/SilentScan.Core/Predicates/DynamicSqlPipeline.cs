@@ -95,9 +95,15 @@ public static class DynamicSqlPipeline
         accumulator.Findings.Add(new DynamicSqlFinding(
             script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
 
-        foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope))
+        var tier1Ledger = new SkipLedger();
+        foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope, tier1Ledger))
         {
             accumulator.Tier1.Add(Remap(tier1Finding, script));
+        }
+
+        foreach (var tier1Skipped in tier1Ledger.Entries)
+        {
+            accumulator.Skipped.Add(Remap(tier1Skipped, script));
         }
 
         var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText

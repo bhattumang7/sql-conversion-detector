@@ -1,0 +1,52 @@
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
+using SilentScan.Core.Parsing;
+
+namespace SilentScan.Tests.Lineage;
+
+/// <summary>
+/// Covers FromScopeResolver.ResolveUnsupportedTableReference's default arm - the one place in
+/// this codebase that ledgers an unhandled ScriptDom node kind generically (by its own
+/// GetType().Name) rather than needing a dedicated visitor per construct. Closes a
+/// ConstructCoverage.json gap found while auditing "Ledgered" rows for a real verifiedBy
+/// reference: the rationale already correctly described this as reachable, real code, but
+/// nothing verified it.
+/// </summary>
+public sealed class FromScopeResolverUnsupportedTableReferenceTests
+{
+    private static LineageCatalog BuildLineage(params string[] batches)
+    {
+        var sql = string.Join("\nGO\n", batches);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        return LineageResolver.Resolve(catalog, [result]);
+    }
+
+    [Fact]
+    public void OpenQuery_LedgersUnsupportedTableReference()
+    {
+        var lineage = BuildLineage(
+            "CREATE VIEW dbo.vw_Remote AS SELECT * FROM OPENQUERY(RemoteServer, 'SELECT Id FROM RemoteTable') AS r;");
+
+        Assert.Contains(
+            lineage.Skipped.Entries,
+            e => e.ConstructKind == "FROM table reference" && e.Reason.Contains("OpenQueryTableReference", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Pivot_LedgersUnsupportedTableReference()
+    {
+        var lineage = BuildLineage(
+            "CREATE TABLE dbo.Sales (OrderId INT NOT NULL, Quarter VARCHAR(2) NOT NULL, Amount INT NOT NULL);",
+            """
+            CREATE VIEW dbo.vw_SalesPivot AS
+            SELECT * FROM (SELECT OrderId, Quarter, Amount FROM dbo.Sales) AS src
+            PIVOT (SUM(Amount) FOR Quarter IN ([Q1], [Q2], [Q3], [Q4])) AS p;
+            """);
+
+        Assert.Contains(
+            lineage.Skipped.Entries,
+            e => e.ConstructKind == "FROM table reference" && e.Reason.Contains("PivotedTableReference", StringComparison.Ordinal));
+    }
+}
