@@ -45,6 +45,10 @@ public sealed class DatabaseCatalog
     public void AddScalarFunctionReturnType(string qualifiedName, SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName[qualifiedName] = returnType;
 
+    /// <summary>DROP FUNCTION on a scalar UDF - the counterpart to AddScalarFunctionReturnType, so a dropped-and-never-recreated function stops offering a stale return type to any later predicate that happens to reference the same name.</summary>
+    public void RemoveScalarFunctionReturnType(string qualifiedName) =>
+        _scalarFunctionReturnTypesByQualifiedName.Remove(qualifiedName);
+
     /// <summary>True only when a CREATE/ALTER FUNCTION with this qualified name was seen with a scalar (non-table) return type - a table-valued function or an unseen name both return false, so a caller can distinguish "not a scalar UDF" from "a scalar UDF whose type didn't resolve".</summary>
     public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
@@ -126,6 +130,26 @@ public sealed class DatabaseCatalog
         }
 
         return Find(qualifiedName);
+    }
+
+    /// <summary>
+    /// DROP TABLE/VIEW-as-table/etc. and the "remove the old key" half of sp_rename - removes
+    /// whichever entry <paramref name="scope"/>-qualified lookup would have found (falling back
+    /// to the unscoped key, matching <see cref="Find(string, string?)"/>'s own fallback), so a
+    /// dropped-and-never-recreated object stops offering a stale definition to any later
+    /// predicate that references its name (docs/audit-remediation-plan.md Phase 2.5 successor:
+    /// catalog lifecycle). A target this pass never cataloged in the first place is a silent
+    /// no-op here - the caller is responsible for ledgering that case if it cares (the same
+    /// division of responsibility RemoveSynonym and RemoveScalarFunctionReturnType already use).
+    /// </summary>
+    public void Remove(string qualifiedName, string? scope)
+    {
+        if (scope is not null)
+        {
+            _tablesByQualifiedName.Remove(Key(qualifiedName, scope));
+        }
+
+        _tablesByQualifiedName.Remove(qualifiedName);
     }
 
     private static string Key(string qualifiedName, string? scope) =>

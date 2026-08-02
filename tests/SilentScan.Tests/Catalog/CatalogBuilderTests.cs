@@ -970,6 +970,194 @@ public sealed class CatalogBuilderTests
         Assert.Single(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly");
     }
 
+    [Fact]
+    public void Build_DropTable_RemovesTableFromCatalog()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL);
+            DROP TABLE dbo.Orders;
+            """);
+
+        Assert.Null(catalog.Find("dbo.Orders"));
+    }
+
+    [Fact]
+    public void Build_DropTableThenRecreateWithDifferentShape_KeepsTheRecreatedShape()
+    {
+        // The false-positive class this pass exists to close: a migration script that drops
+        // and rebuilds a table with a DIFFERENT column type must resolve predicates against
+        // the recreated shape, never the stale original.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            DROP TABLE dbo.Orders;
+            CREATE TABLE dbo.Orders (OrderCode NVARCHAR(20) NOT NULL);
+            """);
+
+        var table = catalog.Find("dbo.Orders")!;
+        Assert.Equal(SqlTypeCategory.NVarChar, table.FindColumn("OrderCode")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_DropTableNeverCataloged_RecordsLedgerEntry()
+    {
+        var catalog = BuildFrom("DROP TABLE dbo.NeverSeen;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "DROP TABLE" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DropIndex_TableColumnNoLongerCountsAsIndexed()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            CREATE INDEX IX_Orders_OrderCode ON dbo.Orders(OrderCode);
+            DROP INDEX IX_Orders_OrderCode ON dbo.Orders;
+            """);
+
+        var table = catalog.Find("dbo.Orders")!;
+        Assert.False(table.IsIndexedColumn("OrderCode"));
+    }
+
+    [Fact]
+    public void Build_DropFunction_ScalarUdfReturnTypeNoLongerRegistered()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Code() RETURNS NVARCHAR(20) AS BEGIN RETURN N'x'; END
+            GO
+            DROP FUNCTION dbo.fn_Code;
+            """);
+
+        Assert.False(catalog.TryGetScalarFunctionReturnType("dbo.fn_Code", out _));
+    }
+
+    [Fact]
+    public void Build_TruncateTable_DoesNotChangeCatalog()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            TRUNCATE TABLE dbo.Orders;
+            """);
+
+        var table = catalog.Find("dbo.Orders")!;
+        Assert.Equal(SqlTypeCategory.VarChar, table.FindColumn("OrderCode")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_CreateTableWithNoInlineDefinition_LedgersRatherThanSilentlyDropping()
+    {
+        // CREATE TABLE ... AS EDGE (a SQL Server graph edge table) has no inline column list -
+        // its columns are implicit - the same "no Definition" shape a CTAS-only form would
+        // have. Ledgered rather than silently skipped.
+        var catalog = BuildFrom("CREATE TABLE dbo.Likes AS EDGE;");
+
+        Assert.Null(catalog.Find("dbo.Likes"));
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE TABLE" && e.Reason.Contains("Likes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DropProcedure_DoesNotThrowAndLeavesUnrelatedCatalogDataIntact()
+    {
+        // Procedures are never registered by name in any catalog structure other passes
+        // consult, so DROP PROCEDURE has nothing to remove - this just confirms the statement
+        // is walked without throwing and without side effects on real catalog data.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_GetOrders AS SELECT OrderCode FROM dbo.Orders;
+            GO
+            DROP PROCEDURE dbo.usp_GetOrders;
+            """);
+
+        Assert.NotNull(catalog.Find("dbo.Orders"));
+    }
+
+    [Fact]
+    public void Build_DropTrigger_DoesNotThrowAndLeavesUnrelatedCatalogDataIntact()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            GO
+            CREATE TRIGGER dbo.trg_Orders ON dbo.Orders AFTER INSERT AS SELECT 1;
+            GO
+            DROP TRIGGER dbo.trg_Orders;
+            """);
+
+        Assert.NotNull(catalog.Find("dbo.Orders"));
+    }
+
+    [Fact]
+    public void Build_SpRename_ObjectForm_RenamesTable()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            EXEC sp_rename 'dbo.Orders', 'PurchaseOrders';
+            """);
+
+        Assert.Null(catalog.Find("dbo.Orders"));
+        var table = catalog.Find("dbo.PurchaseOrders")!;
+        Assert.Equal(SqlTypeCategory.VarChar, table.FindColumn("OrderCode")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_SpRename_ColumnForm_RenamesColumnInPlace()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            EXEC sp_rename 'dbo.Orders.OrderCode', 'OrderNumber', 'COLUMN';
+            """);
+
+        var table = catalog.Find("dbo.Orders")!;
+        Assert.Null(table.FindColumn("OrderCode"));
+        Assert.Equal(SqlTypeCategory.VarChar, table.FindColumn("OrderNumber")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_SpRename_IndexForm_RenamesIndexInPlace()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            CREATE INDEX IX_Old ON dbo.Orders(OrderCode);
+            EXEC sp_rename 'dbo.Orders.IX_Old', 'IX_New', 'INDEX';
+            """);
+
+        var table = catalog.Find("dbo.Orders")!;
+        Assert.True(table.IsIndexedColumn("OrderCode"));
+        Assert.Contains(table.Indexes, i => i.Name == "IX_New");
+        Assert.DoesNotContain(table.Indexes, i => i.Name == "IX_Old");
+    }
+
+    [Fact]
+    public void Build_SpRename_NonLiteralArgument_LedgersAndKeepsOriginalDefinition()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            DECLARE @old sysname = 'dbo.Orders';
+            EXEC sp_rename @old, 'PurchaseOrders';
+            """);
+
+        Assert.NotNull(catalog.Find("dbo.Orders"));
+        Assert.Null(catalog.Find("dbo.PurchaseOrders"));
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename");
+    }
+
+    [Fact]
+    public void Build_UseStatement_IsLedgeredNotSilentlySwallowed()
+    {
+        // Genuine cross-database switching is not modeled (no real corpus repo exercises it -
+        // see KnownGapCharacterizationTests.CrossDatabaseReference_GetsAKeyNothingPopulates),
+        // but USE itself should never be a construct with zero trace.
+        var catalog = BuildFrom("""
+            USE OtherDb;
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "USE" && e.Reason.Contains("OtherDb", StringComparison.Ordinal));
+
+        // Objects still register against the single implicit target database, unaffected by
+        // whatever database name USE happens to name - unchanged from today's behavior.
+        Assert.NotNull(catalog.Find("dbo.Orders"));
+    }
+
     private static SqlParseResult Parse(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

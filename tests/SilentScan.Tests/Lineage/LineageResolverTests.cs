@@ -570,4 +570,40 @@ public sealed class LineageResolverTests
         Assert.IsType<ColumnProvenance.Declared>(column.Provenance);
         Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "column type");
     }
+
+    [Fact]
+    public void Resolve_DropView_RemovesViewFromLineage()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT OrderId FROM dbo.Orders;",
+            "DROP VIEW dbo.vw_Orders;");
+
+        Assert.Null(lineage.Find("dbo.vw_Orders"));
+    }
+
+    [Fact]
+    public void Resolve_DropViewThenRecreateWithDifferentShape_KeepsTheRecreatedShape()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT OrderId FROM dbo.Orders;",
+            "DROP VIEW dbo.vw_Orders;",
+            "CREATE VIEW dbo.vw_Orders AS SELECT OrderCode FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        Assert.Null(view.FindColumn("OrderId"));
+        Assert.NotNull(view.FindColumn("OrderCode"));
+    }
+
+    [Fact]
+    public void Resolve_DropFunction_RemovesInlineTvfFromLineage()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "CREATE FUNCTION dbo.itvf_Orders() RETURNS TABLE AS RETURN SELECT OrderId FROM dbo.Orders;",
+            "DROP FUNCTION dbo.itvf_Orders;");
+
+        Assert.Null(lineage.Find("dbo.itvf_Orders"));
+    }
 }

@@ -421,6 +421,76 @@
       "status": "Ledgered",
       "verifiedBy": null,
       "rationale": "Deliberately not resolved - feeding dynamically-created objects back into a catalog later passes have already consumed is a re-entrancy problem out of proportion to its value, and would require guessing which EXEC calls run before which. coverage-remediation-plan.md Phase 4.4."
+    },
+    {
+      "construct": "DropTableStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Roadmap Phase A1: previously never processed, so a dropped-and-never-recreated table stayed live in the catalog forever - a predicate against it would resolve against a stale, possibly wrong-typed definition, exactly the false-positive class this tool exists to avoid. Fixed: removed from the catalog in the same phase (CollectTables) as CreateTableStatement, so a drop-then-recreate cycle within the scanned file set still resolves to the recreated shape."
+    },
+    {
+      "construct": "DropIndexStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Both the modern (DROP INDEX ix ON table) and SQL-2000-era (DROP INDEX table.ix) clause shapes are handled. A dropped index's column no longer counts as indexed."
+    },
+    {
+      "construct": "DropViewStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Lineage.LineageResolverTests",
+      "rationale": "ViewDefinitionExtractor now upserts/removes views in a single file-then-statement-ordered dictionary pass instead of a flat list dedup'd afterward, so a dropped-and-never-recreated view disappears from lineage entirely."
+    },
+    {
+      "construct": "DropFunctionStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Removes whichever registry the function actually lived in - scalar UDF return type (DatabaseCatalog, via CatalogBuilder) or inline-TVF/MSTVF view-shaped definition (ViewDefinitionExtractor, see Lineage.LineageResolverTests) - since DROP FUNCTION alone doesn't say which kind it was. Removing from a registry that never held the name is a harmless no-op."
+    },
+    {
+      "construct": "DropProcedureStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "No visitor needed: procedures are never stored in a name-keyed registry any other pass consults (unlike scalar UDF return types) - every pass that cares about a procedure's contents walks its body fresh each time it's encountered. Correct by construction, not a gap."
+    },
+    {
+      "construct": "DropTriggerStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Same reasoning as DropProcedureStatement - triggers are never registered by name either."
+    },
+    {
+      "construct": "TruncateTableStatement",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "TRUNCATE never changes column types, collations, or index definitions - a correct no-op requiring no visitor, verified by a regression test asserting the catalog is unchanged after one."
+    },
+    {
+      "construct": "CreateTableStatement (no inline Definition - e.g. AS EDGE/AS NODE graph tables, CTAS-only forms this parser accepts)",
+      "group": "CatalogLifecycle",
+      "status": "Ledgered",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Previously a silent early return with no ledger entry at all. Now ledgered: the object's real column shape is determinable in principle (from the source table/query or the implicit graph columns) but this pass doesn't attempt it, so it stays honestly absent from the catalog rather than silently missing with no trace."
+    },
+    {
+      "construct": "ExecuteStatement / sp_rename (OBJECT/COLUMN/INDEX forms, literal arguments)",
+      "group": "CatalogLifecycle",
+      "status": "Handled",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Renames a table (moving its catalog key), a column, or an index in place. Positional and @-named arguments both resolve. A non-literal @objname/@newname argument, a three-part (database-qualified) target, or an unmodeled @objtype (e.g. USERDATATYPE) is ledgered and the catalog keeps the PRE-rename definition - never a guess, and never a false-positive risk, since a later reference to the new name simply resolves 'no known DDL' instead of inheriting the wrong shape."
+    },
+    {
+      "construct": "UseStatement",
+      "group": "CatalogLifecycle",
+      "status": "Ledgered",
+      "verifiedBy": "Catalog.CatalogBuilderTests",
+      "rationale": "Roadmap Phase A2: genuine cross-database switching mid-scan is deliberately not modeled - checked against the real pinned 5-repo corpus for evidence first, and none exercises actual cross-database referencing (mojoportal's two distinct USE targets are each a standalone script naming its own single dev database, never referencing the other). Building unverified resolution logic for a pattern nothing in the corpus exercises would be speculative complexity this project's oracle-verified-only discipline exists to avoid. USE is now ledgered rather than silently swallowed (it previously left zero trace anywhere); every scanned object still resolves against the single implicit target database, unchanged from before."
     }
   ]
 }

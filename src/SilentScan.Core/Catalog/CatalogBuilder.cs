@@ -287,6 +287,110 @@ public static class CatalogBuilder
             node.AcceptChildren(this);
         }
 
+        /// <summary>
+        /// Gated to the SAME phase as <see cref="CreateTableStatement"/> (not <c>ApplyEverythingElse</c>,
+        /// where every other DROP/ALTER in this file lives) so create/drop/recreate cycles across a
+        /// corpus's migration-history files resolve correctly: both are collected in one pass, in
+        /// file-then-statement order, before any ALTER/index/computed-column logic ever runs against
+        /// the result. A dropped-and-never-recreated table simply isn't in the catalog by the time
+        /// ApplyEverythingElse or any later pass looks for it - predicates against it resolve to the
+        /// honest "no known DDL" ledger reason instead of a stale, possibly wrong-typed definition
+        /// (the false-positive class this pass exists to close). A drop immediately followed by a
+        /// recreate in the same file set still ends up with the recreated shape, because the second
+        /// CreateTableStatement re-adds it after this removes it, in that same single ordered walk.
+        /// </summary>
+        public override void ExplicitVisit(DropTableStatement node)
+        {
+            if (phase == BuildPhase.CollectTables)
+            {
+                VisitDropTable(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        /// <summary>
+        /// <c>DROP INDEX index ON table</c> (and the multi-clause <c>DROP INDEX a.ix1, b.ix2</c> form) -
+        /// lives in <c>ApplyEverythingElse</c> alongside every other index mutation
+        /// (<see cref="VisitCreateIndex"/>, <see cref="VisitAlterIndex"/>), so a script that creates an
+        /// index, drops it, and later queries the column no longer counts it as indexed.
+        /// </summary>
+        public override void ExplicitVisit(DropIndexStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitDropIndex(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        /// <summary>
+        /// <c>DROP FUNCTION</c> on a scalar UDF - the registry counterpart to
+        /// <see cref="VisitFunctionBody"/>'s <c>AddScalarFunctionReturnType</c> call, in the same
+        /// <c>ApplyEverythingElse</c> phase so create/drop ordering within one pass stays consistent.
+        /// A dropped inline-TVF/MSTVF's entry lives in <see cref="Lineage.ViewDefinitionExtractor"/>'s
+        /// own view/TVF registry, not here - this only ever removes a scalar return-type entry, and
+        /// removing a name that was never a scalar UDF (e.g. it was a TVF, or unseen entirely) is a
+        /// harmless no-op on a dictionary that never had the key.
+        /// </summary>
+        public override void ExplicitVisit(DropFunctionStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                foreach (var target in node.Objects)
+                {
+                    catalog.RemoveScalarFunctionReturnType(SchemaObjectNameHelper.Qualify(target));
+                }
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        /// <summary>
+        /// <c>EXEC sp_rename 'objname', 'newname'[, 'objtype']</c> - the one system procedure whose
+        /// effect changes catalog identity rather than data, so it is modeled here rather than left to
+        /// the dynamic-SQL pipeline (which only ever analyzes predicates, never DDL side effects).
+        /// Only literal string arguments are handled, matching every DDL string in this file: a
+        /// variable/expression argument makes the actual rename target undecidable without executing
+        /// the script, so it is ledgered rather than guessed, and the catalog keeps the PRE-rename
+        /// definition (never a false-positive risk - a later reference to the new name simply resolves
+        /// "no known DDL" instead of silently inheriting the wrong shape). Gated to
+        /// <c>ApplyEverythingElse</c>, alongside every other in-place catalog mutation.
+        /// </summary>
+        public override void ExplicitVisit(ExecuteStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                VisitPossibleSpRename(node);
+            }
+
+            node.AcceptChildren(this);
+        }
+
+        /// <summary>
+        /// <c>USE &lt;database&gt;</c> - genuine cross-database switching mid-scan is not modeled
+        /// (checked against the real pinned 5-repo corpus: no repo actually cross-references
+        /// between two databases it also declares DDL for - mojoportal's two distinct USE targets
+        /// are each a standalone script naming its own single dev database, never referencing the
+        /// other - so building unverified resolution logic for a pattern nothing in the corpus
+        /// exercises would be exactly the kind of speculative complexity this project's precision-
+        /// first, oracle-verified-only discipline exists to avoid). Ledgered rather than silently
+        /// swallowed - unlike before this pass, USE is no longer a construct with zero trace in
+        /// either the ledger or the coverage matrix.
+        /// </summary>
+        public override void ExplicitVisit(UseStatement node)
+        {
+            if (phase == BuildPhase.ApplyEverythingElse)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "USE", $"'{node.DatabaseName.Value}': database context switching is not modeled - every scanned object still resolves against the single implicit target database");
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(AlterTableAddTableElementStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
@@ -542,11 +646,233 @@ public static class CatalogBuilder
             catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, WriteScopeFor(existing));
         }
 
+        private void VisitDropTable(DropTableStatement dropTable)
+        {
+            foreach (var target in dropTable.Objects)
+            {
+                var qualifiedName = SchemaObjectNameHelper.Qualify(target);
+                if (catalog.Find(qualifiedName, _currentScope) is not { } existing)
+                {
+                    // IF EXISTS or a target outside this scan's file set - nothing to remove, but
+                    // still worth an honest ledger entry: a caller diffing the ledger for "why did
+                    // this table disappear" should be able to find this either way.
+                    RecordUnresolvedTarget("DROP TABLE", qualifiedName, dropTable);
+                    continue;
+                }
+
+                catalog.Remove(qualifiedName, WriteScopeFor(existing));
+            }
+        }
+
+        private void VisitDropIndex(DropIndexStatement dropIndex)
+        {
+            foreach (var clause in dropIndex.DropIndexClauses)
+            {
+                // Two ScriptDOM shapes: the modern `DROP INDEX ix ON table` (Object + Index
+                // separate) and the SQL 2000-era `DROP INDEX table.ix` form, whose ChildObjectName
+                // carries the table as its base name and the index as ChildIdentifier - both
+                // resolve to the same (table, indexName) pair once unwrapped.
+                var (tableName, indexName) = clause switch
+                {
+                    DropIndexClause modern => (modern.Object, modern.Index.Value),
+                    BackwardsCompatibleDropIndexClause legacy => (legacy.Index, legacy.Index.ChildIdentifier.Value),
+                    _ => (null, null),
+                };
+
+                if (tableName is null || indexName is null)
+                {
+                    catalog.Skipped.Record(
+                        AnalysisPass.Catalog, sourcePath, dropIndex.StartLine, dropIndex.StartColumn,
+                        "DROP INDEX", $"clause of kind '{clause.GetType().Name}' is not modeled");
+                    continue;
+                }
+
+                var qualifiedName = SchemaObjectNameHelper.Qualify(tableName);
+                var existing = catalog.Find(qualifiedName, _currentScope);
+                if (existing is null)
+                {
+                    RecordUnresolvedTarget("DROP INDEX", qualifiedName, dropIndex);
+                    continue;
+                }
+
+                var remainingIndexes = existing.Indexes
+                    .Where(i => !string.Equals(i.Name, indexName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (remainingIndexes.Count == existing.Indexes.Count)
+                {
+                    catalog.Skipped.Record(
+                        AnalysisPass.Catalog, sourcePath, dropIndex.StartLine, dropIndex.StartColumn,
+                        "DROP INDEX", $"index '{indexName}' on '{qualifiedName}' not found in catalog");
+                    continue;
+                }
+
+                catalog.AddOrReplace(existing with { Indexes = remainingIndexes }, WriteScopeFor(existing));
+            }
+        }
+
+        /// <summary>Object types <c>sp_rename</c> accepts in its third argument (case-insensitive); anything else (e.g. <c>USERDATATYPE</c>) is ledgered rather than modeled.</summary>
+        private void VisitPossibleSpRename(ExecuteStatement execute)
+        {
+            if (execute.ExecuteSpecification?.ExecutableEntity is not ExecutableProcedureReference
+                {
+                    ProcedureReference.ProcedureReference.Name.BaseIdentifier.Value: { } procName,
+                } procedureReference
+                || !string.Equals(procName, "sp_rename", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!TryResolveSpRenameArguments(procedureReference.Parameters, out var objName, out var newName, out var objType))
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, execute.StartLine, execute.StartColumn,
+                    "sp_rename", "objname/newname argument is not a literal string - rename not applied, catalog keeps the pre-rename definition");
+                return;
+            }
+
+            if (objType is null || string.Equals(objType, "OBJECT", StringComparison.OrdinalIgnoreCase))
+            {
+                RenameTable(objName, newName, execute);
+            }
+            else if (string.Equals(objType, "COLUMN", StringComparison.OrdinalIgnoreCase))
+            {
+                RenameColumn(objName, newName, execute);
+            }
+            else if (string.Equals(objType, "INDEX", StringComparison.OrdinalIgnoreCase))
+            {
+                RenameIndex(objName, newName, execute);
+            }
+            else
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, execute.StartLine, execute.StartColumn,
+                    "sp_rename", $"object type '{objType}' is not modeled");
+            }
+        }
+
+        private static bool TryResolveSpRenameArguments(IList<ExecuteParameter> parameters, out string objName, out string newName, out string? objType)
+        {
+            objName = string.Empty;
+            newName = string.Empty;
+            objType = null;
+
+            // sp_rename's arguments can be passed positionally or by @-name; either way, only a
+            // literal string argument is honored - a variable/expression makes the real target
+            // undecidable without executing the script.
+            string? Resolve(int position, string parameterName) =>
+                parameters
+                    .Select((p, i) => (Param: p, Index: i))
+                    .Where(x => string.Equals(x.Param.Variable?.Name, parameterName, StringComparison.OrdinalIgnoreCase)
+                        || (x.Param.Variable is null && x.Index == position))
+                    .Select(x => (x.Param.ParameterValue as StringLiteral)?.Value)
+                    .FirstOrDefault(v => v is not null);
+
+            if (Resolve(0, "@objname") is not { } resolvedObjName || Resolve(1, "@newname") is not { } resolvedNewName)
+            {
+                return false;
+            }
+
+            objName = resolvedObjName;
+            newName = resolvedNewName;
+            objType = Resolve(2, "@objtype");
+            return true;
+        }
+
+        private void RenameTable(string objName, string newName, TSqlFragment node)
+        {
+            var (schema, oldQualifiedName) = SplitTableTarget(objName);
+            if (schema is UnresolvableSchema)
+            {
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, node.StartLine, node.StartColumn,
+                    "sp_rename", $"'{objName}': three-part (database-qualified) rename target is not modeled");
+                return;
+            }
+
+            if (catalog.Find(oldQualifiedName, _currentScope) is not { } existing)
+            {
+                RecordUnresolvedTarget("sp_rename", oldQualifiedName, node);
+                return;
+            }
+
+            var writeScope = WriteScopeFor(existing);
+            catalog.Remove(oldQualifiedName, writeScope);
+            catalog.AddOrReplace(existing with { SchemaName = schema, Name = newName }, writeScope);
+        }
+
+        private void RenameColumn(string objName, string newName, TSqlFragment node)
+        {
+            var (containerName, oldColumnName) = SplitLastSegment(objName);
+            var (schema, tableQualifiedName) = SplitTableTarget(containerName);
+            if (schema is UnresolvableSchema || catalog.Find(tableQualifiedName, _currentScope) is not { } existing)
+            {
+                RecordUnresolvedTarget("sp_rename (COLUMN)", tableQualifiedName, node);
+                return;
+            }
+
+            var updatedColumns = existing.Columns
+                .Select(c => string.Equals(c.Name, oldColumnName, StringComparison.OrdinalIgnoreCase) ? c with { Name = newName } : c)
+                .ToList();
+
+            catalog.AddOrReplace(existing with { Columns = updatedColumns }, WriteScopeFor(existing));
+        }
+
+        private void RenameIndex(string objName, string newName, TSqlFragment node)
+        {
+            var (containerName, oldIndexName) = SplitLastSegment(objName);
+            var (schema, tableQualifiedName) = SplitTableTarget(containerName);
+            if (schema is UnresolvableSchema || catalog.Find(tableQualifiedName, _currentScope) is not { } existing)
+            {
+                RecordUnresolvedTarget("sp_rename (INDEX)", tableQualifiedName, node);
+                return;
+            }
+
+            var updatedIndexes = existing.Indexes
+                .Select(i => string.Equals(i.Name, oldIndexName, StringComparison.OrdinalIgnoreCase) ? i with { Name = newName } : i)
+                .ToList();
+
+            catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, WriteScopeFor(existing));
+        }
+
+        /// <summary>Sentinel schema value <see cref="SplitTableTarget"/> returns for a three-part (database-qualified) target - cross-database rename resolution is out of scope, matching every other cross-database simplification in this pass.</summary>
+        private const string UnresolvableSchema = "\0unresolvable";
+
+        /// <summary>Splits an sp_rename object-name argument's leading table reference into (schema, qualifiedName), defaulting an unqualified name to dbo and a leading-<c>#</c> name to no schema at all - the same two defaults <see cref="SchemaObjectNameHelper.Resolve"/> applies to a real parsed SchemaObjectName, reimplemented here because sp_rename's arguments are plain string literals, not AST nodes.</summary>
+        private static (string? Schema, string QualifiedName) SplitTableTarget(string name)
+        {
+            if (name.StartsWith('#'))
+            {
+                return (null, name);
+            }
+
+            var parts = name.Split('.');
+            return parts.Length switch
+            {
+                1 => (SchemaObjectNameHelper.DefaultSchema, $"{SchemaObjectNameHelper.DefaultSchema}.{parts[0]}"),
+                2 => (parts[0], name),
+                _ => (UnresolvableSchema, name),
+            };
+        }
+
+        /// <summary>Splits "a.b.c" into ("a.b", "c") - the container-plus-element shape sp_rename's COLUMN/INDEX forms use.</summary>
+        private static (string Container, string Element) SplitLastSegment(string name)
+        {
+            var lastDot = name.LastIndexOf('.');
+            return lastDot < 0 ? (name, name) : (name[..lastDot], name[(lastDot + 1)..]);
+        }
+
         private void VisitCreateTable(CreateTableStatement createTable)
         {
             if (createTable.Definition is null)
             {
-                // CREATE TABLE ... AS CLONE OF or CTAS-only forms have no inline column list.
+                // CREATE TABLE ... AS CLONE OF or CTAS-only forms have no inline column list -
+                // ledgered rather than silently skipped, since the object's real shape is
+                // determinable in principle (from the source table/query) but this pass doesn't
+                // attempt it.
+                catalog.Skipped.Record(
+                    AnalysisPass.Catalog, sourcePath, createTable.StartLine, createTable.StartColumn,
+                    "CREATE TABLE", $"'{SchemaObjectNameHelper.Qualify(createTable.SchemaObjectName)}': no inline column list (CTAS / AS CLONE OF form) - column shape not modeled");
                 return;
             }
 

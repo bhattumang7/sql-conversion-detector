@@ -135,6 +135,15 @@ public sealed class KnownGapCharacterizationTests
     [Fact]
     public void CrossDatabaseReference_GetsAKeyNothingPopulates_NoTypedFinding()
     {
+        // Roadmap Phase A2: deliberately still pinned open, not a fix pending. Checked against
+        // the real pinned 5-repo corpus for evidence before deciding whether to build cross-
+        // database resolution: no repo actually cross-references between two databases it also
+        // declares DDL for (mojoportal's two distinct USE targets are each a standalone script
+        // naming its own single dev database, never referencing the other). Building unverified
+        // resolution logic for a pattern nothing in the corpus exercises would be exactly the
+        // speculative complexity this project's precision-first, oracle-verified-only discipline
+        // exists to avoid - so this stays an honestly-ledgered gap, not a guess.
+        //
         // ArchiveDb.dbo.Shipments is keyed distinctly from the scanned dbo.Shipments and no
         // DDL ever populates a cross-database key - the reference is unresolvable by
         // construction, so the mismatch produces no typed finding. Unlike the computed-column
