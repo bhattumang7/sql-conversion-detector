@@ -353,11 +353,39 @@
       "rationale": null
     },
     {
-      "construct": "InsertStatement (INSERT ... SELECT / SET-clause type-check)",
-      "group": "PredicateCarrier",
+      "construct": "InsertStatement VALUES source (write-loss)",
+      "group": "WriteLoss",
+      "status": "Handled",
+      "verifiedBy": "Predicates.WriteLossExtractionTests",
+      "rationale": null
+    },
+    {
+      "construct": "InsertStatement plain-SELECT source (write-loss)",
+      "group": "WriteLoss",
+      "status": "Handled",
+      "verifiedBy": "Predicates.WriteLossExtractionTests",
+      "rationale": null
+    },
+    {
+      "construct": "InsertStatement SELECT * / UNION / non-scalar source (write-loss)",
+      "group": "WriteLoss",
       "status": "Ledgered",
       "verifiedBy": null,
-      "rationale": "The tool only ever types comparison predicates (=, <, IN, BETWEEN). INSERT target-column/source-column mismatches and SET/assignment expressions are never type-checked - deliberately out of scope: assignment implicit conversion is a correctness concern, not the index-seek-loss concern this tool exists for."
+      "rationale": "Roadmap Phase E1: only a plain, non-UNION SELECT with an explicit scalar select list can be paired positionally against the INSERT's target column list without guessing which source expression feeds which target column. SELECT * (target-vs-source arity depends on catalog state, not the statement's own text) and UNION/EXCEPT/INTERSECT (each branch could type differently) are out of scope, ledgered per occurrence via TypedPredicateExtractor's SkipLedger rather than silently skipped."
+    },
+    {
+      "construct": "AssignmentSetClause (UPDATE ... SET, write-loss)",
+      "group": "WriteLoss",
+      "status": "Handled",
+      "verifiedBy": "Predicates.WriteLossExtractionTests",
+      "rationale": null
+    },
+    {
+      "construct": "MERGE WHEN [NOT] MATCHED THEN INSERT/UPDATE actions (write-loss)",
+      "group": "WriteLoss",
+      "status": "Ledgered",
+      "verifiedBy": null,
+      "rationale": "Roadmap Phase E1 scoped write-loss analysis to standalone INSERT/UPDATE statements only. A MERGE action's own INSERT/UPDATE targets are structurally the same shape but are not yet wired to AnalyzeInsertWriteLoss/AssignmentSetClause - a deliberate scope decision (MERGE is rare in the pinned corpus set relative to plain INSERT/UPDATE), not a gap discovered and left unfixed."
     },
     {
       "construct": "WhileStatement / IfStatement boolean guard (no FROM scope)",

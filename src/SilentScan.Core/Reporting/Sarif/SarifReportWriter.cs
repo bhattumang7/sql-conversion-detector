@@ -41,6 +41,7 @@ public static class SarifReportWriter
         results.AddRange(report.DynamicSqlFindings.Select(ToResult));
         results.AddRange(report.ExpressionDerivedFindings.Select(ToResult));
         results.AddRange(report.CollationConflictFindings.Select(ToResult));
+        results.AddRange(report.WriteLossFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -126,6 +127,16 @@ public static class SarifReportWriter
         return BuildResult(SarifRuleCatalog.CollationConflictRuleId, LevelError, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
+    private static SarifResult ToResult(WriteLossFinding finding)
+    {
+        // Always warning, not error/downgraded-by-index the way a seek/scan finding is - "is
+        // this column indexed" has no bearing on whether a write silently loses data.
+        var ruleId = SarifRuleCatalog.WriteLossRuleId(finding.Kind);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TargetType}) is assigned a {finding.SourceType} value - {DescribeWriteLossKind(finding.Kind)}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
+
+        return BuildResult(ruleId, LevelWarning, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+    }
+
     private static SarifResult ToResult(DynamicSqlFinding finding)
     {
         var ruleId = SarifRuleCatalog.DynamicSqlRuleId(finding.Outcome);
@@ -157,6 +168,15 @@ public static class SarifReportWriter
 
     private static string DescribeTransformationSite(TransformationSite site) =>
         site.SourcePath is null ? site.Description : $"{site.Description} at {site.SourcePath}:{site.Line}";
+
+    private static string DescribeWriteLossKind(WriteLossKind kind) => kind switch
+    {
+        WriteLossKind.UnicodeToNonUnicodeReplacement => "characters outside the target collation's codepage are silently replaced with '?'",
+        WriteLossKind.ApproximateToExactTruncation => "the fractional part is silently dropped",
+        WriteLossKind.NumericScaleNarrowing => "digits past the target's scale are silently rounded away",
+        WriteLossKind.TemporalPrecisionLoss => "the time-of-day component is silently dropped",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled WriteLossKind."),
+    };
 
     private static string DescribeDepth(int depth)
     {

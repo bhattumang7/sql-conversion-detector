@@ -30,7 +30,7 @@ public static class TypedPredicateExtractor
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, ledger.Entries);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries);
     }
 
     private sealed class Visitor(
@@ -46,6 +46,12 @@ public static class TypedPredicateExtractor
 
         /// <summary>Skip-ledger construct kind shared by every operator that is oracle-verified non-sargable regardless of type match (&lt;&gt;, NOT LIKE, NOT IN, &lt;&gt; ALL) - the type-conversion verdict machinery never applies to these.</summary>
         private const string NonSeekableOperatorConstructKind = "non-seekable operator";
+
+        /// <summary>Skip-ledger construct kind for an INSERT whose target table/column doesn't resolve against the catalog - write-loss analysis has nothing to compare against.</summary>
+        private const string WriteTargetConstructKind = "write target";
+
+        /// <summary>Skip-ledger construct kind for an INSERT source shape Phase E1 doesn't analyze (anything but a plain VALUES list or a single non-UNION SELECT with an explicit scalar select list).</summary>
+        private const string WriteSourceConstructKind = "write source";
 
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
@@ -87,6 +93,21 @@ public static class TypedPredicateExtractor
 
         public List<CollationConflictFinding> CollationConflictFindings { get; } = [];
 
+        public List<WriteLossFinding> WriteLossFindings { get; } = [];
+
+        /// <summary>
+        /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before the natural child walk reaches
+        /// an INSERT ... SELECT's own SELECT, and consumed (cleared) by the very next
+        /// <see cref="ExplicitVisit(QuerySpecification)"/> - which is always that exact SELECT,
+        /// since InsertSpecification's Target/Columns contain no QuerySpecification of their own
+        /// to hit first. Consuming it before that override recurses into its OWN FromClause/select
+        /// list (which may contain a derived-table subquery, itself a QuerySpecification) is what
+        /// keeps a nested subquery from wrongly stealing these fields instead.
+        /// </summary>
+        private IReadOnlyList<CatalogColumn?>? _pendingInsertTargetColumns;
+
+        private string? _pendingInsertTargetTable;
+
         public override void ExplicitVisit(SelectStatement node)
         {
             // A WITH clause's CTEs are visible for the whole statement they're declared in, not
@@ -102,6 +123,17 @@ public static class TypedPredicateExtractor
         public override void ExplicitVisit(QuerySpecification node)
         {
             _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope));
+
+            // Consumed here, before any recursion at all (a derived-table subquery inside this
+            // SELECT's own FROM/select list is itself a QuerySpecification, and must never see
+            // these still set).
+            if (_pendingInsertTargetColumns is { } pendingColumns)
+            {
+                _pendingInsertTargetColumns = null;
+                var pendingTable = _pendingInsertTargetTable!;
+                _pendingInsertTargetTable = null;
+                AnalyzeSelectListWriteLoss(node.SelectElements, pendingColumns, pendingTable);
+            }
 
             // Reset to false for every part of this query specification except its own WHERE/
             // HAVING (whose own overrides below turn it back on) - without this, an outer
@@ -171,6 +203,20 @@ public static class TypedPredicateExtractor
             _cteStack.Pop();
         }
 
+        // Roadmap Phase E1: write-side (INSERT) analysis is additive to the WHERE/ON/HAVING
+        // predicate scanning above - no FROM scope is pushed onto _scopeStack for the target
+        // table itself (unlike UPDATE/DELETE/MERGE, an INSERT target is never referenced by a
+        // predicate; its own catalog columns are looked up directly by AnalyzeInsertWriteLoss),
+        // only CTEs, so a CTE referenced by an INSERT ... SELECT source still resolves.
+        public override void ExplicitVisit(InsertStatement node)
+        {
+            var spec = node.InsertSpecification;
+            PushCteScope(node.WithCtesAndXmlNamespaces);
+            AnalyzeInsertWriteLoss(spec);
+            base.ExplicitVisit(node);
+            _cteStack.Pop();
+        }
+
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
@@ -201,6 +247,29 @@ public static class TypedPredicateExtractor
             _inFilterContext = previousFilterContext;
             _scopeStack.Pop();
             _cteStack.Pop();
+        }
+
+        // Roadmap Phase E1: UPDATE ... SET's own targets, previously never visited at all (only
+        // its WHERE clause was). The scope UPDATE's own ExplicitVisit above already pushed has
+        // the target table (and any extra FROM tables) live, so both Column and NewValue resolve
+        // through the exact same ResolveOperand every predicate operand goes through - a
+        // multi-table `UPDATE t SET t.Col = s.Col FROM t JOIN s ON ...` types NewValue against
+        // s.Col correctly, not just literals. node.Variable ( SET @v = ... ) is not a write to any
+        // catalog column, so it is silently skipped rather than ledgered - it was never something
+        // this pass could have analyzed in the first place, not an analysis attempt that failed.
+        public override void ExplicitVisit(AssignmentSetClause node)
+        {
+            if (node.Column is { } columnRef)
+            {
+                var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+                if (ResolveOperand(columnRef, scopeChain) is PredicateOperand.Column target && target.Type is { } targetType)
+                {
+                    var sourceType = OperandType(ResolveOperand(node.NewValue, scopeChain));
+                    EmitWriteLossFinding(target.TableQualifiedName, target.ColumnName, targetType, sourceType, node.NewValue);
+                }
+            }
+
+            base.ExplicitVisit(node);
         }
 
         // ScriptDOM's visitor double-dispatches through each concrete node type's own Accept()
@@ -285,6 +354,150 @@ public static class TypedPredicateExtractor
             }
 
             return merged;
+        }
+
+        /// <summary>
+        /// Resolves an INSERT target that is a plain named table/view, then dispatches to the
+        /// shape-specific analysis for whatever its InsertSource turns out to be. A target that
+        /// isn't a <see cref="NamedTableReference"/> at all (never legal SQL for INSERT's own
+        /// Target in practice) or doesn't resolve in the catalog is ledgered once here rather
+        /// than guessed at.
+        /// </summary>
+        private void AnalyzeInsertWriteLoss(InsertSpecification spec)
+        {
+            var table = ResolveWriteTargetTable(spec.Target);
+            if (table is null)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, spec.Target.StartLine, spec.Target.StartColumn,
+                    WriteTargetConstructKind, "INSERT target does not resolve to a known table - write-loss analysis skipped");
+                return;
+            }
+
+            var targetColumns = ResolveInsertTargetColumns(spec, table);
+
+            switch (spec.InsertSource)
+            {
+                case ValuesInsertSource values:
+                    AnalyzeValuesInsertSource(values, targetColumns, table.QualifiedName);
+                    return;
+
+                // The target column list is stashed for the SELECT this InsertSource wraps to
+                // pick up once ExplicitVisit(QuerySpecification) reaches it and its own FROM
+                // scope is live - see _pendingInsertTargetColumns' own doc comment. Only a plain,
+                // non-UNION SELECT with an explicit scalar select list (no `SELECT *`) is
+                // supported; anything else is ledgered below.
+                case SelectInsertSource { Select: QuerySpecification querySpec }
+                    when querySpec.SelectElements.All(e => e is SelectScalarExpression):
+                    _pendingInsertTargetColumns = targetColumns;
+                    _pendingInsertTargetTable = table.QualifiedName;
+                    return;
+
+                default:
+                    ledger.Record(
+                        AnalysisPass.Predicates, sourcePath, spec.StartLine, spec.StartColumn,
+                        WriteSourceConstructKind, $"INSERT source of kind '{spec.InsertSource.GetType().Name}' is not analyzed for write-loss - only a plain VALUES list or a single non-UNION SELECT with an explicit scalar select list is");
+                    return;
+            }
+        }
+
+        private CatalogTable? ResolveWriteTargetTable(TableReference target)
+        {
+            if (target is not NamedTableReference named)
+            {
+                return null;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
+            return catalog.Find(qualifiedName, _currentProcScope);
+        }
+
+        /// <summary>
+        /// An explicit column list matches positionally by name against the target table's real
+        /// columns; an omitted one (<c>INSERT INTO T VALUES (...)</c>) means every one of the
+        /// table's own columns, in declared order. A named column that doesn't resolve on the
+        /// table is ledgered and represented as a null placeholder so its position still lines up
+        /// with the corresponding VALUES/SELECT entry - <see cref="AnalyzeValuesInsertSource"/>
+        /// and <see cref="AnalyzeSelectListWriteLoss"/> both just skip a null entry.
+        /// </summary>
+        private List<CatalogColumn?> ResolveInsertTargetColumns(InsertSpecification spec, CatalogTable table)
+        {
+            if (spec.Columns.Count == 0)
+            {
+                return [.. table.Columns];
+            }
+
+            var resolved = new List<CatalogColumn?>(spec.Columns.Count);
+            foreach (var columnRef in spec.Columns)
+            {
+                var name = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
+                var column = table.FindColumn(name);
+                if (column is null)
+                {
+                    ledger.Record(
+                        AnalysisPass.Predicates, sourcePath, columnRef.StartLine, columnRef.StartColumn,
+                        WriteTargetConstructKind, $"INSERT target column '{name}' does not resolve on table '{table.QualifiedName}' - write-loss analysis skipped for this column");
+                }
+
+                resolved.Add(column);
+            }
+
+            return resolved;
+        }
+
+        private void AnalyzeValuesInsertSource(ValuesInsertSource values, List<CatalogColumn?> targetColumns, string targetTableQualifiedName)
+        {
+            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            foreach (var columnValues in values.RowValues.Select(row => row.ColumnValues))
+            {
+                var count = Math.Min(columnValues.Count, targetColumns.Count);
+                for (var i = 0; i < count; i++)
+                {
+                    // DEFAULT never carries a source value of its own to compare - the column's
+                    // own DEFAULT constraint (if any) is a DDL-time concern this pass doesn't
+                    // re-derive here.
+                    if (targetColumns[i]?.Type is not { } targetType || columnValues[i] is DefaultLiteral)
+                    {
+                        continue;
+                    }
+
+                    var sourceExpression = columnValues[i];
+                    var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
+                    EmitWriteLossFinding(targetTableQualifiedName, targetColumns[i]!.Name, targetType, sourceType, sourceExpression);
+                }
+            }
+        }
+
+        private void AnalyzeSelectListWriteLoss(IList<SelectElement> selectElements, IReadOnlyList<CatalogColumn?> targetColumns, string targetTableQualifiedName)
+        {
+            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var count = Math.Min(selectElements.Count, targetColumns.Count);
+            for (var i = 0; i < count; i++)
+            {
+                // AnalyzeInsertWriteLoss only stashes the pending fields when every select
+                // element is a SelectScalarExpression, so this cast is safe.
+                var sourceExpression = ((SelectScalarExpression)selectElements[i]).Expression;
+                if (targetColumns[i]?.Type is not { } targetType)
+                {
+                    continue;
+                }
+
+                var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
+                EmitWriteLossFinding(targetTableQualifiedName, targetColumns[i]!.Name, targetType, sourceType, sourceExpression);
+            }
+        }
+
+        private void EmitWriteLossFinding(string tableQualifiedName, string columnName, SqlType targetType, SqlType? sourceType, ScalarExpression sourceExpression)
+        {
+            var kind = Rules.WriteLossClassifier.Classify(targetType, sourceType, sourceExpression);
+            if (kind is null)
+            {
+                return;
+            }
+
+            WriteLossFindings.Add(new WriteLossFinding(
+                tableQualifiedName, columnName, kind.Value, targetType, sourceType!,
+                sourcePath, sourceExpression.StartLine, sourceExpression.StartColumn));
         }
 
         private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)

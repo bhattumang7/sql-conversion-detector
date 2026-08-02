@@ -65,10 +65,12 @@ public static class DynamicSqlPipeline
 
         public List<CollationConflictFinding> CollationConflicts { get; } = [];
 
+        public List<WriteLossFinding> WriteLoss { get; } = [];
+
         public List<SkippedConstruct> Skipped { get; } = [];
 
         public DynamicSqlPipelineResult ToResult() =>
-            new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, Skipped);
+            new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, WriteLoss, Skipped);
     }
 
     private static void ProcessScript(
@@ -120,6 +122,11 @@ public static class DynamicSqlPipeline
             accumulator.CollationConflicts.Add(Remap(collationConflict, script));
         }
 
+        foreach (var writeLoss in extraction.WriteLossFindings)
+        {
+            accumulator.WriteLoss.Add(Remap(writeLoss, script));
+        }
+
         foreach (var skippedConstruct in extraction.SkippedConstructs)
         {
             accumulator.Skipped.Add(Remap(skippedConstruct, script));
@@ -131,6 +138,7 @@ public static class DynamicSqlPipeline
         accumulator.Typed.AddRange(nested.TypedFindings);
         accumulator.ExpressionDerived.AddRange(nested.ExpressionDerivedFindings);
         accumulator.CollationConflicts.AddRange(nested.CollationConflictFindings);
+        accumulator.WriteLoss.AddRange(nested.WriteLossFindings);
         accumulator.Skipped.AddRange(nested.SkippedConstructs);
     }
 
@@ -150,7 +158,7 @@ public static class DynamicSqlPipeline
 
         if (nestedExtraction.AnalyzableScripts.Count == 0)
         {
-            return new DynamicSqlPipelineResult(findings, [], [], [], [], []);
+            return new DynamicSqlPipelineResult(findings, [], [], [], [], [], []);
         }
 
         if (depth >= MaxNestingDepth)
@@ -161,7 +169,7 @@ public static class DynamicSqlPipeline
                 .Select(nestedScript => script.SegmentMap.Map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
                 .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "max-nesting-depth-exceeded")));
 
-            return new DynamicSqlPipelineResult(findings, [], [], [], [], []);
+            return new DynamicSqlPipelineResult(findings, [], [], [], [], [], []);
         }
 
         var seeds = BuildArgumentBindingSeeds(nestedExtraction.AnalyzableScripts, outerDeclaredParameters);
@@ -174,6 +182,7 @@ public static class DynamicSqlPipeline
             [.. nestedResult.TypedFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.ExpressionDerivedFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.CollationConflictFindings.Select(f => RemapNested(f, script))],
+            [.. nestedResult.WriteLossFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.SkippedConstructs.Select(s => Remap(s, script))]);
     }
 
@@ -267,6 +276,12 @@ public static class DynamicSqlPipeline
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
     }
 
+    private static WriteLossFinding Remap(WriteLossFinding finding, DynamicSqlScript script)
+    {
+        var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
+    }
+
     private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script)
     {
         var span = script.SegmentMap.Map(entry.Line, entry.Column);
@@ -303,6 +318,12 @@ public static class DynamicSqlPipeline
         var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
     }
+
+    private static WriteLossFinding RemapNested(WriteLossFinding finding, DynamicSqlScript outerScript)
+    {
+        var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
+    }
 }
 
 /// <summary>Findings produced by reparsing and analyzing the dynamic SQL scripts of one scan, including any found nested inside them.</summary>
@@ -312,4 +333,5 @@ public sealed record DynamicSqlPipelineResult(
     IReadOnlyList<TypedPredicateFinding> TypedFindings,
     IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
     IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
+    IReadOnlyList<WriteLossFinding> WriteLossFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs);

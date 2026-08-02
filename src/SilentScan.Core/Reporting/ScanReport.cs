@@ -10,6 +10,7 @@ public sealed record ScanReport(
     IReadOnlyList<DynamicSqlFinding> DynamicSqlFindings,
     IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
     IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
+    IReadOnlyList<WriteLossFinding> WriteLossFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -20,8 +21,8 @@ public sealed record ScanReport(
     /// Bumped whenever a breaking change is made to this report's own shape or to any finding
     /// record it carries (a field renamed/removed, an enum member's meaning changed) - CLAUDE.md:
     /// "Findings schema is versioned JSON." Before this field existed, nothing in the emitted
-    /// JSON let a consumer tell one tool version's output from another's. Bumped to 2 for the
-    /// new CollationConflictFindings stream.
+    /// JSON let a consumer tell one tool version's output from another's. Bumped to 3 for the
+    /// new WriteLossFindings stream (roadmap Phase E1).
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 }

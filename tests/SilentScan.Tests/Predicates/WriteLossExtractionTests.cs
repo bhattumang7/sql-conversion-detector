@@ -1,0 +1,289 @@
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
+using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
+
+namespace SilentScan.Tests.Predicates;
+
+/// <summary>Roadmap Phase E1: static (no Docker) coverage for TypedPredicateExtractor's write-side (INSERT/UPDATE) analysis - the classification rules themselves are covered by SilentScan.Tests.Rules.WriteLossClassifierTests, and their oracle confirmation by WriteLossOracleTests.</summary>
+public sealed class WriteLossExtractionTests
+{
+    private static IReadOnlyList<WriteLossFinding> Extract(params string[] batches) =>
+        ExtractAll(batches).WriteLossFindings;
+
+    private static PredicateExtractionResult ExtractAll(params string[] batches)
+    {
+        var sql = string.Join("\nGO\n", batches);
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        return TypedPredicateExtractor.Extract(result, catalog, lineage);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithNonAsciiUnicodeLiteralIntoVarchar_FlagsUnicodeReplacement()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
+            "INSERT INTO dbo.T (VarCol) VALUES (N'日本語');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.Equal("dbo.T", finding.TableQualifiedName);
+        Assert.Equal("VarCol", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithAsciiOnlyUnicodeLiteralIntoVarchar_ProvablySafe_NoFinding()
+    {
+        // Every character is ASCII, so this is safe under ANY non-Unicode codepage - the
+        // classifier's own "never guess" discipline applies to safety too, not just risk.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
+            "INSERT INTO dbo.T (VarCol) VALUES (N'hello');");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithUnicodeColumnIntoVarchar_NonLiteral_AlwaysFlagged()
+    {
+        // A column source is data-dependent - unlike a literal, its actual content can never be
+        // inspected statically, so it is flagged unconditionally (mirrors ScanForced's "makes
+        // possible" framing).
+        var findings = Extract(
+            "CREATE TABLE dbo.Src (NCol NVARCHAR(20) NULL); CREATE TABLE dbo.Dst (VarCol VARCHAR(20) NULL);",
+            "INSERT INTO dbo.Dst (VarCol) SELECT NCol FROM dbo.Src;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.Equal("dbo.Dst", finding.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithFractionalNumericLiteralIntoInt_FlagsNumericScaleNarrowing()
+    {
+        // A bare `7.9` literal is a NumericLiteral (types DECIMAL(2,1) - LiteralTypeResolver:
+        // only scientific notation types as FLOAT), so a decimal-source-into-integer-target
+        // assignment is the scale-narrowing rule, not the approximate-numeric one - both are
+        // oracle-confirmed to truncate toward zero the same way, just via different source
+        // literal shapes.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NULL);",
+            "INSERT INTO dbo.T (IntCol) VALUES (7.9);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithFractionalScientificNotationLiteralIntoInt_FlagsApproximateTruncation()
+    {
+        // Scientific notation always types as FLOAT in T-SQL (oracle-verified elsewhere -
+        // LiteralTypeResolverTests), which is what actually exercises the approximate-numeric
+        // rule via a literal rather than only via a non-literal column source.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NULL);",
+            "INSERT INTO dbo.T (IntCol) VALUES (7.9e0);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.ApproximateToExactTruncation, finding.Kind);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithWholeNumberDecimalLiteralIntoInt_ProvablySafe_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NULL);",
+            "INSERT INTO dbo.T (IntCol) VALUES (7.0);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithHigherScaleDecimalLiteral_FlagsNumericScaleNarrowing()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DecCol DECIMAL(10,2) NULL);",
+            "INSERT INTO dbo.T (DecCol) VALUES (123.456);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithinTargetScale_ProvablySafe_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DecCol DECIMAL(10,2) NULL);",
+            "INSERT INTO dbo.T (DecCol) VALUES (123.40);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithDateTimeLiteralIntoDate_FlagsTemporalPrecisionLoss()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DateCol DATE NULL);",
+            "INSERT INTO dbo.T (DateCol) VALUES ('2024-01-15 13:45:00');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.TemporalPrecisionLoss, finding.Kind);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithDateOnlyLiteralIntoDate_ProvablySafe_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DateCol DATE NULL);",
+            "INSERT INTO dbo.T (DateCol) VALUES ('2024-01-15');");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertValuesWithSafeTypePair_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NULL);",
+            "INSERT INTO dbo.T (IntCol) VALUES (7);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertWithoutExplicitColumnList_PairsPositionallyByDeclaredOrder()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NULL, VarCol VARCHAR(20) NULL);",
+            "INSERT INTO dbo.T VALUES (1, N'日本語');");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("VarCol", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_InsertWithDefaultKeyword_SkippedWithoutFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NOT NULL DEFAULT 0);",
+            "INSERT INTO dbo.T (IntCol) VALUES (DEFAULT);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_UpdateSetWithLossyLiteral_FlagsWriteLoss()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (DecCol DECIMAL(10,2) NULL);",
+            "UPDATE dbo.T SET DecCol = 123.456 WHERE DecCol IS NULL;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.Equal("dbo.T", finding.TableQualifiedName);
+        Assert.Equal("DecCol", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_UpdateSetFromJoinedTable_ResolvesSourceThroughFromClause()
+    {
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.Target (Id INT NOT NULL, VarCol VARCHAR(20) NULL);
+            CREATE TABLE dbo.Src (Id INT NOT NULL, NCol NVARCHAR(20) NULL);
+            """,
+            "UPDATE t SET t.VarCol = s.NCol FROM dbo.Target t JOIN dbo.Src s ON s.Id = t.Id;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.Equal("dbo.Target", finding.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Extract_UpdateSetSafeAssignment_NoFinding()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (IntCol INT NULL);",
+            "UPDATE dbo.T SET IntCol = 7 WHERE IntCol IS NULL;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertSelectColumnToColumn_FlagsWriteLossThroughSelectList()
+    {
+        var findings = Extract(
+            """
+            CREATE TABLE dbo.Src (Amount DECIMAL(10,4) NOT NULL);
+            CREATE TABLE dbo.Dst (Amount DECIMAL(10,2) NULL);
+            """,
+            "INSERT INTO dbo.Dst (Amount) SELECT Amount FROM dbo.Src;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.Equal("dbo.Dst", finding.TableQualifiedName);
+    }
+
+    [Fact]
+    public void Extract_InsertSelectWithWhereClause_StillFindsPredicateAndWriteLoss()
+    {
+        // Confirms the ordinary predicate-scanning pass (WHERE clause) and the new write-loss
+        // pass both fire for the same INSERT ... SELECT - neither one crowds out the other.
+        var result = ExtractAll(
+            """
+            CREATE TABLE dbo.Src (Amount DECIMAL(10,4) NOT NULL, Flag INT NOT NULL);
+            CREATE TABLE dbo.Dst (Amount DECIMAL(10,2) NULL);
+            """,
+            "INSERT INTO dbo.Dst (Amount) SELECT Amount FROM dbo.Src WHERE Flag = 1;");
+
+        Assert.Single(result.WriteLossFindings);
+    }
+
+    [Fact]
+    public void Extract_InsertSelectStar_LedgeredNotAnalyzed()
+    {
+        var result = ExtractAll(
+            """
+            CREATE TABLE dbo.Src (Amount DECIMAL(10,4) NOT NULL);
+            CREATE TABLE dbo.Dst (Amount DECIMAL(10,2) NULL);
+            """,
+            "INSERT INTO dbo.Dst SELECT * FROM dbo.Src;");
+
+        Assert.Empty(result.WriteLossFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "write source");
+    }
+
+    [Fact]
+    public void Extract_InsertSelectUnion_LedgeredNotAnalyzed()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Dst (Amount DECIMAL(10,2) NULL);",
+            "INSERT INTO dbo.Dst (Amount) SELECT 123.456 UNION SELECT 1.00;");
+
+        Assert.Empty(result.WriteLossFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "write source");
+    }
+
+    [Fact]
+    public void Extract_InsertIntoUnresolvedTable_LedgeredNotAnalyzed()
+    {
+        var result = ExtractAll("INSERT INTO dbo.NeverDeclared (Col) VALUES (1);");
+
+        Assert.Empty(result.WriteLossFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "write target");
+    }
+
+    [Fact]
+    public void Extract_InsertWithUnresolvedTargetColumn_LedgeredNotAnalyzed()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (IntCol INT NULL);",
+            "INSERT INTO dbo.T (NeverDeclaredCol) VALUES (1);");
+
+        Assert.Empty(result.WriteLossFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "write target");
+    }
+}

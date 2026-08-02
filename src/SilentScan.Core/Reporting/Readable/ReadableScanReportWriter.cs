@@ -26,6 +26,9 @@ public static class ReadableScanReportWriter
     /// <summary>Every finding table's first column header - a predicate's source location.</summary>
     private const string WhereHeader = "Where";
 
+    /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string ColumnHeader = "Column";
+
     public static string Write(
         ScanReport report,
         CollationSensitivityReport? collationSensitivity,
@@ -79,6 +82,7 @@ public static class ReadableScanReportWriter
             "Implicit conversions that degrade the seek",
             "The column still converts, but under a Windows collation the engine can bound the search with GetRangeThroughConvert - cheaper than the scan above, dearer than the seek the column would have had with matching types."));
         blocks.AddRange(ExpressionDerived(report, headingLevel, pathBase));
+        blocks.AddRange(WriteLoss(report, headingLevel, pathBase));
         blocks.AddRange(Tier1(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
@@ -111,6 +115,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Implicit conversions forcing a scan", summary.ScanForcedCount, summary.DistinctScanForcedCount);
         AddCount(counts, "Implicit conversions degrading the seek", summary.RangeSeekCount, summary.DistinctRangeSeekCount);
         AddCount(counts, "Expression-derived columns in predicates", report.ExpressionDerivedFindings.Count);
+        AddCount(counts, "INSERT/UPDATE assignments risking silent data loss", report.WriteLossFindings.Count);
         AddCount(counts, "Non-sargable predicate patterns", report.Tier1Findings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
@@ -185,7 +190,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Heading(level, $"{title} ({findings.Count})");
         yield return new ReadableBlock.Paragraph(explanation);
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Column", "Column type", "Compared with", "Indexed", "Introduced by"],
+            [WhereHeader, ColumnHeader, "Column type", "Compared with", "Indexed", "Introduced by"],
             [.. findings.Select(f => TypedRow(f, pathBase))]);
     }
 
@@ -231,7 +236,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "By the time these columns reach the predicate they are the result of an expression a view or function computed, not a stored column. An index on whatever feeds them cannot be seeked through that expression.");
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Column", "Computed by", "Underlying base columns"],
+            [WhereHeader, ColumnHeader, "Computed by", "Underlying base columns"],
             [.. report.ExpressionDerivedFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
@@ -244,6 +249,37 @@ public static class ReadableScanReportWriter
                     : string.Join(", ", f.UnderlyingBaseColumns.Select(bc => $"{bc.TableQualifiedName}.{bc.ColumnName}{(bc.Indexed ? " (indexed)" : string.Empty)}")),
             })]);
     }
+
+    private static IEnumerable<ReadableBlock> WriteLoss(ScanReport report, int level, string? pathBase)
+    {
+        if (report.WriteLossFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"INSERT/UPDATE assignments risking silent data loss ({report.WriteLossFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Each of these writes a value whose static type carries more information than its target column can hold - T-SQL rounds, truncates, or replaces the value with no error raised, so nothing here shows up as a failed statement. A case T-SQL itself refuses to run (a too-long string, an overflowing integer) is not listed - those already fail loudly on their own.");
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Target type", "Source type", "Risk"],
+            [.. report.WriteLossFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TargetType.ToString(),
+                f.SourceType.ToString(),
+                DescribeWriteLossKind(f.Kind),
+            })]);
+    }
+
+    private static string DescribeWriteLossKind(WriteLossKind kind) => kind switch
+    {
+        WriteLossKind.UnicodeToNonUnicodeReplacement => "Unicode characters outside the target's codepage become '?'",
+        WriteLossKind.ApproximateToExactTruncation => "fractional part silently dropped",
+        WriteLossKind.NumericScaleNarrowing => "digits past the target's scale silently rounded away",
+        WriteLossKind.TemporalPrecisionLoss => "time-of-day silently dropped",
+        _ => kind.ToString(),
+    };
 
     private static IEnumerable<ReadableBlock> Tier1(ScanReport report, int level, string? pathBase)
     {
@@ -269,7 +305,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{Tier1Title(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(Tier1Explanation(group.Key));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Column", "Indexed", "Detail"],
+                [WhereHeader, ColumnHeader, "Indexed", "Detail"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
