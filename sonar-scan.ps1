@@ -79,6 +79,14 @@ $IsVerbose = $VerbosePreference -eq 'Continue'
 # machinery - Start-Job/Stop-Job does not reliably tear down a job's own
 # native child processes on Linux, `timeout` (with --kill-after as a SIGKILL
 # backstop if SIGTERM is ignored) does.
+#
+# MSBUILDDISABLENODEREUSE=1 for the same reason scripts/dotnet-safe.sh sets it: `dotnet build`/
+# `dotnet test` otherwise spawn detached MSBuild worker processes that outlive the command by
+# design, which left thousands of orphaned /tmp/MSBuildTemp* directories across sessions that
+# ran and killed dotnet invocations directly (see docs/local-dev.md). Exported here so every
+# `dotnet` child this script launches inherits it.
+$env:MSBUILDDISABLENODEREUSE = '1'
+
 function Invoke-Step {
     param(
         [Parameter(Mandatory)] [string]$Label,

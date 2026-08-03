@@ -16,9 +16,27 @@ not at the server level — each spike/bench database sets it explicitly after
 ## Build & test
 
 ```
-dotnet build
-dotnet test
+scripts/dotnet-safe.sh build
+scripts/dotnet-safe.sh test
+scripts/dotnet-safe.sh test --filter "FullyQualifiedName~DynamicSql"
 ```
+
+Always go through `scripts/dotnet-safe.sh`, never a bare `dotnet build`/
+`dotnet test` piped into `tail`/`head`/`grep`/etc. Both commands spawn
+detached MSBuild "node reuse" worker processes that inherit the invoking
+shell's stdout/stderr and deliberately outlive the command so a later build
+can reuse them. Piping the output into another process makes the shell wait
+for EVERY holder of the pipe's write end to close it - the reused workers
+never do, so the pipeline hangs indefinitely even though the real command
+already finished. Reproduced directly in this repo (2026-08-03): a `dotnet
+test | tail -60` sat for 20+ minutes after `dotnet test` itself had already
+exited, and repeated kill-instead-of-exit across sessions left thousands of
+orphaned `/tmp/MSBuildTemp*` directories. `scripts/dotnet-safe.sh` sets
+`MSBUILDDISABLENODEREUSE=1` (so there is no worker process left to hold a
+pipe open in the first place), always redirects to a real log file instead
+of a pipe, wraps the run in a hard `timeout` as a backstop, and shuts down
+any build server on exit regardless of outcome. It prints the last 60 lines
+and the full log path; read the log file directly for more.
 
 `Directory.Build.props` treats warnings as errors and enables recommended
 analyzers solution-wide; a red build is a real defect, not noise to suppress.
