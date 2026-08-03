@@ -69,11 +69,9 @@ public static class ExpressionTypeInferencer
         // but never combined into the result type.
         NullIfExpression nullIf => Resolve(nullIf.FirstExpression, resolveLeaf, typeAliases),
 
-        CoalesceExpression coalesce => CombineAll(coalesce.Expressions.Select(e => Resolve(e, resolveLeaf, typeAliases))),
+        CoalesceExpression coalesce => CombineBranches(coalesce.Expressions, resolveLeaf, typeAliases),
 
-        IIfCall iif => Combine(
-            Resolve(iif.ThenExpression, resolveLeaf, typeAliases),
-            Resolve(iif.ElseExpression, resolveLeaf, typeAliases)),
+        IIfCall iif => CombineBranches([iif.ThenExpression, iif.ElseExpression], resolveLeaf, typeAliases),
 
         SearchedCaseExpression searched => CombineCase(searched.WhenClauses, searched.ElseExpression, resolveLeaf, typeAliases),
 
@@ -85,14 +83,27 @@ public static class ExpressionTypeInferencer
     private static SqlType? CombineCase(
         IEnumerable<WhenClause> whenClauses, ScalarExpression? elseExpression, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
-        var branchTypes = whenClauses.Select(w => Resolve(w.ThenExpression, resolveLeaf, typeAliases));
+        var branches = whenClauses.Select(w => w.ThenExpression);
         if (elseExpression is not null)
         {
-            branchTypes = branchTypes.Append(Resolve(elseExpression, resolveLeaf, typeAliases));
+            branches = branches.Append(elseExpression);
         }
 
-        return CombineAll(branchTypes);
+        return CombineBranches(branches, resolveLeaf, typeAliases);
     }
+
+    /// <summary>
+    /// Merges every branch by precedence, EXCEPT a bare <c>NULL</c> literal branch, which is
+    /// skipped entirely rather than resolved and folded in - oracle-verified: <c>CASE WHEN 1=1
+    /// THEN NULL ELSE IntCol END</c> resolves INT against the real server, not Unknown. An
+    /// untyped NULL has no type of its own to contribute to the merge (unlike a branch this pass
+    /// merely couldn't type, e.g. an unresolvable column reference, which must still null the
+    /// whole result - CombineAll's existing "one unresolvable branch nulls everything" rule is
+    /// otherwise unchanged).
+    /// </summary>
+    private static SqlType? CombineBranches(
+        IEnumerable<ScalarExpression> branches, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
+        CombineAll(branches.Where(e => e is not NullLiteral).Select(e => Resolve(e, resolveLeaf, typeAliases)));
 
     /// <summary>
     /// Folds every branch by precedence. A single unresolvable branch nulls the whole result
