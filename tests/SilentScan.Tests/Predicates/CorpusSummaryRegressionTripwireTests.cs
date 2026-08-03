@@ -54,13 +54,15 @@ public sealed class CorpusSummaryRegressionTripwireTests
 
         // DynamicSqlSummary - the 5 EXEC/sp_executesql call sites the fixture plants (4
         // analyzable: literal/Tier B/Tier C/clean, 1 genuinely Unanalyzable: a procedure
-        // parameter, never foldable).
+        // parameter with no known caller in this fixture - value-seeding across proc-call edges
+        // now reports its own honest reason rather than the generic "undeclared-variable" a
+        // caller-blind lookup used to produce).
         var dynamicSql = report.DynamicSqlSummary;
         Assert.Equal(5, dynamicSql.TotalCallSites);
         Assert.Equal(4, dynamicSql.AnalyzedCount);
         Assert.Equal(1, dynamicSql.UnanalyzableCount);
         Assert.Equal(0, dynamicSql.InnerParseFailedCount);
-        Assert.Equal(1, Assert.Contains("undeclared-variable", dynamicSql.UnanalyzableReasonCounts));
+        Assert.Equal(1, Assert.Contains("procedure-parameter:no-known-call-site", dynamicSql.UnanalyzableReasonCounts));
 
         // SkippedConstructSummary - the fixture's one deliberately-unresolvable comparison
         // (both sides non-column), ledgered rather than silently dropped.

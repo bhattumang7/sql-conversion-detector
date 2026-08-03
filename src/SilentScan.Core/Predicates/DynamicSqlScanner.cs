@@ -146,25 +146,41 @@ public static class DynamicSqlScanner
             }
 
             var edges = callGraph.EdgesCalling(qualifiedName).ToList();
+            var seed = new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
+
             if (edges.Count == 0)
             {
-                return null;
+                // No call site THIS SCAN saw at all (application code, an unparsed caller, a
+                // synonym this scan didn't resolve) - the parameter genuinely IS declared, just
+                // with no known value. Seeds an honest, specific taint reason rather than
+                // returning null and falling through to the generic "undeclared-variable" a
+                // caller-blind VariableReference lookup would otherwise report - that reason is
+                // misleading here: the variable IS declared, as a parameter, there is simply no
+                // known caller to learn its value from.
+                foreach (var formal in formalParameters)
+                {
+                    seed[formal.VariableName.Value] = FoldState.Tainted("procedure-parameter:no-known-call-site", Span(formal));
+                }
+
+                return seed;
             }
 
-            var singleEdge = edges.Count == 1 ? edges[0] : null;
-            var seed = new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
+            if (edges.Count == 1)
+            {
+                SeedFromSingleEdge(edges[0], formalParameters, seed);
+                return seed;
+            }
+
+            SeedFromMultipleEdges(edges, formalParameters, seed);
+            return seed;
+        }
+
+        private static void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
+        {
             foreach (var formal in formalParameters)
             {
                 var paramName = formal.VariableName.Value;
-                var location = Span(formal);
-
-                if (singleEdge is null)
-                {
-                    seed[paramName] = FoldState.Tainted("parameter-not-seeded:multiple-call-sites", location);
-                    continue;
-                }
-
-                var argument = singleEdge.Arguments.FirstOrDefault(
+                var argument = edge.Arguments.FirstOrDefault(
                     a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
                 if (argument is null || argument.FormalParameterIsOutput)
                 {
@@ -177,10 +193,64 @@ public static class DynamicSqlScanner
                     ? FoldState.ConstantSingle([new LiteralSegment(
                         literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn,
                         literalArgument.PrefixLength, literalArgument.Value)])
-                    : FoldState.Tainted("parameter-not-seeded:non-literal-caller", singleEdge.CallSite);
+                    : FoldState.Tainted("parameter-not-seeded:non-literal-caller", edge.CallSite);
+            }
+        }
+
+        /// <summary>
+        /// Set-valued seeding across every known caller (roadmap "trace provably-constant dynamic
+        /// SQL across proc-call edges", extended beyond a single call site): when EVERY edge
+        /// calling this proc supplies a literal argument for a given formal parameter, the
+        /// parameter's true runtime value is provably one of those literals - seeded as the
+        /// assembly SET, composing with the same branch-fold machinery an IF/TRY-CATCH divergence
+        /// merge already uses, never a guess about which caller's value applies at this
+        /// particular invocation. If even ONE caller can't supply a literal for this parameter (a
+        /// variable/expression argument, an OUTPUT parameter, or no matching argument at all - a
+        /// default value this scan doesn't track), the whole parameter stays tainted rather than
+        /// partially seeded from a subset of callers - a taint at even one call site means the
+        /// parameter's true value set is unknown, not merely wider than what the literals show.
+        /// </summary>
+        private static void SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
+        {
+            foreach (var paramName in formalParameters.Select(formal => formal.VariableName.Value))
+            {
+                seed[paramName] = SeedOneParameterFromMultipleEdges(edges, paramName);
+            }
+        }
+
+        private static FoldState SeedOneParameterFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, string paramName)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var assemblies = new List<IReadOnlyList<LiteralSegment>>();
+
+            foreach (var edge in edges)
+            {
+                var argument = edge.Arguments.FirstOrDefault(
+                    a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
+                if (argument is null || argument.FormalParameterIsOutput || argument.LiteralArgument is not { } literalArgument)
+                {
+                    return FoldState.Tainted("parameter-not-seeded:non-literal-caller", edge.CallSite);
+                }
+
+                if (!seen.Add(literalArgument.Value))
+                {
+                    continue;
+                }
+
+                if (assemblies.Count == MaxAssembliesPerVariable)
+                {
+                    return FoldState.Tainted("parameter-not-seeded:cardinality-cap", edge.CallSite);
+                }
+
+                assemblies.Add([new LiteralSegment(
+                    literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn,
+                    literalArgument.PrefixLength, literalArgument.Value)]);
             }
 
-            return seed;
+            // Reached only when every edge supplied a genuine literal argument for this
+            // parameter - assemblies is never empty here (the loop above returns early the
+            // moment any edge lacks one), so this is always a real constant set, never a guess.
+            return FoldState.Constant(assemblies);
         }
 
         /// <summary>Same save/restore as <see cref="WalkScopedBody"/>, plus the trigger's own target table/view (null for a DDL/LOGON trigger, which has no inserted/deleted rowset at all) so a dynamic SQL call site inside the body can resolve inserted/deleted the same way it would statically.</summary>

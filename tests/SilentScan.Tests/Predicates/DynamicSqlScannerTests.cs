@@ -755,11 +755,12 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamWithMultipleCallers_UnanalyzableWithSpecificReason()
+    public void Scan_ProcParamWithMultipleCallersPassingSameLiteral_ProducesAnalyzableScript()
     {
-        // Two call sites - even if both happened to pass the same literal, this scan has no
-        // general way to prove that without comparing every caller's value, so it must not
-        // silently pick one and call it constant.
+        // Value-seeding across proc-call edges (roadmap "trace provably-constant dynamic SQL
+        // across proc-call edges", extended beyond a single caller): every known caller supplies
+        // a literal for this parameter, so its runtime value is provably one of them - here both
+        // callers happen to agree, so the assembly set collapses to one script.
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var argument = new ProcCallArgument("@Status", null, false, null, true, literal);
         var graph = new ProcCallGraph([
@@ -772,9 +773,78 @@ public sealed class DynamicSqlScannerTests
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
             graph);
 
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1 WHERE Status = 'Active'", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ProcParamWithMultipleCallersPassingDifferentLiterals_BothAssembliesAnalyzed()
+    {
+        var activeArgument = new ProcCallArgument(
+            "@Status", null, false, null, true, new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2));
+        var archivedArgument = new ProcCallArgument(
+            "@Status", null, false, null, true, new ProcCallLiteralArgument("Archived", "caller.sql", 20, 30, PrefixLength: 2));
+        var graph = new ProcCallGraph([
+            new ProcCallEdge(null, CalleeProcName, new SourceSpan("caller.sql", 10, 5), [activeArgument]),
+            new ProcCallEdge(null, CalleeProcName, new SourceSpan("caller.sql", 20, 5), [archivedArgument]),
+        ]);
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            graph);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Active'");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Archived'");
+    }
+
+    [Fact]
+    public void Scan_ProcParamWithMultipleCallers_OneCallerNonLiteral_StaysTainted()
+    {
+        // Value-seeding requires EVERY known caller to supply a literal - a single non-literal
+        // caller means the parameter's true value set is unknown, not merely wider than what the
+        // OTHER callers' literals show, so this must not partially seed from the literal callers.
+        var literalArgument = new ProcCallArgument(
+            "@Status", null, false, null, true, new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2));
+        var variableArgument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
+        var graph = new ProcCallGraph([
+            new ProcCallEdge(null, CalleeProcName, new SourceSpan("caller.sql", 10, 5), [literalArgument]),
+            new ProcCallEdge(null, CalleeProcName, new SourceSpan("caller.sql", 20, 5), [variableArgument]),
+        ]);
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            graph);
+
         Assert.Empty(result.AnalyzableScripts);
         var finding = Assert.Single(result.Findings);
-        Assert.Equal("parameter-not-seeded:multiple-call-sites", finding.Reason);
+        Assert.Equal("parameter-not-seeded:non-literal-caller", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ProcParamWithManyCallersPassingDistinctLiterals_CardinalityCapExceeded_StaysTainted()
+    {
+        // 40 distinct callers, each passing its own distinct literal - over the 32-assembly cap.
+        var edges = Enumerable.Range(0, 40)
+            .Select(i => new ProcCallEdge(
+                null,
+                CalleeProcName,
+                new SourceSpan("caller.sql", 10 + i, 5),
+                [new ProcCallArgument("@Status", null, false, null, true, new ProcCallLiteralArgument($"Status{i}", "caller.sql", 10 + i, 30, PrefixLength: 2))]))
+            .ToList();
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            new ProcCallGraph(edges));
+
+        Assert.Empty(result.AnalyzableScripts);
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("parameter-not-seeded:cardinality-cap", finding.Reason);
     }
 
     [Fact]
@@ -796,10 +866,12 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamWithNoKnownCallers_FallsBackToUndeclaredVariable()
+    public void Scan_ProcParamWithNoKnownCallers_ReasonNamesProcedureParameterNotUndeclaredVariable()
     {
-        // Zero edges for this callee - unchanged from before cross-call-edge seeding existed;
-        // a caller-blind scan reports the same generic reason it always has.
+        // Zero edges for this callee (application code, an unparsed caller, a synonym this scan
+        // didn't resolve) - the parameter IS declared, just with no known caller to seed from, so
+        // this must report its own honest reason rather than the misleading generic
+        // "undeclared-variable" a caller-blind VariableReference lookup would otherwise produce.
         var graph = new ProcCallGraph([]);
 
         var result = ScanWithCallGraph(
@@ -809,7 +881,7 @@ public sealed class DynamicSqlScannerTests
 
         Assert.Empty(result.AnalyzableScripts);
         var finding = Assert.Single(result.Findings);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("procedure-parameter:no-known-call-site", finding.Reason);
     }
 
     [Fact]

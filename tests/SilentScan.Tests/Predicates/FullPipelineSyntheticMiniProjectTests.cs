@@ -146,10 +146,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public void DynamicSqlUnanalyzable_IsPlantedAndFound()
     {
         // usp_DynamicVariable_Fires' @Sql is a PROCEDURE PARAMETER (a runtime input, never a
-        // local straight-line DECLARE), so Tier C correctly can't fold it either.
+        // local straight-line DECLARE) with no known caller in this fixture, so Tier C correctly
+        // can't fold it either - value-seeding across proc-call edges reports its own honest
+        // reason here rather than the generic "undeclared-variable" a caller-blind lookup used
+        // to produce (the variable IS declared, as a parameter, there's just no caller to learn
+        // its value from).
         var finding = Assert.Single(_report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
 
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("procedure-parameter:no-known-call-site", finding.Reason);
     }
 
     [Fact]

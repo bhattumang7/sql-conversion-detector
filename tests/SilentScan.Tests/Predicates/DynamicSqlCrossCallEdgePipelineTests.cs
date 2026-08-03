@@ -1,3 +1,4 @@
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
@@ -59,8 +60,12 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
-    public async Task TwoCallersWithLiterals_NotSeeded_UnanalyzableWithMultipleCallSitesReason()
+    public async Task TwoCallersWithDifferentLiterals_BothAssembliesAnalyzed()
     {
+        // Value-seeding across proc-call edges (extended beyond a single caller): every known
+        // caller supplies a literal for @Status, so its runtime value is provably one of them -
+        // both assemblies are reparsed and analyzed, rather than the whole site declining just
+        // because there's more than one call site.
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
@@ -73,8 +78,10 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
             CREATE PROCEDURE dbo.usp_CallerB AS BEGIN EXEC dbo.usp_FindByStatus @Status = N'Closed'; END;
             """);
 
-        var finding = Assert.Single(report.DynamicSqlFindings);
-        Assert.Equal("parameter-not-seeded:multiple-call-sites", finding.Reason);
+        Assert.Equal(2, report.DynamicSqlFindings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
+        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        // dbo.Orders is never declared in this test's own DDL, so the reparsed predicate's column
+        // never resolves to a real catalog table either way - unrelated to the seeding change.
         Assert.Empty(report.TypedFindings);
     }
 
