@@ -19,31 +19,41 @@ public sealed record DynamicSqlSummary(
 
     public static DynamicSqlSummary From(IReadOnlyList<DynamicSqlFinding> findings)
     {
-        var analyzed = 0;
-        var unanalyzable = 0;
-        var innerParseFailed = 0;
+        // Branch-fold coverage (roadmap "trace dynamic SQL across IF/ELSE/TRY-CATCH branches")
+        // can report several AnalyzedLiteral findings for ONE call site - one per possible
+        // constant assembly, all sharing the same (SourcePath, Line, Column). Counting by
+        // distinct call site rather than by raw finding keeps "% of call sites analyzed" honest
+        // - a site with three assemblies must count once here, not three times.
+        var analyzedSites = new HashSet<(string SourcePath, int Line, int Column)>();
+        var unanalyzableSites = new HashSet<(string SourcePath, int Line, int Column)>();
+        var innerParseFailedSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var reasonCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var finding in findings)
         {
+            var site = (finding.SourcePath, finding.Line, finding.Column);
             switch (finding.Outcome)
             {
                 case DynamicSqlOutcome.AnalyzedLiteral:
-                    analyzed++;
+                    analyzedSites.Add(site);
                     break;
 
                 case DynamicSqlOutcome.Unanalyzable:
-                    unanalyzable++;
-                    var reason = finding.Reason ?? "unspecified";
-                    reasonCounts[reason] = reasonCounts.GetValueOrDefault(reason) + 1;
+                    if (unanalyzableSites.Add(site))
+                    {
+                        var reason = finding.Reason ?? "unspecified";
+                        reasonCounts[reason] = reasonCounts.GetValueOrDefault(reason) + 1;
+                    }
+
                     break;
 
                 case DynamicSqlOutcome.InnerParseFailed:
-                    innerParseFailed++;
+                    innerParseFailedSites.Add(site);
                     break;
             }
         }
 
-        return new DynamicSqlSummary(findings.Count, analyzed, unanalyzable, innerParseFailed, reasonCounts);
+        var totalSites = analyzedSites.Count + unanalyzableSites.Count + innerParseFailedSites.Count;
+        return new DynamicSqlSummary(totalSites, analyzedSites.Count, unanalyzableSites.Count, innerParseFailedSites.Count, reasonCounts);
     }
 }

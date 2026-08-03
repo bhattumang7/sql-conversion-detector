@@ -49,24 +49,39 @@ public static class DynamicSqlScanner
 
     private readonly record struct LiteralSegment(string SourcePath, int StartLine, int StartColumn, int PrefixLength, string Value);
 
-    private readonly record struct FoldAttempt(IReadOnlyList<LiteralSegment>? Segments, string? Reason, SourceSpan? Location)
-    {
-        public bool Success => Segments is not null;
+    /// <summary>
+    /// One statically-provable constant value a folded expression could assemble to - a single
+    /// concatenation chain of literal segments. Plural assemblies (see <see cref="FoldAttempt"/>/
+    /// <see cref="FoldState"/>) exist because a control-flow join point (IF/TRY-CATCH) can leave a
+    /// variable with more than one PROVABLY POSSIBLE constant value - the optional-filter
+    /// accumulation pattern (<c>IF @a IS NOT NULL SET @sql = @sql + N' AND col = @a'</c>) is
+    /// exactly this: after the IF, @sql is EITHER the unmodified value OR the appended one, never
+    /// anything else, so both are analyzed rather than the whole site declining as unknowable.
+    /// </summary>
+    private const int MaxAssembliesPerVariable = 32;
 
-        public static FoldAttempt Ok(IReadOnlyList<LiteralSegment> segments) => new(segments, null, null);
+    private readonly record struct FoldAttempt(IReadOnlyList<IReadOnlyList<LiteralSegment>>? Assemblies, string? Reason, SourceSpan? Location)
+    {
+        public bool Success => Assemblies is not null;
+
+        public static FoldAttempt Ok(IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies) => new(assemblies, null, null);
+
+        public static FoldAttempt OkSingle(IReadOnlyList<LiteralSegment> segments) => Ok([segments]);
 
         public static FoldAttempt Fail(string reason, SourceSpan location) => new(null, reason, location);
     }
 
     private sealed class FoldState
     {
-        public IReadOnlyList<LiteralSegment>? Segments { get; private init; }
+        public IReadOnlyList<IReadOnlyList<LiteralSegment>>? Assemblies { get; private init; }
 
         public string? TaintReason { get; private init; }
 
         public SourceSpan? TaintLocation { get; private init; }
 
-        public static FoldState Constant(IReadOnlyList<LiteralSegment> segments) => new() { Segments = segments };
+        public static FoldState Constant(IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies) => new() { Assemblies = assemblies };
+
+        public static FoldState ConstantSingle(IReadOnlyList<LiteralSegment> segments) => Constant([segments]);
 
         public static FoldState Tainted(string reason, SourceSpan location) => new() { TaintReason = reason, TaintLocation = location };
     }
@@ -159,7 +174,7 @@ public static class DynamicSqlScanner
                 }
 
                 seed[paramName] = argument.LiteralArgument is { } literalArgument
-                    ? FoldState.Constant([new LiteralSegment(
+                    ? FoldState.ConstantSingle([new LiteralSegment(
                         literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn,
                         literalArgument.PrefixLength, literalArgument.Value)])
                     : FoldState.Tainted("parameter-not-seeded:non-literal-caller", singleEdge.CallSite);
@@ -287,7 +302,7 @@ public static class DynamicSqlScanner
 
                 var attempt = TryFoldExpression(element.Value, folded, foldingEnabled);
                 folded[name] = attempt.Success
-                    ? FoldState.Constant(attempt.Segments!)
+                    ? FoldState.Constant(attempt.Assemblies!)
                     : FoldState.Tainted(attempt.Reason!, attempt.Location!.Value);
             }
         }
@@ -347,20 +362,26 @@ public static class DynamicSqlScanner
 
             if (kind == AssignmentKind.AddEquals)
             {
-                if (!folded.TryGetValue(name, out var existing) || existing.Segments is null)
+                if (!folded.TryGetValue(name, out var existing) || existing.Assemblies is null)
                 {
                     folded[name] = FoldState.Tainted(existing?.TaintReason ?? "undeclared-variable", existing?.TaintLocation ?? Span(site));
                     return;
                 }
 
-                folded[name] = rhs.Success
-                    ? FoldState.Constant([.. existing.Segments, .. rhs.Segments!])
-                    : FoldState.Tainted(rhs.Reason!, rhs.Location!.Value);
+                if (!rhs.Success)
+                {
+                    folded[name] = FoldState.Tainted(rhs.Reason!, rhs.Location!.Value);
+                    return;
+                }
+
+                folded[name] = TryCartesianConcat(existing.Assemblies, rhs.Assemblies!, out var combined)
+                    ? FoldState.Constant(combined)
+                    : FoldState.Tainted("diverges-across-if-branches:cardinality-cap", Span(site));
                 return;
             }
 
             folded[name] = rhs.Success
-                ? FoldState.Constant(rhs.Segments!)
+                ? FoldState.Constant(rhs.Assemblies!)
                 : FoldState.Tainted(rhs.Reason!, rhs.Location!.Value);
         }
 
@@ -375,7 +396,7 @@ public static class DynamicSqlScanner
                 WalkStatements(NormalizeToStatementList(ifStatement.ElseStatement), elseDict, foldingEnabled);
             }
 
-            MergeTaintingDivergent(folded, thenDict, elseDict, ifStatement, "diverges-across-if-branches");
+            MergeUnioningDivergent(folded, thenDict, elseDict, ifStatement, "diverges-across-if-branches");
         }
 
         private void HandleWhile(WhileStatement whileStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -425,7 +446,7 @@ public static class DynamicSqlScanner
             var catchDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
             WalkStatements(tryCatch.CatchStatements.Statements, catchDict, foldingEnabled);
 
-            MergeTaintingDivergent(folded, tryDict, catchDict, tryCatch, "diverges-across-try-catch");
+            MergeUnioningDivergent(folded, tryDict, catchDict, tryCatch, "diverges-across-try-catch");
         }
 
         /// <summary>
@@ -434,7 +455,11 @@ public static class DynamicSqlScanner
         /// the exact same <see cref="FoldState"/> reference as in <paramref name="folded"/> -
         /// so reference (in)equality alone tells us whether either branch could have changed a
         /// variable, with no content comparison needed. Any real divergence taints; this
-        /// deliberately never tries to prove two branches produced textually-equal values.
+        /// deliberately never tries to prove two branches produced textually-equal values. Used
+        /// ONLY by <see cref="HandleWhile"/>'s own post-loop merge: a loop body can run zero,
+        /// one, or many times, which is NOT reducible to "one of these two known branch outcomes"
+        /// the way an IF's THEN/ELSE or a TRY/CATCH's TRY/CATCH are - <see
+        /// cref="MergeUnioningDivergent"/> is what those two use instead.
         /// </summary>
         private void MergeTaintingDivergent(
             Dictionary<string, FoldState> folded, Dictionary<string, FoldState> branchA, Dictionary<string, FoldState> branchB, TSqlStatement owner, string reason)
@@ -450,6 +475,157 @@ public static class DynamicSqlScanner
                     folded[key] = FoldState.Tainted(reason, Span(owner));
                 }
             }
+        }
+
+        /// <summary>
+        /// An IF's THEN/ELSE or a TRY/CATCH's TRY/CATCH are each exactly one of two mutually
+        /// exclusive, fully-determined outcomes - unlike a WHILE body (<see
+        /// cref="MergeTaintingDivergent"/>), which can run zero, one, or many times. When BOTH
+        /// branches independently folded a touched variable to a constant assembly set, the real
+        /// value after the statement is PROVABLY one of the two branches' own assemblies, so this
+        /// unions them (deduplicated, cardinality-capped - see <see cref="TryUnionAssemblies"/>)
+        /// instead of tainting - the optional-filter accumulation pattern this scanner previously
+        /// declined outright (CLAUDE.md dynamic SQL policy). A variable only one branch actually
+        /// assigned differently still merges here (reference-inequality against the
+        /// pre-statement state decides "touched", exactly as <see
+        /// cref="MergeTaintingDivergent"/> already did) - only a variable BOTH branches leave
+        /// bit-for-bit unchanged from <paramref name="folded"/> is skipped entirely.
+        /// </summary>
+        private void MergeUnioningDivergent(
+            Dictionary<string, FoldState> folded, Dictionary<string, FoldState> branchA, Dictionary<string, FoldState> branchB, TSqlStatement owner, string reason)
+        {
+            var touched = new HashSet<string>(branchA.Keys, StringComparer.OrdinalIgnoreCase);
+            touched.UnionWith(branchB.Keys);
+
+            var location = Span(owner);
+            foreach (var key in touched)
+            {
+                var before = folded.GetValueOrDefault(key);
+                var a = branchA.GetValueOrDefault(key);
+                var b = branchB.GetValueOrDefault(key);
+
+                if (ReferenceEquals(before, a) && ReferenceEquals(before, b))
+                {
+                    continue;
+                }
+
+                folded[key] = MergeOne(a, b, reason, location);
+            }
+        }
+
+        /// <summary>
+        /// Merges one variable's two branch outcomes: both constant unions (capped and
+        /// deduplicated by concatenated text, so byte-identical assemblies from each branch
+        /// collapse to one entry rather than reporting the same defect twice); exactly one side
+        /// tainted propagates THAT side's own reason, since an unrelated fold failure inside one
+        /// branch is not "divergence" - a branch whose own function call the folder can't handle
+        /// must not get relabeled with the generic divergence reason just because the OTHER
+        /// branch happened to fold cleanly. Anything else (both tainted, or a variable one branch
+        /// never even declared) falls back to the generic divergence reason, matching this
+        /// scanner's pre-existing behavior for those rarer shapes.
+        /// </summary>
+        private static FoldState MergeOne(FoldState? a, FoldState? b, string reason, SourceSpan location)
+        {
+            if (a?.Assemblies is { } assembliesA && b?.Assemblies is { } assembliesB)
+            {
+                return TryUnionAssemblies(assembliesA, assembliesB, out var union)
+                    ? FoldState.Constant(union)
+                    : FoldState.Tainted($"{reason}:cardinality-cap", location);
+            }
+
+            // Both sides already tainted with the IDENTICAL reason (e.g. a proc with many
+            // sequential optional filters keeps re-tainting with the same cardinality-cap reason
+            // at every later branch once the cap first triggers) - propagate that shared reason
+            // rather than relabeling it with the generic divergence reason below, which would
+            // otherwise mask WHY every later branch is unanalyzable behind a less specific label.
+            if (a?.TaintReason is { } sharedReason && a.TaintLocation is { } sharedLocation && b?.TaintReason == sharedReason)
+            {
+                return FoldState.Tainted(sharedReason, sharedLocation);
+            }
+
+            if (a is { Assemblies: null, TaintReason: { } reasonA, TaintLocation: { } locationA } && b?.Assemblies is not null)
+            {
+                return FoldState.Tainted(reasonA, locationA);
+            }
+
+            if (b is { Assemblies: null, TaintReason: { } reasonB, TaintLocation: { } locationB } && a?.Assemblies is not null)
+            {
+                return FoldState.Tainted(reasonB, locationB);
+            }
+
+            return FoldState.Tainted(reason, location);
+        }
+
+        /// <summary>
+        /// Deduplicates (by concatenated text) and caps the union of two branches' own assembly
+        /// sets at <see cref="MaxAssembliesPerVariable"/> - a real bound against a proc with many
+        /// independent optional filters (ten sequential IFs can produce up to 2^10 = 1024
+        /// combinations), not a tuned-for-recall limit.
+        /// </summary>
+        private static bool TryUnionAssemblies(
+            IReadOnlyList<IReadOnlyList<LiteralSegment>> a,
+            IReadOnlyList<IReadOnlyList<LiteralSegment>> b,
+            out IReadOnlyList<IReadOnlyList<LiteralSegment>> union)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var result = new List<IReadOnlyList<LiteralSegment>>();
+            foreach (var assembly in a.Concat(b))
+            {
+                if (!seen.Add(string.Concat(assembly.Select(s => s.Value))))
+                {
+                    continue;
+                }
+
+                if (result.Count == MaxAssembliesPerVariable)
+                {
+                    union = [];
+                    return false;
+                }
+
+                result.Add(assembly);
+            }
+
+            union = result;
+            return true;
+        }
+
+        /// <summary>
+        /// Cross-products two assembly sets for string concatenation (<c>SET @sql = @sql +
+        /// '...'</c>, where either side may already carry multiple possible values from an
+        /// earlier branch merge - the exact shape ten sequential optional-filter IFs produce,
+        /// each concatenating onto an already-divergent @sql) - deduplicated and capped the same
+        /// way <see cref="TryUnionAssemblies"/> is, since this is the identical cardinality bound
+        /// reached through concatenation instead of a single merge point.
+        /// </summary>
+        private static bool TryCartesianConcat(
+            IReadOnlyList<IReadOnlyList<LiteralSegment>> left,
+            IReadOnlyList<IReadOnlyList<LiteralSegment>> right,
+            out IReadOnlyList<IReadOnlyList<LiteralSegment>> combined)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var result = new List<IReadOnlyList<LiteralSegment>>();
+            foreach (var l in left)
+            {
+                foreach (var r in right)
+                {
+                    List<LiteralSegment> merged = [.. l, .. r];
+                    if (!seen.Add(string.Concat(merged.Select(s => s.Value))))
+                    {
+                        continue;
+                    }
+
+                    if (result.Count == MaxAssembliesPerVariable)
+                    {
+                        combined = [];
+                        return false;
+                    }
+
+                    result.Add(merged);
+                }
+            }
+
+            combined = result;
+            return true;
         }
 
         private void HandleExecute(ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -497,8 +673,10 @@ public static class DynamicSqlScanner
         {
             // ExecutableStringList.Strings is never empty for a successfully parsed
             // ExecuteStatement - EXEC() with no argument is a syntax error, not a valid
-            // zero-element call.
-            var segments = new List<LiteralSegment>();
+            // zero-element call. Starts from the single empty assembly and cross-concatenates
+            // each argument's own assembly set in turn - EXEC('a', @x, 'b') concatenates all
+            // three pieces in order regardless of how many possible values @x itself carries.
+            IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies = [[]];
             foreach (var element in stringList.Strings)
             {
                 var attempt = TryFoldExpression(element, folded, foldingEnabled);
@@ -508,10 +686,19 @@ public static class DynamicSqlScanner
                     return;
                 }
 
-                segments.AddRange(attempt.Segments!);
+                if (!TryCartesianConcat(assemblies, attempt.Assemblies!, out var next))
+                {
+                    Findings.Add(Unanalyzable(node, "diverges-across-if-branches:cardinality-cap"));
+                    return;
+                }
+
+                assemblies = next;
             }
 
-            Scripts.Add(BuildScript(node, segments, parameterDeclarationText: null, argumentBindings: null));
+            foreach (var assembly in assemblies)
+            {
+                Scripts.Add(BuildScript(node, assembly, parameterDeclarationText: null, argumentBindings: null));
+            }
         }
 
         private void HandleSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -536,11 +723,12 @@ public static class DynamicSqlScanner
                 return;
             }
 
-            Scripts.Add(BuildScript(
-                node,
-                queryAttempt.Segments!,
-                ResolveParameterDeclarationText(procRef, folded, foldingEnabled),
-                ResolveArgumentBindings(procRef)));
+            var parameterDeclarationText = ResolveParameterDeclarationText(procRef, folded, foldingEnabled);
+            var argumentBindings = ResolveArgumentBindings(procRef);
+            foreach (var assembly in queryAttempt.Assemblies!)
+            {
+                Scripts.Add(BuildScript(node, assembly, parameterDeclarationText, argumentBindings));
+            }
         }
 
         /// <summary>
@@ -589,12 +777,15 @@ public static class DynamicSqlScanner
             }
 
             var attempt = TryFoldExpression(paramsArg, folded, foldingEnabled);
-            if (!attempt.Success)
+            if (!attempt.Success || attempt.Assemblies!.Count != 1)
             {
+                // A @params declaration text that itself carries more than one possible value
+                // (from an upstream branch merge) is a rare compound shape - falls back to null
+                // exactly like an unfoldable one, rather than guessing which assembly applies.
                 return null;
             }
 
-            return string.Concat(attempt.Segments!.Select(s => s.Value));
+            return string.Concat(attempt.Assemblies[0].Select(s => s.Value));
         }
 
         /// <summary>
@@ -655,37 +846,13 @@ public static class DynamicSqlScanner
             {
                 case StringLiteral literal:
                     var prefixLength = literal.IsNational ? 2 : 1;
-                    return FoldAttempt.Ok([new LiteralSegment(sourcePath, literal.StartLine, literal.StartColumn, prefixLength, literal.Value)]);
+                    return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, literal.StartLine, literal.StartColumn, prefixLength, literal.Value)]);
 
                 case VariableReference variableRef:
-                    if (!foldingEnabled)
-                    {
-                        return FoldAttempt.Fail("goto-or-label-in-scope", Span(variableRef));
-                    }
-
-                    if (!folded.TryGetValue(variableRef.Name, out var state))
-                    {
-                        return FoldAttempt.Fail("undeclared-variable", Span(variableRef));
-                    }
-
-                    return state.Segments is not null
-                        ? FoldAttempt.Ok(state.Segments)
-                        : FoldAttempt.Fail(state.TaintReason!, state.TaintLocation!.Value);
+                    return TryFoldVariableReference(variableRef, folded, foldingEnabled);
 
                 case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary:
-                    var left = TryFoldExpression(binary.FirstExpression, folded, foldingEnabled);
-                    if (!left.Success)
-                    {
-                        return left;
-                    }
-
-                    var right = TryFoldExpression(binary.SecondExpression, folded, foldingEnabled);
-                    if (!right.Success)
-                    {
-                        return right;
-                    }
-
-                    return FoldAttempt.Ok([.. left.Segments!, .. right.Segments!]);
+                    return TryFoldConcatenation(binary, folded, foldingEnabled);
 
                 case ParenthesisExpression paren:
                     return TryFoldExpression(paren.Expression, folded, foldingEnabled);
@@ -694,8 +861,276 @@ public static class DynamicSqlScanner
                     when string.Equals(functionName, "QUOTENAME", StringComparison.OrdinalIgnoreCase):
                     return TryFoldQuoteName(quoteNameCall, folded, foldingEnabled);
 
+                case FunctionCall { FunctionName.Value: var functionName } builderCall
+                    when WhitelistedStringBuilders.Contains(functionName):
+                    return TryFoldStringBuilder(builderCall, functionName, folded, foldingEnabled);
+
+                // LEFT/RIGHT are NOT parsed as an ordinary FunctionCall the way UPPER/LOWER/
+                // LTRIM/RTRIM/SUBSTRING are - ScriptDom gives them their own dedicated node types
+                // (LeftFunctionCall/RightFunctionCall, confirmed via reflection over the parsed
+                // tree - CLAUDE.md "verify against the real oracle/parser, never assume"), the
+                // same way it gives CAST/CONVERT their own CastCall/ConvertCall rather than a
+                // generic FunctionCall. Handled as their own cases rather than folded into
+                // WhitelistedStringBuilders's FunctionCall-only dispatch above.
+                case LeftFunctionCall leftCall:
+                    return TryFoldLeftOrRight(leftCall.Parameters, "LEFT", leftCall, folded, foldingEnabled);
+
+                case RightFunctionCall rightCall:
+                    return TryFoldLeftOrRight(rightCall.Parameters, "RIGHT", rightCall, folded, foldingEnabled);
+
                 default:
                     return FailNonLiteralExpression(expression);
+            }
+        }
+
+        private FoldAttempt TryFoldVariableReference(VariableReference variableRef, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (!foldingEnabled)
+            {
+                return FoldAttempt.Fail("goto-or-label-in-scope", Span(variableRef));
+            }
+
+            if (!folded.TryGetValue(variableRef.Name, out var state))
+            {
+                return FoldAttempt.Fail("undeclared-variable", Span(variableRef));
+            }
+
+            return state.Assemblies is not null
+                ? FoldAttempt.Ok(state.Assemblies)
+                : FoldAttempt.Fail(state.TaintReason!, state.TaintLocation!.Value);
+        }
+
+        private FoldAttempt TryFoldConcatenation(BinaryExpression binary, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            var left = TryFoldExpression(binary.FirstExpression, folded, foldingEnabled);
+            if (!left.Success)
+            {
+                return left;
+            }
+
+            var right = TryFoldExpression(binary.SecondExpression, folded, foldingEnabled);
+            if (!right.Success)
+            {
+                return right;
+            }
+
+            return TryCartesianConcat(left.Assemblies!, right.Assemblies!, out var concatenated)
+                ? FoldAttempt.Ok(concatenated)
+                : FoldAttempt.Fail("diverges-across-if-branches:cardinality-cap", Span(binary));
+        }
+
+        /// <summary>
+        /// Every string-builder function this scanner folds besides QUOTENAME (roadmap "fold
+        /// high-volume string-builder functions in dynamic SQL, oracle-checked") that ScriptDom
+        /// still parses as an ordinary <see cref="FunctionCall"/> - chosen because each is a pure
+        /// lexical operation with no collation-comparison semantics involved (unlike REPLACE/
+        /// CHARINDEX/PATINDEX, whose case-sensitivity depends on the CALLER's collation, which
+        /// this scanner has no access to at all - see <see cref="TryFoldQuoteName"/>'s own
+        /// remarks). UPPER/LOWER are the one entry here that still needs a per-input guard (<see
+        /// cref="IsSafeToCaseConvert"/>) rather than being unconditionally safe - oracle-verified:
+        /// the Turkish-family "dotless I" case mapping genuinely differs by collation for the
+        /// specific 'i'/'I' pair, even though every other ASCII letter's case mapping does not.
+        /// LEFT/RIGHT are deliberately NOT here - see the dedicated <see cref="LeftFunctionCall"/>/
+        /// <see cref="RightFunctionCall"/> cases in <see cref="TryFoldExpression"/>.
+        /// </summary>
+        private static readonly HashSet<string> WhitelistedStringBuilders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "UPPER", "LOWER", "LTRIM", "RTRIM", "SUBSTRING",
+        };
+
+        private FoldAttempt TryFoldStringBuilder(FunctionCall functionCall, string functionName, Dictionary<string, FoldState> folded, bool foldingEnabled) =>
+            functionName.ToUpperInvariant() switch
+            {
+                "UPPER" or "LOWER" => TryFoldCaseConversion(functionCall, functionName, folded, foldingEnabled),
+                "LTRIM" or "RTRIM" => TryFoldTrim(functionCall, functionName, folded, foldingEnabled),
+                "SUBSTRING" => TryFoldSubstring(functionCall, folded, foldingEnabled),
+                _ => FailNonLiteralExpression(functionCall),
+            };
+
+        /// <summary>
+        /// Oracle-verified (Turkish_CI_AS vs Latin1_General_CI_AS): every ASCII letter EXCEPT
+        /// 'i'/'I' case-converts identically across every SQL Server collation; 'i'/'I' is the one
+        /// pair whose mapping genuinely differs (<c>UPPER('i')</c> is 'İ' under a Turkish-family
+        /// collation, 'I' everywhere else - the well-known "Turkish I problem", real in SQL
+        /// Server too, not just other platforms). This scanner has no collation context at all at
+        /// the point it runs, so an input containing 'i'/'I' or any non-ASCII character declines
+        /// the fold rather than guessing which mapping the real target collation would apply.
+        /// </summary>
+        private FoldAttempt TryFoldCaseConversion(FunctionCall functionCall, string functionName, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (functionCall.Parameters.Count != 1)
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var attempt, out var input))
+            {
+                return attempt;
+            }
+
+            if (!IsSafeToCaseConvert(input!))
+            {
+                return FoldAttempt.Fail("non-literal-expression:case-conversion-collation-sensitive", Span(functionCall));
+            }
+
+            var converted = string.Equals(functionName, "UPPER", StringComparison.OrdinalIgnoreCase)
+                ? input!.ToUpperInvariant()
+                : input!.ToLowerInvariant();
+
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, converted)]);
+        }
+
+        private static bool IsSafeToCaseConvert(string input) => input.All(c => c is not ('i' or 'I') && c <= 127);
+
+        /// <summary>
+        /// Oracle-verified: SQL Server's LTRIM/RTRIM trim ONLY the space character (0x20) - a tab
+        /// or other whitespace is left untouched, unlike .NET's parameterless Trim()/TrimStart()/
+        /// TrimEnd(), which strip every Unicode whitespace character - so this trims ' '
+        /// explicitly rather than using the parameterless overload. The two-argument SQL 2022+
+        /// overload (a custom trim-character set) is out of scope - declines via the parameter
+        /// count check below, same as any other unsupported call shape.
+        /// </summary>
+        private FoldAttempt TryFoldTrim(FunctionCall functionCall, string functionName, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (functionCall.Parameters.Count != 1)
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var attempt, out var input))
+            {
+                return attempt;
+            }
+
+            var trimmed = string.Equals(functionName, "LTRIM", StringComparison.OrdinalIgnoreCase)
+                ? input!.TrimStart(' ')
+                : input!.TrimEnd(' ');
+
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, trimmed)]);
+        }
+
+        /// <summary>
+        /// Oracle-verified: <c>LEFT</c>/<c>RIGHT</c> with a length at or beyond the input's own
+        /// length simply return the whole string (no padding) - matches .NET's own clamped
+        /// slicing once the length is capped at the input's length. A negative length raises Msg
+        /// 536 ("Invalid length parameter") on the real server rather than returning anything -
+        /// the real EXEC would never even reach this dynamic SQL text on that path, a materially
+        /// different runtime outcome this scanner has no representation for, so it declines
+        /// rather than guessing at a runtime error. The length argument must itself be a literal
+        /// integer - this scanner tracks only STRING variable values, never numeric ones, so a
+        /// length carried in a variable is declined, not guessed.
+        /// </summary>
+        private FoldAttempt TryFoldLeftOrRight(
+            IList<ScalarExpression> parameters, string functionName, TSqlFragment site, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (parameters.Count != 2)
+            {
+                return FoldAttempt.Fail("non-literal-expression:other", Span(site));
+            }
+
+            if (!TryFoldSingleAssemblyArgument(parameters[0], folded, foldingEnabled, out var attempt, out var input))
+            {
+                return attempt;
+            }
+
+            if (!TryFoldIntegerLiteral(parameters[1], out var length))
+            {
+                return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(parameters[1]));
+            }
+
+            if (length < 0)
+            {
+                return FoldAttempt.Fail("non-literal-expression:negative-length", Span(site));
+            }
+
+            var input0 = input!;
+            var clampedLength = Math.Min(length, input0.Length);
+            var result = string.Equals(functionName, "LEFT", StringComparison.OrdinalIgnoreCase)
+                ? input0[..clampedLength]
+                : input0[^clampedLength..];
+
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
+        }
+
+        /// <summary>
+        /// Oracle-verified: <c>SUBSTRING(s, start, length)</c> clamps a <c>length</c>-beyond-the-
+        /// end down to whatever remains (matching .NET's own clamped slicing), and a <c>start</c>
+        /// beyond the input's length returns an empty string rather than
+        /// erroring. A negative length raises Msg 536 exactly like LEFT/RIGHT (declined, not
+        /// guessed - see <see cref="TryFoldLeftOrRight"/>). A start position below 1 IS real,
+        /// defined T-SQL behavior (oracle-verified: the requested window still clips against the
+        /// string's actual bounds) but is rare enough in real dynamic-SQL construction that this
+        /// scanner declines it rather than adding the extra below-1 clipping arithmetic for a
+        /// shape that essentially never appears outside adversarial input. Both start and length
+        /// must be literal integers, for the same reason as <see cref="TryFoldLeftOrRight"/>'s
+        /// length argument.
+        /// </summary>
+        private FoldAttempt TryFoldSubstring(FunctionCall functionCall, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (functionCall.Parameters.Count != 3)
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var attempt, out var input))
+            {
+                return attempt;
+            }
+
+            if (!TryFoldIntegerLiteral(functionCall.Parameters[1], out var start) || !TryFoldIntegerLiteral(functionCall.Parameters[2], out var length))
+            {
+                return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(functionCall));
+            }
+
+            if (length < 0)
+            {
+                return FoldAttempt.Fail("non-literal-expression:negative-length", Span(functionCall));
+            }
+
+            if (start < 1)
+            {
+                return FoldAttempt.Fail("non-literal-expression:substring-start-below-one", Span(functionCall));
+            }
+
+            var input0 = input!;
+            if (start > input0.Length)
+            {
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, string.Empty)]);
+            }
+
+            var clampedLength = Math.Min(length, input0.Length - (start - 1));
+            var result = input0.Substring(start - 1, clampedLength);
+
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, result)]);
+        }
+
+        /// <summary>Folds a bare integer literal argument (e.g. LEFT/RIGHT/SUBSTRING's length or start position) - this scanner tracks only string variable values, so anything other than a literal (a variable, an expression) is declined rather than guessed.</summary>
+        private static bool TryFoldIntegerLiteral(ScalarExpression expression, out int value)
+        {
+            switch (expression)
+            {
+                case IntegerLiteral literal when int.TryParse(literal.Value, out value):
+                    return true;
+
+                case ParenthesisExpression paren:
+                    return TryFoldIntegerLiteral(paren.Expression, out value);
+
+                // A negative literal (e.g. the -1 in LEFT(@x, -1)) is NOT its own literal shape -
+                // ScriptDom parses the sign as a UnaryExpression wrapping an ordinary
+                // IntegerLiteral (confirmed via the parsed tree, not assumed), the same way a
+                // negative NumericLiteral would be. Positive's explicit '+' sign is handled the
+                // same way for symmetry, even though it never changes the value.
+                case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary
+                    when TryFoldIntegerLiteral(unary.Expression, out var innerValue):
+                    value = -innerValue;
+                    return true;
+
+                case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
+                    return TryFoldIntegerLiteral(unary.Expression, out value);
+
+                default:
+                    value = 0;
+                    return false;
             }
         }
 
@@ -718,26 +1153,19 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            var inputAttempt = TryFoldExpression(functionCall.Parameters[0], folded, foldingEnabled);
-            if (!inputAttempt.Success)
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var inputAttempt, out var input))
             {
                 return inputAttempt;
             }
 
             string? delimiterText = null;
-            if (functionCall.Parameters.Count == 2)
+            if (functionCall.Parameters.Count == 2
+                && !TryFoldSingleAssemblyArgument(functionCall.Parameters[1], folded, foldingEnabled, out var delimiterAttempt, out delimiterText))
             {
-                var delimiterAttempt = TryFoldExpression(functionCall.Parameters[1], folded, foldingEnabled);
-                if (!delimiterAttempt.Success)
-                {
-                    return delimiterAttempt;
-                }
-
-                delimiterText = string.Concat(delimiterAttempt.Segments!.Select(s => s.Value));
+                return delimiterAttempt;
             }
 
-            var input = string.Concat(inputAttempt.Segments!.Select(s => s.Value));
-            var quoted = QuoteName(input, delimiterText);
+            var quoted = QuoteName(input!, delimiterText);
             if (quoted is null)
             {
                 // Oracle-verified: QUOTENAME itself returns SQL NULL for an input over 128
@@ -748,7 +1176,36 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:quotename-null-result", Span(functionCall));
             }
 
-            return FoldAttempt.Ok([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, quoted)]);
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, quoted)]);
+        }
+
+        /// <summary>
+        /// Folds one function-call argument that must resolve to exactly ONE concrete value to
+        /// be usable inside a string-builder function (QUOTENAME and, roadmap, its sibling
+        /// whitelisted builders) - an argument itself carrying multiple possible assemblies (a
+        /// variable set by divergent IF branches upstream) is a rare compound shape this scanner
+        /// declines rather than cross-producing through the partial-NULL edge cases a function
+        /// like QUOTENAME can hit per-combination.
+        /// </summary>
+        private bool TryFoldSingleAssemblyArgument(
+            ScalarExpression expression, Dictionary<string, FoldState> folded, bool foldingEnabled, out FoldAttempt attempt, out string? value)
+        {
+            attempt = TryFoldExpression(expression, folded, foldingEnabled);
+            if (!attempt.Success)
+            {
+                value = null;
+                return false;
+            }
+
+            if (attempt.Assemblies!.Count > 1)
+            {
+                attempt = FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(expression));
+                value = null;
+                return false;
+            }
+
+            value = string.Concat(attempt.Assemblies[0].Select(s => s.Value));
+            return true;
         }
 
         /// <summary>

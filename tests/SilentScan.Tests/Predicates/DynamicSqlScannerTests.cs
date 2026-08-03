@@ -41,8 +41,13 @@ public sealed class DynamicSqlScannerTests
     public void Scan_ExecOfVariableAssignedFromFunctionCall_Unanalyzable()
     {
         // The assignment itself isn't a bare literal/concatenation - CLAUDE.md's known hard
-        // case (function calls like QUOTENAME aren't reimplemented, just declined honestly).
-        var result = Scan("DECLARE @sql NVARCHAR(MAX) = UPPER(N'select 1'); EXEC(@sql);");
+        // case (an ordinary function call not on the whitelisted string-builder list is not
+        // reimplemented, just declined honestly). REVERSE is deliberately NOT one of the
+        // whitelisted builders (DynamicSqlScanner.WhitelistedStringBuilders), unlike UPPER/LOWER/
+        // LTRIM/RTRIM/LEFT/RIGHT/SUBSTRING/QUOTENAME which now fold - see
+        // Scan_ExecOfVariableAssignedFromUpperOnAsciiLiteral_TierC_ProducesAnalyzableScript below
+        // for that behavior.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REVERSE(N'select 1'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
@@ -122,19 +127,21 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableReassignedInsideIfBranch_Unanalyzable()
+    public void Scan_ExecOfVariableReassignedInsideIfBranch_BothBranchAssembliesAnalyzed()
     {
-        // A reassignment under a branch makes the value entering the EXEC ambiguous -
-        // CLAUDE.md: "no assignment under IF/WHILE/TRY-CATCH/GOTO-reachable branches".
+        // Branch-fold coverage (roadmap "trace dynamic SQL across IF/ELSE branches"): an IF's
+        // THEN/ELSE are mutually exclusive, fully-determined outcomes, so when BOTH fold to a
+        // constant value (here: reassigned, or left unchanged - the implicit ELSE), the real
+        // value after the statement is provably one of the two - both are analyzed, not tainted.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "IF 1 = 1 BEGIN SET @sql = N'SELECT 2'; END " +
             "EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("diverges-across-if-branches", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 2");
     }
 
     [Fact]
@@ -221,20 +228,23 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableAfterTryCatchThatTouchesIt_Unanalyzable()
+    public void Scan_ExecOfVariableAfterTryCatchThatTouchesIt_BothOutcomeAssembliesAnalyzed()
     {
-        // How far the TRY block got before an error is unknowable, so anything it (or CATCH)
-        // reassigns is ambiguous afterward.
+        // After the TRY/CATCH statement, exactly one of two fully-determined outcomes happened:
+        // TRY ran to completion with no exception (tryDict's own value), or an exception
+        // occurred and CATCH ran to completion (catchDict's value, itself built from the
+        // pre-TRY baseline - see HandleTryCatch's own comment on why CATCH never starts from
+        // tryDict). Both fold constant here, so both are analyzed rather than tainted.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "BEGIN TRY SET @sql = N'SELECT 2'; END TRY " +
             "BEGIN CATCH SET @sql = N'SELECT 3'; END CATCH " +
             "EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("diverges-across-try-catch", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 2");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 3");
     }
 
     [Fact]
@@ -356,7 +366,7 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableReassignedInsideElseBranch_Unanalyzable()
+    public void Scan_ExecOfVariableReassignedInsideElseBranch_BothBranchAssembliesAnalyzed()
     {
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -364,10 +374,10 @@ public sealed class DynamicSqlScannerTests
             "ELSE BEGIN SET @sql = N'SELECT 3'; END " +
             "EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("diverges-across-if-branches", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 2");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 3");
     }
 
     [Fact]
@@ -974,5 +984,281 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal("non-literal-expression:function-call", finding.Reason);
+    }
+
+    // ------------------------------------------------------------------
+    // Whitelisted string-builder folding (roadmap "fold high-volume string-builder functions in
+    // dynamic SQL, oracle-checked") - every expected string and every decline below was verified
+    // directly against a live Docker SQL Server instance, not assumed from documentation.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromUpperOnAsciiLiteral_TierC_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = UPPER(N'select 1'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromLowerOnAsciiLiteral_TierC_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = LOWER(N'SELECT 1'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("select 1", script.InnerText);
+    }
+
+    [Theory]
+    [InlineData("UPPER(N'select id')")] // contains 'i'
+    [InlineData("UPPER(N'SELECT Id')")] // contains 'I'
+    [InlineData("LOWER(N'select ID')")]
+    public void Scan_CaseConversionOnInputContainingI_Declines_TurkishCollationAmbiguity(string expression)
+    {
+        // Oracle-verified: UPPER('i' COLLATE Turkish_CI_AS) is 'İ', not 'I' as under every other
+        // collation family - the one ASCII letter pair whose case mapping genuinely depends on
+        // collation. This scanner has no collation context at all, so it declines rather than
+        // guessing which mapping the real target database uses.
+        var result = Scan($"DECLARE @sql NVARCHAR(MAX) = {expression}; EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:case-conversion-collation-sensitive", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_CaseConversionOnNonAsciiInput_Declines()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = UPPER(N'Ä'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:case-conversion-collation-sensitive", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_LtrimOnSpacePaddedLiteral_TrimsOnlySpace_NotTab()
+    {
+        // Oracle-verified: LTRIM/RTRIM trim ONLY the space character (0x20) - a leading tab is
+        // left untouched, unlike .NET's parameterless TrimStart(), which strips all whitespace.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = LTRIM(N'  " + '\t' + "x'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("\tx", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_RtrimOnSpacePaddedLiteral_TrimsOnlySpace_NotTab()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = RTRIM(N'x" + '\t' + "  '); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("x\t", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_LeftWithinBounds_TierC_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdef', 3); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("abc", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_LeftLengthBeyondInput_ClampsToWholeString()
+    {
+        // Oracle-verified: LEFT('abc', 10) returns 'abc' - no padding, no error.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = LEFT(N'abc', 10); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("abc", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_RightWithinBounds_TierC_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = RIGHT(N'abcdef', 3); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("def", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_LeftWithNegativeLength_Declines()
+    {
+        // Oracle-verified: LEFT with a negative length raises Msg 536 rather than returning
+        // anything - the real EXEC would never reach this text on that path.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = LEFT(N'abc', -1); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:negative-length", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_LeftWithNonLiteralLength_Declines()
+    {
+        // This scanner tracks only string variable values, never numeric ones - a length carried
+        // in a variable is declined, not guessed.
+        var result = Scan("DECLARE @n INT = 3; DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdef', @n); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_SubstringWithinBounds_TierC_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', 2, 3); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("bcd", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SubstringLengthBeyondInput_ClampsToRemainder()
+    {
+        // Oracle-verified: SUBSTRING('abcdef', 2, 100) returns 'bcdef' - clamped, not an error.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', 2, 100); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("bcdef", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SubstringStartBeyondInput_FoldsToEmptyString()
+    {
+        // Oracle-verified: SUBSTRING('abcdef', 10, 5) returns an empty string, not an error.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'X' + SUBSTRING(N'abcdef', 10, 5); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("X", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SubstringWithNegativeLength_Declines()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', 2, -1); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:negative-length", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_SubstringWithStartBelowOne_Declines()
+    {
+        // Real, defined T-SQL behavior (oracle-verified: the window still clips against the
+        // string's bounds), but rare enough outside adversarial input that this scanner declines
+        // rather than adding the extra below-1 clipping arithmetic.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', -2, 5); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:substring-start-below-one", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_SubstringWithNonLiteralStart_Declines()
+    {
+        var result = Scan("DECLARE @n INT = 2; DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', @n, 3); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_LeftOnFoldedVariable_TierC_ProducesAnalyzableScript()
+    {
+        // The realistic pattern this fold exists for: a variable that already folded constant
+        // via straight-line DECLARE tracing, THEN wrapped in a whitelisted builder.
+        var result = Scan(
+            "DECLARE @table VARCHAR(50) = 'OrdersTable'; " +
+            "DECLARE @sql VARCHAR(MAX) = 'SELECT * FROM ' + LEFT(@table, 6); " +
+            "EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM Orders", script.InnerText);
+    }
+
+    // ------------------------------------------------------------------
+    // Branch-fold coverage (roadmap "trace provably-constant dynamic SQL across IF/ELSE/TRY-
+    // CATCH branches") - the optional-filter accumulation pattern this scanner previously declined
+    // outright is now analyzed as the union of every branch's own provably-constant assembly.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_ThreeWayIfElseIfElse_AllThreeBranchesFold_AllThreeAssembliesAnalyzed()
+    {
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE @mode INT = 0; " +
+            "IF @mode = 0 BEGIN SET @sql = N'SELECT 2'; END " +
+            "ELSE IF @mode = 1 BEGIN SET @sql = N'SELECT 3'; END " +
+            "ELSE BEGIN SET @sql = N'SELECT 4'; END " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(3, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 2");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 3");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 4");
+    }
+
+    [Fact]
+    public void Scan_TenIndependentOptionalFilters_CardinalityCapExceeded_Unanalyzable()
+    {
+        // 10 independent optional filters, each appending to @sql under its own IF with no ELSE,
+        // produce up to 2^10 = 1024 possible assemblies - comfortably over the 32-assembly cap.
+        var filters = string.Concat(Enumerable.Range(0, 10)
+            .Select(i => $"IF @f{i} = 1 BEGIN SET @sql = @sql + N' AND c{i} = 1'; END "));
+        var declares = string.Concat(Enumerable.Range(0, 10).Select(i => $"DECLARE @f{i} BIT = 0; "));
+
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE 1 = 1'; " +
+            declares +
+            filters +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.AnalyzableScripts);
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("diverges-across-if-branches:cardinality-cap", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_IfBranchOwnFoldFails_ElseBranchFine_MergedReasonIsBranchsOwn_NotDivergence()
+    {
+        // The THEN branch's own assignment can't fold (a function call this scanner doesn't
+        // whitelist) - the merged state must carry THAT reason, not "diverges-across-if-branches",
+        // even though the ELSE branch folded cleanly.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "IF 1 = 1 BEGIN SET @sql = REVERSE(N'SELECT 2'); END " +
+            "ELSE BEGIN SET @sql = N'SELECT 3'; END " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_IfBranchesProduceByteIdenticalAssemblies_CollapseToOneScript()
+    {
+        // Both branches happen to assign the exact same literal text - the union must not report
+        // the same defect twice just because two independent branches agree on it.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "IF 1 = 1 BEGIN SET @sql = N'SELECT 2'; END " +
+            "ELSE BEGIN SET @sql = N'SELECT 2'; END " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 2", script.InnerText);
     }
 }

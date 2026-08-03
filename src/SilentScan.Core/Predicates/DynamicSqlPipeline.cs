@@ -2,6 +2,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Reporting;
 
 namespace SilentScan.Core.Predicates;
 
@@ -44,12 +45,84 @@ public static class DynamicSqlPipeline
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds)
     {
         var accumulator = new ResultAccumulator();
-        foreach (var script in scripts)
+
+        // Branch-fold coverage (roadmap "trace dynamic SQL across IF/ELSE/TRY-CATCH branches")
+        // can turn ONE call site into several DynamicSqlScripts, one per possible constant
+        // assembly - grouping by CallSite (already identical across every assembly of the same
+        // site, and scripts already arrive call-site-contiguous from DynamicSqlScanner's own
+        // visitation order, so this never reorders anything observably) lets each call site's
+        // own substantive findings dedupe against EACH OTHER before joining the overall result,
+        // without ever merging two genuinely different call sites' findings together.
+        foreach (var group in scripts.GroupBy(s => s.CallSite))
         {
-            ProcessScript(script, catalog, lineage, depth, seeds, accumulator);
+            var perCallSite = new ResultAccumulator();
+            foreach (var script in group)
+            {
+                ProcessScript(script, catalog, lineage, depth, seeds, perCallSite);
+            }
+
+            accumulator.Findings.AddRange(perCallSite.Findings);
+            accumulator.Skipped.AddRange(perCallSite.Skipped);
+            accumulator.Tier1.AddRange(DedupeTier1(perCallSite.Tier1));
+            accumulator.Typed.AddRange(TypedFindingDeduplicator.Dedupe(perCallSite.Typed));
+            accumulator.ExpressionDerived.AddRange(DedupeExpressionDerived(perCallSite.ExpressionDerived));
+            accumulator.CollationConflicts.AddRange(DedupeCollationConflicts(perCallSite.CollationConflicts));
+            accumulator.WriteLoss.AddRange(DedupeWriteLoss(perCallSite.WriteLoss));
         }
 
         return accumulator.ToResult();
+    }
+
+    /// <summary>
+    /// A syntactic Tier-1 finding's identity, position-independent (unlike <see
+    /// cref="SargabilityFinding.SourcePath"/>/<see cref="SargabilityFinding.Line"/>/<see
+    /// cref="SargabilityFinding.Column"/>, which legitimately differ across two assemblies of the
+    /// same call site whenever an earlier branch's appended text shifts everything after it) -
+    /// the same defect (e.g. <c>UPPER(Code)</c> on the same table) surfacing in more than one
+    /// assembly is one finding, not one per assembly.
+    /// </summary>
+    private static List<SargabilityFinding> DedupeTier1(List<SargabilityFinding> findings)
+    {
+        var seen = new HashSet<(SargabilityFindingKind Kind, string ColumnName, string? Detail, string? TableQualifiedName)>();
+        return findings
+            .Where(finding => seen.Add((finding.Kind, finding.ColumnName, finding.Detail, finding.TableQualifiedName)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Keys on <see cref="TransformationSite.Description"/> only, never its own SourcePath/Line -
+    /// those describe where the CAST/CONVERT layer lives in the ORIGINAL file, which is identical
+    /// across every assembly of the same call site regardless of which assembly produced the
+    /// finding, so including them would never actually cause a false collapse - but the finding's
+    /// own SourcePath/Line/ColumnPosition (excluded here entirely) DO legitimately differ per
+    /// assembly, which is the reason this key exists at all.
+    /// </summary>
+    private static List<ExpressionDerivedFinding> DedupeExpressionDerived(List<ExpressionDerivedFinding> findings)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return findings.Where(finding => seen.Add(ExpressionDerivedKey(finding))).ToList();
+    }
+
+    private static string ExpressionDerivedKey(ExpressionDerivedFinding finding) => string.Join(
+        '\u0001',
+        finding.ColumnName,
+        string.Join(',', finding.TransformationChain.Select(t => t.Description)),
+        string.Join(',', finding.UnderlyingBaseColumns.Select(b => $"{b.TableQualifiedName}.{b.ColumnName}:{b.Indexed}")));
+
+    private static List<CollationConflictFinding> DedupeCollationConflicts(List<CollationConflictFinding> findings)
+    {
+        var seen = new HashSet<(string, string, string, string, string, string, string)>();
+        return findings.Where(finding => seen.Add((
+            finding.FirstTableQualifiedName, finding.FirstColumnName, finding.FirstCollationName,
+            finding.SecondTableQualifiedName, finding.SecondColumnName, finding.SecondCollationName, finding.Operator))).ToList();
+    }
+
+    private static List<WriteLossFinding> DedupeWriteLoss(List<WriteLossFinding> findings)
+    {
+        var seen = new HashSet<(string, string, WriteLossKind, SqlType, SqlType)>();
+        return findings
+            .Where(finding => seen.Add((finding.TableQualifiedName, finding.ColumnName, finding.Kind, finding.TargetType, finding.SourceType)))
+            .ToList();
     }
 
     /// <summary>Mutable accumulator for one <see cref="ProcessScript"/> loop's worth of findings - a plain field bag rather than growing the caller's own local-variable count, which is most of what was driving its cognitive complexity over the line.</summary>
