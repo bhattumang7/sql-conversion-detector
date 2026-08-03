@@ -158,7 +158,8 @@ published externally without Umang's explicit go-ahead.
   Make sure that the tests are meaningful and not sake of doing - assert the real ting.
 * **Zero issues, every category.** `dotnet build` (warnings are errors) and
   `dotnet test` clean, and a Sonar scan at 0 issues, before every commit —
-  via `sonar-scan.ps1` then `sonar-check-issues.sh`.
+  via `sonar-scan.ps1` (one script: scans, waits for processing, prints the
+  result; add `-Verbose` for full scan/build/test output).
 * Deterministic output ordering. No network calls in Core. Findings schema is
   versioned JSON; SARIF export doubles the tool as a CI gate later.
 * **Git:** conventional commits, authored as Umang Bhatt

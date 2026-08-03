@@ -47,11 +47,13 @@ CLI directly for the full-scale sweep.
 ## Sonar
 
 ```
-pwsh ./sonar-scan.ps1              # build + test + coverage + upload
-./sonar-check-issues.sh            # print open issues + quality gate status
+pwsh ./sonar-scan.ps1              # build + test + coverage + upload + wait + print result
+pwsh ./sonar-scan.ps1 -Verbose     # same, with full scan/build/test output as it runs
 ```
 
 The SonarQube MCP server is disabled in this session (it pages full issue
-objects and burns context). `sonar-check-issues.sh` hits the REST API
-directly with `curl`/`jq` and prints a compact table instead — use that to
-check gate status before every commit, per CLAUDE.md.
+objects and burns context). `sonar-scan.ps1` hits the REST API directly
+instead, in the same script that ran the scan — quiet by default (a one-line
+"Quality gate: OK" when clean), full file:line/severity/rule/message detail
+for every issue/hotspot when not. Use it to check gate status before every
+commit, per CLAUDE.md.

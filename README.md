@@ -102,8 +102,8 @@ database and writes a CSV. Median of 5 warm runs per cell.
 ## Sonar
 
 ```
-pwsh ./sonar-scan.ps1              # build + test + coverage + upload
-./sonar-check-issues.sh            # print open issues + quality gate status
+pwsh ./sonar-scan.ps1              # build + test + coverage + upload + wait + print result
+pwsh ./sonar-scan.ps1 -Verbose     # same, with full scan/build/test output as it runs
 ```
 
 ## Layout
