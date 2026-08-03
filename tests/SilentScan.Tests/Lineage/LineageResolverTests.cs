@@ -217,6 +217,93 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
+    public void Resolve_MinOfTinyIntColumn_OracleVerified_PreservesExactArgumentType()
+    {
+        // Oracle-verified: MIN(TinyIntCol) returns tinyint - unlike SUM/AVG below, MIN/MAX never
+        // widen an integer-family argument.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (Qty TINYINT NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT MIN(Qty) AS MinQty FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("MinQty")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.TinyInt, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_MaxOfMoneyColumn_OracleVerified_PreservesExactArgumentType()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (Total MONEY NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT MAX(Total) AS MaxTotal FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("MaxTotal")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.Money, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_SumOfTinyIntColumn_OracleVerified_WidensToInt()
+    {
+        // Oracle-verified: SUM(TinyIntCol) returns int, not tinyint - SQL Server widens SUM/AVG's
+        // integer-family argument to avoid overflow, unlike MIN/MAX which preserve it exactly.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (Qty TINYINT NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT SUM(Qty) AS TotalQty FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("TotalQty")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.Int, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_AvgOfSmallIntColumn_OracleVerified_WidensToInt()
+    {
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (Qty SMALLINT NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT AVG(Qty) AS AvgQty FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("AvgQty")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.Int, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_SumOfMoneyColumn_OracleVerified_PreservesMoneyCategory()
+    {
+        // Distinguishes the widening rule from a blanket "always Int": non-integer categories
+        // (money/decimal/float/real) pass through SUM/AVG unchanged.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (Total MONEY NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT SUM(Total) AS TotalSum FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("TotalSum")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.Money, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_DateAddOnDateColumn_OracleVerified_TakesThirdArgumentType()
+    {
+        // Oracle-verified: DATEADD(day, 1, DateCol) returns date, matching its THIRD argument
+        // (the date expression, index 2) - not its datepart keyword at index 0, and not a fixed
+        // type the way GETDATE()/YEAR() are.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (StartDate DATE NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT DATEADD(day, 1, StartDate) AS NextDate FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("NextDate")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.Date, expr.InferredType!.Category);
+    }
+
+    [Fact]
     public void Resolve_ScalarUdfCallInSelectList_ResolvesToExpressionWithNoInferredType()
     {
         // A scalar UDF is not in the curated builtin table and is out of scope for this pass

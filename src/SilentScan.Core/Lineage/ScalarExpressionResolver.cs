@@ -69,10 +69,15 @@ public static class ScalarExpressionResolver
         var inputs = CollectColumnInputs(functionCall, context);
         var name = functionCall.FunctionName.Value;
 
-        if (BuiltinFunctionTypeResolver.TakesFirstArgumentType(name) && functionCall.Parameters.Count > 0)
+        if (BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
         {
-            var firstArgType = ColumnProvenanceAnalysis.TryGetScalarType(Resolve(functionCall.Parameters[0], context));
-            return new ColumnProvenance.Expression(firstArgType, inputs, context.SourcePath, functionCall.StartLine);
+            var argumentType = ColumnProvenanceAnalysis.TryGetScalarType(Resolve(functionCall.Parameters[argumentIndex], context));
+            if (argumentType is not null && BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name))
+            {
+                argumentType = BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
+            }
+
+            return new ColumnProvenance.Expression(argumentType, inputs, context.SourcePath, functionCall.StartLine);
         }
 
         var fixedType = BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);

@@ -1282,9 +1282,15 @@ public static class TypedPredicateExtractor
         {
             var name = functionCall.FunctionName.Value;
 
-            if (Rules.BuiltinFunctionTypeResolver.TakesFirstArgumentType(name) && functionCall.Parameters.Count > 0)
+            if (Rules.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
             {
-                return new PredicateOperand.Value(OperandType(ResolveOperand(functionCall.Parameters[0], scopeChain)));
+                var argumentType = OperandType(ResolveOperand(functionCall.Parameters[argumentIndex], scopeChain));
+                if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name))
+                {
+                    argumentType = Rules.BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
+                }
+
+                return new PredicateOperand.Value(argumentType);
             }
 
             var fixedType = Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
