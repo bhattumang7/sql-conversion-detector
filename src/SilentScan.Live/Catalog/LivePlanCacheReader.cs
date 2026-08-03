@@ -18,27 +18,43 @@ namespace SilentScan.Live.Catalog;
 /// </summary>
 public sealed class LivePlanCacheReader
 {
-    // Scoped to the connected database (qp.dbid = DB_ID()) - the plan cache is instance-wide,
-    // and without this filter a table/column name that happens to match one in a completely
-    // unrelated database on the same instance would silently contaminate this database's
-    // evidence (a real risk on any shared/multi-tenant instance, not a theoretical one - caught
-    // while writing this reader's own test, which runs against a shared Docker instance with
-    // other test databases live on it at the same time).
+    // Scoped to the connected database, but NOT via qp.dbid (sys.dm_exec_query_plan's own dbid
+    // column) - that column only exists on the fully-decoded plan, so a naive
+    // "CROSS APPLY sys.dm_exec_query_plan(...) WHERE qp.dbid = DB_ID()" still forces the engine
+    // to decode EVERY cached plan instance-wide before the filter can discard the ones that
+    // don't match. On a shared instance, another connection concurrently dropping an unrelated
+    // database can transiently fail that decode ("Database 'X' is in transition") for a plan
+    // this query was always going to throw away anyway.
+    //
+    // sys.dm_exec_plan_attributes(plan_handle) exposes the same dbid as a cheap key/value
+    // attribute read off the plan cache entry itself, without decoding the plan XML at all
+    // (verified directly against the live Docker instance: the 'dbid' attribute is present and
+    // correct for every cached plan, including proc-object plans compiled in a specific
+    // database). Filtering FilteredPlans down to this database's own plan handles first, and
+    // only THEN invoking sys.dm_exec_query_plan on that already-narrowed set, means the fragile
+    // decode is never attempted on a plan belonging to some other, possibly-currently-dropping
+    // database in the first place - the failure mode is structurally unreachable, not just
+    // retried around.
     private const string Sql = """
-        SELECT TOP (@maxPlans) qs.execution_count, qp.query_plan
-        FROM sys.dm_exec_query_stats qs
-        CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
-        WHERE qp.query_plan IS NOT NULL AND qp.dbid = DB_ID()
-        ORDER BY qs.execution_count DESC;
+        WITH FilteredPlans AS (
+            SELECT DISTINCT qs.plan_handle, qs.execution_count
+            FROM sys.dm_exec_query_stats qs
+            CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) epa
+            WHERE epa.attribute = 'dbid' AND TRY_CONVERT(int, epa.value) = DB_ID()
+        )
+        SELECT TOP (@maxPlans) fp.execution_count, qp.query_plan
+        FROM FilteredPlans fp
+        CROSS APPLY sys.dm_exec_query_plan(fp.plan_handle) qp
+        WHERE qp.query_plan IS NOT NULL
+        ORDER BY fp.execution_count DESC;
         """;
 
-    // sys.dm_exec_query_plan decodes plan cache entries instance-wide before this query's own
-    // WHERE qp.dbid = DB_ID() filter narrows the result set - on a shared instance, another
-    // connection concurrently dropping an unrelated database can transiently fail that decode
-    // ("Database 'X' is in transition") even though this query never touches that database's
-    // data. Retried a few times before degrading to unavailable, since a permission denial (the
-    // other realistic failure mode) fails identically on every attempt and still ends up
-    // reported the same way once retries are exhausted.
+    // The cross-database decode race the comment above describes is now structurally
+    // unreachable, but a login can still lack VIEW SERVER STATE (a permission denial, which
+    // fails identically on every attempt), and sys.dm_exec_query_plan can still fail to decode a
+    // plan belonging to THIS OWN database's current DDL churn in a corpus-scanning run (this
+    // reader's own test suite creates/drops databases around it). Kept as a safety net for that
+    // narrower residual case, not as a substitute for the structural fix above.
     private const int MaxAttempts = 6;
 
     private readonly string _connectionString;
