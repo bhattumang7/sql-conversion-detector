@@ -44,7 +44,16 @@ param(
     [string]$Password     = 'SonarPassword@1',
     [string]$HostUrl      = 'http://localhost:9010',
     [string]$ProjectKey   = 'silentscan',
-    [switch]$WithCoverage = $true
+    [switch]$WithCoverage = $true,
+    # Per-step wall-clock ceilings (seconds). See Invoke-Step's remarks for why these exist at
+    # all. Generous defaults: `test` in particular deploys and drops real Docker SQL Server
+    # databases per Oracle-tagged fixture (docs/local-dev.md), which is legitimately slow, not
+    # hung - the cap exists to catch an unresponsive dependency, not to rush a healthy run.
+    [int]$BeginTimeoutSeconds = 180,
+    [int]$BuildTimeoutSeconds = 600,
+    [int]$TestTimeoutSeconds  = 1800,
+    [int]$EndTimeoutSeconds   = 300,
+    [int]$RestTimeoutSeconds  = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,22 +61,38 @@ $RootDir  = $PSScriptRoot
 $Solution = Join-Path $RootDir 'SilentScan.slnx'
 $IsVerbose = $VerbosePreference -eq 'Continue'
 
-# Runs an external command, capturing its combined output. Streamed live only
-# under -Verbose; otherwise captured silently and dumped in full ONLY if the
-# command fails - so a failure's specific detail is never lost, but a clean
-# run never has to scroll past four steps of routine build/scan noise to find
-# out whether it passed.
+# Runs an external command under a hard wall-clock cap, capturing its combined
+# output. Streamed live only under -Verbose; otherwise captured silently and
+# dumped in full ONLY if the command fails - so a failure's specific detail is
+# never lost, but a clean run never has to scroll past four steps of routine
+# build/scan noise to find out whether it passed.
+#
+# The timeout is not optional and not merely a nicety: this previously ran
+# `dotnet sonarscanner begin/end`, `dotnet build`, and `dotnet test` as plain
+# unbounded external calls. When the SonarQube container it was talking to
+# restarted mid-run (observed directly - an unrelated container restart, not
+# something this script did), `dotnet sonarscanner end`'s upload call hung
+# forever waiting on a socket that would never respond, and nothing noticed
+# for over 111 minutes until a human did. Every step here now has an explicit
+# ceiling: it fails loudly with a clear timeout message instead of hanging
+# silently. Implemented via the `timeout` coreutil rather than PowerShell job
+# machinery - Start-Job/Stop-Job does not reliably tear down a job's own
+# native child processes on Linux, `timeout` (with --kill-after as a SIGKILL
+# backstop if SIGTERM is ignored) does.
 function Invoke-Step {
     param(
         [Parameter(Mandatory)] [string]$Label,
-        [Parameter(Mandatory)] [scriptblock]$Command
+        [Parameter(Mandatory)] [string]$FilePath,
+        [Parameter(Mandatory)] [string[]]$ArgumentList,
+        [Parameter(Mandatory)] [int]$TimeoutSeconds
     )
-    Write-Verbose "=== $Label ==="
+    Write-Verbose "=== $Label (timeout ${TimeoutSeconds}s) ==="
+    $timeoutArgs = @('--kill-after=10', "${TimeoutSeconds}s", $FilePath) + $ArgumentList
     if ($IsVerbose) {
-        & $Command
+        & timeout @timeoutArgs
         $exit = $LASTEXITCODE
     } else {
-        $output = & $Command 2>&1
+        $output = & timeout @timeoutArgs 2>&1
         $exit = $LASTEXITCODE
         if ($exit -ne 0) {
             Write-Host ""
@@ -75,6 +100,12 @@ function Invoke-Step {
             $output | ForEach-Object { Write-Host $_ }
             Write-Host "--- end $Label output ---" -ForegroundColor Red
         }
+    }
+    # GNU coreutils `timeout` exit code 124 means the command was killed for exceeding the
+    # deadline (137 if --kill-after's SIGKILL was the one that landed) - surface that distinctly
+    # rather than letting it read as an ordinary tool failure.
+    if ($exit -eq 124 -or $exit -eq 137) {
+        throw "$Label timed out after ${TimeoutSeconds}s and was killed."
     }
     return $exit
 }
@@ -85,6 +116,9 @@ if (-not (Get-Command dotnet-sonarscanner -ErrorAction SilentlyContinue)) {
 }
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
     throw "java not found on PATH. SonarScanner for .NET requires a Java 17+ runtime."
+}
+if (-not (Get-Command timeout -ErrorAction SilentlyContinue)) {
+    throw "timeout (GNU coreutils) not found on PATH. Required to bound every external dotnet/sonarscanner call - see Invoke-Step."
 }
 try {
     $status = Invoke-RestMethod "$HostUrl/api/system/status" -TimeoutSec 10
@@ -100,7 +134,8 @@ $authHeader = @{ Authorization = "Basic $credentials" }
 $tokenResponse = Invoke-RestMethod -Method Post `
     -Uri "$HostUrl/api/user_tokens/generate" `
     -Headers $authHeader `
-    -Body @{ name = "$ProjectKey-scan-$([DateTimeOffset]::Now.ToUnixTimeSeconds())" }
+    -Body @{ name = "$ProjectKey-scan-$([DateTimeOffset]::Now.ToUnixTimeSeconds())" } `
+    -TimeoutSec $RestTimeoutSeconds
 if (-not $tokenResponse.token) { throw "Failed to generate a SonarQube token." }
 $Token = $tokenResponse.token
 
@@ -180,7 +215,7 @@ try {
             "/d:sonar.cs.vstest.reportsPaths=$RootDir/TestResults/**/*.trx"
         )
     }
-    $exit = Invoke-Step "sonarscanner begin" { dotnet sonarscanner begin @beginArgs }
+    $exit = Invoke-Step "sonarscanner begin" "dotnet" (@('sonarscanner', 'begin') + $beginArgs) $BeginTimeoutSeconds
     if ($exit -ne 0) { throw "sonarscanner begin failed" }
 
     # -- [3/4] Build (this is what makes C# analysis happen) -----------------
@@ -188,20 +223,20 @@ try {
     # actually recompiled, so an up-to-date incremental build yields an empty
     # C# analysis. A failing project is not fatal - everything that did compile
     # is still analyzed - but it is called out loudly.
-    $exit = Invoke-Step "build" { dotnet build $Solution --no-incremental -v minimal --nologo }
+    $exit = Invoke-Step "build" "dotnet" @('build', $Solution, '--no-incremental', '-v', 'minimal', '--nologo') $BuildTimeoutSeconds
     if ($exit -ne 0) {
         $buildFailed = $true
         Write-Warning "Build reported errors. Projects that failed to compile are NOT analyzed - their C# results will be missing. Continuing so the rest of the scan still uploads."
     }
 
     if ($WithCoverage) {
-        $exit = Invoke-Step "test" {
-            dotnet test $Solution --no-build `
-                --collect "XPlat Code Coverage;Format=opencover" `
-                --results-directory (Join-Path $RootDir 'TestResults') `
-                --logger trx `
-                --verbosity quiet
-        }
+        $exit = Invoke-Step "test" "dotnet" @(
+            'test', $Solution, '--no-build',
+            '--collect', 'XPlat Code Coverage;Format=opencover',
+            '--results-directory', (Join-Path $RootDir 'TestResults'),
+            '--logger', 'trx',
+            '--verbosity', 'quiet'
+        ) $TestTimeoutSeconds
         if ($exit -ne 0) {
             $dotnetTestFailed = $true
             Write-Warning ".NET tests had failures - coverage will still be uploaded"
@@ -209,8 +244,11 @@ try {
     }
 
     # -- [4/4] End / upload --------------------------------------------------
-    Write-Verbose "=== sonarscanner end ==="
-    $endOutput = dotnet sonarscanner end /d:sonar.token="$Token" 2>&1
+    # Captured separately from Invoke-Step (rather than reusing its plain exit-code return)
+    # because the Compute-Engine task id below is parsed out of this step's own stdout.
+    Write-Verbose "=== sonarscanner end (timeout ${EndTimeoutSeconds}s) ==="
+    $endTimeoutArgs = @('--kill-after=10', "${EndTimeoutSeconds}s", 'dotnet', 'sonarscanner', 'end', "/d:sonar.token=$Token")
+    $endOutput = & timeout @endTimeoutArgs 2>&1
     $endExit   = $LASTEXITCODE
     if ($IsVerbose) {
         $endOutput | ForEach-Object { Write-Host $_ }
@@ -220,6 +258,7 @@ try {
         $endOutput | ForEach-Object { Write-Host $_ }
         Write-Host "--- end sonarscanner end output ---" -ForegroundColor Red
     }
+    if ($endExit -eq 124 -or $endExit -eq 137) { throw "sonarscanner end timed out after ${EndTimeoutSeconds}s and was killed." }
     if ($endExit -ne 0) { throw "sonarscanner end failed" }
 
     # -- Wait for background processing --------------------------------------
@@ -247,7 +286,7 @@ try {
     while ($ceStatus -in @('PENDING', 'IN_PROGRESS') -and $elapsed -lt $timeoutSeconds) {
         Start-Sleep -Seconds $pollIntervalSeconds
         $elapsed += $pollIntervalSeconds
-        $task = Invoke-RestMethod -Uri "$HostUrl/api/ce/task?id=$taskId" -Headers $authHeader
+        $task = Invoke-RestMethod -Uri "$HostUrl/api/ce/task?id=$taskId" -Headers $authHeader -TimeoutSec $RestTimeoutSeconds
         if (-not $task -or -not $task.task -or -not $task.task.status) {
             throw "SonarQube returned no task for id '$taskId' (host $HostUrl). This is the failure mode where a task id looks present but the API can't find it - check the token/host are pointed at the same server instance that received the upload."
         }
@@ -277,9 +316,9 @@ if ($dotnetTestFailed) { Write-Warning ".NET tests had failures." }
 # What sonar-check-issues.sh used to be a required second step for - folded in
 # here so a scan's actual result (not just "the upload succeeded") is always
 # what this script ends on.
-$issues = (Invoke-RestMethod -Uri "$HostUrl/api/issues/search?componentKeys=$ProjectKey&resolved=false&ps=200" -Headers $authHeader).issues
-$hotspots = (Invoke-RestMethod -Uri "$HostUrl/api/hotspots/search?projectKey=$ProjectKey&status=TO_REVIEW" -Headers $authHeader).hotspots
-$gateStatus = (Invoke-RestMethod -Uri "$HostUrl/api/qualitygates/project_status?projectKey=$ProjectKey" -Headers $authHeader).projectStatus.status
+$issues = (Invoke-RestMethod -Uri "$HostUrl/api/issues/search?componentKeys=$ProjectKey&resolved=false&ps=200" -Headers $authHeader -TimeoutSec $RestTimeoutSeconds).issues
+$hotspots = (Invoke-RestMethod -Uri "$HostUrl/api/hotspots/search?projectKey=$ProjectKey&status=TO_REVIEW" -Headers $authHeader -TimeoutSec $RestTimeoutSeconds).hotspots
+$gateStatus = (Invoke-RestMethod -Uri "$HostUrl/api/qualitygates/project_status?projectKey=$ProjectKey" -Headers $authHeader -TimeoutSec $RestTimeoutSeconds).projectStatus.status
 
 Write-Host ""
 if ($issues.Count -eq 0 -and $hotspots.Count -eq 0 -and $gateStatus -eq 'OK') {
