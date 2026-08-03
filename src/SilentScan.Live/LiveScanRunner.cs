@@ -36,7 +36,7 @@ public static class LiveScanRunner
         var moduleResult = await new LiveModuleReader(connectionString).ReadAsync(cancellationToken);
 
         var parseResults = moduleResult.Modules
-            .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition))
+            .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier))
             .ToList();
 
         // Roadmap Phase C2 (live catalog parity): engine metadata alone knows nothing about

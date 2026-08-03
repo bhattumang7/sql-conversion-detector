@@ -36,7 +36,7 @@ public sealed class LiveModuleReader
     private static async Task<List<LiveModule>> ReadReadableModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition
+            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition, m.uses_quoted_identifier
             FROM sys.sql_modules m
             JOIN sys.objects o ON o.object_id = m.object_id
             JOIN sys.schemas s ON s.schema_id = o.schema_id
@@ -56,7 +56,14 @@ public sealed class LiveModuleReader
                 SchemaName: reader.GetString(0),
                 ObjectName: reader.GetString(1),
                 ObjectTypeCode: reader.GetString(2).Trim(),
-                Definition: reader.GetString(3)));
+                Definition: reader.GetString(3),
+                // sys.sql_modules.uses_quoted_identifier captures the QUOTED_IDENTIFIER setting
+                // at CREATE/ALTER time. Modules created under QI OFF use `"..."` as string
+                // literals (the legacy `EXEC("...")` idiom); parsing them under the ScriptDOM
+                // default (QI ON) turns those into unclosed quoted identifiers and drops the
+                // batch. Threading the flag through keeps such modules analyzable rather than
+                // silently misclassified as broken T-SQL.
+                UsesQuotedIdentifier: reader.GetBoolean(4)));
         }
 
         return modules;

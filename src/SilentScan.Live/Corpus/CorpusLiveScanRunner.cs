@@ -82,7 +82,7 @@ public static class CorpusLiveScanRunner
                         sourcePath = module.QualifiedName;
                     }
 
-                    return SqlScriptParser.ParseText(sourcePath, module.Definition);
+                    return SqlScriptParser.ParseText(sourcePath, module.Definition, module.UsesQuotedIdentifier);
                 })
                 .ToList();
 

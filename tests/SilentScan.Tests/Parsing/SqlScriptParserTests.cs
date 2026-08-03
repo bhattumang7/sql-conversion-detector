@@ -183,6 +183,29 @@ public sealed class SqlScriptParserTests
     }
 
     [Fact]
+    public void ParseText_QuotedIdentifierOff_ParsesLegacyExecStringLiteralCleanly()
+    {
+        // Under QUOTED_IDENTIFIER OFF (the setting a module was actually CREATEd/ALTERed with,
+        // per sys.sql_modules.uses_quoted_identifier), "..." is a plain string literal - the
+        // legacy EXEC("...") dynamic-SQL idiom. The live path must be able to parse a module
+        // with this ground-truth setting instead of always assuming QI ON.
+        var result = SqlScriptParser.ParseText("test.sql", "EXEC(\"SELECT 1\");", initialQuotedIdentifiers: false);
+
+        Assert.False(result.HasErrors);
+    }
+
+    [Fact]
+    public void ParseText_QuotedIdentifierOn_RejectsLegacyExecStringLiteralAsUnclosedIdentifier()
+    {
+        // The same text under QI ON (the tool's existing 2-arg-overload default) is NOT legal -
+        // "..." is an identifier delimiter, so this must remain a genuine parse error rather
+        // than silently accepted both ways.
+        var result = SqlScriptParser.ParseText("test.sql", "EXEC(\"SELECT 1\");", initialQuotedIdentifiers: true);
+
+        Assert.True(result.HasErrors);
+    }
+
+    [Fact]
     public void DecodeFile_Windows1252EncodedIdentifier_DecodesCorrectlyInsteadOfUtf8Mojibake()
     {
         // DecodeFile is ParseFile's own decode step, exposed for callers (corpus template

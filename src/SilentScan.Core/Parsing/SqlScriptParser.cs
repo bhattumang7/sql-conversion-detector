@@ -14,6 +14,18 @@ public static class SqlScriptParser
         Parse(sourcePath, sql, initialQuotedIdentifiers: true);
 
     /// <summary>
+    /// Overload for callers that have ground truth for the module's own <c>QUOTED_IDENTIFIER</c>
+    /// setting (live catalog reads it from <c>sys.sql_modules.uses_quoted_identifier</c>). A
+    /// module created under QI OFF uses <c>"..."</c> as a string literal (the legacy
+    /// <c>EXEC("...")</c> idiom); parsing it under QI ON turns those into unclosed quoted
+    /// identifiers and drops the batch. The 2-arg overload above (see
+    /// <see cref="ParseText(string, string)"/>) stays at QI ON for callers with no ground truth
+    /// (file scan, dynamic SQL, live-query guard), keeping the existing contract.
+    /// </summary>
+    public static SqlParseResult ParseText(string sourcePath, string sql, bool initialQuotedIdentifiers) =>
+        Parse(sourcePath, sql, initialQuotedIdentifiers);
+
+    /// <summary>
     /// Real-world corpus files aren't always encoded, or written, the way this scanner assumes
     /// by default (docs/audit-remediation-plan.md Phase 4.4, audit finding B4). Two distinct
     /// recovery mechanisms are combined here, each verified against the real parser rather than
@@ -49,7 +61,7 @@ public static class SqlScriptParser
     /// Reads and decodes <paramref name="path"/> using the same BOM-detection/Latin-1 fallback
     /// <see cref="ParseFile"/> uses internally, without parsing it - for callers that need to
     /// transform the text (e.g. corpus template token substitution) before handing it to <see
-    /// cref="ParseText"/>. Exists because a plain <c>File.ReadAllText</c> silently mis-decodes a
+    /// cref="ParseText(string, string)"/>. Exists because a plain <c>File.ReadAllText</c> silently mis-decodes a
     /// Windows-1252/Latin-1 corpus file as replacement-character-laden UTF-8 rather than failing
     /// visibly - the same failure mode <see cref="ParseFile"/> already guards against, which a
     /// caller reading bytes directly would otherwise bypass entirely.
