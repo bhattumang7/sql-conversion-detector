@@ -278,21 +278,55 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableAfterUnrecognizedStatementKind_Unanalyzable()
+    public void Scan_ExecOfVariableAfterUnrecognizedStatementNotMentioningIt_ProducesAnalyzableScript()
     {
-        // Precision-first default: a statement kind this scanner doesn't explicitly model
-        // (here, INSERT) taints everything tracked rather than risk folding through a value
-        // some unmodeled mechanism (e.g. OUTPUT INTO) might have silently changed.
+        // A statement kind this scanner doesn't explicitly model (here, INSERT) can only have
+        // mutated a variable it names literally - T-SQL locals cannot alias. This INSERT never
+        // mentions @sql, so @sql must survive untainted.
         var result = Scan(
             "CREATE TABLE dbo.T (Col INT); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "INSERT INTO dbo.T (Col) VALUES (1); " +
             "EXEC(@sql);");
 
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAfterUnrecognizedStatementMentioningIt_Unanalyzable()
+    {
+        // Precision-first default: an unrecognized statement kind that DOES name the tracked
+        // variable taints it, since this scanner can't rule out an unmodeled mechanism (e.g.
+        // OUTPUT INTO) having changed it through that mention.
+        var result = Scan(
+            "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "INSERT INTO dbo.T (Col) VALUES (@sql); " +
+            "EXEC(@sql);");
+
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
         Assert.Equal("unsupported-statement-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfUnrelatedVariableAfterUnrecognizedStatement_ProducesAnalyzableScript()
+    {
+        // The unrecognized statement mentions a DIFFERENT variable (@other) - only @other may
+        // be tainted, @sql (never named by the INSERT) must survive.
+        var result = Scan(
+            "CREATE TABLE dbo.T (Col INT); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE @other INT = 1; " +
+            "INSERT INTO dbo.T (Col) VALUES (@other); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
     }
 
     [Fact]
@@ -666,6 +700,22 @@ public sealed class DynamicSqlScannerTests
         Assert.Empty(result.AnalyzableScripts);
         var finding = Assert.Single(result.Findings);
         Assert.Equal("unsupported-execute-form", finding.Reason); // the second EXEC(@sql) site
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableUnrelatedToPriorProcCallWithOutput_ProducesAnalyzableScript()
+    {
+        // The unrecognized proc call only mutates @other (named as its OUTPUT argument) -
+        // @sql, never mentioned by that call, must survive untainted.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE @other NVARCHAR(MAX); " +
+            "EXEC dbo.BuildQuery @other OUTPUT; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
     }
 
     [Fact]

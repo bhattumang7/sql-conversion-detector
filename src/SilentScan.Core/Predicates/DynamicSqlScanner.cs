@@ -352,9 +352,12 @@ public static class DynamicSqlScanner
                 default:
                     // An unrecognized statement kind might mutate a tracked variable through a
                     // mechanism this scanner doesn't model (OUTPUT INTO, cursor FETCH INTO,
-                    // RECEIVE ... INTO, ...). Precision-first: taint everything currently
-                    // tracked rather than risk folding through a stale value.
-                    TaintAll(folded, statement, "unsupported-statement-in-scope");
+                    // RECEIVE ... INTO, ...). T-SQL locals cannot alias, so a statement can only
+                    // ever assign a variable it names literally - taints exactly the variables
+                    // this statement mentions (a strict superset of what it could have written)
+                    // rather than every variable currently tracked. An INSERT/UPDATE/PRINT/etc.
+                    // that never mentions @Where cannot have changed @Where, so @Where survives.
+                    TaintReferencedVariables(folded, statement, "unsupported-statement-in-scope");
                     break;
             }
         }
@@ -729,14 +732,16 @@ public static class DynamicSqlScanner
 
         /// <summary>
         /// Taints the return-value variable (<c>EXEC @rc = proc</c>) and every argument passed
-        /// with OUTPUT, plus - conservatively, since this scanner does not model what an
-        /// arbitrary called procedure does internally - every other variable currently tracked,
-        /// matching the same fail-safe the WalkStatement default case already uses for any
-        /// other statement kind it doesn't specifically model.
+        /// with OUTPUT - this scanner does not model what an arbitrary called procedure does
+        /// internally, so any variable named in the call could come back holding something
+        /// other than what was folded for it. Scoped to the variables this EXEC actually
+        /// mentions (same no-aliasing argument as <see cref="TaintReferencedVariables"/>) rather
+        /// than every variable currently tracked - an unrelated variable this call never
+        /// references cannot have been mutated by it.
         /// </summary>
         private void TaintExecuteMutatedVariables(ExecuteStatement node, Dictionary<string, FoldState> folded)
         {
-            TaintAll(folded, node, "unsupported-execute-form");
+            TaintReferencedVariables(folded, node, "unsupported-execute-form");
         }
 
         private void HandleStringList(ExecutableStringList stringList, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -1340,12 +1345,24 @@ public static class DynamicSqlScanner
             _ => FoldAttempt.Fail("non-literal-expression:other", Span(expression)),
         };
 
-        private void TaintAll(Dictionary<string, FoldState> folded, TSqlStatement statement, string reason)
+        /// <summary>
+        /// Taints every currently-tracked variable this <paramref name="fragment"/> textually
+        /// names - a sound upper bound on what an unmodeled construct could have written,
+        /// because T-SQL locals have no aliasing: nothing can assign to a variable without
+        /// naming it directly. A variable this fragment never mentions cannot have changed, so
+        /// it is left exactly as folded so far.
+        /// </summary>
+        private void TaintReferencedVariables(Dictionary<string, FoldState> folded, TSqlFragment fragment, string reason)
         {
-            var location = Span(statement);
-            foreach (var key in folded.Keys.ToList())
+            var location = Span(fragment);
+            var collector = new ReferencedVariableCollector();
+            fragment.Accept(collector);
+            foreach (var name in collector.Names)
             {
-                folded[key] = FoldState.Tainted(reason, location);
+                if (folded.ContainsKey(name))
+                {
+                    folded[name] = FoldState.Tainted(reason, location);
+                }
             }
         }
 
@@ -1405,6 +1422,22 @@ public static class DynamicSqlScanner
             public override void Visit(SetVariableStatement node) => Names.Add(node.Variable.Name);
 
             public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
+        }
+
+        /// <summary>
+        /// Every variable name mentioned anywhere in a fragment, read or written alike - the
+        /// sound upper bound <see cref="TaintReferencedVariables"/> taints against. Broader than
+        /// <see cref="AssignedVariableCollector"/> on purpose: that collector proves a definite
+        /// write (SET/SELECT-assign only, used to pre-taint a loop body before walking it), while
+        /// this one bounds a POSSIBLE write for a statement whose own semantics this scanner
+        /// doesn't model at all - a plain mention (e.g. inside a WHERE clause or PRINT) is not
+        /// provably a write, but it is the only variables that possibly could be one.
+        /// </summary>
+        private sealed class ReferencedVariableCollector : TSqlFragmentVisitor
+        {
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public override void Visit(VariableReference node) => Names.Add(node.Name);
         }
     }
 }
