@@ -9,41 +9,21 @@ namespace SilentScan.Core.Reporting;
 
 public static class ScanReportBuilder
 {
-    public static ScanReport Build(IReadOnlyList<string> sqlFilePaths)
-    {
-        return BuildFromParseResults(sqlFilePaths.Select(SqlScriptParser.ParseFile).ToList());
-    }
-
     /// <summary>
-    /// Builds a report from already-parsed sources. Exists separately from <see cref="Build"/>
-    /// so callers that need to preprocess text before parsing (e.g. the corpus scanner
-    /// substituting DNN's {databaseOwner}/{objectQualifier} template tokens) can parse in
-    /// memory via <see cref="SqlScriptParser.ParseText"/> instead of writing temp files.
-    /// <paramref name="manifestDeclaredCollation"/> is the corpus manifest's declaredCollation
-    /// hint (CLAUDE.md Pass 1), used only when no scanned file has its own explicit CREATE/ALTER
-    /// DATABASE ... COLLATE statement - null for a plain folder scan with no manifest. Ignored
-    /// when <paramref name="catalog"/> is supplied.
+    /// Builds a report from already-parsed sources. <paramref name="catalog"/> is REQUIRED
+    /// (roadmap "delete the file-parsed catalog path and the file-only scan pipeline" - CLAUDE.md
+    /// hard scope: "Everything goes via the database — no file-parsed catalog, no file-only
+    /// scan") - this method no longer infers one from <paramref name="allParseResults"/> itself.
+    /// Every real caller reads the catalog from a live database's own metadata
+    /// (<c>SilentScan.Live.Catalog.LiveCatalogReader</c>, via <c>LiveScanRunner</c>/
+    /// <c>CorpusLiveScanRunner</c>) - the only place file-parsed catalog inference
+    /// (<see cref="CatalogBuilder"/>) still runs at all is <c>DatabaseCatalog.MergeFileModeExtras</c>,
+    /// contributing what engine metadata alone cannot see (temp tables, table variables, a scalar
+    /// UDF's return type) on top of that real catalog, never in place of it.
     /// </summary>
     /// <param name="allParseResults">Already-parsed sources to run Lineage/Predicates/Rules over.</param>
-    /// <param name="manifestDeclaredCollation">See above.</param>
-    /// <param name="catalog">
-    /// A catalog to use instead of building one from <paramref name="allParseResults"/> via
-    /// <see cref="CatalogBuilder"/> - for live-mode scans, whose parsed sources are module
-    /// bodies (views/procs/functions/triggers) with no CREATE TABLE DDL of their own to build a
-    /// catalog from; the real catalog was already read from the live database's own metadata
-    /// (<c>SilentScan.Live.Catalog.LiveCatalogReader</c>). Null (the default) preserves file-mode's
-    /// existing behavior of building the catalog from the scanned DDL text itself.
-    /// </param>
-    /// <param name="manifestTempdbCollation">
-    /// The corpus manifest's tempdbCollation hint, when stated - a SEPARATE collation from
-    /// <paramref name="manifestDeclaredCollation"/>, since a real SQL Server's tempdb collation is
-    /// fixed at install time and frequently differs from a user database's. Null (the default)
-    /// falls back to <paramref name="manifestDeclaredCollation"/> for a #temp table/table
-    /// variable's columns, exactly like before this parameter existed. Ignored when
-    /// <paramref name="catalog"/> is supplied.
-    /// </param>
-    public static ScanReport BuildFromParseResults(
-        IReadOnlyList<SqlParseResult> allParseResults, string? manifestDeclaredCollation = null, DatabaseCatalog? catalog = null, string? manifestTempdbCollation = null)
+    /// <param name="catalog">The real catalog, read from a live database's own metadata.</param>
+    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, DatabaseCatalog catalog)
     {
         var fileHealth = new List<FileParseHealth>();
         var usableParseResults = new List<SqlParseResult>();
@@ -67,16 +47,13 @@ public static class ScanReportBuilder
             }
         }
 
-        // Catalog/lineage need every cleanly-parsed file together, so views can resolve
-        // against tables (and other views) declared in a different file. Built before Tier-1
-        // scanning (which used to run catalog-blind) so a syntactic finding's column can be
-        // resolved through the same machinery Pass 3/4 use, carrying real Indexed/
-        // TableQualifiedName information instead of none at all. Also built before the dynamic
-        // SQL scan below (a reordering from before this existed) - the call graph a proc-body
-        // parameter seed needs (ProcCallGraphBuilder.Build) requires TryGetProcedureParameters,
-        // which requires a real catalog; dynamic SQL scanning has no dependency running it
-        // earlier ever served.
-        catalog ??= CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation, manifestTempdbCollation);
+        // Lineage needs every cleanly-parsed file together, so views can resolve against tables
+        // (and other views) declared in a different file. Resolved before Tier-1 scanning (which
+        // used to run catalog-blind) so a syntactic finding's column can be resolved through the
+        // same machinery Pass 3/4 use, carrying real Indexed/TableQualifiedName information
+        // instead of none at all. Also resolved before the dynamic SQL scan below - the call
+        // graph a proc-body parameter seed needs (ProcCallGraphBuilder.Build) requires
+        // TryGetProcedureParameters, which requires the catalog the caller already supplied.
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
 
         var callGraphLedger = new SkipLedger();

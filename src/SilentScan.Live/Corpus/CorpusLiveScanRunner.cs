@@ -91,8 +91,16 @@ public static class CorpusLiveScanRunner
             // module body - only the module text itself carries those. Built from the POST-
             // DEPLOYMENT module parse results (not the raw repo files) so a temp table declared
             // inside a proc body is resolved from the exact same text the predicate pipeline
-            // below reads, matching LiveScanRunner's own pattern precisely.
-            catalog.MergeFileModeExtras(CatalogBuilder.Build(moduleParseResults, repo.DeclaredCollation, repo.TempdbCollation));
+            // below reads, matching LiveScanRunner's own pattern precisely. Falls back to the
+            // real deployed database's own collation (catalog.DefaultCollation/TempdbCollation,
+            // read by LiveCatalogReader) when the manifest declares none - stronger than leaving
+            // a #temp table's own unqualified column permanently unresolved, and correct even
+            // when repo.DeclaredCollation was null (the database still deployed with SOME real
+            // collation, just the server's own default rather than a manifest-pinned one).
+            catalog.MergeFileModeExtras(CatalogBuilder.Build(
+                moduleParseResults,
+                repo.DeclaredCollation ?? catalog.DefaultCollation?.Name,
+                repo.TempdbCollation ?? catalog.TempdbCollation?.Name));
 
             var report = ScanReportBuilder.BuildFromParseResults(moduleParseResults, catalog: catalog);
 

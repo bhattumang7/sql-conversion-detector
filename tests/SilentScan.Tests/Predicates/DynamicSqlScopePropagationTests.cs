@@ -1,7 +1,7 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -18,10 +18,9 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class DynamicSqlScopePropagationTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("dynsql_scope.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -31,9 +30,9 @@ public sealed class DynamicSqlScopePropagationTests
     }
 
     [Fact]
-    public void TempTableDeclaredStatically_ResolvesInsideExecStringLiteral()
+    public async Task TempTableDeclaredStatically_ResolvesInsideExecStringLiteral()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
             GO
             CREATE PROCEDURE dbo.usp_DynamicTemp AS
@@ -57,9 +56,9 @@ public sealed class DynamicSqlScopePropagationTests
     }
 
     [Fact]
-    public void TempTableDeclaredStatically_ResolvesInsideSpExecuteSql()
+    public async Task TempTableDeclaredStatically_ResolvesInsideSpExecuteSql()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
             GO
             CREATE PROCEDURE dbo.usp_DynamicTemp AS
@@ -76,12 +75,12 @@ public sealed class DynamicSqlScopePropagationTests
     }
 
     [Fact]
-    public void TempTableDeclaredStatically_ResolvesTwoLevelsDeepInNestedDynamicSql()
+    public async Task TempTableDeclaredStatically_ResolvesTwoLevelsDeepInNestedDynamicSql()
     {
         // The outer EXEC's own text contains a further EXEC - scope must survive the recursive
         // re-scan (DynamicSqlPipeline.AnalyzeNested passes the outer script's own Scope into
         // the nested DynamicSqlScanner.Scan call), not just the first level of reparsing.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
             GO
             CREATE PROCEDURE dbo.usp_DynamicTemp AS
@@ -97,12 +96,12 @@ public sealed class DynamicSqlScopePropagationTests
     }
 
     [Fact]
-    public void TriggerInsertedPseudoTable_ResolvesInsideExecStringLiteral()
+    public async Task TriggerInsertedPseudoTable_ResolvesInsideExecStringLiteral()
     {
         // A distinct mechanism from the #temp case: TypedPredicateExtractor seeds the CTE
         // stack with the trigger's own inserted/deleted pseudo-tables before walking the
         // reparsed fragment, mirroring what VisitTriggerBody does for static SQL.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Orders (OrderCode varchar(20) NOT NULL, INDEX IX_OrderCode (OrderCode));
             GO
             CREATE TRIGGER dbo.trg_Orders ON dbo.Orders AFTER INSERT AS

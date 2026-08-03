@@ -1,6 +1,6 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -13,19 +13,27 @@ namespace SilentScan.Tests.Reporting;
 public sealed class ScanReportBuilderDynamicSqlSummaryTests
 {
     [Fact]
-    public void BuildFromParseResults_MixOfAnalyzedAndUnanalyzableCallSites_PopulatesSummary()
+    public async Task BuildFromParseResults_MixOfAnalyzedAndUnanalyzableCallSites_PopulatesSummary()
     {
-        var result = SqlScriptParser.ParseText(
-            "proc.sql",
+        // Both EXEC statements have to live inside a real module body - a bare top-level EXEC
+        // isn't captured by sys.sql_modules at all, so under the engine-authoritative pipeline
+        // (module text read back from the server, not parsed straight off disk) a call site
+        // outside any CREATE PROCEDURE/FUNCTION/TRIGGER would never reach the dynamic SQL
+        // scanner in the first place.
+        var report = await EngineAuthoritativeScan.ScanAsync(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);
             GO
-            EXEC('SELECT Col FROM dbo.T WHERE Col = 1');
-            GO
-            EXEC(@UndeclaredSql);
-            """);
+            CREATE PROCEDURE dbo.usp_Dynamic
+            AS
+            BEGIN
+                EXEC('SELECT Col FROM dbo.T WHERE Col = 1');
 
-        var report = ScanReportBuilder.BuildFromParseResults([result]);
+                DECLARE @UndeclaredSql NVARCHAR(MAX);
+                SELECT @UndeclaredSql = N'SELECT 1 WHERE 1 = 0' FROM (SELECT 1 AS x) AS Dummy;
+                EXEC(@UndeclaredSql);
+            END
+            """);
 
         Assert.Equal(2, report.DynamicSqlSummary.TotalCallSites);
         Assert.Equal(1, report.DynamicSqlSummary.AnalyzedCount);
@@ -35,11 +43,9 @@ public sealed class ScanReportBuilderDynamicSqlSummaryTests
     }
 
     [Fact]
-    public void BuildFromParseResults_NoDynamicSqlAtAll_ReportsZeroTotalCallSites()
+    public async Task BuildFromParseResults_NoDynamicSqlAtAll_ReportsZeroTotalCallSites()
     {
-        var result = SqlScriptParser.ParseText("t.sql", "CREATE TABLE dbo.T (Col INT NOT NULL);");
-
-        var report = ScanReportBuilder.BuildFromParseResults([result]);
+        var report = await EngineAuthoritativeScan.ScanAsync("CREATE TABLE dbo.T (Col INT NOT NULL);");
 
         Assert.Equal(0, report.DynamicSqlSummary.TotalCallSites);
     }

@@ -1,5 +1,5 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Lineage;
 
@@ -19,10 +19,9 @@ namespace SilentScan.Tests.Lineage;
 /// </summary>
 public sealed class SystemDatabaseReferenceTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("sysdb.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -37,9 +36,9 @@ public sealed class SystemDatabaseReferenceTests
     [InlineData("tempdb")]
     [InlineData("model")]
     [InlineData("MSDB")]
-    public void ReferenceToSystemDatabase_GetsSpecificOutOfScopeReason(string systemDatabase)
+    public async Task ReferenceToSystemDatabase_GetsSpecificOutOfScopeReason(string systemDatabase)
     {
-        var report = Scan($"SELECT name FROM {systemDatabase}.sys.objects WHERE name = 'x';");
+        var report = await Scan($"SELECT name FROM {systemDatabase}.sys.objects WHERE name = 'x';");
 
         Assert.Contains(report.SkippedConstructs, s =>
             s.Reason.Contains("system database", StringComparison.Ordinal)
@@ -48,12 +47,12 @@ public sealed class SystemDatabaseReferenceTests
     }
 
     [Fact]
-    public void ReferenceToGenuineExternalDatabase_StaysTheGenericNoKnownDdlReason()
+    public async Task ReferenceToGenuineExternalDatabase_StaysTheGenericNoKnownDdlReason()
     {
         // ArchiveDb is a real, nameable external database - not one of the four built-in
         // system databases - so this is a genuine gap, not an intentional scope boundary, and
         // must keep the generic reason rather than being misclassified as "out of scope".
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Shipments (TrackingNo varchar(30) NOT NULL);
             GO
             SELECT 1 FROM ArchiveDb.dbo.Shipments WHERE TrackingNo = N'T1';

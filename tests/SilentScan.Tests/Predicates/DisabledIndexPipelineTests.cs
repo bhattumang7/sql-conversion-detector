@@ -1,4 +1,3 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
@@ -34,8 +33,7 @@ public sealed class DisabledIndexPipelineTests : OracleTestFixture
     [Fact]
     public async Task DisabledIndex_NoLongerReportsIndexed_OracleConfirmed()
     {
-        var parseResult = SqlScriptParser.ParseText("disabled_index.sql", DisabledIndexSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(DisabledIndexSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "SerialNo");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -61,8 +59,7 @@ public sealed class DisabledIndexPipelineTests : OracleTestFixture
             """;
         await new SilentScan.Verify.Deployment.ScriptDeployer(Options).DeployWhitelistedDdlAsync(rebuiltIndexSql, DatabaseName);
 
-        var parseResult = SqlScriptParser.ParseText("rebuilt_index.sql", rebuiltIndexSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(rebuiltIndexSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "SerialNo");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);

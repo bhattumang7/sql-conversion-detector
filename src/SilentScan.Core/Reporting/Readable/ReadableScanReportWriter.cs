@@ -15,11 +15,7 @@ namespace SilentScan.Core.Reporting.Readable;
 /// is, which base column it lands on, whether that column is indexed, and which view layer
 /// introduced the mismatch.
 ///
-/// Sections appear only when they have something to report, with one deliberate exception:
-/// the unpinned-collation warning is a statement about what the run could not reach, not a
-/// count, so it is printed even when every count under it is zero. A zero there is exactly the
-/// case where a clean-looking report would otherwise be read as "we checked and found nothing"
-/// (<see cref="CollationSensitivityReport"/>), which is a different and much stronger claim.
+/// Sections appear only when they have something to report.
 /// </summary>
 public static class ReadableScanReportWriter
 {
@@ -29,26 +25,17 @@ public static class ReadableScanReportWriter
     /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string ColumnHeader = "Column";
 
-    public static string Write(
-        ScanReport report,
-        CollationSensitivityReport? collationSensitivity,
-        string title,
-        ReadableStyle style,
-        string? pathBase = null) =>
-        ReadableDocumentRenderer.Render(BuildDocument(report, collationSensitivity, title, pathBase), style);
+    public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null) =>
+        ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase), style);
 
     /// <summary>
     /// Builds the document for a whole scan, title included. Corpus reports embed a repo's
     /// sections into a larger document instead - see <see cref="BuildSections"/>.
     /// </summary>
-    public static ReadableDocument BuildDocument(
-        ScanReport report,
-        CollationSensitivityReport? collationSensitivity,
-        string title,
-        string? pathBase = null)
+    public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null)
     {
         List<ReadableBlock> blocks = [new ReadableBlock.Heading(1, title)];
-        blocks.AddRange(BuildSections(report, collationSensitivity, 2, pathBase));
+        blocks.AddRange(BuildSections(report, 2, pathBase));
         return new ReadableDocument(blocks);
     }
 
@@ -56,22 +43,12 @@ public static class ReadableScanReportWriter
     /// The report body without a title, at a caller-chosen heading level, so one repo's report
     /// can sit under a corpus-wide heading without its sections outranking it.
     /// </summary>
-    public static IReadOnlyList<ReadableBlock> BuildSections(
-        ScanReport report,
-        CollationSensitivityReport? collationSensitivity,
-        int headingLevel,
-        string? pathBase = null)
+    public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null)
     {
         ArgumentNullException.ThrowIfNull(report);
 
         var blocks = new List<ReadableBlock>();
         blocks.AddRange(Summary(report, headingLevel));
-
-        if (collationSensitivity is { } sensitivity)
-        {
-            blocks.AddRange(UnpinnedCollation(sensitivity, headingLevel));
-        }
-
         blocks.AddRange(CollationConflicts(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.ScanForced, headingLevel, pathBase,
@@ -153,30 +130,6 @@ public static class ReadableScanReportWriter
             distinct is { } d ? d.ToString(CultureInfo.InvariantCulture) : "-",
         ]);
     }
-
-    private static IEnumerable<ReadableBlock> UnpinnedCollation(CollationSensitivityReport sensitivity, int level)
-    {
-        yield return new ReadableBlock.Heading(level, "No collation was pinned for this scan");
-        yield return new ReadableBlock.Paragraph(
-            "Nothing in the scanned DDL, and no --collation argument, said what collation a string column without its own COLLATE clause uses. " +
-            "The varchar-vs-nvarchar verdict depends on that answer, so those comparisons were left unclassified rather than guessed - " +
-            "which means a zero above is \"not established\", not \"nothing there\". Scored under both collation families, the counts would be:");
-        yield return new ReadableBlock.Table(
-            ["Assumed collation", "Scan forced", "Degraded seek", "Unclassified"],
-            [
-                CollationRow(sensitivity.SqlFamilyCollation, sensitivity.UnderSqlFamilyAssumption),
-                CollationRow(sensitivity.WindowsFamilyCollation, sensitivity.UnderWindowsFamilyAssumption),
-            ]);
-        yield return new ReadableBlock.Paragraph("Re-run with --collation <name> to get a single classified answer.");
-    }
-
-    private static IReadOnlyList<string> CollationRow(string collation, TypedPredicateSummary summary) =>
-    [
-        collation,
-        summary.ScanForcedCount.ToString(CultureInfo.InvariantCulture),
-        summary.RangeSeekCount.ToString(CultureInfo.InvariantCulture),
-        summary.UnknownCount.ToString(CultureInfo.InvariantCulture),
-    ];
 
     private static IEnumerable<ReadableBlock> TypedSection(
         ScanReport report, Verdict verdict, int level, string? pathBase, string title, string explanation)

@@ -50,9 +50,7 @@ public static class ReadableLiveScanWriter
         blocks.AddRange(PlanCacheEvidence(result));
         blocks.AddRange(WorkloadFindings(result));
 
-        // No collation sensitivity report: a live database always answers what its own default
-        // collation is, so there is nothing here for the scan to have left unpinned.
-        blocks.AddRange(ReadableScanReportWriter.BuildSections(result.Report, collationSensitivity: null, headingLevel: 2));
+        blocks.AddRange(ReadableScanReportWriter.BuildSections(result.Report, headingLevel: 2));
         blocks.AddRange(UnanalyzableModules(result));
 
         return ReadableDocumentRenderer.Render(new ReadableDocument(blocks), style);

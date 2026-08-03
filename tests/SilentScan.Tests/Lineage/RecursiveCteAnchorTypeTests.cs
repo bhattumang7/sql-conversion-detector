@@ -1,6 +1,6 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Lineage;
 
@@ -15,10 +15,9 @@ namespace SilentScan.Tests.Lineage;
 /// </summary>
 public sealed class RecursiveCteAnchorTypeTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("recursive_cte.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -28,9 +27,9 @@ public sealed class RecursiveCteAnchorTypeTests
     }
 
     [Fact]
-    public void PredicateAgainstRecursiveCteColumn_ClassifiesUsingTheAnchorsType()
+    public async Task PredicateAgainstRecursiveCteColumn_ClassifiesUsingTheAnchorsType()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Categories (
                 CategoryCode varchar(20) NOT NULL,
                 ParentCode varchar(20) NULL,
@@ -54,7 +53,7 @@ public sealed class RecursiveCteAnchorTypeTests
     }
 
     [Fact]
-    public void RecursionsOwnJoinPredicate_IsNowClassifiable()
+    public async Task RecursionsOwnJoinPredicate_IsNowClassifiable()
     {
         // Bonus unlock: t.CategoryCode (read through the CTE inside the recursive member's own
         // join) used to be Union/Unknown too, making the recursion's own join predicate
@@ -62,7 +61,7 @@ public sealed class RecursiveCteAnchorTypeTests
         // varchar; t.CategoryCode now resolves through the anchor's real type, so this predicate
         // (same-type, same-collation) correctly classifies as a non-actionable seek-preserved
         // comparison rather than staying invisible to the summary entirely.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Categories (
                 CategoryCode varchar(20) NOT NULL,
                 ParentCode varchar(20) NULL,
@@ -81,12 +80,12 @@ public sealed class RecursiveCteAnchorTypeTests
     }
 
     [Fact]
-    public void RecursiveCteWithNvarcharJoinMismatch_ClassifiesScanForced()
+    public async Task RecursiveCteWithNvarcharJoinMismatch_ClassifiesScanForced()
     {
         // The recursion's own join predicate is now genuinely actionable when there IS a real
         // mismatch - c.ParentCode (varchar) compared against t.CategoryCode (nvarchar, through
         // the CTE) forces the varchar column to convert.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Categories (
                 CategoryCode nvarchar(20) NOT NULL,
                 ParentCode varchar(20) NULL,

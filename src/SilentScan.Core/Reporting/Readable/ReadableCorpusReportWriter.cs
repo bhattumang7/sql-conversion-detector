@@ -5,13 +5,8 @@ namespace SilentScan.Core.Reporting.Readable;
 /// <summary>One scanned repo's input to the corpus report.</summary>
 /// <param name="Name">The manifest entry's name.</param>
 /// <param name="Report">That repo's scan report.</param>
-/// <param name="CollationSensitivity">The both-ways re-score, when the manifest pinned no collation for the repo.</param>
 /// <param name="PathBase">The repo's clone root, trimmed off finding paths so they read as repo-relative.</param>
-public sealed record ReadableCorpusRepo(
-    string Name,
-    ScanReport Report,
-    CollationSensitivityReport? CollationSensitivity,
-    string? PathBase = null);
+public sealed record ReadableCorpusRepo(string Name, ScanReport Report, string? PathBase = null);
 
 /// <summary>
 /// Renders a whole corpus run: one comparison table across every repo, then each repo's full
@@ -43,7 +38,7 @@ public static class ReadableCorpusReportWriter
         else
         {
             blocks.Add(new ReadableBlock.Table(
-                ["Repo", "Files", "Parsed", "Dialect check", "Scan forced", "Degraded seek", "Unclassified", "Collation"],
+                ["Repo", "Files", "Parsed", "Dialect check", "Scan forced", "Degraded seek", "Unclassified"],
                 [.. repos.Select(RollupRow)]));
         }
 
@@ -64,7 +59,7 @@ public static class ReadableCorpusReportWriter
         foreach (var repo in repos)
         {
             blocks.Add(new ReadableBlock.Heading(2, repo.Name));
-            blocks.AddRange(ReadableScanReportWriter.BuildSections(repo.Report, repo.CollationSensitivity, 3, repo.PathBase));
+            blocks.AddRange(ReadableScanReportWriter.BuildSections(repo.Report, 3, repo.PathBase));
         }
 
         return ReadableDocumentRenderer.Render(new ReadableDocument(blocks), style);
@@ -84,7 +79,6 @@ public static class ReadableCorpusReportWriter
             Occurrences(summary.ScanForcedCount, summary.DistinctScanForcedCount),
             Occurrences(summary.RangeSeekCount, summary.DistinctRangeSeekCount),
             summary.UnknownCount.ToString(CultureInfo.InvariantCulture),
-            repo.CollationSensitivity is null ? "pinned" : "NOT PINNED",
         ];
     }
 

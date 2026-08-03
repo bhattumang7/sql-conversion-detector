@@ -1,4 +1,3 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
@@ -35,10 +34,9 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
 
     protected override string Ddl => Ddl_;
 
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("op.sql", Ddl_ + "\nGO\n" + sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "Latin1_General_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(Ddl_ + "\nGO\n" + sql, "Latin1_General_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -52,7 +50,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     {
         // Matches the matrix's own probed pair/collation exactly - only the operator (LIKE
         // against a non-literal pattern) and predicate shape differ from what was probed (`=`).
-        var report = Scan("""
+        var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByPrefix @Prefix NVARCHAR(20)
             AS
             BEGIN
@@ -73,7 +71,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     {
         // Near-miss: a LIKE pattern that IS a literal keeps the dynamic range seek, agreeing
         // with the matrix's own `=`-probed outcome for this pair/collation.
-        var report = Scan("SELECT Code FROM dbo.VarCharWin WHERE Code LIKE N'abc%';");
+        var report = await Scan("SELECT Code FROM dbo.VarCharWin WHERE Code LIKE N'abc%';");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
@@ -93,7 +91,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
         // operator for this pair/collation (oracle-verified directly across >, <, >=, <=) - only
         // LIKE-with-a-non-literal-pattern diverges. Guards against a future change assuming
         // operator-invariance is universal rather than checking it.
-        var report = Scan($"DECLARE @p NVARCHAR(20); SELECT Code FROM dbo.VarCharWin WHERE Code {op} @p;");
+        var report = await Scan($"DECLARE @p NVARCHAR(20); SELECT Code FROM dbo.VarCharWin WHERE Code {op} @p;");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
         Assert.Equal(Verdict.RangeSeek, finding.Verdict);
@@ -109,7 +107,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
         // above has no index at all) against the confounded "always ScanForced" correction this
         // class's own doc comment explains was deliberately NOT made. If a future change
         // reintroduces a blanket column-vs-column downgrade, this regresses loudly.
-        var report = Scan("""
+        var report = await Scan("""
             SELECT a.Code
             FROM dbo.VarCharWin a
             JOIN dbo.NVarCharWin b ON a.Code = b.Code;

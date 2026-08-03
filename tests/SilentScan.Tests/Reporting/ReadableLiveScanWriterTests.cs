@@ -1,8 +1,8 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
 using SilentScan.Live;
 using SilentScan.Live.Catalog;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -17,19 +17,19 @@ public sealed class ReadableLiveScanWriterTests
 {
     private static readonly LiveCatalogSummary Catalog = new("SQL_Latin1_General_CP1_CI_AS", 12, 96, 20, 1, []);
 
-    private static ScanReport EmptyReport() =>
-        ScanReportBuilder.BuildFromParseResults([SqlScriptParser.ParseText("dbo.vw_X.sql", "CREATE VIEW dbo.vw_X AS SELECT 1 AS N;")]);
+    private static Task<ScanReport> EmptyReport() =>
+        EngineAuthoritativeScan.ScanAsync("CREATE VIEW dbo.vw_X AS SELECT 1 AS N;");
 
-    private static LiveScanResult Result(
+    private static async Task<LiveScanResult> Result(
         IReadOnlyList<LiveLineageParityMismatch>? mismatches = null,
         IReadOnlyList<UnanalyzableModule>? unanalyzable = null,
         IReadOnlyList<WorkloadFinding>? workloadFindings = null) =>
-        new(EmptyReport(), Catalog, ModulesAnalyzed: 7, mismatches ?? [], unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? []);
+        new(await EmptyReport(), Catalog, ModulesAnalyzed: 7, mismatches ?? [], unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? []);
 
     [Fact]
-    public void CatalogSummary_SaysWhatWasReadAndThatNothingWasExecuted()
+    public async Task CatalogSummary_SaysWhatWasReadAndThatNothingWasExecuted()
     {
-        var rendered = ReadableLiveScanWriter.Write(Result(), "srv/shop", ReadableStyle.Text);
+        var rendered = ReadableLiveScanWriter.Write(await Result(), "srv/shop", ReadableStyle.Text);
 
         Assert.Contains("SilentScan live scan - srv/shop", rendered, StringComparison.Ordinal);
         Assert.Contains("nothing in the target database was executed", rendered, StringComparison.Ordinal);
@@ -37,10 +37,10 @@ public sealed class ReadableLiveScanWriterTests
     }
 
     [Fact]
-    public void LineageParityMismatch_IsReportedAboveTheFindingsItUndermines()
+    public async Task LineageParityMismatch_IsReportedAboveTheFindingsItUndermines()
     {
         var rendered = ReadableLiveScanWriter.Write(
-            Result([new LiveLineageParityMismatch("dbo.vw_Orders", "OrderCode", "type", "varchar(20)", "nvarchar(20)")]),
+            await Result([new LiveLineageParityMismatch("dbo.vw_Orders", "OrderCode", "type", "varchar(20)", "nvarchar(20)")]),
             "srv/shop",
             ReadableStyle.Text);
 
@@ -53,10 +53,10 @@ public sealed class ReadableLiveScanWriterTests
     }
 
     [Fact]
-    public void UnanalyzableModules_AreNamedRatherThanDropped()
+    public async Task UnanalyzableModules_AreNamedRatherThanDropped()
     {
         var rendered = ReadableLiveScanWriter.Write(
-            Result(unanalyzable: [
+            await Result(unanalyzable: [
                 new UnanalyzableModule("dbo", "usp_Secret", "P", UnanalyzableModuleReason.Encrypted),
                 new UnanalyzableModule("dbo", "fn_Clr", "FS", UnanalyzableModuleReason.ClrAssemblyModule),
             ]),

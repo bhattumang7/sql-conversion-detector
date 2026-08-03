@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
@@ -42,8 +43,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
     [Fact]
     public async Task VarcharColumnAgainstNvarcharReturningUdf_ClassifiesScanForced_OracleConfirmed()
     {
-        var parseResult = SqlScriptParser.ParseText("scalar_udf.sql", NvarcharReturningSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(NvarcharReturningSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -54,10 +54,18 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
     }
 
     [Fact]
-    public async Task UnqualifiedFunctionCall_ResolvesUnderDefaultDboSchema_OracleConfirmed()
+    public void UnqualifiedFunctionCall_ResolvesUnderDefaultDboSchema()
     {
         // fn_DefaultCode() with no schema qualifier still resolves against dbo.fn_DefaultCode,
         // matching CatalogBuilder's own default-schema convention for unqualified references.
+        // Parsed-only, via CatalogBuilder directly, not EngineAuthoritativeScan: calling a
+        // user scalar function with no schema qualifier is itself rejected by a real SQL Server
+        // ("'fn_DefaultCode' is not a recognized function name", verified directly - unlike a
+        // built-in function, a user-defined one is never resolved unqualified) - this is
+        // legitimate, real-world corpus text (a schema-unqualified UDF call a developer wrote
+        // assuming the default schema, common enough that this pass has its own resolution rule
+        // for it) that this pass must still type correctly from parsed text, independent of
+        // whether that exact call syntax could ever actually execute.
         var sql = """
             CREATE TABLE dbo.Accounts (Code varchar(50) NOT NULL, INDEX IX_Code (Code));
             GO
@@ -66,48 +74,44 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
             CREATE PROCEDURE dbo.usp_FindAccount AS
                 SELECT Code FROM dbo.Accounts WHERE Code = fn_DefaultCode();
             """;
-        var parseResult = SqlScriptParser.ParseText("scalar_udf_unqualified.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var parseResult = SqlScriptParser.ParseText("udf.sql", sql);
+        Assert.Empty(parseResult.Errors);
+        var catalog = CatalogBuilder.Build([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = ScanReportBuilder.BuildFromParseResults([parseResult], catalog);
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
-
-        // Same DDL/schema as the qualified case above (already deployed via Ddl) - only the
-        // probe's call syntax differs, and that syntax doesn't change the plan shape at all.
-        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
-        PipelineOracleVerification.AssertAllConfirmed(results);
+        Assert.True(finding.Column.Indexed);
     }
 
     [Fact]
-    public void SameFamilyAndCollationAgainstUdf_ClassifiesSeekPreserved()
+    public async Task SameFamilyAndCollationAgainstUdf_ClassifiesSeekPreserved()
     {
         // A UDF whose RETURNS type matches the column's own family/collation must not be
         // flagged - proves the registry types the operand rather than always forcing a
         // mismatch verdict once a UDF is involved. SeekPreserved makes no CONVERT_IMPLICIT
         // claim, so there's nothing for the plan-XML oracle to confirm here.
-        var parseResult = SqlScriptParser.ParseText("scalar_udf_clean.sql", """
+        var report = await EngineAuthoritativeScan.ScanAsync("""
             CREATE TABLE dbo.Accounts (Code varchar(50) NOT NULL, INDEX IX_Code (Code));
             GO
             CREATE FUNCTION dbo.fn_DefaultVarcharCode() RETURNS varchar(50) AS BEGIN RETURN 'X' END;
             GO
             CREATE PROCEDURE dbo.usp_FindAccount AS
                 SELECT Code FROM dbo.Accounts WHERE Code = dbo.fn_DefaultVarcharCode();
-            """);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+            """, "SQL_Latin1_General_CP1_CI_AS");
 
         Assert.Empty(report.TypedFindings);
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
     }
 
     [Fact]
-    public void UnregisteredFunction_StillResolvesUnknown()
+    public async Task UnregisteredFunction_StillResolvesUnknown()
     {
         // A function name that was never declared as CREATE FUNCTION anywhere in the scan
         // (typo, or genuinely external) must still resolve Unknown, not silently match some
         // other function's registry entry. Unknown is a claim about our own uncertainty, not
         // a claim the engine can confirm or deny, so no oracle round-trip here.
-        var parseResult = SqlScriptParser.ParseText("scalar_udf_missing.sql", MissingFunctionSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(MissingFunctionSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.Unknown, finding.Verdict);

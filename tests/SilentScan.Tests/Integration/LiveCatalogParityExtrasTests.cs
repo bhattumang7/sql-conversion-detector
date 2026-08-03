@@ -1,5 +1,3 @@
-using SilentScan.Core.Parsing;
-using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Live;
 using SilentScan.Tests.Support;
@@ -12,11 +10,12 @@ namespace SilentScan.Tests.Integration;
 /// synonyms, scalar UDF return types, or temp-table/table-variable shapes - all three exist only
 /// as text inside a module body, which a live scan parses (for predicate analysis) but never fed
 /// through <see cref="Catalog.CatalogBuilder"/>. That made a live scan of a synonym/UDF/temp-
-/// table-heavy database strictly WORSE than scanning the same objects' scripted-out DDL from
-/// disk - a predicate a file-mode scan resolved fine came back "no known DDL" in live mode purely
-/// because of which pipeline read the schema. Mirrors <see cref="LiveFileEquivalenceTests"/>'s
-/// same-SQL-text, both-modes-must-agree structure, extended to the three previously-live-blind
-/// constructs.
+/// table-heavy database resolve strictly WORSE than it does now - a predicate the engine
+/// metadata alone couldn't see came back "no known DDL" purely because
+/// <see cref="Catalog.CatalogBuilder"/>'s own module-body inference was never consulted at all.
+/// Proves live mode actually resolves all three constructs correctly, on its own merits (no
+/// file-mode comparison - the file-parsed catalog pipeline this test used to compare against has
+/// been deleted, per the roadmap's "delete the file-parsed catalog path" item).
 /// </summary>
 [Trait("Category", "Oracle")]
 public sealed class LiveCatalogParityExtrasTests : OracleTestFixture
@@ -50,36 +49,26 @@ public sealed class LiveCatalogParityExtrasTests : OracleTestFixture
         findings.ToDictionary(f => (f.Column.TableQualifiedName, f.Column.ColumnName), f => f.Verdict);
 
     [Fact]
-    public async Task SynonymAndScalarUdfReference_LiveModeResolvesTheSameAsFileMode()
+    public async Task SynonymAndScalarUdfReference_LiveModeResolvesIt()
     {
-        var parseResult = SqlScriptParser.ParseText("fixture.sql", FixtureSql);
-        var fileReport = ScanReportBuilder.BuildFromParseResults([parseResult]);
         var liveResult = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
-        var fileVerdicts = VerdictsByColumn(fileReport.TypedFindings);
         var liveVerdicts = VerdictsByColumn(liveResult.Report.TypedFindings);
 
         var key = ("dbo.Orders", "OrderCode");
-        Assert.True(fileVerdicts.ContainsKey(key), "File mode should resolve the synonym+UDF predicate.");
-        Assert.True(liveVerdicts.ContainsKey(key), "Live mode should resolve the synonym+UDF predicate too - the whole point of this fix.");
-        Assert.Equal(fileVerdicts[key], liveVerdicts[key]);
+        Assert.True(liveVerdicts.ContainsKey(key), "Live mode should resolve the synonym+UDF predicate - the whole point of this fix.");
         Assert.Equal(Verdict.ScanForced, liveVerdicts[key]);
     }
 
     [Fact]
-    public async Task TableVariableJoin_LiveModeResolvesTheSameAsFileMode()
+    public async Task TableVariableJoin_LiveModeResolvesIt()
     {
-        var parseResult = SqlScriptParser.ParseText("fixture.sql", FixtureSql);
-        var fileReport = ScanReportBuilder.BuildFromParseResults([parseResult]);
         var liveResult = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
-        var fileVerdicts = VerdictsByColumn(fileReport.TypedFindings);
         var liveVerdicts = VerdictsByColumn(liveResult.Report.TypedFindings);
 
         var key = ("dbo.Accounts", "Code");
-        Assert.True(fileVerdicts.ContainsKey(key), "File mode should resolve the table-variable join predicate.");
-        Assert.True(liveVerdicts.ContainsKey(key), "Live mode should resolve the table-variable join predicate too.");
-        Assert.Equal(fileVerdicts[key], liveVerdicts[key]);
+        Assert.True(liveVerdicts.ContainsKey(key), "Live mode should resolve the table-variable join predicate.");
         Assert.Equal(Verdict.ScanForced, liveVerdicts[key]);
     }
 }

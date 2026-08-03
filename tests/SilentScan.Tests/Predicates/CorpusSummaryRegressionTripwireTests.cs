@@ -1,5 +1,6 @@
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -24,10 +25,10 @@ public sealed class CorpusSummaryRegressionTripwireTests
     private static readonly string ProjectDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "mini_project");
 
     [Fact]
-    public void MiniProject_SummaryCounts_MatchTheKnownGoldenShape()
+    public async Task MiniProject_SummaryCounts_MatchTheKnownGoldenShape()
     {
         var files = SqlFileDiscovery.EnumerateSqlFiles(ProjectDir);
-        var report = ScanReportBuilder.Build(files);
+        var report = await EngineAuthoritativeScan.ScanFilesAsync(files, "SQL_Latin1_General_CP1_CI_AS");
 
         foreach (var fileHealth in report.ParseHealth.Files)
         {

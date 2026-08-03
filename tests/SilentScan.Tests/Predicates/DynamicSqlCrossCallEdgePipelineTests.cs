@@ -1,6 +1,6 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -15,10 +15,9 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class DynamicSqlCrossCallEdgePipelineTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("dynsql_crosscall.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -28,7 +27,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
-    public void SingleCallerLiteral_SeedsCalleeParameter_DynamicSqlAnalyzedAndScanForced()
+    public async Task SingleCallerLiteral_SeedsCalleeParameter_DynamicSqlAnalyzedAndScanForced()
     {
         // The seeded @Status value is reconstructed into the dynamic SQL text as an EXPLICIT
         // nvarchar literal (N'...' around the placeholder, not just around the STATIC pieces of
@@ -37,7 +36,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
         // exists". CLAUDE.md's own rule (only the reconstructed TEXT's own quote characters
         // determine a literal's type, never the outer nvarchar variable that built it) is
         // exactly why the DECLARE below embeds N' around @Status's own surrounding quotes.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Orders (Status varchar(20) NOT NULL, INDEX IX_Status (Status));
             GO
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
@@ -60,9 +59,9 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
-    public void TwoCallersWithLiterals_NotSeeded_UnanalyzableWithMultipleCallSitesReason()
+    public async Task TwoCallersWithLiterals_NotSeeded_UnanalyzableWithMultipleCallSitesReason()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
                 DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM dbo.Orders WHERE Status = ''' + @Status + N'''';
@@ -80,9 +79,9 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
-    public void CallerPassesVariableNotLiteral_UnanalyzableWithNonLiteralCallerReason()
+    public async Task CallerPassesVariableNotLiteral_UnanalyzableWithNonLiteralCallerReason()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
                 DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM dbo.Orders WHERE Status = ''' + @Status + N'''';

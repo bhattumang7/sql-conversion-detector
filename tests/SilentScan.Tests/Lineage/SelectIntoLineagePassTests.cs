@@ -1,6 +1,6 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Lineage;
 
@@ -15,10 +15,9 @@ namespace SilentScan.Tests.Lineage;
 /// </summary>
 public sealed class SelectIntoLineagePassTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("select_into.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -28,9 +27,9 @@ public sealed class SelectIntoLineagePassTests
     }
 
     [Fact]
-    public void SelectIntoFromView_TargetColumnTypesFromTheViewsRealColumn()
+    public async Task SelectIntoFromView_TargetColumnTypesFromTheViewsRealColumn()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL, INDEX IX_Badge (Badge));
             GO
             CREATE VIEW dbo.vEmployees AS SELECT Badge FROM dbo.Employees;
@@ -53,11 +52,11 @@ public sealed class SelectIntoLineagePassTests
     }
 
     [Fact]
-    public void SelectIntoFromUnionSource_ResolvesInstead_OfGivingUp()
+    public async Task SelectIntoFromUnionSource_ResolvesInstead_OfGivingUp()
     {
         // The UNION give-up SelectIntoColumnResolver's own doc comment names is fixed for
         // free: QueryExpressionResolver already handles BinaryQueryExpression natively.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.CurrentOrders (OrderCode varchar(20) NOT NULL);
             GO
             CREATE TABLE dbo.ArchivedOrders (OrderCode varchar(20) NOT NULL);
@@ -75,11 +74,11 @@ public sealed class SelectIntoLineagePassTests
     }
 
     [Fact]
-    public void AlterTableAddAfterSelectInto_SurvivesTheMerge()
+    public async Task AlterTableAddAfterSelectInto_SurvivesTheMerge()
     {
         // Pass 1's own ALTER TABLE #tmp ADD (a routine post-SELECT-INTO pattern) must not be
         // discarded by the merge - only column TYPES are filled in, never the column/index list.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL);
             GO
             CREATE VIEW dbo.vEmployees AS SELECT Badge FROM dbo.Employees;
@@ -97,11 +96,11 @@ public sealed class SelectIntoLineagePassTests
     }
 
     [Fact]
-    public void CreateIndexAfterSelectInto_SurvivesTheMerge_ReportsIndexed()
+    public async Task CreateIndexAfterSelectInto_SurvivesTheMerge_ReportsIndexed()
     {
         // A CREATE INDEX issued after SELECT INTO (also routine) must survive the merge just
         // like ALTER TABLE ADD does - the fix only ever fills in null column types.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL);
             GO
             CREATE VIEW dbo.vEmployees AS SELECT Badge FROM dbo.Employees;
@@ -120,11 +119,11 @@ public sealed class SelectIntoLineagePassTests
     }
 
     [Fact]
-    public void SelectIntoFromBaseTable_UnaffectedByThePass()
+    public async Task SelectIntoFromBaseTable_UnaffectedByThePass()
     {
         // The common, already-working case (Pass 1 alone can resolve this) must keep working
         // identically - the new pass only fills in columns Pass 1 left null.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL, INDEX IX_Badge (Badge));
             GO
             SELECT Badge INTO #snap FROM dbo.Employees;

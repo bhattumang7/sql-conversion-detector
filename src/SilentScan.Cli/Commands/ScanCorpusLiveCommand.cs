@@ -130,7 +130,7 @@ public static class ScanCorpusLiveCommand
             }
 
             reportsByRepo[repo.Name] = outcome;
-            readableRepos.Add(new ReadableCorpusRepo(repo.Name, outcome.Report, CollationSensitivity: null, repoRoot));
+            readableRepos.Add(new ReadableCorpusRepo(repo.Name, outcome.Report, repoRoot));
         }
 
         var content = reportFormat == ReportFormat.Json

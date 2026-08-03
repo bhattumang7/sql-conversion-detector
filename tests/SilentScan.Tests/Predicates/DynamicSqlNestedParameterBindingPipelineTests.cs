@@ -1,6 +1,6 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -18,10 +18,9 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class DynamicSqlNestedParameterBindingPipelineTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("dynsql_nested_binding.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -31,9 +30,9 @@ public sealed class DynamicSqlNestedParameterBindingPipelineTests
     }
 
     [Fact]
-    public void NestedCallBindsFormalParameterToEnclosingDeclaredParameter_TypesThroughTheBinding()
+    public async Task NestedCallBindsFormalParameterToEnclosingDeclaredParameter_TypesThroughTheBinding()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Vendors (VendorCode varchar(50) NOT NULL, INDEX IX_VendorCode (VendorCode));
             GO
             CREATE PROCEDURE dbo.usp_FindVendor @Code nvarchar(50) AS
@@ -49,13 +48,13 @@ public sealed class DynamicSqlNestedParameterBindingPipelineTests
     }
 
     [Fact]
-    public void NestedCallBindsFormalParameterToNameOnlyMatch_NoEnclosingParameterOfThatName_StaysUnknown()
+    public async Task NestedCallBindsFormalParameterToNameOnlyMatch_NoEnclosingParameterOfThatName_StaysUnknown()
     {
         // @Code here isn't declared anywhere the outer script can see - it isn't the outer's
         // own sp_executesql parameter, so there is nothing to bind through. Guessing from the
         // name alone (rather than a genuine argument-binding hand-off) is exactly what CLAUDE.md
         // and the design note for this gap forbid.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Vendors (VendorCode varchar(50) NOT NULL, INDEX IX_VendorCode (VendorCode));
             GO
             CREATE PROCEDURE dbo.usp_FindVendor AS

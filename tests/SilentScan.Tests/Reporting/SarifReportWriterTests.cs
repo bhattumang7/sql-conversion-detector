@@ -6,16 +6,17 @@ using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Sarif;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
 public sealed class SarifReportWriterTests
 {
     [Fact]
-    public void Write_MiniProjectFixture_ProducesValidSarifWithExpectedResultCount()
+    public async Task Write_MiniProjectFixture_ProducesValidSarifWithExpectedResultCount()
     {
         var projectDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "mini_project");
-        var report = ScanReportBuilder.Build(SqlFileDiscovery.EnumerateSqlFiles(projectDir));
+        var report = await EngineAuthoritativeScan.ScanFilesAsync(SqlFileDiscovery.EnumerateSqlFiles(projectDir));
 
         var sarif = SarifReportWriter.Write(report);
         using var document = JsonDocument.Parse(sarif);

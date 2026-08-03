@@ -1,6 +1,6 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -16,10 +16,9 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class DynamicSqlParameterAliasPipelineTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("dynsql_alias.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -29,9 +28,9 @@ public sealed class DynamicSqlParameterAliasPipelineTests
     }
 
     [Fact]
-    public void AliasTypedDeclaredParameter_ResolvesThroughCatalogTypeAliases_ScanForced()
+    public async Task AliasTypedDeclaredParameter_ResolvesThroughCatalogTypeAliases_ScanForced()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TYPE dbo.CodeType FROM nvarchar(50);
             GO
             CREATE TABLE dbo.Vendors (VendorCode varchar(50) NOT NULL, INDEX IX_VendorCode (VendorCode));

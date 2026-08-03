@@ -1,4 +1,3 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
@@ -57,8 +56,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     [Fact]
     public async Task DroppedPrimaryKeyConstraint_NoLongerReportsIndexed_OracleConfirmed()
     {
-        var parseResult = SqlScriptParser.ParseText("dropped_pk.sql", DroppedPkSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(DroppedPkSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "PartCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -71,8 +69,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     [Fact]
     public async Task DroppedUniqueConstraint_NoLongerReportsIndexed_OracleConfirmed()
     {
-        var parseResult = SqlScriptParser.ParseText("dropped_unique.sql", DroppedUniqueSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(DroppedUniqueSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Email");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -83,15 +80,14 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     }
 
     [Fact]
-    public void DroppingOneConstraint_LeavesUnrelatedIndexesIntact()
+    public async Task DroppingOneConstraint_LeavesUnrelatedIndexesIntact()
     {
         // A named constraint drop must remove ONLY its own backing index, not every index on
         // the table - the fix matches by name, not by clearing the whole index list. This is a
         // catalog-bookkeeping assertion (Indexed flag), not a verdict claim, so there is
         // nothing for the plan-XML oracle to confirm beyond what the two tests above already
         // established for the underlying mechanism.
-        var parseResult = SqlScriptParser.ParseText("dropped_one_of_two.sql", DroppedOneOfTwoSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(DroppedOneOfTwoSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var orderCodeFinding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
         Assert.True(orderCodeFinding.Column.Indexed);

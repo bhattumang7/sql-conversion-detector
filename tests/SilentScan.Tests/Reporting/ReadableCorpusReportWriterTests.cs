@@ -1,15 +1,16 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
 /// <summary>
 /// The corpus report's rollup table is what answers "which repo do I look at" without reading
-/// five reports first, so it has to carry the three facts that decide that: how many findings,
-/// whether the repo's files actually parsed as T-SQL, and whether its collation was pinned at
-/// all. A repo below the parse-success bar must be visibly marked rather than sitting in the
-/// table looking like any other row.
+/// five reports first, so it has to carry the facts that decide that: how many findings, and
+/// whether the repo's files actually parsed as T-SQL. A repo below the parse-success bar must be
+/// visibly marked rather than sitting in the table looking like any other row.
 /// </summary>
 public sealed class ReadableCorpusReportWriterTests
 {
@@ -20,35 +21,23 @@ public sealed class ReadableCorpusReportWriterTests
         AS SELECT DisplayName FROM dbo.Users WHERE DisplayName = @DisplayName;
         """;
 
-    private static ReadableCorpusRepo Repo(string name, string sql, string? collation = "SQL_Latin1_General_CP1_CI_AS", string path = "src/x.sql")
+    private static async Task<ReadableCorpusRepo> Repo(string name, string sql, string? collation = "SQL_Latin1_General_CP1_CI_AS")
     {
-        var parsed = SqlScriptParser.ParseText(path, sql);
-        return new ReadableCorpusRepo(name, ScanReportBuilder.BuildFromParseResults([parsed], collation), null);
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, collation);
+        return new ReadableCorpusRepo(name, report, null);
     }
 
     [Fact]
-    public void RollupTable_HasOneRowPerRepoWithItsFindingsParseRateAndCollationState()
+    public async Task RollupTable_HasOneRowPerRepoWithItsFindingsAndParseRate()
     {
-        var unpinnedParse = SqlScriptParser.ParseText("y.sql", FindingSql);
-        var repos = new[]
-        {
-            Repo("alpha", FindingSql),
-            new ReadableCorpusRepo(
-                "beta",
-                ScanReportBuilder.BuildFromParseResults([unpinnedParse]),
-                CollationSensitivityReport.Analyze([unpinnedParse])),
-        };
+        var repos = new[] { await Repo("alpha", FindingSql) };
 
         var rendered = ReadableCorpusReportWriter.Write(repos, [], ReadableStyle.Text).ReplaceLineEndings("\n");
         var lines = rendered.Split('\n');
 
         var alpha = Assert.Single(lines, line => line.StartsWith("  alpha", StringComparison.Ordinal));
-        var beta = Assert.Single(lines, line => line.StartsWith("  beta", StringComparison.Ordinal));
 
         Assert.Contains("pass", alpha, StringComparison.Ordinal);
-        Assert.Contains("pinned", alpha, StringComparison.Ordinal);
-        Assert.DoesNotContain("NOT PINNED", alpha, StringComparison.Ordinal);
-        Assert.Contains("NOT PINNED", beta, StringComparison.Ordinal);
 
         // Each repo's own full report follows the table.
         Assert.Contains("dbo.Users.DisplayName", rendered, StringComparison.Ordinal);
@@ -57,8 +46,13 @@ public sealed class ReadableCorpusReportWriterTests
     [Fact]
     public void RepoBelowTheDialectSniffingBar_IsMarkedAndNamed()
     {
+        // A malformed batch is real SQL Server syntax, not just noise ScriptDOM can recover
+        // from - deploying it through the engine would abort deployment outright (ScriptDeployer
+        // has no per-batch try/catch), so this exercises ParseHealthReport directly, the same way
+        // ScanReportBuilder itself does before any catalog/lineage work runs.
         var broken = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
-        var repo = new ReadableCorpusRepo("mysql-ish", ScanReportBuilder.BuildFromParseResults([broken]), null);
+        var report = ScanReportBuilder.BuildFromParseResults([broken], new DatabaseCatalog());
+        var repo = new ReadableCorpusRepo("mysql-ish", report, null);
 
         var rendered = ReadableCorpusReportWriter.Write([repo], [], ReadableStyle.Text);
 
@@ -68,18 +62,18 @@ public sealed class ReadableCorpusReportWriterTests
     }
 
     [Fact]
-    public void ReposWithoutAClone_AreNamedRatherThanSilentlyAbsent()
+    public async Task ReposWithoutAClone_AreNamedRatherThanSilentlyAbsent()
     {
-        var rendered = ReadableCorpusReportWriter.Write([Repo("alpha", FindingSql)], ["gamma"], ReadableStyle.Text);
+        var rendered = ReadableCorpusReportWriter.Write([await Repo("alpha", FindingSql)], ["gamma"], ReadableStyle.Text);
 
         Assert.Contains("no local clone was found", rendered, StringComparison.Ordinal);
         Assert.Contains("- gamma", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PerRepoSections_SitUnderTheRepoHeadingRatherThanOutrankingIt()
+    public async Task PerRepoSections_SitUnderTheRepoHeadingRatherThanOutrankingIt()
     {
-        var rendered = ReadableCorpusReportWriter.Write([Repo("alpha", FindingSql)], [], ReadableStyle.Markdown);
+        var rendered = ReadableCorpusReportWriter.Write([await Repo("alpha", FindingSql)], [], ReadableStyle.Markdown);
 
         Assert.Contains("# SilentScan corpus scan", rendered, StringComparison.Ordinal);
         Assert.Contains("## alpha", rendered, StringComparison.Ordinal);

@@ -1,6 +1,8 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Catalog;
 
@@ -15,10 +17,9 @@ namespace SilentScan.Tests.Catalog;
 /// </summary>
 public sealed class SynonymResolutionTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("synonym.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -28,9 +29,9 @@ public sealed class SynonymResolutionTests
     }
 
     [Fact]
-    public void SynonymForTable_ResolvesToTheRealBaseTable()
+    public async Task SynonymForTable_ResolvesToTheRealBaseTable()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
             CREATE SYNONYM dbo.Stock FOR dbo.Inventory;
@@ -45,12 +46,12 @@ public sealed class SynonymResolutionTests
     }
 
     [Fact]
-    public void SynonymForView_Resolves_EvenThoughViewsAreNeverInDatabaseCatalog()
+    public async Task SynonymForView_Resolves_EvenThoughViewsAreNeverInDatabaseCatalog()
     {
         // The hardest case: a view is not in DatabaseCatalog at all (only LineageCatalog knows
         // about it), so a synonym pointing at one can only ever resolve through the
         // resolvedViews dictionary lookup, not catalog.Find - both must be canonicalized.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
             CREATE VIEW dbo.vInventory AS SELECT Sku FROM dbo.Inventory;
@@ -67,12 +68,12 @@ public sealed class SynonymResolutionTests
     }
 
     [Fact]
-    public void ViewDefinedOverSynonymForAnotherView_GetsACorrectDependencyEdge()
+    public async Task ViewDefinedOverSynonymForAnotherView_GetsACorrectDependencyEdge()
     {
         // Without threading synonym resolution into ViewDependencyGraph's own dependency-edge
         // collection, topological order could resolve vOuter before vInner and vOuter's Sku
         // column would degrade to Unknown regardless of the FromScopeResolver fix above.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
             CREATE VIEW dbo.vInner AS SELECT Sku FROM dbo.Inventory;
@@ -90,9 +91,9 @@ public sealed class SynonymResolutionTests
     }
 
     [Fact]
-    public void DropSynonym_MakesTheNameUnresolvedAgain()
+    public async Task DropSynonym_MakesTheNameUnresolvedAgain()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL);
             GO
             CREATE SYNONYM dbo.Stock FOR dbo.Inventory;
@@ -106,6 +107,26 @@ public sealed class SynonymResolutionTests
         Assert.Contains(report.SkippedConstructs, s => s.Reason.Contains("dbo.Stock", StringComparison.Ordinal) && s.Reason.Contains("has no known DDL", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Builds straight from parsed text via <see cref="CatalogBuilder"/>, never through
+    /// <see cref="EngineAuthoritativeScan"/> - the two scenarios below are deliberately
+    /// undeployable T-SQL (a real synonym cycle, a synonym targeting a linked server that does
+    /// not exist), so a real SQL Server predictably REJECTS creating them outright (verified
+    /// directly: "Synonym chaining is not allowed" / the linked server does not exist) rather
+    /// than silently accepting and letting this pass's own cycle/ledger-safety logic run at
+    /// all. These two are testing THIS PASS's own resilience to text a real corpus script might
+    /// contain and ScriptDom parses fine, independent of whether that text could ever actually
+    /// deploy - CatalogBuilder is still a live, used component (DatabaseCatalog.MergeFileModeExtras),
+    /// so exercising it directly here is not testing a deleted code path.
+    /// </summary>
+    private static ScanReport ScanParsedOnly(string sql)
+    {
+        var parseResult = SqlScriptParser.ParseText("synonym.sql", sql);
+        Assert.Empty(parseResult.Errors);
+        var catalog = CatalogBuilder.Build([parseResult]);
+        return ScanReportBuilder.BuildFromParseResults([parseResult], catalog);
+    }
+
     [Fact]
     public void SynonymCycle_FallsBackToTheOriginalNameRatherThanLooping()
     {
@@ -113,7 +134,7 @@ public sealed class SynonymResolutionTests
         // must never loop on a corpus script that tries it anyway - a cycle resolves to the
         // ORIGINAL input name, which then takes the ordinary honestly-ledgered "no known DDL"
         // path rather than a guess.
-        var report = Scan("""
+        var report = ScanParsedOnly("""
             CREATE SYNONYM dbo.A FOR dbo.B;
             GO
             CREATE SYNONYM dbo.B FOR dbo.A;
@@ -131,7 +152,7 @@ public sealed class SynonymResolutionTests
         // SchemaObjectNameHelper.Qualify silently drops ServerIdentifier - registering this
         // under "otherdb.dbo.RemoteInventory" (dropping "linkedserver") could alias an
         // unrelated LOCAL object sharing that same three-part tail. Must ledger, never register.
-        var report = Scan("""
+        var report = ScanParsedOnly("""
             CREATE SYNONYM dbo.RemoteStock FOR linkedserver.otherdb.dbo.RemoteInventory;
             GO
             SELECT 1 FROM dbo.RemoteStock WHERE Sku = N'S1';

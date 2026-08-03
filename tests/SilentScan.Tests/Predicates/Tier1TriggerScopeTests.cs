@@ -1,5 +1,5 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Predicates;
 
@@ -15,10 +15,9 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class Tier1TriggerScopeTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("tier1_trigger.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -28,9 +27,9 @@ public sealed class Tier1TriggerScopeTests
     }
 
     [Fact]
-    public void FunctionWrappedInsertedColumn_ResolvesToTargetTableColumn_NotIndexed()
+    public async Task FunctionWrappedInsertedColumn_ResolvesToTargetTableColumn_NotIndexed()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Orders_Code (Code));
             GO
             CREATE TRIGGER dbo.trg_Orders ON dbo.Orders AFTER INSERT AS
@@ -49,9 +48,9 @@ public sealed class Tier1TriggerScopeTests
     }
 
     [Fact]
-    public void TempTableDeclaredInTriggerBody_ResolvesUnderTheTriggersOwnScope()
+    public async Task TempTableDeclaredInTriggerBody_ResolvesUnderTheTriggersOwnScope()
     {
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
             GO
             CREATE TRIGGER dbo.trg_Orders ON dbo.Orders AFTER INSERT AS

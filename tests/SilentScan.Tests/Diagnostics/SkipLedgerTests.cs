@@ -5,6 +5,7 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Diagnostics;
 
@@ -200,6 +201,14 @@ public sealed class SkipLedgerTests
     [Fact]
     public void ScanReportBuilder_AggregatesSkippedConstructsAcrossAllPasses()
     {
+        // Parsed-only, via CatalogBuilder directly - not EngineAuthoritativeScan: a view
+        // referencing a genuinely nonexistent table (dbo.Ghost, deliberately never declared,
+        // exactly the gap this test exists to ledger) fails to even DEPLOY to a real server
+        // ("Invalid object name 'dbo.Ghost'", verified directly - unlike a procedure body,
+        // CREATE VIEW's own referenced objects are validated immediately, not deferred). This is
+        // testing the Lineage/Predicates passes' own ledgering of an unresolved reference from
+        // parsed text, independent of whether that text could ever actually deploy -
+        // CatalogBuilder is still a live, used component (DatabaseCatalog.MergeFileModeExtras).
         var sql = """
             CREATE TABLE dbo.Users (Id INT NOT NULL, DisplayName VARCHAR(40) NOT NULL);
             GO
@@ -215,10 +224,11 @@ public sealed class SkipLedgerTests
                 END
             END
             """;
-        var result = SqlScriptParser.ParseText("test.sql", sql);
-        Assert.False(result.HasErrors);
 
-        var report = ScanReportBuilder.BuildFromParseResults([result]);
+        var parseResult = SqlScriptParser.ParseText("skip_ledger.sql", sql);
+        Assert.Empty(parseResult.Errors);
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var report = ScanReportBuilder.BuildFromParseResults([parseResult], catalog);
 
         Assert.Contains(report.SkippedConstructs, e => e.Pass == AnalysisPass.Lineage);
         Assert.Contains(report.SkippedConstructs, e => e.Pass == AnalysisPass.Predicates);

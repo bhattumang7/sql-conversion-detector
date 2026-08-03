@@ -25,26 +25,26 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
 {
     private static readonly string ProjectDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "mini_project");
 
-    private readonly string _fixtureFile;
-    private readonly ScanReport _report;
-
-    public FullPipelineSyntheticMiniProjectTests()
-    {
-        var files = SqlFileDiscovery.EnumerateSqlFiles(ProjectDir);
-        _fixtureFile = files.Single(f => f.EndsWith("03_procs.sql", StringComparison.Ordinal));
-        _report = ScanReportBuilder.Build(files);
-
-        foreach (var fileHealth in _report.ParseHealth.Files)
-        {
-            Assert.Empty(fileHealth.Errors);
-        }
-    }
+    private ScanReport _report = null!;
 
     protected override string DatabaseNameSeed => nameof(FullPipelineSyntheticMiniProjectTests);
 
     protected override string Ddl =>
         File.ReadAllText(Path.Combine(ProjectDir, "01_schema.sql")) + "\nGO\n" +
         File.ReadAllText(Path.Combine(ProjectDir, "02_views.sql"));
+
+    public override async Task InitializeAsync()
+    {
+        await base.InitializeAsync();
+
+        var files = SqlFileDiscovery.EnumerateSqlFiles(ProjectDir);
+        _report = await EngineAuthoritativeScan.ScanFilesAsync(files, "SQL_Latin1_General_CP1_CI_AS");
+
+        foreach (var fileHealth in _report.ParseHealth.Files)
+        {
+            Assert.Empty(fileHealth.Errors);
+        }
+    }
 
     [Fact]
     public async Task DirectTableScanForced_IsPlantedAndFound_OracleConfirmed()
@@ -177,16 +177,22 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
         // usp_DynamicTierCAccumulated_Fires builds its EXEC text via a straight-line
         // DECLARE + SET accumulation across two source lines with no branch in between -
         // Tier C must fold it, reparse it, and remap the resulting ScanForced finding back to
-        // the SET statement (line 90) that actually contributed the offending predicate, not
-        // the EXEC call site (line 91).
+        // the SET statement that actually contributed the offending predicate, not the EXEC
+        // call site one line later. The module's own qualified name is the finding's source
+        // path (engine-authoritative scanning maps a finding back to the deployed module, not
+        // the original repo file - CLAUDE.md's file-provenance requirement is a corpus-scanning
+        // concern, satisfied instead by CorpusLiveScanRunner's own provenance map), and its line
+        // numbers are relative to the module's own definition text (sys.sql_modules preserves
+        // the original CREATE PROCEDURE text verbatim, starting fresh at line 1 for each module -
+        // not the whole file's absolute line count), verified directly against the real engine.
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "AccountCode");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
-        Assert.Equal(_fixtureFile, finding.SourcePath);
-        Assert.Equal(90, finding.Line);
+        Assert.Equal("dbo.usp_DynamicTierCAccumulated_Fires", finding.SourcePath);
+        Assert.Equal(5, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
-        Assert.Equal(91, finding.DynamicSqlCallSite!.Value.Line);
+        Assert.Equal(6, finding.DynamicSqlCallSite!.Value.Line);
 
         // The dynamic-SQL provenance is purely a source-location concern - the underlying
         // comparison the oracle probes is the same "AccountCode = <nvarchar literal>" against
@@ -207,7 +213,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
         Assert.NotNull(finding.DynamicSqlCallSite);
-        Assert.Equal(_fixtureFile, finding.DynamicSqlCallSite!.Value.SourcePath);
+        Assert.Equal("dbo.usp_DynamicSpExecuteSqlDeclaredParam_Fires", finding.DynamicSqlCallSite!.Value.SourcePath);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
@@ -216,20 +222,22 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public async Task DynamicSqlLiteral_InnerPredicateIsReparsedAndRemappedToSourceLine_OracleConfirmed()
     {
-        // EXEC('SELECT UserId FROM dbo.Users WHERE Email = N''x''') on line 69 of
-        // 03_procs.sql - Email is VARCHAR/SQL_* collation vs an nvarchar literal, so Tier A
-        // must actually reparse the folded text (not just detect the call site) and remap the
-        // resulting ScanForced finding back to that exact source line, with call-site
-        // provenance attached.
+        // EXEC('SELECT UserId FROM dbo.Users WHERE Email = N''x''') inside
+        // usp_DynamicLiteralWithFinding_Fires - Email is VARCHAR/SQL_* collation vs an
+        // nvarchar literal, so Tier A must actually reparse the folded text (not just detect
+        // the call site) and remap the resulting ScanForced finding back to that exact source
+        // line within the module's own definition, with call-site provenance attached -
+        // verified directly against the real engine (see the sibling TierC test above for why
+        // the source path/line are module-relative under engine-authoritative scanning).
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Email");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
-        Assert.Equal(_fixtureFile, finding.SourcePath);
-        Assert.Equal(69, finding.Line);
+        Assert.Equal("dbo.usp_DynamicLiteralWithFinding_Fires", finding.SourcePath);
+        Assert.Equal(4, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
-        Assert.Equal(_fixtureFile, finding.DynamicSqlCallSite!.Value.SourcePath);
-        Assert.Equal(69, finding.DynamicSqlCallSite.Value.Line);
+        Assert.Equal("dbo.usp_DynamicLiteralWithFinding_Fires", finding.DynamicSqlCallSite!.Value.SourcePath);
+        Assert.Equal(4, finding.DynamicSqlCallSite.Value.Line);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
         PipelineOracleVerification.AssertAllConfirmed(results);

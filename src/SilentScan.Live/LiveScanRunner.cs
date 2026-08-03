@@ -45,8 +45,13 @@ public static class LiveScanRunner
         // bodies (already parsed above for predicate analysis, not reparsed) and merging in only
         // what it can contribute that engine metadata cannot closes the gap that otherwise made
         // a live scan of a synonym/UDF/temp-table-heavy database strictly WORSE than scanning
-        // the same objects' scripted-out DDL from disk.
-        catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResults));
+        // the same objects' scripted-out DDL from disk. The real database's own default/tempdb
+        // collation (already read by LiveCatalogReader, not a manifest guess) is threaded
+        // through as the fallback hint a #temp table/table variable column with no explicit
+        // COLLATE of its own needs - without this, every such column's collation stayed
+        // permanently unresolved (Verdict.Unknown), since CatalogBuilder had nothing at all to
+        // fall back to.
+        catalog.MergeFileModeExtras(CatalogBuilder.Build(parseResults, catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name));
 
         // Resolved once here for the parity gate below, and again inside ScanReportBuilder for
         // the findings pipeline itself - a pure function of (catalog, parseResults), so the

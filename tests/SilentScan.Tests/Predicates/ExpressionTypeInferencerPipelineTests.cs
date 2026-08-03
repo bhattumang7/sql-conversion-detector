@@ -35,8 +35,7 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
         // Oracle-verified (see ExpressionTypeInferencer's own remarks): COALESCE(varchar,
         // nvarchar) resolves nvarchar - the SQL_* collation column then converts, same
         // flagship direction as CLAUDE.md's "varchar column vs nvarchar value" example.
-        var parseResult = SqlScriptParser.ParseText("coalesce.sql", CoalesceSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(CoalesceSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);

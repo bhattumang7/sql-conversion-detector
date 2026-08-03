@@ -45,12 +45,12 @@ public abstract class OracleTestFixture : IAsyncLifetime
     /// <summary>The DDL (CREATE TABLE/INDEX/VIEW/etc, GO-separated) this test class's probes run against.</summary>
     protected abstract string Ddl { get; }
 
-    public async Task InitializeAsync()
+    public virtual async Task InitializeAsync()
     {
         await new DatabaseProvisioner(Options).CreateFreshAsync(DatabaseName);
         await new ScriptDeployer(Options).DeployAsync(Ddl, DatabaseName);
     }
 
-    public async Task DisposeAsync() =>
+    public virtual async Task DisposeAsync() =>
         await new DatabaseProvisioner(Options).DropIfExistsAsync(DatabaseName);
 }

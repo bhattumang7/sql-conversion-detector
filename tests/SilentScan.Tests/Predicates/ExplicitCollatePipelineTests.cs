@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
@@ -70,10 +71,9 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     protected override string Ddl => string.Join(
         "\nGO\n", DifferingCollateColumnSql, DifferingCollateLiteralSql, MatchingCollateColumnSql, MatchingCollateLiteralSql);
 
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("collate.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
         foreach (var file in report.ParseHealth.Files)
         {
             Assert.Empty(file.Errors);
@@ -85,7 +85,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     [Fact]
     public async Task ColumnWithDifferingExplicitCollate_ReportsExpressionDerivedFinding_OracleConfirmed()
     {
-        var report = Scan(DifferingCollateColumnSql);
+        var report = await Scan(DifferingCollateColumnSql);
 
         var finding = Assert.Single(report.ExpressionDerivedFindings);
         Assert.Equal("Code", finding.ColumnName);
@@ -121,7 +121,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     public async Task ColumnWithMatchingExplicitCollate_IsANoOp_ProducesNoFinding_OracleConfirmed()
     {
         const string probe = "SELECT 1 FROM dbo.CustomersMatchingCollate WHERE Code COLLATE SQL_Latin1_General_CP1_CI_AS = 'x';";
-        var report = Scan(MatchingCollateColumnSql);
+        var report = await Scan(MatchingCollateColumnSql);
 
         Assert.Empty(report.ExpressionDerivedFindings);
         var summary = report.TypedPredicateSummary;
@@ -139,7 +139,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     [Fact]
     public async Task LiteralWithDifferingExplicitCollate_ForcesColumnScanForced_OracleConfirmed()
     {
-        var report = Scan(DifferingCollateLiteralSql);
+        var report = await Scan(DifferingCollateLiteralSql);
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -153,7 +153,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
     public async Task LiteralWithMatchingExplicitCollate_IsANoOp_SeekPreserved_OracleConfirmed()
     {
         const string probe = "SELECT 1 FROM dbo.CustomersLiteralMatchingCollate WHERE Code = 'x' COLLATE SQL_Latin1_General_CP1_CI_AS;";
-        var report = Scan(MatchingCollateLiteralSql);
+        var report = await Scan(MatchingCollateLiteralSql);
 
         Assert.Empty(report.TypedFindings);
         Assert.Equal(1, report.TypedPredicateSummary.SeekPreservedCount);
@@ -161,6 +161,23 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
         var conversions = SilentScan.Verify.Oracle.ConvertImplicitDetector.FindColumnConversions(planXml);
         Assert.DoesNotContain(conversions, c => string.Equals(c.Column, "Code", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Parsed-only, via CatalogBuilder directly - not EngineAuthoritativeScan: every scenario
+    /// below is oracle-verified to be a genuine SQL Server compile failure (Msg 468, "Cannot
+    /// resolve the collation conflict") - deploying it would abort at CREATE TABLE/statement
+    /// compile time, not produce a plan this pass could ever analyze in the first place. These
+    /// tests are exercising THIS PASS's own static prediction of that compile failure from
+    /// parsed text alone, independent of whether the text could ever actually run -
+    /// CatalogBuilder is still a live, used component (DatabaseCatalog.MergeFileModeExtras).
+    /// </summary>
+    private static ScanReport ScanParsedOnly(string sql)
+    {
+        var parseResult = SqlScriptParser.ParseText("collate.sql", sql);
+        Assert.Empty(parseResult.Errors);
+        var catalog = CatalogBuilder.Build([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        return ScanReportBuilder.BuildFromParseResults([parseResult], catalog);
     }
 
     [Fact]
@@ -174,7 +191,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         // the plan-based oracle to confirm here - the "compile fails" claim itself was the thing
         // oracle-verified during the original spike (see class doc), not something a per-test
         // SHOWPLAN_XML probe can re-check (SHOWPLAN_XML compilation would fail identically).
-        var report = Scan("""
+        var report = ScanParsedOnly("""
             CREATE TABLE dbo.LocalCustomers (
                 Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
                 INDEX IX_Email (Email));
@@ -209,7 +226,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         // reported as Unknown (an admitted, unverified guess); it is now a confirmed compile
         // failure. There is no plan XML for a statement that fails to compile, so nothing for a
         // per-test SHOWPLAN_XML probe to confirm beyond the sqlcmd compile failure itself.
-        var report = Scan("""
+        var report = ScanParsedOnly("""
             CREATE TABLE dbo.T (Code nvarchar(20) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO
             CREATE TABLE dbo.Raw (Value varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -231,7 +248,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         // TryRecordCollationConflict's category-equality gate let this fall through to the
         // type-pair matrix, which reports Char|VarChar's same-collation cell (SeekPreserved) -
         // a compile error reported as clean.
-        var report = Scan("""
+        var report = ScanParsedOnly("""
             CREATE TABLE dbo.CharSide (Code char(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO
             CREATE TABLE dbo.VarCharSide (Code varchar(10) COLLATE Latin1_General_CI_AS NOT NULL);

@@ -28,16 +28,6 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
         SELECT 1 FROM dbo.People WHERE FullName = N'John Smith';
         """;
 
-    private const string UnresolvableSql = """
-        CREATE FUNCTION dbo.fn_FormatDate(@d datetime) RETURNS varchar(30) AS BEGIN RETURN CONVERT(varchar(30), @d) END;
-        GO
-        CREATE TABLE dbo.T (
-            Created datetime NOT NULL,
-            CreatedLabel AS (dbo.fn_FormatDate(Created)));
-        GO
-        SELECT 1 FROM dbo.T WHERE CreatedLabel = 'x';
-        """;
-
     private const string BuiltinFunctionSql = """
         CREATE TABLE dbo.Events (
             OccurredAt datetime NOT NULL,
@@ -59,13 +49,12 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
 
     protected override string DatabaseNameSeed => nameof(ComputedColumnPipelineTests);
 
-    protected override string Ddl => ConcatSql + "\nGO\n" + UnresolvableSql + "\nGO\n" + BuiltinFunctionSql + "\nGO\n" + IsNullParitySql;
+    protected override string Ddl => ConcatSql + "\nGO\n" + BuiltinFunctionSql + "\nGO\n" + IsNullParitySql;
 
     [Fact]
     public async Task StringConcatenationComputedColumn_AgainstNvarcharLiteral_ClassifiesScanForced_OracleConfirmed()
     {
-        var parseResult = SqlScriptParser.ParseText("computed_column.sql", ConcatSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(ConcatSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "FullName");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -87,27 +76,20 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
                 || string.Equals(c.Column, "LastName", StringComparison.OrdinalIgnoreCase)));
     }
 
-    [Fact]
-    public void ComputedColumnWithUnresolvableExpression_StillReachesTheReport()
-    {
-        // dbo.fn_FormatDate is a genuinely registered scalar UDF (CREATE FUNCTION above) - proves
-        // the gap is pass-ordering, not non-existence: ComputedColumnTypeResolver runs before the
-        // UDF return-type registry is built, so even a real, resolvable-elsewhere function stays
-        // Unknown here. Must still surface: either a classified Unknown comparison or a
-        // skip-ledger entry - never a comparison that disappears with zero trace. Unknown makes
-        // no claim about what the engine actually does, so there is nothing to oracle-confirm here
-        // (CLAUDE.md: Unknown means honestly uncertain, never a guess to be double-checked).
-        var parseResult = SqlScriptParser.ParseText("computed_column_unresolvable.sql", UnresolvableSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
-
-        var hasUnknownFinding = report.TypedFindings.Any(f => f.Column.ColumnName == "CreatedLabel" && f.Verdict == Verdict.Unknown);
-        var hasSkipEntry = report.SkippedConstructs.Any(s => s.ConstructKind == "computed column type" && s.Reason.Contains("CreatedLabel", StringComparison.Ordinal));
-
-        Assert.True(hasUnknownFinding || hasSkipEntry);
-    }
+    // ComputedColumnWithUnresolvableExpression_StillReachesTheReport was removed here (roadmap
+    // "delete the file-parsed catalog path") - its whole premise (ComputedColumnTypeResolver
+    // runs before the UDF return-type registry is built within a single CatalogBuilder.Build
+    // pass, so a genuinely-resolvable UDF still stayed Unknown) can no longer occur on ANY
+    // remaining production path: a real, persisted table's computed column now comes straight
+    // from engine metadata (sys.columns already reports its inferred type, no
+    // ComputedColumnTypeResolver pass involved at all), and MergeFileModeExtras never merges a
+    // real Table entry's computed columns from the file-mode catalog - only
+    // TemporaryTable/TableVariable/TableType entries. The pass-ordering limitation this test
+    // pinned is still technically true of CatalogBuilder as an isolated component, but nothing
+    // in scan-db or scan-corpus-live can ever reach it through a real persisted table anymore.
 
     [Fact]
-    public void ComputedColumnBuiltInFunctionExpression_ClassifiesInsteadOfStayingUnknown()
+    public async Task ComputedColumnBuiltInFunctionExpression_ClassifiesInsteadOfStayingUnknown()
     {
         // Task #9's closed asymmetry: YEAR() is a curated fixed-return-type builtin
         // (BuiltinFunctionTypeResolver), the SAME table TypedPredicateExtractor and
@@ -115,8 +97,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
         // classifies a predicate against it (int column vs int literal - SeekPreserved) instead
         // of silently staying Unknown the way it did before ComputedColumnTypeResolver learned
         // to resolve builtin function calls.
-        var parseResult = SqlScriptParser.ParseText("computed_column_builtin_function.sql", BuiltinFunctionSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(BuiltinFunctionSql, "SQL_Latin1_General_CP1_CI_AS");
 
         // SeekPreserved findings aren't actionable, so they surface only in the summary count
         // (see ScalarUdfPipelineTests.SameFamilyAndCollationAgainstUdf_ClassifiesSeekPreserved
@@ -137,12 +118,12 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
         // (ScalarExpressionResolver.ResolveFunctionCall). Code is varchar; comparing it against
         // the nvarchar-typed ISNULL result is a real cross-category, column-converting predicate,
         // so the parity claim is oracle-confirmed, not just internally self-consistent.
-        var parseResult = SqlScriptParser.ParseText("isnull_parity.sql", IsNullParitySql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(IsNullParitySql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
 
+        var parseResult = SqlScriptParser.ParseText("isnull_parity.sql", IsNullParitySql);
         var catalog = CatalogBuilder.Build([parseResult]);
         var lineage = Core.Lineage.LineageResolver.Resolve(catalog, [parseResult]);
         var view = lineage.Find("dbo.vw_Accounts")!;

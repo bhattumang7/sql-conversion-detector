@@ -153,7 +153,16 @@ public static class VerifyCorpusCommand
             parseResults.Add(await ParseCorpusFileAsync(repo, file, cancellationToken));
         }
 
-        var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation, manifestTempdbCollation: repo.TempdbCollation);
+        // Built once and reused for both the report (ScanReportBuilder.BuildFromParseResults no
+        // longer builds one internally - roadmap "delete the file-parsed catalog path") and the
+        // environment parity gate below, which needs the resolved view provenance to diff
+        // against sys.columns after deployment - previously two separate CatalogBuilder.Build
+        // calls over the same parse results, wastefully rebuilding the identical catalog twice.
+        var usableParseResults = parseResults.Where(r => r.BatchCount > 0).ToList();
+        var catalog = CatalogBuilder.Build(usableParseResults, repo.DeclaredCollation, repo.TempdbCollation);
+        var lineage = LineageResolver.Resolve(catalog, usableParseResults);
+
+        var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog);
         var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
 
         // How many DISTINCT (table, column, operator, other-type) defects probeWorthy actually
@@ -164,13 +173,6 @@ public static class VerifyCorpusCommand
         // Every occurrence is still individually oracle-probed below - this is reported
         // alongside the raw counts, not used to skip probing any of them.
         var distinctProbeWorthyFindingCount = TypedFindingDeduplicator.Dedupe(probeWorthy).Count;
-
-        // Rebuilds the same catalog/lineage ScanReportBuilder computed internally - it doesn't
-        // expose them, and the environment parity gate needs the resolved view provenance to
-        // diff against sys.columns after deployment below.
-        var usableParseResults = parseResults.Where(r => r.BatchCount > 0).ToList();
-        var catalog = CatalogBuilder.Build(usableParseResults, repo.DeclaredCollation, repo.TempdbCollation);
-        var lineage = LineageResolver.Resolve(catalog, usableParseResults);
 
         var databaseName = SanitizeDatabaseName(repo.Name);
         var deploymentErrors = new List<string>();

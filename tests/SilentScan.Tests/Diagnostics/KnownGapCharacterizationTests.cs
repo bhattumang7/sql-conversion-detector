@@ -1,7 +1,7 @@
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Diagnostics;
 
@@ -32,10 +32,9 @@ namespace SilentScan.Tests.Diagnostics;
 /// </summary>
 public sealed class KnownGapCharacterizationTests
 {
-    private static ScanReport Scan(string sql)
+    private static async Task<ScanReport> Scan(string sql)
     {
-        var parseResult = SqlScriptParser.ParseText("gap.sql", sql);
-        var report = ScanReportBuilder.BuildFromParseResults([parseResult], "SQL_Latin1_General_CP1_CI_AS");
+        var report = await EngineAuthoritativeScan.ScanAsync(sql, "SQL_Latin1_General_CP1_CI_AS");
 
         // Every scenario must parse cleanly - a gap pinned against a half-parsed script would
         // characterize ScriptDom error recovery, not the analysis gap it claims to.
@@ -139,7 +138,7 @@ public sealed class KnownGapCharacterizationTests
     // trace. Moved to Lineage/SelectIntoLineagePassTests.cs.
 
     [Fact]
-    public void CrossDatabaseReference_GetsAKeyNothingPopulates_NoTypedFinding()
+    public async Task CrossDatabaseReference_GetsAKeyNothingPopulates_NoTypedFinding()
     {
         // Roadmap Phase A2: deliberately still pinned open, not a fix pending. Checked against
         // the real pinned 5-repo corpus for evidence before deciding whether to build cross-
@@ -154,7 +153,7 @@ public sealed class KnownGapCharacterizationTests
         // DDL ever populates a cross-database key - the reference is unresolvable by
         // construction, so the mismatch produces no typed finding. Unlike the computed-column
         // and SELECT INTO silent drops, this loss IS honestly ledgered.
-        var report = Scan("""
+        var report = await Scan("""
             CREATE TABLE dbo.Shipments (TrackingNo varchar(30) NOT NULL, INDEX IX_TrackingNo (TrackingNo));
             GO
             SELECT 1 FROM ArchiveDb.dbo.Shipments WHERE TrackingNo = N'T1';

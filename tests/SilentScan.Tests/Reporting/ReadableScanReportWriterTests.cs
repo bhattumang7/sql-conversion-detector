@@ -1,6 +1,11 @@
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
+using SilentScan.Core.Rules;
+using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
@@ -40,26 +45,22 @@ public sealed class ReadableScanReportWriterTests
         END
         """;
 
-    private static ScanReport Build(string sql, string? collation = null)
-    {
-        var parsed = SqlScriptParser.ParseText("shop.sql", sql);
-        Assert.False(parsed.HasErrors, string.Join("; ", parsed.Errors.Select(e => e.Message)));
-        return ScanReportBuilder.BuildFromParseResults([parsed], collation);
-    }
+    private static Task<ScanReport> Build(string sql, string? collation = null) =>
+        EngineAuthoritativeScan.ScanAsync(sql, collation);
 
-    private static string Render(ScanReport report, CollationSensitivityReport? sensitivity = null) =>
-        ReadableScanReportWriter.Write(report, sensitivity, "SilentScan - test", ReadableStyle.Text)
+    private static string Render(ScanReport report) =>
+        ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text)
             .ReplaceLineEndings("\n");
 
     [Fact]
-    public void ScanForcedFinding_CarriesLocationColumnIndexedAndTheLayerThatIntroducedIt()
+    public async Task ScanForcedFinding_CarriesLocationColumnIndexedAndTheLayerThatIntroducedIt()
     {
-        var report = Build(LayeredSql);
+        var report = await Build(LayeredSql);
         var rendered = Render(report);
 
         var row = Assert.Single(
             rendered.Split('\n'),
-            line => line.Contains("dbo.Orders.OrderCode", StringComparison.Ordinal) && line.Contains("shop.sql:", StringComparison.Ordinal));
+            line => line.Contains("dbo.Orders.OrderCode", StringComparison.Ordinal) && line.Contains("dbo.usp_FindOrder:", StringComparison.Ordinal));
 
         Assert.Contains("Implicit conversions that force a scan (1)", rendered, StringComparison.Ordinal);
         Assert.Contains("VarChar(20)", row, StringComparison.Ordinal);
@@ -69,9 +70,9 @@ public sealed class ReadableScanReportWriterTests
     }
 
     [Fact]
-    public void SeekPreservedComparison_IsCountedInTheBaseRateButNeverListed()
+    public async Task SeekPreservedComparison_IsCountedInTheBaseRateButNeverListed()
     {
-        var report = Build(LayeredSql);
+        var report = await Build(LayeredSql);
         var rendered = Render(report);
 
         // The nvarchar-column-vs-varchar-value comparison converts the value, not the column.
@@ -82,9 +83,9 @@ public sealed class ReadableScanReportWriterTests
     }
 
     [Fact]
-    public void SectionsWithNothingToReport_AreOmitted()
+    public async Task SectionsWithNothingToReport_AreOmitted()
     {
-        var report = Build(LayeredSql);
+        var report = await Build(LayeredSql);
         var rendered = Render(report);
 
         Assert.DoesNotContain("Collation conflicts", rendered, StringComparison.Ordinal);
@@ -94,32 +95,11 @@ public sealed class ReadableScanReportWriterTests
     }
 
     [Fact]
-    public void UnpinnedCollation_IsStatedEvenWhenEveryCountUnderItIsZero()
-    {
-        const string NoStringPredicates = """
-            CREATE TABLE dbo.T (Id INT NOT NULL);
-            GO
-            CREATE PROCEDURE dbo.p @Id INT AS SELECT Id FROM dbo.T WHERE Id = @Id;
-            """;
-
-        var parsed = SqlScriptParser.ParseText("t.sql", NoStringPredicates);
-        var report = ScanReportBuilder.BuildFromParseResults([parsed]);
-        var sensitivity = CollationSensitivityReport.Analyze([parsed]);
-
-        var rendered = Render(report, sensitivity);
-
-        Assert.Empty(report.TypedFindings);
-        Assert.Contains("No collation was pinned for this scan", rendered, StringComparison.Ordinal);
-        Assert.Contains("\"not established\", not \"nothing there\"", rendered, StringComparison.Ordinal);
-        Assert.Contains(CollationSensitivityReport.DefaultWindowsFamilyCollation, rendered, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void ParseFailures_AreListedWithTheirFirstError()
     {
         var parsed = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
         Assert.True(parsed.HasErrors);
-        var report = ScanReportBuilder.BuildFromParseResults([parsed]);
+        var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
 
         var rendered = Render(report);
 
@@ -129,7 +109,7 @@ public sealed class ReadableScanReportWriterTests
     }
 
     [Fact]
-    public void NonSargablePattern_IsExplainedOncePerPatternRatherThanPerRow()
+    public async Task NonSargablePattern_IsExplainedOncePerPatternRatherThanPerRow()
     {
         const string Sql = """
             CREATE TABLE dbo.Users (Id INT NOT NULL, CreatedAt DATETIME NOT NULL, UpdatedAt DATETIME NOT NULL);
@@ -138,7 +118,7 @@ public sealed class ReadableScanReportWriterTests
             SELECT Id FROM dbo.Users WHERE YEAR(CreatedAt) = @Year AND YEAR(UpdatedAt) = @Year;
             """;
 
-        var rendered = Render(Build(Sql));
+        var rendered = Render(await Build(Sql));
 
         Assert.Contains("Column wrapped in a function (2)", rendered, StringComparison.Ordinal);
         var explanation = "The index stores the column's values, not the function's results";
@@ -148,15 +128,14 @@ public sealed class ReadableScanReportWriterTests
     }
 
     [Fact]
-    public void MarkdownAndText_ReportTheSameFindings()
+    public async Task MarkdownAndText_ReportTheSameFindings()
     {
-        var report = Build(LayeredSql);
-        var sensitivity = CollationSensitivityReport.Analyze([SqlScriptParser.ParseText("shop.sql", LayeredSql)]);
+        var report = await Build(LayeredSql);
 
-        var text = ReadableScanReportWriter.Write(report, sensitivity, "t", ReadableStyle.Text);
-        var markdown = ReadableScanReportWriter.Write(report, sensitivity, "t", ReadableStyle.Markdown);
+        var text = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
+        var markdown = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Markdown);
 
-        foreach (var expected in new[] { "dbo.Orders.OrderCode", "2 view layers via dbo.vw_OrdersOuter.OrderCode", "No collation was pinned for this scan" })
+        foreach (var expected in new[] { "dbo.Orders.OrderCode", "2 view layers via dbo.vw_OrdersOuter.OrderCode" })
         {
             Assert.Contains(expected, text, StringComparison.Ordinal);
             Assert.Contains(expected, markdown, StringComparison.Ordinal);
@@ -169,10 +148,9 @@ public sealed class ReadableScanReportWriterTests
     [Fact]
     public void FindingPaths_AreShownRelativeToTheScanRoot()
     {
-        var parsed = SqlScriptParser.ParseText(Path.Combine("/repo", "sql", "shop.sql"), LayeredSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parsed], "SQL_Latin1_General_CP1_CI_AS");
+        var report = ReportWithFindingAt(Path.Combine("/repo", "sql", "shop.sql"));
 
-        var rendered = ReadableScanReportWriter.Write(report, null, "t", ReadableStyle.Text, "/repo");
+        var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text, "/repo");
 
         Assert.Contains(Path.Combine("sql", "shop.sql") + ":", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("/repo/sql", rendered.Replace('\\', '/'), StringComparison.Ordinal);
@@ -181,16 +159,44 @@ public sealed class ReadableScanReportWriterTests
     [Fact]
     public void ScanRootThatIsOnlyATextualPrefix_IsNotTrimmed()
     {
-        var parsed = SqlScriptParser.ParseText("/src/application/shop.sql", LayeredSql);
-        var report = ScanReportBuilder.BuildFromParseResults([parsed], "SQL_Latin1_General_CP1_CI_AS");
+        var report = ReportWithFindingAt("/src/application/shop.sql");
 
-        var rendered = ReadableScanReportWriter.Write(report, null, "t", ReadableStyle.Text, "/src/app");
+        var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text, "/src/app");
 
         // The whole path survives - trimming a prefix that stops mid-segment would leave
         // "lication/shop.sql", a path that points at nothing.
         Assert.Contains("/src/application/shop.sql:", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("  lication/shop.sql", rendered, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A minimal, hand-built report carrying one ScanForced finding at <paramref name="sourcePath"/>
+    /// - the path-trimming behavior under test lives entirely in
+    /// <see cref="ReadableScanReportWriter"/>'s own presentation logic over whatever SourcePath a
+    /// finding carries, not in how that finding's type was inferred, so there is nothing gained by
+    /// routing it through a real deployment (whose live-mode source paths are module qualified
+    /// names, not file paths, and could never carry an arbitrary path like "/repo/sql/shop.sql" in
+    /// the first place).
+    /// </summary>
+    private static ScanReport ReportWithFindingAt(string sourcePath) => new(
+        new ParseHealthReport([]),
+        [],
+        [new TypedPredicateFinding(
+            Verdict.ScanForced,
+            new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar), Indexed: true, Depth: 0, Provenance: null!),
+            new PredicateOperand.Value(null),
+            "=",
+            sourcePath,
+            1,
+            1)],
+        [],
+        [],
+        [],
+        [],
+        [],
+        SkippedConstructSummary.From([]),
+        TypedPredicateSummary.From([]),
+        DynamicSqlSummary.From([]));
 
     private static int CountOccurrences(string haystack, string needle)
     {
