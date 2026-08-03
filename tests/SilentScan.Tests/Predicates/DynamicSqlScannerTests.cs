@@ -1738,4 +1738,112 @@ public sealed class DynamicSqlScannerTests
         var script = Assert.Single(result.AnalyzableScripts);
         Assert.Equal("SELECT 2", script.InnerText);
     }
+
+    // ------------------------------------------------------------------
+    // LEN(...) and +/- integer arithmetic folding for LEFT/RIGHT/SUBSTRING's numeric arguments -
+    // the "strip a trailing delimiter" idiom: LEFT(@sql, LEN(@sql) - LEN(@delim)).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_LenOfFoldedVariable_FoldsToLiteralLength()
+    {
+        var result = Scan(
+            "DECLARE @sql VARCHAR(MAX) = 'SELECT 1'; " +
+            "DECLARE @out VARCHAR(MAX) = LEFT(@sql, LEN(@sql)); " +
+            "EXEC(@out);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_LenTrimsTrailingSpacesBeforeCounting()
+    {
+        // Oracle-verified: LEN trims trailing spaces before counting, unlike DATALENGTH.
+        var result = Scan(
+            "DECLARE @sql VARCHAR(MAX) = 'abc  '; " +
+            "DECLARE @out VARCHAR(MAX) = LEFT(@sql, LEN(@sql)); " +
+            "EXEC(@out);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("abc", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_LeftLengthIsLenMinusLen_StripsTrailingDelimiter()
+    {
+        // The real-world idiom this fix targets: strip a trailing delimiter of known length off
+        // an accumulator string built up via straight-line concatenation.
+        var result = Scan(
+            "DECLARE @delim VARCHAR(10) = ' AND '; " +
+            "DECLARE @sql VARCHAR(MAX) = 'a = 1' + @delim + 'b = 2' + @delim; " +
+            "DECLARE @out VARCHAR(MAX) = LEFT(@sql, LEN(@sql) - LEN(@delim)); " +
+            "EXEC(@out);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("a = 1 AND b = 2", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_LenOfNonLiteralExpression_DeclinesLeft()
+    {
+        // LEN's own argument doesn't fold (an undeclared variable) - the length stays unknown,
+        // same generic reason as any other non-literal LEFT/RIGHT length argument.
+        var result = Scan("DECLARE @sql VARCHAR(MAX) = LEFT(N'abcdef', LEN(@undeclared)); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
+    }
+
+    // ------------------------------------------------------------------
+    // Guarded-EXEC path resolution: "IF cond SET @sql = ... ; ... ; IF cond EXEC(@sql)" - the
+    // second IF's own guard proves the first IF's THEN branch is the path that ran, so the
+    // no-initializer taint left by the implicit "neither branch ran" path doesn't apply here.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_GuardedSetThenSameGuardExec_ResolvesPastNoInitializer()
+    {
+        var result = Scan(
+            "DECLARE @sql VARCHAR(MAX); " +
+            "IF @mode = 1 SET @sql = 'SELECT 1'; " +
+            "IF @mode = 1 EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_GuardedSetElseIfChain_MatchingGuardExec_ResolvesEachArm()
+    {
+        var result = Scan(
+            "DECLARE @sql VARCHAR(MAX); " +
+            "IF @mode = 1 SET @sql = 'SELECT 1'; " +
+            "ELSE IF @mode = 2 SET @sql = 'SELECT 2'; " +
+            "IF @mode = 1 EXEC(@sql); " +
+            "IF @mode = 2 EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 2");
+    }
+
+    [Fact]
+    public void Scan_GuardedSetThenDifferentGuardExec_StaysTainted()
+    {
+        // A DIFFERENT (even if a human could prove it implies the first) guard is left unresolved
+        // - this scanner matches guard text exactly, never implication, per its soundness-first
+        // policy: no heuristic guessing about what one condition proves about another.
+        var result = Scan(
+            "DECLARE @sql VARCHAR(MAX); " +
+            "IF @mode = 1 SET @sql = 'SELECT 1'; " +
+            "IF @mode = 1 AND @extra = 1 EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("no-initializer", finding.Reason);
+    }
 }

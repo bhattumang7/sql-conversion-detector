@@ -1,6 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Predicates;
 
@@ -82,6 +83,16 @@ public static class DynamicSqlScanner
         public static FoldAttempt Fail(string reason, SourceSpan location) => new(null, reason, location);
     }
 
+    /// <summary>
+    /// One IF's own predicate, rendered to canonical T-SQL text via <see
+    /// cref="FragmentTextRenderer"/> (ScriptDOM's own generator, not raw source slicing - the same
+    /// technique <see cref="Rules.FragmentTextRenderer"/> already uses elsewhere), paired with the
+    /// fold outcome that predicate's THEN branch produced for one variable. Lets a LATER,
+    /// syntactically unrelated IF site recover that outcome when its own guard renders to the
+    /// identical text - see <see cref="Visitor.ResolveGuardedAlternatives"/>.
+    /// </summary>
+    private readonly record struct GuardedAlternative(string GuardText, FoldState State);
+
     private sealed class FoldState
     {
         public IReadOnlyList<IReadOnlyList<LiteralSegment>>? Assemblies { get; private init; }
@@ -90,11 +101,25 @@ public static class DynamicSqlScanner
 
         public SourceSpan? TaintLocation { get; private init; }
 
+        /// <summary>
+        /// Every guard under which this variable is PROVABLY a different, known value than this
+        /// state's own (possibly tainted) one - see <see cref="GuardedAlternative"/>. Never
+        /// consulted by ordinary reads (<see cref="Visitor.TryFoldVariableReference"/> only ever
+        /// looks at <see cref="Assemblies"/>/<see cref="TaintReason"/>) - only by <see
+        /// cref="Visitor.HandleIf"/> seeding a THEN branch whose own guard matches one of these.
+        /// </summary>
+        public IReadOnlyList<GuardedAlternative>? GuardedAlternatives { get; private init; }
+
         public static FoldState Constant(IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies) => new() { Assemblies = assemblies };
 
         public static FoldState ConstantSingle(IReadOnlyList<LiteralSegment> segments) => Constant([segments]);
 
         public static FoldState Tainted(string reason, SourceSpan location) => new() { TaintReason = reason, TaintLocation = location };
+
+        public FoldState WithGuardedAlternatives(IReadOnlyList<GuardedAlternative>? alternatives) =>
+            alternatives is null
+                ? this
+                : new FoldState { Assemblies = Assemblies, TaintReason = TaintReason, TaintLocation = TaintLocation, GuardedAlternatives = alternatives };
     }
 
     private sealed class Visitor(
@@ -548,7 +573,10 @@ public static class DynamicSqlScanner
 
         private void HandleIf(IfStatement ifStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
-            var thenDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+            var guardText = FragmentTextRenderer.Render(ifStatement.Predicate);
+
+            var thenSeed = ResolveGuardedAlternatives(folded, guardText);
+            var thenDict = new Dictionary<string, FoldState>(thenSeed, StringComparer.OrdinalIgnoreCase);
             WalkStatements(NormalizeToStatementList(ifStatement.ThenStatement), thenDict, foldingEnabled);
 
             var elseDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
@@ -557,7 +585,44 @@ public static class DynamicSqlScanner
                 WalkStatements(NormalizeToStatementList(ifStatement.ElseStatement), elseDict, foldingEnabled);
             }
 
-            MergeUnioningDivergent(folded, thenDict, elseDict, ifStatement, "diverges-across-if-branches");
+            MergeUnioningDivergent(folded, thenDict, elseDict, ifStatement, "diverges-across-if-branches", guardText);
+        }
+
+        /// <summary>
+        /// Seeds a THEN branch about to run under a KNOWN-true <paramref name="guardText"/>: any
+        /// variable whose current state was itself produced by an earlier IF/ELSE-IF chain (<see
+        /// cref="MergeUnioningDivergent"/>) recording a <see cref="GuardedAlternative"/> for this
+        /// EXACT same guard text is resolved to that recorded outcome instead of whatever the
+        /// general (possibly tainted) merge left behind - the "IF cond SET @sql=... ; ... ; IF
+        /// cond EXEC(@sql)" pattern, where the second IF's own guard proves the first IF's THEN
+        /// branch is exactly the path that ran. Deliberately exact text equality, not
+        /// implication - a weaker or differently-shaped second guard (even one a human could prove
+        /// implies the first) is left unresolved rather than guessed, per this scanner's
+        /// soundness-first policy. Returns <paramref name="folded"/> itself, unchanged, when
+        /// nothing matches - the overwhelmingly common case - rather than always cloning.
+        /// </summary>
+        private static Dictionary<string, FoldState> ResolveGuardedAlternatives(Dictionary<string, FoldState> folded, string guardText)
+        {
+            Dictionary<string, FoldState>? resolved = null;
+            foreach (var (key, state) in folded)
+            {
+                if (state.GuardedAlternatives is not { } alternatives)
+                {
+                    continue;
+                }
+
+                foreach (var alternative in alternatives)
+                {
+                    if (string.Equals(alternative.GuardText, guardText, StringComparison.Ordinal))
+                    {
+                        resolved ??= new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+                        resolved[key] = alternative.State;
+                        break;
+                    }
+                }
+            }
+
+            return resolved ?? folded;
         }
 
         /// <summary>
@@ -643,7 +708,7 @@ public static class DynamicSqlScanner
         /// bit-for-bit unchanged from <paramref name="folded"/> is skipped entirely.
         /// </summary>
         private void MergeUnioningDivergent(
-            Dictionary<string, FoldState> folded, Dictionary<string, FoldState> branchA, Dictionary<string, FoldState> branchB, TSqlStatement owner, string reason)
+            Dictionary<string, FoldState> folded, Dictionary<string, FoldState> branchA, Dictionary<string, FoldState> branchB, TSqlStatement owner, string reason, string? guardText = null)
         {
             var touched = new HashSet<string>(branchA.Keys, StringComparer.OrdinalIgnoreCase);
             touched.UnionWith(branchB.Keys);
@@ -660,8 +725,31 @@ public static class DynamicSqlScanner
                     continue;
                 }
 
-                folded[key] = MergeOne(a, b, reason, location);
+                var merged = MergeOne(a, b, reason, location);
+                folded[key] = guardText is not null && a is not null
+                    ? merged.WithGuardedAlternatives(CombineGuardedAlternatives(guardText, before, a, b))
+                    : merged;
             }
+        }
+
+        /// <summary>Bounds a variable's own accumulated <see cref="GuardedAlternative"/> list the same defensive way <see cref="MaxAssembliesPerVariable"/> bounds assembly sets - a proc with many sequential guarded IFs stops growing new entries rather than never terminating; losing the newest entry only means one later guard site stays unresolved, never a soundness break.</summary>
+        private const int MaxGuardedAlternatives = 16;
+
+        private static List<GuardedAlternative>? CombineGuardedAlternatives(string guardText, FoldState? before, FoldState branchAOutcome, FoldState? branchB)
+        {
+            List<GuardedAlternative> combined = [];
+            if (before?.GuardedAlternatives is { } beforeAlternatives)
+            {
+                combined.AddRange(beforeAlternatives);
+            }
+
+            if (branchB?.GuardedAlternatives is { } branchBAlternatives)
+            {
+                combined.AddRange(branchBAlternatives);
+            }
+
+            combined.Add(new GuardedAlternative(guardText, branchAOutcome));
+            return combined.Count <= MaxGuardedAlternatives ? combined : null;
         }
 
         /// <summary>
@@ -1318,7 +1406,7 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:other", Span(site));
             }
 
-            if (!TryFoldIntegerLiteral(parameters[1], out var length))
+            if (!TryFoldIntegerLiteral(parameters[1], folded, foldingEnabled, out var length))
             {
                 return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(parameters[1]));
             }
@@ -1359,7 +1447,8 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            if (!TryFoldIntegerLiteral(functionCall.Parameters[1], out var start) || !TryFoldIntegerLiteral(functionCall.Parameters[2], out var length))
+            if (!TryFoldIntegerLiteral(functionCall.Parameters[1], folded, foldingEnabled, out var start)
+                || !TryFoldIntegerLiteral(functionCall.Parameters[2], folded, foldingEnabled, out var length))
             {
                 return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(functionCall));
             }
@@ -1515,8 +1604,18 @@ public static class DynamicSqlScanner
             return FoldAttempt.Ok(union);
         }
 
-        /// <summary>Folds a bare integer literal argument (e.g. LEFT/RIGHT/SUBSTRING's length or start position) - this scanner tracks only string variable values, so anything other than a literal (a variable, an expression) is declined rather than guessed.</summary>
-        private static bool TryFoldIntegerLiteral(ScalarExpression expression, out int value)
+        /// <summary>
+        /// Folds an integer-valued argument (e.g. LEFT/RIGHT/SUBSTRING's length or start
+        /// position) - a bare literal, +/- of two such foldable integers (the
+        /// <c>LEN(@x) - LEN(@y)</c> shape a "strip the trailing delimiter" idiom produces), or
+        /// <c>LEN(...)</c> over a string this scanner already folded constant (a single value
+        /// only - if the string itself carries more than one possible assembly from an upstream
+        /// branch merge, its LENGTH is equally ambiguous, so this declines rather than picking
+        /// one). Anything else (a plain variable, an unsupported function, a column reference) is
+        /// declined rather than guessed - this scanner tracks only string variable values, never
+        /// numeric ones.
+        /// </summary>
+        private bool TryFoldIntegerLiteral(ScalarExpression expression, Dictionary<string, FoldState> folded, bool foldingEnabled, out int value)
         {
             switch (expression)
             {
@@ -1524,7 +1623,7 @@ public static class DynamicSqlScanner
                     return true;
 
                 case ParenthesisExpression paren:
-                    return TryFoldIntegerLiteral(paren.Expression, out value);
+                    return TryFoldIntegerLiteral(paren.Expression, folded, foldingEnabled, out value);
 
                 // A negative literal (e.g. the -1 in LEFT(@x, -1)) is NOT its own literal shape -
                 // ScriptDom parses the sign as a UnaryExpression wrapping an ordinary
@@ -1532,17 +1631,47 @@ public static class DynamicSqlScanner
                 // negative NumericLiteral would be. Positive's explicit '+' sign is handled the
                 // same way for symmetry, even though it never changes the value.
                 case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary
-                    when TryFoldIntegerLiteral(unary.Expression, out var innerValue):
+                    when TryFoldIntegerLiteral(unary.Expression, folded, foldingEnabled, out var innerValue):
                     value = -innerValue;
                     return true;
 
                 case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
-                    return TryFoldIntegerLiteral(unary.Expression, out value);
+                    return TryFoldIntegerLiteral(unary.Expression, folded, foldingEnabled, out value);
+
+                case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add or BinaryExpressionType.Subtract } binary
+                    when TryFoldIntegerLiteral(binary.FirstExpression, folded, foldingEnabled, out var left)
+                        && TryFoldIntegerLiteral(binary.SecondExpression, folded, foldingEnabled, out var right):
+                    value = binary.BinaryExpressionType == BinaryExpressionType.Add ? left + right : left - right;
+                    return true;
+
+                case FunctionCall { FunctionName.Value: var functionName } lenCall
+                    when string.Equals(functionName, "LEN", StringComparison.OrdinalIgnoreCase) && lenCall.Parameters.Count == 1:
+                    return TryFoldLenArgument(lenCall.Parameters[0], folded, foldingEnabled, out value);
 
                 default:
                     value = 0;
                     return false;
             }
+        }
+
+        /// <summary>
+        /// Oracle-verified: <c>LEN</c> trims TRAILING spaces before counting (unlike
+        /// <c>DATALENGTH</c>, which this scanner does not fold) - <c>.NET</c>'s
+        /// <see cref="string.TrimEnd(char[])"/> over the space character matches exactly. Requires
+        /// the inner string to fold to exactly one possible value - see the caller's own doc
+        /// comment for why an ambiguous input string makes the length equally ambiguous.
+        /// </summary>
+        private bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, FoldState> folded, bool foldingEnabled, out int value)
+        {
+            var attempt = TryFoldExpression(argument, folded, foldingEnabled);
+            if (!attempt.Success || attempt.Assemblies!.Count != 1)
+            {
+                value = 0;
+                return false;
+            }
+
+            value = string.Concat(attempt.Assemblies[0].Select(s => s.Value)).TrimEnd(' ').Length;
+            return true;
         }
 
         /// <summary>
