@@ -94,7 +94,7 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
-            var arguments = MatchArguments(procedureReference.Parameters, formalParameters);
+            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
@@ -105,7 +105,8 @@ public static class ProcCallGraphBuilder
         /// named one, so a simple left-to-right position counter over the un-named formals is
         /// exact, not an approximation.
         /// </summary>
-        private static List<ProcCallArgument> MatchArguments(IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters)
+        private static List<ProcCallArgument> MatchArguments(
+            IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -130,10 +131,18 @@ public static class ProcCallGraphBuilder
                 }
 
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
-                matched.Add(new ProcCallArgument(formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal));
+                var literalArgument = actual.ParameterValue is StringLiteral stringLiteral ? ToLiteralArgument(stringLiteral, sourcePath) : null;
+                matched.Add(new ProcCallArgument(
+                    formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument));
             }
 
             return matched;
+        }
+
+        private static ProcCallLiteralArgument ToLiteralArgument(StringLiteral stringLiteral, string sourcePath)
+        {
+            var prefixLength = stringLiteral.IsNational ? 2 : 1;
+            return new ProcCallLiteralArgument(stringLiteral.Value, sourcePath, stringLiteral.StartLine, stringLiteral.StartColumn, prefixLength);
         }
     }
 }

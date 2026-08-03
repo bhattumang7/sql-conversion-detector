@@ -67,17 +67,24 @@ public static class ScanReportBuilder
             }
         }
 
-        var dynamicSqlExtractions = usableParseResults.Select(r => DynamicSqlScanner.Scan(r)).ToList();
-        var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
-        var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
-
         // Catalog/lineage need every cleanly-parsed file together, so views can resolve
         // against tables (and other views) declared in a different file. Built before Tier-1
         // scanning (which used to run catalog-blind) so a syntactic finding's column can be
         // resolved through the same machinery Pass 3/4 use, carrying real Indexed/
-        // TableQualifiedName information instead of none at all.
+        // TableQualifiedName information instead of none at all. Also built before the dynamic
+        // SQL scan below (a reordering from before this existed) - the call graph a proc-body
+        // parameter seed needs (ProcCallGraphBuilder.Build) requires TryGetProcedureParameters,
+        // which requires a real catalog; dynamic SQL scanning has no dependency running it
+        // earlier ever served.
         catalog ??= CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation, manifestTempdbCollation);
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
+
+        var callGraphLedger = new SkipLedger();
+        var procCallGraph = ProcCallGraphBuilder.Build(usableParseResults, catalog, callGraphLedger);
+
+        var dynamicSqlExtractions = usableParseResults.Select(r => DynamicSqlScanner.Scan(r, callGraph: procCallGraph)).ToList();
+        var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
+        var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 
         // Pass 1 (CatalogBuilder) resolves a SELECT ... INTO target's columns against tables
         // already known to the catalog only - views/CTEs/UNION sources are a Pass 2 concept
@@ -113,6 +120,7 @@ public static class ScanReportBuilder
         var skippedConstructs = new List<SkippedConstruct>();
         skippedConstructs.AddRange(catalog.Skipped.Entries);
         skippedConstructs.AddRange(lineage.Skipped.Entries);
+        skippedConstructs.AddRange(callGraphLedger.Entries);
         skippedConstructs.AddRange(tier1SkippedEntries);
         skippedConstructs.AddRange(extractionResults.SelectMany(r => r.SkippedConstructs));
 

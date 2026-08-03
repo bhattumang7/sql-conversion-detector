@@ -27,10 +27,15 @@ public static class DynamicSqlScanner
     /// scope here when reparsing a NESTED dynamic SQL fragment, so scope propagation survives
     /// however many nesting levels deep a call site sits (the reparsed fragment itself never
     /// contains a CREATE PROCEDURE wrapper to discover the scope from directly).
+    /// <paramref name="callGraph"/>, when supplied, lets a proc body's OWN formal parameters
+    /// seed as constant-foldable when this scan saw exactly one caller passing a string literal
+    /// for that parameter (roadmap "trace provably-constant dynamic SQL across proc-call
+    /// edges") - null (the default) leaves every parameter reference unseeded, exactly like
+    /// before this capability existed.
     /// </summary>
-    public static DynamicSqlExtractionResult Scan(SqlParseResult parseResult, DynamicSqlScope? enclosingScope = null)
+    public static DynamicSqlExtractionResult Scan(SqlParseResult parseResult, DynamicSqlScope? enclosingScope = null, ProcCallGraph? callGraph = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None);
+        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None, callGraph);
         if (parseResult.Fragment is TSqlScript script)
         {
             foreach (var batch in script.Batches)
@@ -66,7 +71,7 @@ public static class DynamicSqlScanner
         public static FoldState Tainted(string reason, SourceSpan location) => new() { TaintReason = reason, TaintLocation = location };
     }
 
-    private sealed class Visitor(string sourcePath, DynamicSqlScope initialScope)
+    private sealed class Visitor(string sourcePath, DynamicSqlScope initialScope, ProcCallGraph? callGraph)
     {
 
         private DynamicSqlScope _scope = initialScope;
@@ -76,20 +81,91 @@ public static class DynamicSqlScanner
         public List<DynamicSqlScript> Scripts { get; } = [];
 
         /// <summary>Walks a fresh variable scope (a batch, or a proc/function body) in source order.</summary>
-        public void WalkScope(IList<TSqlStatement> statements)
+        public void WalkScope(IList<TSqlStatement> statements, IReadOnlyDictionary<string, FoldState>? initialSeed = null)
         {
             var folded = new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
+            if (initialSeed is not null)
+            {
+                foreach (var (name, state) in initialSeed)
+                {
+                    folded[name] = state;
+                }
+            }
+
             var foldingEnabled = !ContainsGotoOrLabel(statements);
             WalkStatements(statements, folded, foldingEnabled);
         }
 
         /// <summary>A proc/function body's fresh variable scope, additionally recording its own qualified name as the enclosing scope for any dynamic SQL call site found inside - mirrors CatalogBuilder.VisitScopedBody's identical save/restore.</summary>
-        private void WalkScopedBody(SchemaObjectName? name, IList<TSqlStatement> statements)
+        private void WalkScopedBody(SchemaObjectName? name, IList<ProcedureParameter>? formalParameters, IList<TSqlStatement> statements)
         {
             var previousScope = _scope;
-            _scope = name is null ? _scope : new DynamicSqlScope(SchemaObjectNameHelper.Qualify(name), _scope.TriggerTarget);
-            WalkScope(statements);
+            string? qualifiedName = name is null ? null : SchemaObjectNameHelper.Qualify(name);
+            _scope = qualifiedName is null ? _scope : new DynamicSqlScope(qualifiedName, _scope.TriggerTarget);
+
+            var seed = qualifiedName is not null && formalParameters is { Count: > 0 }
+                ? BuildParameterSeed(qualifiedName, formalParameters)
+                : null;
+            WalkScope(statements, seed);
             _scope = previousScope;
+        }
+
+        /// <summary>
+        /// Seeds a proc body's own formal parameters as constant-foldable when the call graph
+        /// saw exactly one caller passing a string literal for that parameter - see
+        /// <see cref="ProcCallGraph.SingleCallSiteFor"/> for why "exactly one call site THIS
+        /// SCAN saw" is the only case a single value can be trusted at all. A parameter with
+        /// zero call sites is left unseeded entirely (falls back to today's plain
+        /// "undeclared-variable" if referenced - unchanged behavior, not a regression). A
+        /// parameter seen at MULTIPLE call sites, or passed something other than a string
+        /// literal at its one call site, is explicitly tainted with its own reason rather than
+        /// silently falling through to the generic "undeclared-variable" a caller-blind scan
+        /// would report - CLAUDE.md's "never silently counted as clean" applies to the REASON a
+        /// dynamic SQL site is unanalyzable exactly as much as to whether it is.
+        /// </summary>
+        private Dictionary<string, FoldState>? BuildParameterSeed(string qualifiedName, IList<ProcedureParameter> formalParameters)
+        {
+            if (callGraph is null)
+            {
+                return null;
+            }
+
+            var edges = callGraph.EdgesCalling(qualifiedName).ToList();
+            if (edges.Count == 0)
+            {
+                return null;
+            }
+
+            var singleEdge = edges.Count == 1 ? edges[0] : null;
+            var seed = new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
+            foreach (var formal in formalParameters)
+            {
+                var paramName = formal.VariableName.Value;
+                var location = Span(formal);
+
+                if (singleEdge is null)
+                {
+                    seed[paramName] = FoldState.Tainted("parameter-not-seeded:multiple-call-sites", location);
+                    continue;
+                }
+
+                var argument = singleEdge.Arguments.FirstOrDefault(
+                    a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
+                if (argument is null || argument.FormalParameterIsOutput)
+                {
+                    // No matching actual argument (a default value applies) or an OUTPUT
+                    // parameter (flows the other direction) - nothing to seed, left unseeded.
+                    continue;
+                }
+
+                seed[paramName] = argument.LiteralArgument is { } literalArgument
+                    ? FoldState.Constant([new LiteralSegment(
+                        literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn,
+                        literalArgument.PrefixLength, literalArgument.Value)])
+                    : FoldState.Tainted("parameter-not-seeded:non-literal-caller", singleEdge.CallSite);
+            }
+
+            return seed;
         }
 
         /// <summary>Same save/restore as <see cref="WalkScopedBody"/>, plus the trigger's own target table/view (null for a DDL/LOGON trigger, which has no inserted/deleted rowset at all) so a dynamic SQL call site inside the body can resolve inserted/deleted the same way it would statically.</summary>
@@ -107,6 +183,14 @@ public static class DynamicSqlScanner
             FunctionStatementBody func => func.Name,
             _ => null,
         };
+
+        // Only ProcedureStatementBody's parameters are ever reachable from ProcCallGraph
+        // (built from EXEC ... call sites, never from a function invocation) - a function's own
+        // parameters are returned as null here rather than [], so BuildParameterSeed's
+        // `formalParameters is { Count: > 0 }` guard skips the lookup entirely instead of
+        // querying a call graph that could never have an edge for it anyway.
+        private static IList<ProcedureParameter>? ProcedureOrFunctionParameters(ProcedureStatementBodyBase procOrFunc) =>
+            procOrFunc is ProcedureStatementBody proc ? proc.Parameters : null;
 
         private void WalkStatements(IList<TSqlStatement> statements, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
@@ -127,7 +211,7 @@ public static class DynamicSqlScanner
                 // real body" pattern (seen verbatim in the First Responder Kit corpus repo),
                 // which a CreateProcedureStatement-only match would silently never walk into.
                 case ProcedureStatementBodyBase { StatementList: not null } procOrFunc:
-                    WalkScopedBody(ProcedureOrFunctionName(procOrFunc), procOrFunc.StatementList.Statements);
+                    WalkScopedBody(ProcedureOrFunctionName(procOrFunc), ProcedureOrFunctionParameters(procOrFunc), procOrFunc.StatementList.Statements);
                     break;
 
                 case ProcedureStatementBodyBase:
