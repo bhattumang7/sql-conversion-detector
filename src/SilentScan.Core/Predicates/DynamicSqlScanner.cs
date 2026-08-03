@@ -324,9 +324,20 @@ public static class DynamicSqlScanner
         }
 
         private void AssignVariable(
-            string name, AssignmentKind kind, ScalarExpression expression, bool functionCallExists, TSqlFragment site, Dictionary<string, FoldState> folded, bool foldingEnabled)
+            string name, AssignmentKind kind, ScalarExpression? expression, bool functionCallExists, TSqlFragment site, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
             if (functionCallExists || kind is not (AssignmentKind.Equals or AssignmentKind.AddEquals))
+            {
+                folded[name] = FoldState.Tainted("unsupported-assignment", Span(site));
+                return;
+            }
+
+            // SetVariableStatement.Expression / SelectSetVariable.Expression are null when the RHS
+            // is a shape ScriptDOM models in a sibling property instead of Expression: SET @c =
+            // CURSOR FOR ..., SET @x = IDENTITY(int,1,1), SET @x = <identifier>. None can be folded
+            // into a dynamic SQL string; taint so any downstream EXEC reports Unanalyzable instead
+            // of crashing inside TryFoldExpression's null path.
+            if (expression is null)
             {
                 folded[name] = FoldState.Tainted("unsupported-assignment", Span(site));
                 return;

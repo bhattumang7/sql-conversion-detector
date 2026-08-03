@@ -107,6 +107,21 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_SetCursorVariable_TaintsRatherThanCrashes()
+    {
+        // SetVariableStatement.Expression is null when the RHS is modeled in a sibling
+        // property instead - SET @c = CURSOR FOR ... puts the RHS in CursorDefinition. Must
+        // taint @c as unsupported-assignment rather than NRE inside TryFoldExpression.
+        var result = Scan(
+            "DECLARE @c CURSOR; DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "SET @c = CURSOR FOR SELECT 1 AS x; SET @sql = N'SELECT 1'; EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
     public void Scan_ExecOfVariableReassignedInsideIfBranch_Unanalyzable()
     {
         // A reassignment under a branch makes the value entering the EXEC ambiguous -
