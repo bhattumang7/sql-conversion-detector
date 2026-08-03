@@ -46,8 +46,64 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("non-literal-expression", finding.Reason);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromColumnReference_ReasonNamesColumnReference()
+    {
+        // ScriptDom parses an unqualified identifier here as a ColumnReferenceExpression
+        // regardless of whether a real FROM scope exists for it (that's a semantic question this
+        // syntax-level scanner never answers) - exactly the shape TryFoldExpression's own
+        // column-reference case exists to name.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + SomeColumn; EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:column-reference", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromScalarSubquery_ReasonNamesSubquery()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = (SELECT TOP 1 SomeColumn FROM dbo.T); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:subquery", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromCaseExpression_ReasonNamesConditional()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CASE WHEN 1 = 1 THEN N'SELECT 1' ELSE N'SELECT 2' END; EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:conditional", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromCastExpression_ReasonNamesCastOrConvert()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'SELECT 1' AS NVARCHAR(MAX)); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:cast-or-convert", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromSubtraction_ReasonNamesUnsupportedOperator()
+    {
+        // Add is the only BinaryExpressionType folded (string concatenation) - every other
+        // operator on a dynamic SQL text expression is its own, distinct, rarer shape.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + (5 - 1); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:unsupported-operator", finding.Reason);
     }
 
     [Fact]

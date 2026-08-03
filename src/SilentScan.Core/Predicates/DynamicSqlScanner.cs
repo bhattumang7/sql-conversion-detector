@@ -596,9 +596,35 @@ public static class DynamicSqlScanner
                     return TryFoldExpression(paren.Expression, folded, foldingEnabled);
 
                 default:
-                    return FoldAttempt.Fail("non-literal-expression", Span(expression));
+                    return FailNonLiteralExpression(expression);
             }
         }
+
+        /// <summary>
+        /// Every ScalarExpression shape not handled directly in <see cref="TryFoldExpression"/>
+        /// genuinely can't be constant-folded (a function call's return value, a column's actual
+        /// data, a subquery's result aren't knowable at scan time) - but a single
+        /// "non-literal-expression" reason used to collapse all of them into one bucket, giving a
+        /// corpus study no way to tell "half our Unanalyzable dynamic SQL is UPPER()-wrapped ORM
+        /// output" from "half is genuinely arbitrary". DynamicSqlSummary already groups
+        /// Unanalyzable findings by this exact reason string, so a finer split here surfaces
+        /// immediately in the study's own numbers - no summary-side change needed. Extracted from
+        /// TryFoldExpression's own switch to keep that method's cognitive complexity bounded.
+        /// </summary>
+        private FoldAttempt FailNonLiteralExpression(ScalarExpression expression) => expression switch
+        {
+            FunctionCall => FoldAttempt.Fail("non-literal-expression:function-call", Span(expression)),
+            ColumnReferenceExpression => FoldAttempt.Fail("non-literal-expression:column-reference", Span(expression)),
+            ScalarSubquery => FoldAttempt.Fail("non-literal-expression:subquery", Span(expression)),
+            SearchedCaseExpression or SimpleCaseExpression or IIfCall => FoldAttempt.Fail("non-literal-expression:conditional", Span(expression)),
+            CastCall or ConvertCall => FoldAttempt.Fail("non-literal-expression:cast-or-convert", Span(expression)),
+            // Reaches here only for a BinaryExpressionType other than Add (Subtract, Multiply,
+            // BitwiseAnd, ...) - Add is folded in TryFoldExpression itself; every other operator
+            // on a dynamic SQL text expression is a distinct, rarer shape from a plain unhandled
+            // leaf node, worth its own bucket rather than "other".
+            BinaryExpression => FoldAttempt.Fail("non-literal-expression:unsupported-operator", Span(expression)),
+            _ => FoldAttempt.Fail("non-literal-expression:other", Span(expression)),
+        };
 
         private void TaintAll(Dictionary<string, FoldState> folded, TSqlStatement statement, string reason)
         {
