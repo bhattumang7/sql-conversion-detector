@@ -166,14 +166,16 @@ public sealed class TypeMatrixGenerator
         // naming collision, not the collision itself.
         var runSuffix = "_" + Guid.NewGuid().ToString("N")[..8];
 
-        if (numericFamily.Count > 0 || dateTimeFamily.Count > 0 || binaryFamily.Count > 0)
+        var needsCrossFamilyProbing = crossFamilyOther.Count > 0 && stringFamily.Count > 0;
+        if (numericFamily.Count > 0 || dateTimeFamily.Count > 0 || binaryFamily.Count > 0 || needsCrossFamilyProbing)
         {
             var familyDb = "SilentScanTypeMatrixFamily" + runSuffix;
             SqlConnection.ClearAllPools();
             await _provisioner.CreateFreshAsync(familyDb, cancellationToken: cancellationToken);
             try
             {
-                await DeployFamilyTablesAsync(familyDb, numericFamily.Concat(dateTimeFamily).Concat(binaryFamily).ToList(), collationName: null, cancellationToken);
+                var baseFamily = numericFamily.Concat(dateTimeFamily).Concat(binaryFamily).ToList();
+                await DeployFamilyTablesAsync(familyDb, baseFamily, collationName: null, cancellationToken);
                 var familyContext = new ProbeContext(familyDb, CollationName: null, entries, v => serverVersion ??= v, cancellationToken);
                 await ProbeFamilyAsync(numericFamily, familyContext);
                 await ProbeFamilyAsync(dateTimeFamily, familyContext);
@@ -186,8 +188,25 @@ public sealed class TypeMatrixGenerator
                 // CollationName=null to match how VerdictClassifier looks up non-string columns)
                 // rather than once per collation family, which would both waste probes and
                 // collide on the matrix's (Column, Other, Collation) dictionary key.
-                if (crossFamilyOther.Count > 0 && stringFamily.Count > 0)
+                if (needsCrossFamilyProbing)
                 {
+                    // crossFamilyOther is probed here as the COLUMN side (ProbeOnePairAsync's
+                    // first argument), not just as a value type - every one of its categories
+                    // needs its own dbo.T_(category) table, not only the ones that happen to
+                    // already be deployed via numeric/dateTime/binary family membership. Missing
+                    // this (UniqueIdentifier is the one CrossFamilyOther entry with no family of
+                    // its own) previously left T_UniqueIdentifier undeployed, every guid-as-column
+                    // probe threw "Invalid object name", and the previous blanket exception
+                    // handler below recorded that as CompileFailed=true - a fabricated
+                    // OperandClash for a pair that actually converts and seeks fine.
+                    var missingColumnTables = crossFamilyOther
+                        .Where(cf => !baseFamily.Any(b => b.Category == cf.Category))
+                        .ToList();
+                    if (missingColumnTables.Count > 0)
+                    {
+                        await DeployFamilyTablesAsync(familyDb, missingColumnTables, collationName: null, cancellationToken);
+                    }
+
                     await DeployFamilyTablesAsync(familyDb, stringFamily, collationName: null, cancellationToken);
                     foreach (var (otherCategory, _) in crossFamilyOther)
                     {
@@ -275,6 +294,21 @@ public sealed class TypeMatrixGenerator
         }
     }
 
+    /// <summary>
+    /// SQL Server error numbers this generator treats as real CompileFailed=true facts about a
+    /// type pair, empirically observed from the two distinct compile errors SQL Server actually
+    /// raises for "these two types cannot be compared at all": 206 ("Operand type clash: %ls is
+    /// incompatible with %ls", e.g. uniqueidentifier vs a numeric/datetime type) and 402 ("The
+    /// data types %ls and %ls are incompatible in the %ls operator", e.g. time vs date/datetime).
+    /// Deliberately NOT a blanket `catch (SqlException)`: that previously swallowed error 208
+    /// ("Invalid object name") from a probe table this generator forgot to deploy
+    /// (dbo.T_UniqueIdentifier) and recorded a fabricated CompileFailed=true for a pair that
+    /// actually converts and seeks fine. Any SqlException whose number isn't in this set is a bug
+    /// in the generator or its deployment, not an empirical fact about the type pair, and must
+    /// fail the run loudly instead of being recorded as a wrong verdict.
+    /// </summary>
+    private static readonly HashSet<int> TypeIncompatibilityErrorNumbers = [206, 402];
+
     private async Task ProbeOnePairAsync(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string otherSyntax, ProbeContext context)
     {
         var probe = $"DECLARE @p {otherSyntax}; SELECT Col FROM dbo.T_{columnCategory} WHERE Col = @p;";
@@ -286,7 +320,7 @@ public sealed class TypeMatrixGenerator
             var dynamicRangeSeek = xml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
             context.Entries.Add(new TypePairProbeResult(columnCategory, otherCategory, context.CollationName, columnConverts, CompileFailed: false, dynamicRangeSeek));
         }
-        catch (SqlException)
+        catch (SqlException ex) when (TypeIncompatibilityErrorNumbers.Contains(ex.Number))
         {
             context.Entries.Add(new TypePairProbeResult(columnCategory, otherCategory, context.CollationName, ColumnConverts: false, CompileFailed: true, DynamicRangeSeekAvailable: false));
         }

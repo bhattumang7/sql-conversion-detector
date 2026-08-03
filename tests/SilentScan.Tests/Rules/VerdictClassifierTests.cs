@@ -485,12 +485,19 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_UniqueIdentifierColumnVsVarcharValue_CompileFailedCell_OperandClash()
+    public void Classify_UniqueIdentifierColumnVsVarcharValue_ValueConverts_SeekPreserved()
     {
+        // Oracle-verified (TypeMatrixGenerator regeneration, 2026-08-03): this cell was
+        // previously reported as a fabricated OperandClash because the generator forgot to
+        // deploy a T_UniqueIdentifier probe table, so every guid-as-column probe threw
+        // "Invalid object name" and a blanket `catch (SqlException)` recorded it as
+        // CompileFailed=true. uniqueidentifier actually outranks the string types in T-SQL
+        // precedence, so a varchar VALUE compared against a uniqueidentifier COLUMN converts
+        // the value, not the column - the seek survives.
         var column = new SqlType(SqlTypeCategory.UniqueIdentifier);
         var value = new SqlType(SqlTypeCategory.VarChar, Length: 36);
 
-        Assert.Equal(Verdict.OperandClash, VerdictClassifier.Classify(column, value));
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
     }
 
     [Fact]
