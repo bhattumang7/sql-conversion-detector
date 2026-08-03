@@ -25,7 +25,12 @@ public abstract record PredicateOperand
     /// to route differently) or when a real view/TVF layer's own qualified name wasn't resolvable.
     /// The Verify oracle uses these to compile a probe against what the source actually queried,
     /// rather than always querying the base table directly and silently skipping the view layer
-    /// a depth&gt;=1 finding claims to be inherited through.
+    /// a depth&gt;=1 finding claims to be inherited through. <paramref name="IndexName"/> is the
+    /// name of the specific index whose leading key column is this one (<see
+    /// cref="Catalog.CatalogTable.FindIndexedColumn"/>), when <paramref name="Indexed"/> is true -
+    /// null when the index itself is unnamed (SQL Server allows an unnamed inline
+    /// <c>PRIMARY KEY</c>/<c>UNIQUE</c> constraint to synthesize its own system name that this
+    /// tool never sees) or, naturally, whenever <paramref name="Indexed"/> is false.
     /// </summary>
     public sealed record Column(
         string TableQualifiedName,
@@ -35,7 +40,8 @@ public abstract record PredicateOperand
         int Depth,
         ColumnProvenance Provenance,
         string? ImmediateRelationQualifiedName = null,
-        string? ImmediateColumnName = null) : PredicateOperand;
+        string? ImmediateColumnName = null,
+        string? IndexName = null) : PredicateOperand;
 
     /// <summary>
     /// A literal, parameter/variable, or non-column expression - typed if we could, untyped

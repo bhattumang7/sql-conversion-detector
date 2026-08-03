@@ -1101,9 +1101,13 @@ public static class TypedPredicateExtractor
         {
             var otherIsLiteral = other is PredicateOperand.Value { IsLiteral: true };
             var otherType = other is PredicateOperand.Value value ? value.Type : ((PredicateOperand.Column)other).Type;
-            var verdict = VerdictClassifier.Classify(column.Type, otherType, otherIsLiteral, operatorText);
+            var (verdict, unknownReason) = VerdictClassifier.ClassifyWithReason(column.Type, otherType, otherIsLiteral, operatorText);
 
-            Findings.Add(new TypedPredicateFinding(verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn));
+            Findings.Add(new TypedPredicateFinding(
+                verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn,
+                UnknownReason: unknownReason,
+                PredicateFragmentText: _currentPredicateFragment is { } fragment ? Rules.FragmentTextRenderer.Render(fragment) : null,
+                Fingerprint: TypedPredicateFindingIdentity.ComputeFingerprint(column, other, operatorText)));
         }
 
         /// <summary>
@@ -1373,11 +1377,11 @@ public static class TypedPredicateExtractor
                 // catalog entry and always reported Indexed=false for any indexed temp
                 // object - a real table was never stored with a scope, so passing one is always
                 // safe (DatabaseCatalog falls back to the unscoped lookup automatically).
-                var indexed = catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false;
+                var matchedIndex = catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.FindIndexedColumn(baseColumn.ColumnName);
                 var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
                 return new PredicateOperand.Column(
-                    baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn,
-                    immediateRelation?.RelationQualifiedName, immediateRelation?.ExposedColumnName);
+                    baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, matchedIndex is not null, baseColumn.Depth, baseColumn,
+                    immediateRelation?.RelationQualifiedName, immediateRelation?.ExposedColumnName, matchedIndex?.Name);
             }
 
             if (provenance is ColumnProvenance.Declared declared)

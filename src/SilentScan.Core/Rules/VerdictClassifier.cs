@@ -50,11 +50,25 @@ public static class VerdictClassifier
     /// indexed-side join as ScanForced when it is genuinely RangeSeek. Deliberately NOT
     /// implemented; column-vs-column keeps the matrix's plain column-vs-variable-probed answer.
     /// </remarks>
-    public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null)
+    public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null) =>
+        ClassifyWithReason(columnType, otherType, otherIsLiteral, operatorText).Verdict;
+
+    /// <summary>
+    /// Same classification as <see cref="Classify"/>, plus - only when the result is
+    /// <see cref="Verdict.Unknown"/> - a short, stable reason code naming WHICH of this method's
+    /// three distinct Unknown-producing branches fired: <c>"operand-type-unresolved"</c> (one or
+    /// both sides never resolved a type at all), <c>"out-of-model-category:{category}"</c>
+    /// (sql_variant/xml/UDT/text-family, CLAUDE.md's own named hard cases), or
+    /// <c>"no-probed-matrix-cell"</c> (a real, in-model cross-category pair the oracle matrix has
+    /// simply never been asked about). Null for every non-Unknown verdict - CLAUDE.md's "Unknown,
+    /// never a guess" discipline is about the verdict itself; a reason code only exists to explain
+    /// an Unknown once it's already been reached, never to justify inventing one.
+    /// </summary>
+    public static (Verdict Verdict, string? UnknownReason) ClassifyWithReason(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null)
     {
         if (columnType is null || otherType is null)
         {
-            return Verdict.Unknown;
+            return (Verdict.Unknown, "operand-type-unresolved");
         }
 
         // sql_variant / xml / CLR user-defined types do not participate in the standard
@@ -66,9 +80,14 @@ public static class VerdictClassifier
         // make `xml = xml` a real, seek-preserving comparison - it isn't comparable with '='
         // at all, and reporting SeekPreserved for it would be actively wrong, not just a
         // missed classification.
-        if (IsOutOfModelCategory(columnType.Category) || IsOutOfModelCategory(otherType.Category))
+        if (IsOutOfModelCategory(columnType.Category))
         {
-            return Verdict.Unknown;
+            return (Verdict.Unknown, $"out-of-model-category:{columnType.Category}");
+        }
+
+        if (IsOutOfModelCategory(otherType.Category))
+        {
+            return (Verdict.Unknown, $"out-of-model-category:{otherType.Category}");
         }
 
         // A genuine, resolved collation mismatch between two string-family operands that are
@@ -88,12 +107,12 @@ public static class VerdictClassifier
             && columnType.Collation is { } columnCollation && otherType.Collation is { } otherCollation
             && !string.Equals(columnCollation.Name, otherCollation.Name, StringComparison.OrdinalIgnoreCase))
         {
-            return Verdict.OperandClash;
+            return (Verdict.OperandClash, null);
         }
 
         if (columnType.Category == otherType.Category)
         {
-            return ClassifySameCategory(columnType, otherType);
+            return (ClassifySameCategory(columnType, otherType), null);
         }
 
         return ClassifyCrossCategory(columnType, otherType, otherIsLiteral, operatorText);
@@ -116,7 +135,7 @@ public static class VerdictClassifier
     /// collation is irrelevant from this point on (either it agrees with columnType's, or the
     /// other operand is a literal, which never conflicts).
     /// </summary>
-    private static Verdict ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
+    private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
     {
         var collationName = columnType.IsStringFamily ? columnType.Collation?.Name : null;
 
@@ -133,24 +152,24 @@ public static class VerdictClassifier
 
         if (outcome is null)
         {
-            return Verdict.Unknown;
+            return (Verdict.Unknown, "no-probed-matrix-cell");
         }
 
         if (outcome.CompileFailed)
         {
             // A probed, empirically-confirmed fact (Roadmap Phase A3), not an absence of data -
             // distinct from the "no probe recorded this cell" Unknown case just above.
-            return Verdict.OperandClash;
+            return (Verdict.OperandClash, null);
         }
 
         if (!outcome.ColumnConverts)
         {
-            return Verdict.SeekPreserved;
+            return (Verdict.SeekPreserved, null);
         }
 
         if (!outcome.DynamicRangeSeekAvailable)
         {
-            return Verdict.ScanForced;
+            return (Verdict.ScanForced, null);
         }
 
         // The matrix cell says RangeSeek (probed as column vs. a variable, under `=`) - a LIKE
@@ -160,7 +179,7 @@ public static class VerdictClassifier
         // RangeSeek. See Classify's own remarks for why an analogous correction is NOT made for
         // a column-vs-column operand shape.
         var isNonLiteralLike = string.Equals(operatorText, "LIKE", StringComparison.Ordinal) && !otherIsLiteral;
-        return isNonLiteralLike ? Verdict.ScanForced : Verdict.RangeSeek;
+        return (isNonLiteralLike ? Verdict.ScanForced : Verdict.RangeSeek, null);
     }
 
     private static bool IsOutOfModelCategory(SqlTypeCategory category) =>

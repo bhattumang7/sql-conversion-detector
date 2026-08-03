@@ -574,4 +574,70 @@ public sealed class VerdictClassifierTests
             or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar;
         return new SqlType(category, Length: isStringFamily ? 20 : null, Collation: collationName is null ? null : new Collation(collationName));
     }
+
+    [Fact]
+    public void ClassifyWithReason_UnresolvedColumnType_ReasonIsOperandTypeUnresolved()
+    {
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(null, new SqlType(SqlTypeCategory.Int));
+
+        Assert.Equal(Verdict.Unknown, verdict);
+        Assert.Equal("operand-type-unresolved", reason);
+    }
+
+    [Fact]
+    public void ClassifyWithReason_UnresolvedOtherType_ReasonIsOperandTypeUnresolved()
+    {
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(new SqlType(SqlTypeCategory.Int), null);
+
+        Assert.Equal(Verdict.Unknown, verdict);
+        Assert.Equal("operand-type-unresolved", reason);
+    }
+
+    [Fact]
+    public void ClassifyWithReason_OutOfModelColumnCategory_ReasonNamesTheCategory()
+    {
+        var column = new SqlType(SqlTypeCategory.Xml);
+        var value = new SqlType(SqlTypeCategory.Int);
+
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
+
+        Assert.Equal(Verdict.Unknown, verdict);
+        Assert.Equal("out-of-model-category:Xml", reason);
+    }
+
+    [Fact]
+    public void ClassifyWithReason_OutOfModelOtherCategory_ReasonNamesTheCategory()
+    {
+        var column = new SqlType(SqlTypeCategory.Int);
+        var value = new SqlType(SqlTypeCategory.SqlVariant);
+
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
+
+        Assert.Equal(Verdict.Unknown, verdict);
+        Assert.Equal("out-of-model-category:SqlVariant", reason);
+    }
+
+    [Fact]
+    public void ClassifyWithReason_VarcharColumnUnresolvedCollation_ReasonIsNoProbedMatrixCell()
+    {
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null);
+        var value = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
+
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
+
+        Assert.Equal(Verdict.Unknown, verdict);
+        Assert.Equal("no-probed-matrix-cell", reason);
+    }
+
+    [Fact]
+    public void ClassifyWithReason_NonUnknownVerdict_ReasonIsNull()
+    {
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS"));
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS"));
+
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
+
+        Assert.Equal(Verdict.SeekPreserved, verdict);
+        Assert.Null(reason);
+    }
 }

@@ -45,6 +45,67 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_UnknownVerdict_CarriesAStableReasonCode()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Docs (Payload sql_variant NOT NULL);",
+            "SELECT 1 FROM dbo.Docs WHERE Payload = 1;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.Equal("out-of-model-category:SqlVariant", finding.UnknownReason);
+    }
+
+    [Fact]
+    public void Extract_NonUnknownVerdict_UnknownReasonIsNull()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "SELECT 1 FROM dbo.Orders WHERE OrderId = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.NotEqual(Verdict.Unknown, finding.Verdict);
+        Assert.Null(finding.UnknownReason);
+    }
+
+    [Fact]
+    public void Extract_Finding_CarriesThePredicateFragmentTextAndAStableFingerprint()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "SELECT 1 FROM dbo.Orders WHERE OrderId = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("OrderId = 5", finding.PredicateFragmentText);
+        Assert.NotNull(finding.Fingerprint);
+        Assert.Equal(finding.Fingerprint, TypedPredicateFindingIdentity.ComputeFingerprint(finding.Column, finding.OtherOperand, finding.Operator));
+    }
+
+    [Fact]
+    public void Extract_IndexedColumn_CarriesTheRealIndexName()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Accounts (Code varchar(50) NOT NULL, INDEX IX_Accounts_Code (Code));",
+            "SELECT 1 FROM dbo.Accounts WHERE Code = N'x';");
+
+        var finding = Assert.Single(findings);
+        Assert.True(finding.Column.Indexed);
+        Assert.Equal("IX_Accounts_Code", finding.Column.IndexName);
+    }
+
+    [Fact]
+    public void Extract_UnindexedColumn_IndexNameIsNull()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.Accounts (Code varchar(50) NOT NULL);",
+            "SELECT 1 FROM dbo.Accounts WHERE Code = N'x';");
+
+        var finding = Assert.Single(findings);
+        Assert.False(finding.Column.Indexed);
+        Assert.Null(finding.Column.IndexName);
+    }
+
+    [Fact]
     public void Extract_ParameterComparison_IsNotMarkedAsLiteral()
     {
         var findings = Extract(

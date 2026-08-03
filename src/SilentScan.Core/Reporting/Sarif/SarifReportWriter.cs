@@ -93,8 +93,10 @@ public static class SarifReportWriter
         var level = finding.Column.Indexed ? baseLevel : DowngradeOneLevel(baseLevel);
 
         var depthNote = DescribeDepth(finding.Column.Depth);
-        var indexNote = finding.Column.Indexed ? ", indexed" : ", not indexed";
-        var message = $"{finding.Verdict}: '{finding.Column.TableQualifiedName}.{finding.Column.ColumnName}'{indexNote}{depthNote}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
+        var indexNote = DescribeIndexNote(finding.Column);
+        var reasonNote = finding.UnknownReason is { } reason ? $" [{reason}]" : string.Empty;
+        var snippetNote = finding.PredicateFragmentText is { } snippet ? $" - `{snippet}`" : string.Empty;
+        var message = $"{finding.Verdict}: '{finding.Column.TableQualifiedName}.{finding.Column.ColumnName}'{indexNote}{depthNote}{reasonNote}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}{snippetNote}";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
@@ -177,6 +179,16 @@ public static class SarifReportWriter
         WriteLossKind.TemporalPrecisionLoss => "the time-of-day component is silently dropped",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled WriteLossKind."),
     };
+
+    private static string DescribeIndexNote(PredicateOperand.Column column)
+    {
+        if (!column.Indexed)
+        {
+            return ", not indexed";
+        }
+
+        return column.IndexName is { } indexName ? $", indexed ({indexName})" : ", indexed";
+    }
 
     private static string DescribeDepth(int depth)
     {

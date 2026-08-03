@@ -199,10 +199,20 @@ public static class ReadableScanReportWriter
         Where(finding.SourcePath, finding.Line, finding.DynamicSqlCallSite, pathBase),
         $"{finding.Column.TableQualifiedName}.{finding.Column.ColumnName}",
         DescribeType(finding.Column.Type),
-        $"{finding.Operator} {DescribeOperand(finding.OtherOperand)}",
-        finding.Column.Indexed ? "yes" : "no",
+        $"{finding.Operator} {DescribeOperand(finding.OtherOperand)}{(finding.UnknownReason is { } reason ? $" ({reason})" : string.Empty)}",
+        DescribeIndexed(finding.Column),
         DescribeOrigin(finding.Column, pathBase),
     ];
+
+    private static string DescribeIndexed(PredicateOperand.Column column)
+    {
+        if (!column.Indexed)
+        {
+            return "no";
+        }
+
+        return column.IndexName is { } indexName ? $"yes ({indexName})" : "yes";
+    }
 
     private static IEnumerable<ReadableBlock> CollationConflicts(ScanReport report, int level, string? pathBase)
     {

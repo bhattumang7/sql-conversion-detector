@@ -32,28 +32,7 @@ public static class TypedFindingDeduplicator
         return result;
     }
 
-    /// <summary>
-    /// The dedup identity: WHERE the column lives (table + column name), HOW it's compared
-    /// (operator), and WHAT it's compared against, described at the level of detail that
-    /// actually decides the verdict - a type category and, for string-family operands, the
-    /// collation - rather than incidental facts like the literal's exact text or which of two
-    /// textually-identical CREATE PROCEDURE copies happened to be scanned.
-    /// </summary>
-    private static string Key(TypedPredicateFinding finding)
-    {
-        var otherShape = finding.OtherOperand switch
-        {
-            PredicateOperand.Value { Type: { } type } => $"Value:{type.Category}:{(type.IsStringFamily ? type.Collation?.Name ?? "?" : string.Empty)}",
-            PredicateOperand.Value => "Value:Unresolved",
-            PredicateOperand.Column otherColumn => $"Column:{otherColumn.TableQualifiedName}.{otherColumn.ColumnName}",
-            _ => "Unknown",
-        };
-
-        return string.Join(
-            '',
-            finding.Column.TableQualifiedName,
-            finding.Column.ColumnName,
-            finding.Operator,
-            otherShape);
-    }
+    /// <summary>Delegates to the shared <see cref="TypedPredicateFindingIdentity"/> - the same shape-level identity <see cref="TypedPredicateFinding.Fingerprint"/> is hashed from, so a fingerprint and a dedup group always agree on what counts as "the same defect".</summary>
+    private static string Key(TypedPredicateFinding finding) =>
+        TypedPredicateFindingIdentity.ComputeKey(finding.Column, finding.OtherOperand, finding.Operator);
 }

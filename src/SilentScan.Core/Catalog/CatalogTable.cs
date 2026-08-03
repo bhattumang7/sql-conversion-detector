@@ -38,7 +38,10 @@ public sealed record CatalogTable(
     /// second-key predicates as indexed even though the oracle correctly refuses to confirm
     /// them at all).
     /// </summary>
-    public bool IsIndexedColumn(string columnName) =>
-        Indexes.Any(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && i.KeyColumns.Count > 0
+    public bool IsIndexedColumn(string columnName) => FindIndexedColumn(columnName) is not null;
+
+    /// <summary>The genuinely seekable index (same eligibility rule as <see cref="IsIndexedColumn"/>) whose leading key column is <paramref name="columnName"/>, or null if none - lets a finding name WHICH index a conversion defeats, not just whether one exists. When more than one qualifying index shares the same leading column (rare, but legal), the first declared wins - deterministic, matching this codebase's file-order-is-declaration-order convention elsewhere.</summary>
+    public CatalogIndex? FindIndexedColumn(string columnName) =>
+        Indexes.FirstOrDefault(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && i.KeyColumns.Count > 0
             && string.Equals(i.KeyColumns[0], columnName, StringComparison.OrdinalIgnoreCase));
 }
