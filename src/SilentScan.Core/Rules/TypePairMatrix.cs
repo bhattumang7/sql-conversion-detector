@@ -58,6 +58,56 @@ public sealed class TypePairMatrix
     public TypePairOutcome? TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory)
     {
         var variants = Entries.Where(e => e.ColumnCategory == columnCategory && e.OtherCategory == otherCategory && e.CollationName is not null).ToList();
+        return TryGetAgreeingOutcome(variants);
+    }
+
+    /// <summary>
+    /// For a string-family column whose collation IS resolved, but not to one of the exact
+    /// names this matrix ever probed (e.g. a real corpus using
+    /// <c>SQL_Latin1_General_CP1_CS_AS</c> when only the case-insensitive variant was probed):
+    /// falls back to every probed collation that shares the SAME family
+    /// (<see cref="Collation.IsSqlFamily"/> - SQL_* vs Windows/UTF8/BIN2, the actual axis
+    /// CLAUDE.md's type rules turn on), and only returns a result when all of THAT family's
+    /// probed representatives agree - the same "never guess, only generalize a unanimous
+    /// finding" discipline <see cref="TryGetOutcomeAgreeingAcrossCollations"/> already applies
+    /// across every collation. A resolved collation must never carry LESS information than an
+    /// unresolved one: this family-scoped agreement set is a subset of that method's
+    /// all-collations set, so whenever the all-collations check would succeed, this one does
+    /// too (a unanimous full set is unanimous on every subset) - and it additionally succeeds in
+    /// cases the all-collations check cannot, when only this collation's own family agrees.
+    /// Never invoked for a pair this matrix has no probe data for at all (an out-of-model
+    /// category, or a category pair never probed) - that stays "no-probed-matrix-cell" Unknown.
+    /// </summary>
+    public TypePairOutcome? TryGetOutcomeAgreeingWithinFamily(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, bool isSqlFamily)
+    {
+        var variants = Entries.Where(e =>
+            e.ColumnCategory == columnCategory
+            && e.OtherCategory == otherCategory
+            && e.CollationName is not null
+            && new Collation(e.CollationName).IsSqlFamily == isSqlFamily).ToList();
+        return TryGetAgreeingOutcome(variants);
+    }
+
+    /// <summary>
+    /// Resolved-collation lookup that never regresses below what an unresolved collation would
+    /// get: tries the exact probed cell first, then falls back to
+    /// <see cref="TryGetOutcomeAgreeingWithinFamily"/>. Pass <paramref name="collation"/> as null
+    /// for an unresolved column collation - that routes to <see cref="TryGetOutcomeAgreeingAcrossCollations"/>
+    /// instead, exactly as before this method existed.
+    /// </summary>
+    public TypePairOutcome? TryGetOutcomeForColumnCollation(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, Collation? collation)
+    {
+        if (collation is null)
+        {
+            return TryGetOutcomeAgreeingAcrossCollations(columnCategory, otherCategory);
+        }
+
+        return TryGetOutcome(columnCategory, otherCategory, collation.Name)
+            ?? TryGetOutcomeAgreeingWithinFamily(columnCategory, otherCategory, collation.IsSqlFamily);
+    }
+
+    private static TypePairOutcome? TryGetAgreeingOutcome(List<TypePairOutcome> variants)
+    {
         if (variants.Count == 0)
         {
             return null;

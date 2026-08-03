@@ -33,6 +33,55 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
+    public void Classify_VarcharColumnVsNVarcharValue_UnprobedSqlFamilyCollation_FallsBackToScanForced()
+    {
+        // SQL_Latin1_General_CP1_CS_AS was never itself probed by TypeMatrixGenerator - only the
+        // CI_AS variant was - but it shares the same SQL_* family, which is the axis this outcome
+        // actually turns on (CLAUDE.md: "Collation is a first-class input... SQL_* collations ->
+        // ScanForced"). A resolved-but-unprobed collation must fall back to the family's probed
+        // representative(s) rather than reporting Unknown for a fact the matrix already knows.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CS_AS"));
+        var value = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_VarcharColumnVsNVarcharValue_UnprobedWindowsFamilyCollation_FallsBackToRangeSeek()
+    {
+        // French_CI_AS is a Windows-family collation (does not start with "SQL_") that was never
+        // itself probed; the matrix DOES probe three other Windows-family representatives
+        // (Latin1_General_CI_AS, the UTF-8 variant, and the _BIN2 variant specifically to stress
+        // this generalization - TypeMatrixGenerator.Collations' own remarks) and they all agree
+        // on RangeSeek, so this resolved-but-unprobed Windows collation should generalize to the
+        // same answer rather than falling to Unknown.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("French_CI_AS"));
+        var value = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
+
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_ResolvedCollation_NeverLessInformativeThanUnresolvedCollation()
+    {
+        // Regression for the audit-found inversion: previously, a RESOLVED-but-not-exactly-
+        // probed collation (French_CI_AS) fell straight to Unknown, while an UNRESOLVED collation
+        // on the exact same pair could still get a real verdict via
+        // TryGetOutcomeAgreeingAcrossCollations - knowing MORE about the column produced LESS
+        // information. Assert the resolved case now at least matches what the unresolved case
+        // reports for a pair where every probed collation (both families) happens to agree.
+        var unresolvedColumn = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
+        var resolvedColumn = new SqlType(SqlTypeCategory.NVarChar, Length: 20, Collation: new Collation("French_CI_AS"));
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 20);
+
+        var unresolvedVerdict = VerdictClassifier.Classify(unresolvedColumn, value);
+        var resolvedVerdict = VerdictClassifier.Classify(resolvedColumn, value);
+
+        Assert.NotEqual(Verdict.Unknown, unresolvedVerdict);
+        Assert.Equal(unresolvedVerdict, resolvedVerdict);
+    }
+
+    [Fact]
     public void Classify_VarcharColumnLikeNVarcharVariable_WindowsCollation_ScanForced()
     {
         // Oracle-verified directly (Docker SQL Server): the matrix's RangeSeek cells were probed

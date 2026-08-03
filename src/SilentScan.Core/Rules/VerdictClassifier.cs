@@ -137,18 +137,22 @@ public static class VerdictClassifier
     /// </summary>
     private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
     {
-        var collationName = columnType.IsStringFamily ? columnType.Collation?.Name : null;
-
-        var outcome = columnType.IsStringFamily && collationName is null
-            // Collation is unresolved on the column, but not every string-family pair's
-            // outcome actually depends on it: e.g. an nvarchar column vs a varchar value never
-            // converts the column regardless of collation - a precedence-direction fact, not a
-            // collation-dependent one. Only reuse an answer that every probed collation for
-            // this pair agreed on; a pair where collation genuinely changes the outcome (e.g.
-            // varchar column vs nvarchar value: ScanForced vs RangeSeek) still falls through to
-            // UNKNOWN (CLAUDE.md: "collation unknown and unpinned by the manifest -> UNKNOWN").
-            ? TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(columnType.Category, otherType.Category)
-            : TypePairMatrix.Instance.TryGetOutcome(columnType.Category, otherType.Category, collationName);
+        // TryGetOutcomeForColumnCollation tries the exact probed collation first, then falls
+        // back to every probed collation sharing the same SQL_*-vs-Windows family (only when
+        // that family's own probed representatives all agree) - a resolved-but-not-exactly-
+        // probed collation (e.g. SQL_Latin1_General_CP1_CS_AS when only the CI variant was
+        // probed) must never report LESS than an unresolved one would via
+        // TryGetOutcomeAgreeingAcrossCollations (which it calls when collation is null); it
+        // reports strictly more. Not every string-family pair's outcome even depends on
+        // collation - e.g. an nvarchar column vs a varchar value never converts the column
+        // regardless of collation, a precedence-direction fact - so both paths can still find a
+        // unanimous answer with zero exact-name knowledge. A pair where collation genuinely
+        // changes the outcome (varchar column vs nvarchar value: ScanForced vs RangeSeek) still
+        // falls through to UNKNOWN once no matching family or full set is unanimous (CLAUDE.md:
+        // "collation unknown and unpinned by the manifest -> UNKNOWN").
+        var outcome = columnType.IsStringFamily
+            ? TypePairMatrix.Instance.TryGetOutcomeForColumnCollation(columnType.Category, otherType.Category, columnType.Collation)
+            : TypePairMatrix.Instance.TryGetOutcome(columnType.Category, otherType.Category, collationName: null);
 
         if (outcome is null)
         {
