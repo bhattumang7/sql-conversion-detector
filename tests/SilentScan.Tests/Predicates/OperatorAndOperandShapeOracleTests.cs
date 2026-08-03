@@ -31,7 +31,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
         CREATE TABLE dbo.NVarCharWin (Code NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);
         """;
 
-    protected override string DatabaseName => nameof(OperatorAndOperandShapeOracleTests);
+    protected override string DatabaseNameSeed => nameof(OperatorAndOperandShapeOracleTests);
 
     protected override string Ddl => Ddl_;
 

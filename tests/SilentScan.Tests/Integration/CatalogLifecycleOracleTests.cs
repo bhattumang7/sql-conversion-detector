@@ -19,7 +19,7 @@ namespace SilentScan.Tests.Integration;
 [Trait("Category", "Oracle")]
 public sealed class CatalogLifecycleOracleTests : OracleTestFixture
 {
-    protected override string DatabaseName => nameof(CatalogLifecycleOracleTests);
+    protected override string DatabaseNameSeed => nameof(CatalogLifecycleOracleTests);
 
     protected override string Ddl => """
         CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);

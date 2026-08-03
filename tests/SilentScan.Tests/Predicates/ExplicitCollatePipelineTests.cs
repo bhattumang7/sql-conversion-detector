@@ -65,7 +65,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         SELECT 1 FROM dbo.CustomersLiteralMatchingCollate WHERE Code = 'x' COLLATE SQL_Latin1_General_CP1_CI_AS;
         """;
 
-    protected override string DatabaseName => nameof(ExplicitCollatePipelineTests);
+    protected override string DatabaseNameSeed => nameof(ExplicitCollatePipelineTests);
 
     protected override string Ddl => string.Join(
         "\nGO\n", DifferingCollateColumnSql, DifferingCollateLiteralSql, MatchingCollateColumnSql, MatchingCollateLiteralSql);

@@ -23,7 +23,24 @@ public abstract class OracleTestFixture : IAsyncLifetime
     /// <c>nameof(MyTests)</c> - collisions across classes would otherwise let one class's
     /// teardown race another's still-running probes.
     /// </summary>
-    protected abstract string DatabaseName { get; }
+    protected abstract string DatabaseNameSeed { get; }
+
+    /// <summary>
+    /// The real, per-RUN-unique database name every subclass actually provisions against and
+    /// must use for every connection it opens - <see cref="DatabaseNameSeed"/> alone is unique
+    /// per CLASS, not per run, so a fixed literal name left behind by a crashed/killed test
+    /// (InitializeAsync throwing skips xUnit's own DisposeAsync call entirely - a documented
+    /// xUnit gap, not something this fixture can prevent) persists and gets silently reused -
+    /// with stale contents, or an unrelated Query Store worker still attached to it - by the
+    /// NEXT run of the same class, rather than that run getting a guaranteed-fresh database.
+    /// Four exactly such leaked databases (from a single class, `TypedPredicateExtractorOracleTests`,
+    /// which pioneered this suffixing pattern for its own fixtures) were found and cleaned up by
+    /// hand while diagnosing full-suite flakiness - this rolls that same protection out to every
+    /// other Oracle test fixture instead of leaving it as one class's own local pattern.
+    /// </summary>
+    protected string DatabaseName => _databaseName ??= $"{DatabaseNameSeed}_{Guid.NewGuid():N}";
+
+    private string? _databaseName;
 
     /// <summary>The DDL (CREATE TABLE/INDEX/VIEW/etc, GO-separated) this test class's probes run against.</summary>
     protected abstract string Ddl { get; }

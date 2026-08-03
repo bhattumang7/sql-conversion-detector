@@ -57,7 +57,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
         SELECT 1 FROM dbo.Accounts WHERE Code = ISNULL(NullableCode, N'x');
         """;
 
-    protected override string DatabaseName => nameof(ComputedColumnPipelineTests);
+    protected override string DatabaseNameSeed => nameof(ComputedColumnPipelineTests);
 
     protected override string Ddl => ConcatSql + "\nGO\n" + UnresolvableSql + "\nGO\n" + BuiltinFunctionSql + "\nGO\n" + IsNullParitySql;
 

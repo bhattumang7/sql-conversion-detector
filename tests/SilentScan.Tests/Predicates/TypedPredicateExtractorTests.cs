@@ -1578,15 +1578,14 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         return TypedPredicateExtractor.Extract(result, catalog, lineage);
     }
 
-    // xUnit gives every [Fact]/[Theory] case its own instance of this class, but a shared
-    // literal DatabaseName (the pattern every other, smaller OracleTestFixture subclass in this
-    // project uses) let two instances' InitializeAsync/DisposeAsync race on the SAME database
-    // name once this class grew to ~40 oracle-confirmed cases - "Cannot drop the database ...
-    // because it does not exist" from one instance's CREATE racing another's DROP, observed
-    // running this file's full suite. A GUID suffix per instance gives every test method a
-    // genuinely disposable database of its own, sidestepping the race outright rather than
-    // relying on xUnit's parallelization defaults not changing under us.
-    protected override string DatabaseName { get; } = $"{nameof(TypedPredicateExtractorOracleTests)}_{Guid.NewGuid():N}";
+    // xUnit gives every [Fact]/[Theory] case its own instance of this class, and a shared
+    // literal database name let two instances' InitializeAsync/DisposeAsync race on the SAME
+    // database name once this class grew to ~40 oracle-confirmed cases - "Cannot drop the
+    // database ... because it does not exist" from one instance's CREATE racing another's DROP,
+    // observed running this file's full suite. OracleTestFixture's own DatabaseName now applies
+    // a GUID suffix to every subclass for exactly this reason - this override just supplies the
+    // per-class seed, same as every other subclass.
+    protected override string DatabaseNameSeed => nameof(TypedPredicateExtractorOracleTests);
 
     protected override string Ddl => string.Join(
         "\nGO\n",

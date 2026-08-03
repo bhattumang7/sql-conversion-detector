@@ -37,7 +37,7 @@ public sealed class LiveFileEquivalenceTests : OracleTestFixture
         END
         """;
 
-    protected override string DatabaseName => nameof(LiveFileEquivalenceTests);
+    protected override string DatabaseNameSeed => nameof(LiveFileEquivalenceTests);
 
     protected override string Ddl => FixtureSql;
 

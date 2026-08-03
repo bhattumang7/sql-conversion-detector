@@ -48,6 +48,19 @@ public sealed partial class DatabaseProvisioner
         var collateClause = collationName is null ? string.Empty : $" COLLATE {collationName}";
         await ExecuteAsync(connection, $"CREATE DATABASE [{databaseName}]{collateClause};", cancellationToken);
         await ExecuteAsync(connection, $"ALTER DATABASE [{databaseName}] SET COMPATIBILITY_LEVEL = {PinnedCompatibilityLevel};", cancellationToken);
+
+        // Query Store is ON by default for a new database on this SQL Server version - a real,
+        // measured problem for a disposable oracle database whose whole lifetime is one test:
+        // its plan-history/regression-tracking async worker has nothing meaningful to track here
+        // (the database is dropped within seconds), yet still runs, and Docker's own error log
+        // showed its background collection racing this suite's own CREATE/DROP DATABASE churn -
+        // "Error: 12412, Internal table access error: failed to access the Query Store internal
+        // table" - 400+ times across a few hours of test runs (`docker logs` on the running
+        // container, not a guess). Turned off immediately after creation: every disposable
+        // database this provisioner creates is scanned once and dropped, never queried for
+        // historical plan regression, so there is nothing Query Store was ever doing FOR this
+        // tool - only overhead against it.
+        await ExecuteAsync(connection, $"ALTER DATABASE [{databaseName}] SET QUERY_STORE = OFF;", cancellationToken);
     }
 
     /// <summary>Drops <paramref name="databaseName"/> if it exists. Safe to call even if creation never succeeded.</summary>

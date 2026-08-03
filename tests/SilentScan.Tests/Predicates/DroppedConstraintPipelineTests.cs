@@ -50,7 +50,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
         SELECT 1 FROM dbo.Orders WHERE OrderCode = N'A1';
         """;
 
-    protected override string DatabaseName => nameof(DroppedConstraintPipelineTests);
+    protected override string DatabaseNameSeed => nameof(DroppedConstraintPipelineTests);
 
     protected override string Ddl => string.Join("\nGO\n", DroppedPkSql, DroppedUniqueSql, DroppedOneOfTwoSql);
 

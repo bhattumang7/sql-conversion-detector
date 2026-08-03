@@ -153,9 +153,22 @@ public sealed class TypeMatrixGenerator
         var entries = new List<TypePairProbeResult>();
         string? serverVersion = null;
 
+        // Every database name this method provisions carries this call's own unique suffix -
+        // without it, two GenerateAsync calls running concurrently (the real, reproducible case:
+        // TypeMatrixGeneratorTests and TypePairMatrixLiveRegenerationTests are separate xUnit
+        // test classes, so xUnit's default parallelization runs them in different threads at the
+        // same time) both provision the exact same literal database name ("SilentScanTypeMatrixFamily")
+        // and race each other's CREATE/DROP - one call's DROP (which SET SINGLE_USER WITH
+        // ROLLBACK IMMEDIATEs first) can kill the OTHER call's still-in-flight session outright
+        // ("Cannot continue the execution because the session is in the kill state"), not just a
+        // transient DMV-decode hiccup. A previous fix here tried widening a plan-cache reader's
+        // retry budget instead - that only papered over one symptom of this same deterministic
+        // naming collision, not the collision itself.
+        var runSuffix = "_" + Guid.NewGuid().ToString("N")[..8];
+
         if (numericFamily.Count > 0 || dateTimeFamily.Count > 0 || binaryFamily.Count > 0)
         {
-            const string familyDb = "SilentScanTypeMatrixFamily";
+            var familyDb = "SilentScanTypeMatrixFamily" + runSuffix;
             SqlConnection.ClearAllPools();
             await _provisioner.CreateFreshAsync(familyDb, cancellationToken: cancellationToken);
             try
@@ -199,7 +212,7 @@ public sealed class TypeMatrixGenerator
                 break;
             }
 
-            var stringDb = "SilentScanTypeMatrixStr_" + SanitizeForIdentifier(collation);
+            var stringDb = "SilentScanTypeMatrixStr_" + SanitizeForIdentifier(collation) + runSuffix;
             await _provisioner.CreateFreshAsync(stringDb, collationName: collation, cancellationToken: cancellationToken);
             try
             {

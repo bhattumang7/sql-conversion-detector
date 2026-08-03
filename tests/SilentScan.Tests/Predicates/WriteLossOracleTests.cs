@@ -15,7 +15,7 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class WriteLossOracleTests : OracleTestFixture
 {
-    protected override string DatabaseName { get; } = $"{nameof(WriteLossOracleTests)}_{Guid.NewGuid():N}";
+    protected override string DatabaseNameSeed => nameof(WriteLossOracleTests);
 
     protected override string Ddl => """
         CREATE TABLE dbo.T (

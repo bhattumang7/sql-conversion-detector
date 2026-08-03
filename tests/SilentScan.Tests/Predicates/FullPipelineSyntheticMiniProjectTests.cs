@@ -40,7 +40,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
         }
     }
 
-    protected override string DatabaseName => nameof(FullPipelineSyntheticMiniProjectTests);
+    protected override string DatabaseNameSeed => nameof(FullPipelineSyntheticMiniProjectTests);
 
     protected override string Ddl =>
         File.ReadAllText(Path.Combine(ProjectDir, "01_schema.sql")) + "\nGO\n" +

@@ -15,7 +15,7 @@ namespace SilentScan.Tests.Integration;
 [Trait("Category", "Oracle")]
 public sealed class LiveCatalogReaderTests : OracleTestFixture
 {
-    protected override string DatabaseName => nameof(LiveCatalogReaderTests);
+    protected override string DatabaseNameSeed => nameof(LiveCatalogReaderTests);
 
     protected override string Ddl => """
         CREATE TABLE dbo.Customers (

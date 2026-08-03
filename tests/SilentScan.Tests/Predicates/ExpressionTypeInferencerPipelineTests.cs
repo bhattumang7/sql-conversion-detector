@@ -25,7 +25,7 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
             SELECT Code FROM dbo.Accounts WHERE Code = COALESCE(@VarcharParam, @NVarcharParam);
         """;
 
-    protected override string DatabaseName => nameof(ExpressionTypeInferencerPipelineTests);
+    protected override string DatabaseNameSeed => nameof(ExpressionTypeInferencerPipelineTests);
 
     protected override string Ddl => CoalesceSql;
 

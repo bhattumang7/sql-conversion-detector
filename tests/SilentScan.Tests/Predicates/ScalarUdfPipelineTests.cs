@@ -32,7 +32,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
         SELECT Code FROM dbo.AccountsMissing WHERE Code = dbo.fn_NeverDeclared();
         """;
 
-    protected override string DatabaseName => nameof(ScalarUdfPipelineTests);
+    protected override string DatabaseNameSeed => nameof(ScalarUdfPipelineTests);
 
     // fn_NeverDeclared() is never CREATEd - dbo.fn_NeverDeclared must NOT be deployed here,
     // since the whole point of UnregisteredFunction_StillResolvesUnknown is that the function

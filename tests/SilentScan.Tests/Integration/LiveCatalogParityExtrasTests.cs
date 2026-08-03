@@ -41,7 +41,7 @@ public sealed class LiveCatalogParityExtrasTests : OracleTestFixture
         END
         """;
 
-    protected override string DatabaseName => nameof(LiveCatalogParityExtrasTests);
+    protected override string DatabaseNameSeed => nameof(LiveCatalogParityExtrasTests);
 
     protected override string Ddl => FixtureSql;
 

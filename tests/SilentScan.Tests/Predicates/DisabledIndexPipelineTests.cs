@@ -27,7 +27,7 @@ public sealed class DisabledIndexPipelineTests : OracleTestFixture
         SELECT 1 FROM dbo.Devices WHERE SerialNo = N'ABC';
         """;
 
-    protected override string DatabaseName => nameof(DisabledIndexPipelineTests);
+    protected override string DatabaseNameSeed => nameof(DisabledIndexPipelineTests);
 
     protected override string Ddl => DisabledIndexSql;
 

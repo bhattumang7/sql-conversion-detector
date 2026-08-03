@@ -27,7 +27,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         "GO\n" +
         "CREATE VIEW dbo.vw_T AS SELECT CAST(Col AS INT) AS ColAsInt FROM dbo.T;";
 
-    protected override string DatabaseName => nameof(DynamicSqlPipelineTests);
+    protected override string DatabaseNameSeed => nameof(DynamicSqlPipelineTests);
 
     protected override string Ddl => SchemaSql;
 

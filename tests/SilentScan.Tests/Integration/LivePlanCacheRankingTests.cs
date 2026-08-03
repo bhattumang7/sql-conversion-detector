@@ -15,7 +15,7 @@ namespace SilentScan.Tests.Integration;
 [Trait("Category", "Oracle")]
 public sealed class LivePlanCacheRankingTests : OracleTestFixture
 {
-    protected override string DatabaseName => nameof(LivePlanCacheRankingTests);
+    protected override string DatabaseNameSeed => nameof(LivePlanCacheRankingTests);
 
     protected override string Ddl => """
         CREATE TABLE dbo.Orders (
