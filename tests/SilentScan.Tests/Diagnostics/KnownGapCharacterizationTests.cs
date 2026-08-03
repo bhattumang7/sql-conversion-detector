@@ -20,9 +20,15 @@ namespace SilentScan.Tests.Diagnostics;
 /// characterization scenarios, distinct from the tier1/ rule fixtures whose real-world-sourced
 /// requirement (CLAUDE.md) applies to rules' fire/clean evidence, not to gap pinning.
 ///
-/// One declared gap is NOT pinned here: the Collation.IsWindowsFamily prefix heuristic
-/// misclassifying UTF-8/_BIN2 collations - it needs matrix regeneration to demonstrate end to
-/// end and should gain characterization coverage when that area is next touched.
+/// The previously-declared IsWindowsFamily-prefix-heuristic gap here turned out to be a
+/// NON-GAP on investigation (roadmap "pin the SQL_-prefix heuristic" task): TypeMatrixGenerator
+/// already oracle-probed both a _BIN2 collation and a _SC_UTF8 one directly (both behave like
+/// the Windows family, exactly as the "SQL_" prefix check predicts), and - more fundamentally -
+/// VerdictClassifier/TypePairMatrix key every matrix lookup on the exact collation NAME string,
+/// never on IsSqlFamily/IsWindowsFamily at all. Those two properties are retained purely as
+/// diagnostic/display helpers (Collation.cs, unit-tested in CollationTests.cs) and were never
+/// load-bearing for a verdict. See Rules/VerdictClassifierTests.cs and
+/// Catalog/CollationTests.cs for the positive coverage this evidence backs.
 /// </summary>
 public sealed class KnownGapCharacterizationTests
 {

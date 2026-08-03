@@ -49,4 +49,15 @@ public enum CorpusFindingOutcome
     /// index, only that the tool's mechanism was validated against one built to order.
     /// </summary>
     ConfirmedViaScratchIndex,
+
+    /// <summary>
+    /// The finding's own verdict is <see cref="Core.Rules.Verdict.Unknown"/> - it makes no claim about
+    /// what the real engine does (CLAUDE.md: Unknown means honestly uncertain, never a guess), so
+    /// there is nothing here for the oracle to confirm OR refute. Distinct from every other
+    /// outcome, all of which are only reachable for a verdict that DOES assert something
+    /// falsifiable - a column happening to convert in the probe's plan is not evidence for an
+    /// Unknown finding the way it would be for a ScanForced/RangeSeek/SeekPreserved one, and must
+    /// never be reported as <see cref="Confirmed"/> just because a probe could be built at all.
+    /// </summary>
+    NotApplicable,
 }

@@ -40,6 +40,16 @@ public sealed class CorpusFindingVerifier
     public async Task<CorpusFindingResult> VerifyAsync(
         string database, TypedPredicateFinding finding, CancellationToken cancellationToken = default)
     {
+        // An Unknown verdict asserts nothing (CLAUDE.md: honestly uncertain, never a guess) - the
+        // column-conversion check every other branch below relies on would otherwise happily
+        // report Confirmed the moment a probe happened to show a conversion, even though Unknown
+        // never claimed one would or wouldn't happen. Checked before any probe is even built, so
+        // this can never depend on what a specific probe's plan XML happens to look like.
+        if (finding.Verdict == Verdict.Unknown)
+        {
+            return new CorpusFindingResult(finding, CorpusFindingOutcome.NotApplicable, "Verdict is Unknown - makes no claim for the oracle to confirm or refute.");
+        }
+
         var probe = CorpusFindingProbeBuilder.Build(finding);
         if (probe is null)
         {

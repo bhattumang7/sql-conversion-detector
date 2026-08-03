@@ -214,8 +214,11 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_LiteralOperandThatCannotBeReconstructed_ReturnsNotProbeableWithFidelityCaveat()
     {
+        // Verdict is deliberately NOT Unknown here - this test is about the operand-rendering
+        // NotProbeable path specifically, which must fire regardless of verdict; Unknown itself
+        // now short-circuits before a probe is even attempted (see the NotApplicable tests below).
         var finding = new TypedPredicateFinding(
-            Verdict.Unknown,
+            Verdict.ScanForced,
             ColumnOperand("dbo.Orders", "OrderId", new SqlType(SqlTypeCategory.Int), indexed: true),
             new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int), IsLiteral: true, LiteralText: null),
             "=",
@@ -269,8 +272,9 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_UnprobeableOtherOperandType_ReturnsNotProbeable()
     {
+        // Verdict is deliberately NOT Unknown - see the comment on the fidelity-caveat test above.
         var finding = new TypedPredicateFinding(
-            Verdict.Unknown,
+            Verdict.ScanForced,
             ColumnOperand("dbo.CodeFrequency", "Code", new SqlType(SqlTypeCategory.Char, Length: 1)),
             new PredicateOperand.Value(new SqlType(SqlTypeCategory.UserDefined)),
             "=",
@@ -358,8 +362,9 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
         // Genuine compile failure in the probe itself, independent of the index-deployment
         // gate (which only applies to ScanForced/RangeSeek verdicts) - the "other" side
         // references a table that was never deployed, so the probe SQL fails to compile.
+        // Verdict is deliberately NOT Unknown - see the comment on the fidelity-caveat test above.
         var finding = new TypedPredicateFinding(
-            Verdict.Unknown,
+            Verdict.ScanForced,
             ColumnOperand("dbo.CodeFrequency", "Code", new SqlType(SqlTypeCategory.Char, Length: 1)),
             ColumnOperand("dbo.AlsoDoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
             "=",
@@ -370,5 +375,52 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
         Assert.Equal(CorpusFindingOutcome.ProbeFailed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_UnknownVerdictCausedByUnresolvedCollation_NeverConfirmedEvenThoughTheColumnActuallyConverts()
+    {
+        // The exact scenario "null-collation verify consistency" exists to pin: dbo.Orders'
+        // OrderCode really does force a column-side conversion against an nvarchar value (the
+        // Confirmed test above proves it) - but if this finding's own Collation never resolved
+        // (VerdictClassifier: unresolved collation -> Unknown, never a guess), the oracle must
+        // NOT rubber-stamp it Confirmed just because the real column happens to convert. Before
+        // the Unknown short-circuit, this finding would have fallen through to the "no shape
+        // claim to check" branch and been silently reported Confirmed - the exact bug this test
+        // exists to prevent from ever coming back.
+        var finding = new TypedPredicateFinding(
+            Verdict.Unknown,
+            ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null), indexed: true),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.NotApplicable, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_UnknownVerdict_NeverAttemptsAProbeAtAll()
+    {
+        // Reaching for a table/column that was never deployed would normally produce
+        // ProbeFailed once a probe is actually attempted (see the two ProbeFailed tests above) -
+        // an Unknown verdict must short-circuit before that point, so this proves the
+        // short-circuit really does run first, not just that it happens to agree with a
+        // probeable case.
+        var finding = new TypedPredicateFinding(
+            Verdict.Unknown,
+            ColumnOperand("dbo.DoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.NotApplicable, result.Outcome);
     }
 }
