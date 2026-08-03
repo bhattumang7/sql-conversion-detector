@@ -48,39 +48,54 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => false,
         };
 
+        var confidenceOption = new Option<string>("--confidence")
+        {
+            Description = ReportOutput.ConfidenceOptionDescription,
+            DefaultValueFactory = _ => "high",
+        };
+
         var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for sargability findings.")
         {
             connectionStringArgument,
             formatOption,
             planCacheEvidenceOption,
+            confidenceOption,
             outputOption,
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
             var connectionString = parseResult.GetValue(connectionStringArgument)!;
-            var format = parseResult.GetValue(formatOption)!;
             var planCacheEvidence = parseResult.GetValue(planCacheEvidenceOption);
-            var output = parseResult.GetValue(outputOption);
-            return await RunAsync(connectionString, format, planCacheEvidence, Console.Out, Console.Error, cancellationToken, output);
+            var options = new ReportOptions(
+                parseResult.GetValue(formatOption)!,
+                parseResult.GetValue(confidenceOption)!,
+                parseResult.GetValue(outputOption));
+            return await RunAsync(connectionString, planCacheEvidence, options, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string connectionString, string format, bool includePlanCacheEvidence, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken, string? outputPath = null)
+        string connectionString, bool includePlanCacheEvidence, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
     {
-        if (!ReportOutput.TryParseFormat(format, out var reportFormat))
+        if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
-            await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(format));
+            await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(options.Format));
+            return 1;
+        }
+
+        if (!ReportOutput.TryParseConfidence(options.Confidence, out var minimumConfidence))
+        {
+            await stderr.WriteLineAsync(ReportOutput.UnknownConfidenceMessage(options.Confidence));
             return 1;
         }
 
         LiveScanResult result;
         try
         {
-            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, cancellationToken);
+            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, minimumConfidence, cancellationToken);
         }
         catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
         {
@@ -95,7 +110,7 @@ public static class ScanDbCommand
             _ => ReadableLiveScanWriter.Write(result, ReadableLiveScanWriter.DescribeTarget(connectionString), ReportOutput.ToStyle(reportFormat)),
         };
 
-        if (!ReportOutput.Emit(content, outputPath, stdout, stderr))
+        if (!ReportOutput.Emit(content, options.OutputPath, stdout, stderr))
         {
             return 1;
         }

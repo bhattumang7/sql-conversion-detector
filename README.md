@@ -76,6 +76,24 @@ confirm `CONVERT_IMPLICIT` lands on the column side of the predicate.
 Corpus DML and stored procedures are never executed — only self-authored
 probes run against the disposable database.
 
+## Confidence tiers and inference rules
+
+Every finding carries a `Confidence`: `High`, `Medium`, or `Low`. A
+statically-derived finding — anything from ordinary parsed SQL text — is
+always `High`. `scan-db` and `scan-corpus-live` both accept
+`--confidence high|medium` (default `high`) to control the least confident a
+finding may be and still appear in the report; SARIF output maps a
+below-`High` finding to level `note` and gives it a `/medium-confidence`-
+suffixed rule ID, independently filterable from its `High` counterpart.
+
+Nothing in the tool currently emits a below-`High` finding — the tier exists
+ahead of the dynamic-SQL folder's planned symbolic-value inference, so that
+work lands already gated: a finding derived from a value the folder could
+only assume (a placeholder standing in for a variable it could prove had a
+type but not a value — an uninitialized `DECLARE`, a proc parameter with no
+known caller) will report at `Medium` and stay off by default, never mixed
+into a `High` finding's numbers.
+
 ## Verification oracle (Docker SQL Server)
 
 ```

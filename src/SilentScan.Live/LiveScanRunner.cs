@@ -28,9 +28,10 @@ public static class LiveScanRunner
     /// caller may not have, and reads a chunk of the plan cache that an ordinary catalog+module
     /// scan has no need to touch.
     /// </param>
+    /// <param name="minimumConfidence">The least confident a finding may be and still appear in the returned report - see <see cref="FindingConfidence"/>. Defaults to <see cref="FindingConfidence.High"/>, unchanged from before this parameter existed.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<LiveScanResult> RunAsync(
-        string connectionString, bool includePlanCacheEvidence = false, CancellationToken cancellationToken = default)
+        string connectionString, bool includePlanCacheEvidence = false, FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
         var catalog = await new LiveCatalogReader(connectionString).ReadAsync(cancellationToken);
         var moduleResult = await new LiveModuleReader(connectionString).ReadAsync(cancellationToken);
@@ -61,7 +62,7 @@ public static class LiveScanRunner
         var lineage = LineageResolver.Resolve(catalog, parseResults);
         var parityMismatches = await new LiveLineageParityChecker(connectionString).CheckAsync(lineage, cancellationToken);
 
-        var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog: catalog);
+        var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog: catalog, minimumConfidence: minimumConfidence);
 
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];

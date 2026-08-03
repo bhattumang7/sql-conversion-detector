@@ -23,7 +23,15 @@ public static class ScanReportBuilder
     /// </summary>
     /// <param name="allParseResults">Already-parsed sources to run Lineage/Predicates/Rules over.</param>
     /// <param name="catalog">The real catalog, read from a live database's own metadata.</param>
-    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, DatabaseCatalog catalog)
+    /// <param name="minimumConfidence">
+    /// The least confident a finding may be and still appear in the returned report - see
+    /// <see cref="FindingConfidence"/>. Defaults to <see cref="FindingConfidence.High"/>, matching
+    /// this method's behavior before the field existed: nothing here is filtered out unless a
+    /// caller explicitly opts into a lower tier. Applied after <see cref="TypedPredicateSummary"/>
+    /// is computed, so that summary's own denominator - "how many comparisons were classified at
+    /// all" - stays complete regardless of what the caller chooses to have reported.
+    /// </param>
+    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, DatabaseCatalog catalog, FindingConfidence minimumConfidence = FindingConfidence.High)
     {
         var fileHealth = new List<FileParseHealth>();
         var usableParseResults = new List<SqlParseResult>();
@@ -154,7 +162,11 @@ public static class ScanReportBuilder
         // call sites we could not analyze" figure CLAUDE.md's dynamic SQL policy requires.
         var dynamicSqlSummary = DynamicSqlSummary.From(dynamicSqlFindings);
 
-        typedFindings = [.. typedFindings.Where(f => f.Verdict != Verdict.SeekPreserved)];
+        typedFindings = [.. typedFindings.Where(f => f.Verdict != Verdict.SeekPreserved && f.Confidence <= minimumConfidence)];
+        tier1Findings = [.. tier1Findings.Where(f => f.Confidence <= minimumConfidence)];
+        expressionDerivedFindings = [.. expressionDerivedFindings.Where(f => f.Confidence <= minimumConfidence)];
+        collationConflictFindings = [.. collationConflictFindings.Where(f => f.Confidence <= minimumConfidence)];
+        writeLossFindings = [.. writeLossFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
         // SCAN_FORCED + indexed + depth>=1 first.

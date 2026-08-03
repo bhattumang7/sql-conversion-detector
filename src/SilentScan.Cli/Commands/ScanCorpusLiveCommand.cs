@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SilentScan.Core.Corpus;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
 using SilentScan.Live.Corpus;
@@ -52,6 +53,12 @@ public static class ScanCorpusLiveCommand
             Description = ReportOutput.OutputOptionDescription,
         };
 
+        var confidenceOption = new Option<string>("--confidence")
+        {
+            Description = ReportOutput.ConfidenceOptionDescription,
+            DefaultValueFactory = _ => "high",
+        };
+
         var command = new Command(
             "scan-corpus-live",
             "Deploy every repo declared in the corpus manifest to the disposable Docker oracle, read its catalog and module text back from the engine, and report per-repo findings.")
@@ -59,6 +66,7 @@ public static class ScanCorpusLiveCommand
             manifestOption,
             clonesRootOption,
             formatOption,
+            confidenceOption,
             outputOption,
         };
 
@@ -66,17 +74,18 @@ public static class ScanCorpusLiveCommand
         {
             var manifestPath = parseResult.GetValue(manifestOption)!;
             var clonesRoot = parseResult.GetValue(clonesRootOption)!;
-            var format = parseResult.GetValue(formatOption)!;
-            var output = parseResult.GetValue(outputOption);
-            return await RunAsync(manifestPath, clonesRoot, Console.Out, Console.Error, format, output, cancellationToken);
+            var options = new ReportOptions(
+                parseResult.GetValue(formatOption)!,
+                parseResult.GetValue(confidenceOption)!,
+                parseResult.GetValue(outputOption));
+            return await RunAsync(manifestPath, clonesRoot, Console.Out, Console.Error, options, cancellationToken);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string manifestPath, string clonesRoot, TextWriter stdout, TextWriter stderr, string format = "text",
-        string? outputPath = null, CancellationToken cancellationToken = default)
+        string manifestPath, string clonesRoot, TextWriter stdout, TextWriter stderr, ReportOptions options, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(manifestPath))
         {
@@ -84,15 +93,21 @@ public static class ScanCorpusLiveCommand
             return 1;
         }
 
-        if (!ReportOutput.TryParseFormat(format, out var reportFormat))
+        if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
-            await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(format));
+            await stderr.WriteLineAsync(ReportOutput.UnknownFormatMessage(options.Format));
             return 1;
         }
 
         if (reportFormat == ReportFormat.Sarif)
         {
             await stderr.WriteLineAsync("error: scan-corpus-live does not support --format sarif; run `scan-db` against a single database for a SARIF log.");
+            return 1;
+        }
+
+        if (!ReportOutput.TryParseConfidence(options.Confidence, out var minimumConfidence))
+        {
+            await stderr.WriteLineAsync(ReportOutput.UnknownConfidenceMessage(options.Confidence));
             return 1;
         }
 
@@ -122,7 +137,7 @@ public static class ScanCorpusLiveCommand
                 continue;
             }
 
-            var outcome = await ScanOneRepoAsync(repo, repoRoot, sqlOptions, stderr, cancellationToken);
+            var outcome = await ScanOneRepoAsync(repo, repoRoot, sqlOptions, stderr, minimumConfidence, cancellationToken);
             if (outcome is null)
             {
                 hadUnexpectedFailure = true;
@@ -140,7 +155,7 @@ public static class ScanCorpusLiveCommand
                 [.. missingRepos.OrderBy(name => name, StringComparer.Ordinal)],
                 ReportOutput.ToStyle(reportFormat));
 
-        if (!ReportOutput.Emit(content, outputPath, stdout, stderr))
+        if (!ReportOutput.Emit(content, options.OutputPath, stdout, stderr))
         {
             return 1;
         }
@@ -150,12 +165,13 @@ public static class ScanCorpusLiveCommand
 
     /// <summary>Deploys/scans one repo and reports every diagnostic to <paramref name="stderr"/> - null return means an unexpected deploy/scan failure (not a missing clone, which the caller already handled), never a silent "nothing to report."</summary>
     private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(
-        CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions, TextWriter stderr, CancellationToken cancellationToken)
+        CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions, TextWriter stderr, FindingConfidence minimumConfidence,
+        CancellationToken cancellationToken = default)
     {
         CorpusLiveRepoResult result;
         try
         {
-            result = await CorpusLiveScanRunner.RunAsync(repo, repoRoot, sqlOptions, cancellationToken);
+            result = await CorpusLiveScanRunner.RunAsync(repo, repoRoot, sqlOptions, minimumConfidence, cancellationToken);
         }
         catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
         {

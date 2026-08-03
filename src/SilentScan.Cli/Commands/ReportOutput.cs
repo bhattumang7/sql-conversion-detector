@@ -1,3 +1,4 @@
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting.Readable;
 
 namespace SilentScan.Cli.Commands;
@@ -16,6 +17,9 @@ internal enum ReportFormat
     Sarif,
 }
 
+/// <summary>The report-shaping flags every scan command's own <c>RunAsync</c> takes together - bundled into one value so a caller doesn't add a bare parameter for every new flag (format, then confidence, then whatever comes next) and blow through Sonar's per-method parameter budget.</summary>
+internal readonly record struct ReportOptions(string Format, string Confidence, string? OutputPath);
+
 internal static class ReportOutput
 {
     internal const string FormatOptionDescription =
@@ -23,6 +27,31 @@ internal static class ReportOutput
 
     internal const string OutputOptionDescription =
         "Write the report to this file instead of standard output. The parent directory must exist.";
+
+    internal const string ConfidenceOptionDescription =
+        "The least confident a finding may be and still be reported: high (default - only findings resting on real, provably-constant source text) or medium (also includes a dynamic-SQL finding derived from a value this scan could not prove constant, e.g. a symbolic placeholder standing in for an uninitialized or caller-unknown variable). Low is not yet produced by anything in this tool.";
+
+    internal static bool TryParseConfidence(string confidence, out FindingConfidence parsed)
+    {
+        switch (confidence)
+        {
+            case "high":
+                parsed = FindingConfidence.High;
+                return true;
+            case "medium":
+                parsed = FindingConfidence.Medium;
+                return true;
+            case "low":
+                parsed = FindingConfidence.Low;
+                return true;
+            default:
+                parsed = FindingConfidence.High;
+                return false;
+        }
+    }
+
+    internal static string UnknownConfidenceMessage(string confidence) =>
+        $"error: unknown --confidence '{confidence}' (expected 'high', 'medium' or 'low')";
 
     internal static bool TryParseFormat(string format, out ReportFormat parsed)
     {

@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Corpus;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Live.Catalog;
 using SilentScan.Verify;
@@ -27,7 +28,8 @@ namespace SilentScan.Live.Corpus;
 public static class CorpusLiveScanRunner
 {
     public static async Task<CorpusLiveRepoResult> RunAsync(
-        CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions, CancellationToken cancellationToken = default)
+        CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions,
+        FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
         var ddlFiles = CorpusFileResolver.ResolveDdlFiles(repo, repoRoot);
         var procOnlyFiles = CorpusFileResolver.ResolveProcFiles(repo, repoRoot).Except(ddlFiles, StringComparer.Ordinal).ToList();
@@ -102,7 +104,7 @@ public static class CorpusLiveScanRunner
                 repo.DeclaredCollation ?? catalog.DefaultCollation?.Name,
                 repo.TempdbCollation ?? catalog.TempdbCollation?.Name));
 
-            var report = ScanReportBuilder.BuildFromParseResults(moduleParseResults, catalog: catalog);
+            var report = ScanReportBuilder.BuildFromParseResults(moduleParseResults, catalog: catalog, minimumConfidence: minimumConfidence);
 
             return new CorpusLiveRepoResult(
                 repo, report, LiveCatalogSummary.From(catalog), moduleResult.Modules.Count,
