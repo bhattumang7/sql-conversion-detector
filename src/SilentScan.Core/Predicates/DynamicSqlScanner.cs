@@ -31,11 +31,22 @@ public static class DynamicSqlScanner
     /// seed as constant-foldable when this scan saw exactly one caller passing a string literal
     /// for that parameter (roadmap "trace provably-constant dynamic SQL across proc-call
     /// edges") - null (the default) leaves every parameter reference unseeded, exactly like
-    /// before this capability existed.
+    /// before this capability existed. <paramref name="outputSummaries"/>, when supplied, lets an
+    /// ordinary `EXEC dbo.SomeProc @out = @var OUTPUT` seed the CALLER's own `@var` from a prior
+    /// scan of the callee's body (keyed by (callee qualified name, callee's own OUTPUT formal
+    /// parameter name), see <see cref="ProcedureOutputSummary"/>) instead of blanket-tainting it -
+    /// null (the default) leaves that OUTPUT binding tainted exactly like before this capability
+    /// existed. Every scan (with or without summaries supplied) records its OWN procedures'
+    /// OUTPUT-parameter results on <see cref="DynamicSqlExtractionResult.OutputSummaries"/>, which
+    /// is how a caller assembles the index this parameter consumes in a later pass.
     /// </summary>
-    public static DynamicSqlExtractionResult Scan(SqlParseResult parseResult, DynamicSqlScope? enclosingScope = null, ProcCallGraph? callGraph = null)
+    public static DynamicSqlExtractionResult Scan(
+        SqlParseResult parseResult,
+        DynamicSqlScope? enclosingScope = null,
+        ProcCallGraph? callGraph = null,
+        IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaries = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None, callGraph);
+        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None, callGraph, outputSummaries);
         if (parseResult.Fragment is TSqlScript script)
         {
             foreach (var batch in script.Batches)
@@ -44,7 +55,7 @@ public static class DynamicSqlScanner
             }
         }
 
-        return new DynamicSqlExtractionResult(visitor.Findings, visitor.Scripts);
+        return new DynamicSqlExtractionResult(visitor.Findings, visitor.Scripts, visitor.OutputSummaries);
     }
 
     private readonly record struct LiteralSegment(string SourcePath, int StartLine, int StartColumn, int PrefixLength, string Value);
@@ -86,7 +97,11 @@ public static class DynamicSqlScanner
         public static FoldState Tainted(string reason, SourceSpan location) => new() { TaintReason = reason, TaintLocation = location };
     }
 
-    private sealed class Visitor(string sourcePath, DynamicSqlScope initialScope, ProcCallGraph? callGraph)
+    private sealed class Visitor(
+        string sourcePath,
+        DynamicSqlScope initialScope,
+        ProcCallGraph? callGraph,
+        IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaryIndex)
     {
 
         private DynamicSqlScope _scope = initialScope;
@@ -95,8 +110,10 @@ public static class DynamicSqlScanner
 
         public List<DynamicSqlScript> Scripts { get; } = [];
 
-        /// <summary>Walks a fresh variable scope (a batch, or a proc/function body) in source order.</summary>
-        public void WalkScope(IList<TSqlStatement> statements, IReadOnlyDictionary<string, FoldState>? initialSeed = null)
+        public List<ProcedureOutputSummary> OutputSummaries { get; } = [];
+
+        /// <summary>Walks a fresh variable scope (a batch, or a proc/function body) in source order, returning the final fold state of every variable this scope declared - <see cref="WalkScopedBody"/>'s own caller needs this to read back an OUTPUT parameter's final value.</summary>
+        public Dictionary<string, FoldState> WalkScope(IList<TSqlStatement> statements, IReadOnlyDictionary<string, FoldState>? initialSeed = null)
         {
             var folded = new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
             if (initialSeed is not null)
@@ -109,6 +126,7 @@ public static class DynamicSqlScanner
 
             var foldingEnabled = !ContainsGotoOrLabel(statements);
             WalkStatements(statements, folded, foldingEnabled);
+            return folded;
         }
 
         /// <summary>A proc/function body's fresh variable scope, additionally recording its own qualified name as the enclosing scope for any dynamic SQL call site found inside - mirrors CatalogBuilder.VisitScopedBody's identical save/restore.</summary>
@@ -121,8 +139,39 @@ public static class DynamicSqlScanner
             var seed = qualifiedName is not null && formalParameters is { Count: > 0 }
                 ? BuildParameterSeed(qualifiedName, formalParameters)
                 : null;
-            WalkScope(statements, seed);
+            var folded = WalkScope(statements, seed);
+
+            if (qualifiedName is not null && formalParameters is { Count: > 0 })
+            {
+                RecordOutputParameterSummaries(qualifiedName, formalParameters, folded);
+            }
+
             _scope = previousScope;
+        }
+
+        /// <summary>
+        /// An OUTPUT-declared formal parameter is just an ordinary local variable inside the
+        /// body - whatever this scan proved it holds by the end of the body (via the exact same
+        /// SET/SELECT-assignment/branch-merge machinery every other tracked variable goes
+        /// through) IS the value the procedure returns through it. Recorded only when provably
+        /// constant, exactly like every other seed/summary this scanner produces - a parameter
+        /// this scan could not fold gets no entry at all, never a guessed one.
+        /// </summary>
+        private void RecordOutputParameterSummaries(string qualifiedName, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> folded)
+        {
+            foreach (var formal in formalParameters)
+            {
+                if (formal.Modifier != ParameterModifier.Output)
+                {
+                    continue;
+                }
+
+                if (folded.TryGetValue(formal.VariableName.Value, out var state) && state.Assemblies is { } assemblies)
+                {
+                    var values = assemblies.Select(a => string.Concat(a.Select(s => s.Value))).Distinct(StringComparer.Ordinal).ToList();
+                    OutputSummaries.Add(new ProcedureOutputSummary(qualifiedName, formal.VariableName.Value, values));
+                }
+            }
         }
 
         /// <summary>
@@ -737,11 +786,61 @@ public static class DynamicSqlScanner
         /// other than what was folded for it. Scoped to the variables this EXEC actually
         /// mentions (same no-aliasing argument as <see cref="TaintReferencedVariables"/>) rather
         /// than every variable currently tracked - an unrelated variable this call never
-        /// references cannot have been mutated by it.
+        /// references cannot have been mutated by it. An OUTPUT argument this scan already
+        /// PROVED the callee always assigns a constant to (<see cref="SeedKnownOutputArguments"/>)
+        /// is seeded with that value instead of tainted - the one case this scanner CAN see
+        /// through what an arbitrary called procedure does internally.
         /// </summary>
         private void TaintExecuteMutatedVariables(ExecuteStatement node, Dictionary<string, FoldState> folded)
         {
-            TaintReferencedVariables(folded, node, "unsupported-execute-form");
+            var seeded = SeedKnownOutputArguments(node, folded);
+            TaintReferencedVariables(folded, node, "unsupported-execute-form", seeded);
+        }
+
+        /// <summary>
+        /// Matches this exact EXEC call site to its own <see cref="ProcCallGraph"/> edge (built
+        /// separately, before dynamic-SQL scanning even starts, from the same argument-to-formal
+        /// matching every input-parameter seed already relies on) and seeds any OUTPUT argument
+        /// whose callee formal parameter has a known <see cref="ProcedureOutputSummary"/> - the
+        /// callee's target must have resolved to a cataloged procedure (an edge exists at all)
+        /// AND this scan must have already proved that specific OUTPUT parameter constant in an
+        /// earlier pass (see Reporting.ScanReportBuilder's fixed-point loop). Returns the set
+        /// of caller variable names seeded, so the caller can exclude them from the blanket taint
+        /// every other OUTPUT/return-value argument on this same call still needs.
+        /// </summary>
+        private HashSet<string> SeedKnownOutputArguments(ExecuteStatement node, Dictionary<string, FoldState> folded)
+        {
+            var seeded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (callGraph is null || outputSummaryIndex is null)
+            {
+                return seeded;
+            }
+
+            var edge = callGraph.EdgeAt(Span(node));
+            if (edge is null)
+            {
+                return seeded;
+            }
+
+            foreach (var argument in edge.Arguments)
+            {
+                if (!argument.FormalParameterIsOutput || argument.CallerVariableName is not { } callerVariable)
+                {
+                    continue;
+                }
+
+                if (!outputSummaryIndex.TryGetValue((edge.CalleeQualifiedName, argument.FormalParameterName), out var values))
+                {
+                    continue;
+                }
+
+                IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies =
+                    [.. values.Select(v => (IReadOnlyList<LiteralSegment>)[new LiteralSegment(sourcePath, node.StartLine, node.StartColumn, PrefixLength: 0, v)])];
+                folded[callerVariable] = FoldState.Constant(assemblies);
+                seeded.Add(callerVariable);
+            }
+
+            return seeded;
         }
 
         private void HandleStringList(ExecutableStringList stringList, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -1554,13 +1653,18 @@ public static class DynamicSqlScanner
         /// naming it directly. A variable this fragment never mentions cannot have changed, so
         /// it is left exactly as folded so far.
         /// </summary>
-        private void TaintReferencedVariables(Dictionary<string, FoldState> folded, TSqlFragment fragment, string reason)
+        private void TaintReferencedVariables(Dictionary<string, FoldState> folded, TSqlFragment fragment, string reason, HashSet<string>? exclude = null)
         {
             var location = Span(fragment);
             var collector = new ReferencedVariableCollector();
             fragment.Accept(collector);
             foreach (var name in collector.Names)
             {
+                if (exclude is not null && exclude.Contains(name))
+                {
+                    continue;
+                }
+
                 if (folded.ContainsKey(name))
                 {
                     folded[name] = FoldState.Tainted(reason, location);
@@ -1647,4 +1751,5 @@ public static class DynamicSqlScanner
 /// <summary>Everything <see cref="DynamicSqlScanner.Scan"/> found in one parsed file: definite unanalyzable findings, and candidate scripts ready for <see cref="DynamicSqlPipeline"/> to reparse.</summary>
 public sealed record DynamicSqlExtractionResult(
     IReadOnlyList<DynamicSqlFinding> Findings,
-    IReadOnlyList<DynamicSqlScript> AnalyzableScripts);
+    IReadOnlyList<DynamicSqlScript> AnalyzableScripts,
+    IReadOnlyList<ProcedureOutputSummary> OutputSummaries);

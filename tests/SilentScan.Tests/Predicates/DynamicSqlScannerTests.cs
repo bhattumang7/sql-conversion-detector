@@ -884,6 +884,93 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("parameter-not-seeded:cardinality-cap", finding.Reason);
     }
 
+    // ------------------------------------------------------------------
+    // OUTPUT-parameter tracking through the call graph: an ordinary `EXEC dbo.Helper @out =
+    // @var OUTPUT` seeds the CALLER's own @var from a prior scan's summary of what dbo.Helper's
+    // body always assigns its OUTPUT parameter, instead of blanket-tainting @var.
+    // ------------------------------------------------------------------
+
+    private static DynamicSqlExtractionResult ScanWithCallGraphAndOutputSummaries(
+        string sql, ProcCallGraph callGraph, IReadOnlyDictionary<(string, string), IReadOnlyList<string>> outputSummaries)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return DynamicSqlScanner.Scan(result, callGraph: callGraph, outputSummaries: outputSummaries);
+    }
+
+    [Fact]
+    public void Scan_ExecWithKnownOutputSummary_SeedsCallerVariable_ProducesAnalyzableScript()
+    {
+        var sql =
+            "DECLARE @select varchar(max);\n" +
+            "EXEC dbo.usp_BuildSelectClause @kind = 1, @out = @select OUTPUT;\n" +
+            "EXEC ('SELECT ' + @select + ' FROM T');";
+
+        var outputArgument = new ProcCallArgument("@out", null, FormalParameterIsOutput: true, CallerVariableName: "@select", IsLiteral: false);
+        var graph = new ProcCallGraph([new ProcCallEdge(null, "dbo.usp_BuildSelectClause", new SourceSpan("test.sql", 2, 1), [outputArgument])]);
+        var summaries = new Dictionary<(string, string), IReadOnlyList<string>>
+        {
+            [("dbo.usp_BuildSelectClause", "@out")] = ["Col1, Col2"],
+        };
+
+        var result = ScanWithCallGraphAndOutputSummaries(sql, graph, summaries);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT Col1, Col2 FROM T", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecWithOutputArgumentButNoKnownSummary_StaysTainted()
+    {
+        // The call graph resolved the target, but no summary exists for its OUTPUT parameter
+        // (its own body couldn't prove @out constant, or the callee was never scanned at all) -
+        // must fall back to tainting exactly like before this capability existed.
+        var sql =
+            "DECLARE @select varchar(max);\n" +
+            "EXEC dbo.usp_BuildSelectClause @kind = 1, @out = @select OUTPUT;\n" +
+            "EXEC ('SELECT ' + @select + ' FROM T');";
+
+        var outputArgument = new ProcCallArgument("@out", null, FormalParameterIsOutput: true, CallerVariableName: "@select", IsLiteral: false);
+        var graph = new ProcCallGraph([new ProcCallEdge(null, "dbo.usp_BuildSelectClause", new SourceSpan("test.sql", 2, 1), [outputArgument])]);
+
+        var result = ScanWithCallGraphAndOutputSummaries(sql, graph, new Dictionary<(string, string), IReadOnlyList<string>>());
+
+        Assert.Empty(result.AnalyzableScripts);
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("unsupported-execute-form", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecWithUnrelatedVariableAlongsideKnownOutputSummary_OnlySeedsTheOutputBinding()
+    {
+        // A second variable this same EXEC references (the return-value var) is NOT an OUTPUT
+        // argument with a known summary, so it must still taint - only the OUTPUT binding this
+        // scan actually proved gets seeded.
+        var sql =
+            "DECLARE @select varchar(max);\n" +
+            "DECLARE @rc int;\n" +
+            "EXEC @rc = dbo.usp_BuildSelectClause @kind = 1, @out = @select OUTPUT;\n" +
+            "DECLARE @sql varchar(max) = N'SELECT ' + @select + N' FROM T WHERE rc = ' + CAST(@rc AS varchar(10));\n" +
+            "EXEC (@sql);";
+
+        var outputArgument = new ProcCallArgument("@out", null, FormalParameterIsOutput: true, CallerVariableName: "@select", IsLiteral: false);
+        var graph = new ProcCallGraph([new ProcCallEdge(null, "dbo.usp_BuildSelectClause", new SourceSpan("test.sql", 3, 1), [outputArgument])]);
+        var summaries = new Dictionary<(string, string), IReadOnlyList<string>>
+        {
+            [("dbo.usp_BuildSelectClause", "@out")] = ["Col1"],
+        };
+
+        var result = ScanWithCallGraphAndOutputSummaries(sql, graph, summaries);
+
+        // @rc (the return-value variable, never an OUTPUT argument at all) is tainted by the
+        // blanket EXEC taint - CAST(@rc AS varchar(10)) inside the LAST EXEC's own source text
+        // then declines because @rc itself is tainted, distinct from @select's own success.
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("unsupported-execute-form", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
     [Fact]
     public void Scan_ProcParamWithSingleNonLiteralCaller_UnanalyzableWithSpecificReason()
     {

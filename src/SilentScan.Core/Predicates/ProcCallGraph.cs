@@ -50,6 +50,17 @@ public sealed class ProcCallGraph(IReadOnlyList<ProcCallEdge> edges)
         Edges.Where(e => string.Equals(e.CalleeQualifiedName, calleeQualifiedName, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
+    /// The edge THIS exact <c>EXEC</c> call site produced, if its target resolved to a known
+    /// procedure - a call site's own <see cref="SourceSpan"/> (source path/line/column) is
+    /// unique within a scan, so this is an exact match, never a heuristic one. Used by
+    /// <see cref="DynamicSqlScanner"/> to find an ordinary procedure call's own OUTPUT-argument
+    /// bindings without re-deriving the argument-to-formal-parameter matching this pass already
+    /// did.
+    /// </summary>
+    public ProcCallEdge? EdgeAt(SourceSpan callSite) =>
+        Edges.FirstOrDefault(e => e.CallSite == callSite);
+
+    /// <summary>
     /// The single call site for <paramref name="calleeQualifiedName"/> this scan actually saw -
     /// null when there are zero (nothing calls it, or nothing this scan resolved to it) or MORE
     /// THAN ONE. A value seen at exactly one call site within THIS scan is the only case a

@@ -59,7 +59,36 @@ public static class ScanReportBuilder
         var callGraphLedger = new SkipLedger();
         var procCallGraph = ProcCallGraphBuilder.Build(usableParseResults, catalog, callGraphLedger);
 
-        var dynamicSqlExtractions = usableParseResults.Select(r => DynamicSqlScanner.Scan(r, callGraph: procCallGraph)).ToList();
+        // OUTPUT-parameter tracking (roadmap "trace a constant OUTPUT value across a proc-call
+        // edge"): an ordinary `EXEC dbo.Helper @out = @var OUTPUT` can only seed the CALLER's
+        // @var from a summary of what dbo.Helper's own body always assigns its OUTPUT parameter -
+        // which this same scan produces as a side effect of walking dbo.Helper's body for its OWN
+        // EXEC sites. A single pass can only feed a callee's summary forward to a caller scanned
+        // AFTER it; re-running with the summaries seen so far closes that regardless of file/proc
+        // order, and running until no NEW summary appears (capped, matching this codebase's other
+        // bounded-recursion limits) also resolves a short OUTPUT-through-OUTPUT chain, not just
+        // one hop. The FINAL pass below is the one whose findings/scripts are actually reported.
+        const int maxOutputSummaryRounds = 5;
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>();
+        List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
+        for (var round = 0; round < maxOutputSummaryRounds; round++)
+        {
+            dynamicSqlExtractions = usableParseResults
+                .Select(r => DynamicSqlScanner.Scan(r, callGraph: procCallGraph, outputSummaries: outputSummaryIndex))
+                .ToList();
+
+            var discoveredCount = outputSummaryIndex.Count;
+            foreach (var summary in dynamicSqlExtractions.SelectMany(r => r.OutputSummaries))
+            {
+                outputSummaryIndex[(summary.QualifiedName, summary.ParameterName)] = summary.PossibleValues;
+            }
+
+            if (outputSummaryIndex.Count == discoveredCount)
+            {
+                break;
+            }
+        }
+
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
         var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
 
