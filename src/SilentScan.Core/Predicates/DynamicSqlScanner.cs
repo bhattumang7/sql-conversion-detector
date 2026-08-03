@@ -614,11 +614,14 @@ public static class DynamicSqlScanner
                     continue;
                 }
 
-                foreach (var alternative in alternatives.Where(a => string.Equals(a.GuardText, guardText, StringComparison.Ordinal)))
+                var match = alternatives
+                    .Where(a => string.Equals(a.GuardText, guardText, StringComparison.Ordinal))
+                    .Select(a => (GuardedAlternative?)a)
+                    .FirstOrDefault();
+                if (match is { } alternative)
                 {
                     resolved ??= new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
                     resolved[key] = alternative.State;
-                    break;
                 }
             }
 
