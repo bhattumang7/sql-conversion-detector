@@ -32,4 +32,18 @@ public sealed record Collation(string Name, CollationSource Source = CollationSo
     public bool IsSqlFamily => Name.StartsWith("SQL_", StringComparison.OrdinalIgnoreCase);
 
     public bool IsWindowsFamily => !IsSqlFamily;
+
+    /// <summary>
+    /// A collation whose name carries an explicit <c>_CS_</c> (case-sensitive) or <c>_BIN</c>/
+    /// <c>_BIN2</c> (binary, which compares byte-for-byte and is therefore also case-sensitive)
+    /// suffix makes identifier comparison in the real engine case-sensitive too - two objects
+    /// named <c>Foo</c> and <c>FOO</c> are distinct. This tool's own catalog dictionaries compare
+    /// names with <see cref="StringComparer.OrdinalIgnoreCase"/> unconditionally (Catalog.
+    /// ExecutionContext's own remarks explain why that plumbing isn't threaded everywhere): this
+    /// property only lets a caller detect the mismatch and report it honestly, not correct it.
+    /// </summary>
+    public bool IsCaseSensitive =>
+        Name.Contains("_CS_", StringComparison.OrdinalIgnoreCase)
+        || Name.EndsWith("_BIN", StringComparison.OrdinalIgnoreCase)
+        || Name.EndsWith("_BIN2", StringComparison.OrdinalIgnoreCase);
 }

@@ -22,14 +22,22 @@ public static class CatalogBuilder
     /// declaredCollation hint (CLAUDE.md Pass 1: "database default collation from any CREATE
     /// DATABASE/manifest hint") - used only as a last resort, when no scanned file contains an
     /// explicit CREATE DATABASE/ALTER DATABASE ... COLLATE statement of its own. Every string
-    /// column's own collation always wins over either source.
+    /// column's own collation always wins over either source. <paramref name="manifestTempdbCollation"/>
+    /// is a SEPARATE, optional hint for tempdb's own server-level collation (real SQL Server
+    /// instances routinely run tempdb at a different collation than a user database) - null (the
+    /// default) preserves this pass's prior behavior of defaulting a #temp table/table variable's
+    /// columns to the scanned database's own collation instead, since most corpora never state one.
     /// </summary>
-    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null)
+    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
     {
         var catalog = new DatabaseCatalog();
         var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
 
         catalog.DefaultCollation = ResolveDefaultCollation(results, manifestDeclaredCollation);
+        catalog.TempdbCollation = manifestTempdbCollation is { Length: > 0 }
+            ? new Collation(manifestTempdbCollation, CollationSource.DatabaseDefaultFromManifest)
+            : null;
+        WarnIfCaseSensitive(catalog);
 
         // CREATE TYPE ... FROM aliases must be known before ANY column resolves its type
         // (docs/audit-remediation-plan.md Phase 6.2) - the same cross-file-ordering problem
@@ -68,6 +76,35 @@ public static class CatalogBuilder
         foreach (var batch in script.Batches)
         {
             batch.Accept(visitor);
+        }
+    }
+
+    /// <summary>
+    /// Every catalog dictionary (tables, procedures, functions, synonyms, type aliases) and every
+    /// name comparison this codebase does elsewhere (predicates, lineage) is case-INSENSITIVE
+    /// (<see cref="StringComparer.OrdinalIgnoreCase"/>), unconditionally - correct for the
+    /// overwhelming majority of real SQL Server instances, which run a case-insensitive (<c>_CI_</c>)
+    /// collation. A genuinely case-sensitive database (an explicit <c>_CS_</c> collation, or a
+    /// binary one) makes <c>Foo</c> and <c>FOO</c> distinct objects in the real engine - this scan
+    /// would silently collide them into one catalog entry. Rather than thread a configurable
+    /// comparer through every dictionary in the catalog and every other pass that does its own
+    /// name comparison (a large, invasive change with no evidence any pinned corpus repo actually
+    /// needs it), this reports the mismatch once, honestly, so a reader knows this scan's results
+    /// are unreliable for such a repo instead of silently trusting a wrong catalog match.
+    /// </summary>
+    private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
+    {
+        var caseSensitive = new[] { catalog.DefaultCollation, catalog.TempdbCollation }
+            .Where(c => c is { IsCaseSensitive: true })
+            .Select(c => c!.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (caseSensitive.Count > 0)
+        {
+            catalog.Skipped.Record(
+                AnalysisPass.Catalog, sourcePath: string.Empty, line: 0, column: 0, "case-sensitive collation",
+                $"database collation(s) {string.Join(", ", caseSensitive)} are case-sensitive, but this scan's catalog/name lookups are unconditionally case-insensitive - two objects differing only by case would be wrongly treated as the same one; results for this repo should be treated as unreliable");
         }
     }
 
@@ -988,7 +1025,11 @@ public static class CatalogBuilder
             var isTemp = schema is null;
             var kind = isTemp ? CatalogTableKind.TemporaryTable : CatalogTableKind.Table;
 
-            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+            // A #temp table lives in tempdb, which has its own server-level collation - distinct
+            // from the scanned user database's DefaultCollation whenever one was actually
+            // supplied (EffectiveTempdbCollation falls back to DefaultCollation otherwise,
+            // preserving this pass's prior behavior for every corpus that never specifies one).
+            var (columns, indexesFromColumns) = BuildColumns(createTable.Definition, isTemp ? catalog.EffectiveTempdbCollation : catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(createTable.Definition.TableConstraints);
             var allIndexes = (List<CatalogIndex>)[.. indexesFromColumns, .. indexesFromConstraints];
             columns = ApplyPrimaryKeyNotNull(columns, allIndexes);
@@ -1184,12 +1225,11 @@ public static class CatalogBuilder
                 return;
             }
 
-            // A table variable's columns technically default to tempdb's collation, not the
-            // user database's - but this tool models a single target database per scan (the
-            // same simplification SchemaObjectNameHelper makes), so the scanned database's
-            // default is the closest available signal rather than leaving every unqualified
-            // column UNKNOWN.
-            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.DefaultCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
+            // A table variable's columns default to tempdb's own collation, not the user
+            // database's - EffectiveTempdbCollation supplies that when a manifest/CLI value
+            // gave one, falling back to the scanned database's own default otherwise (the
+            // closest available signal, rather than leaving every unqualified column UNKNOWN).
+            var (columns, indexesFromColumns) = BuildColumns(body.Definition, catalog.EffectiveTempdbCollation, catalog.TypeAliases, catalog.Skipped, sourcePath);
             var indexesFromConstraints = BuildIndexesFromTableConstraints(body.Definition.TableConstraints);
 
             var table = new CatalogTable(

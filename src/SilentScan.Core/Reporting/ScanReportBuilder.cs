@@ -34,7 +34,16 @@ public static class ScanReportBuilder
     /// (<c>SilentScan.Live.Catalog.LiveCatalogReader</c>). Null (the default) preserves file-mode's
     /// existing behavior of building the catalog from the scanned DDL text itself.
     /// </param>
-    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, string? manifestDeclaredCollation = null, DatabaseCatalog? catalog = null)
+    /// <param name="manifestTempdbCollation">
+    /// The corpus manifest's tempdbCollation hint, when stated - a SEPARATE collation from
+    /// <paramref name="manifestDeclaredCollation"/>, since a real SQL Server's tempdb collation is
+    /// fixed at install time and frequently differs from a user database's. Null (the default)
+    /// falls back to <paramref name="manifestDeclaredCollation"/> for a #temp table/table
+    /// variable's columns, exactly like before this parameter existed. Ignored when
+    /// <paramref name="catalog"/> is supplied.
+    /// </param>
+    public static ScanReport BuildFromParseResults(
+        IReadOnlyList<SqlParseResult> allParseResults, string? manifestDeclaredCollation = null, DatabaseCatalog? catalog = null, string? manifestTempdbCollation = null)
     {
         var fileHealth = new List<FileParseHealth>();
         var usableParseResults = new List<SqlParseResult>();
@@ -67,7 +76,7 @@ public static class ScanReportBuilder
         // scanning (which used to run catalog-blind) so a syntactic finding's column can be
         // resolved through the same machinery Pass 3/4 use, carrying real Indexed/
         // TableQualifiedName information instead of none at all.
-        catalog ??= CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation);
+        catalog ??= CatalogBuilder.Build(usableParseResults, manifestDeclaredCollation, manifestTempdbCollation);
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
 
         // Pass 1 (CatalogBuilder) resolves a SELECT ... INTO target's columns against tables

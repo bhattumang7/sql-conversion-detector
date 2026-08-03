@@ -153,7 +153,7 @@ public static class VerifyCorpusCommand
             parseResults.Add(await ParseCorpusFileAsync(repo, file, cancellationToken));
         }
 
-        var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
+        var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation, manifestTempdbCollation: repo.TempdbCollation);
         var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
 
         // How many DISTINCT (table, column, operator, other-type) defects probeWorthy actually
@@ -169,7 +169,7 @@ public static class VerifyCorpusCommand
         // expose them, and the environment parity gate needs the resolved view provenance to
         // diff against sys.columns after deployment below.
         var usableParseResults = parseResults.Where(r => r.BatchCount > 0).ToList();
-        var catalog = CatalogBuilder.Build(usableParseResults, repo.DeclaredCollation);
+        var catalog = CatalogBuilder.Build(usableParseResults, repo.DeclaredCollation, repo.TempdbCollation);
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
 
         var databaseName = SanitizeDatabaseName(repo.Name);

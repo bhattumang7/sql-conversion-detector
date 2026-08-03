@@ -257,6 +257,72 @@ public sealed class CorpusManifestLoaderTests
     }
 
     [Fact]
+    public void Parse_InvalidTempdbCollationShape_Throws()
+    {
+        var json = """
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"],
+                  "tempdbCollation": "not a real collation name"
+                }
+              ]
+            }
+            """;
+
+        Assert.Throws<InvalidDataException>(() => CorpusManifestLoader.Parse(json));
+    }
+
+    [Fact]
+    public void Parse_TempdbCollationDistinctFromDeclaredCollation_BothSurvive()
+    {
+        var json = """
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"],
+                  "declaredCollation": "Latin1_General_CI_AS",
+                  "tempdbCollation": "SQL_Latin1_General_CP1_CI_AS"
+                }
+              ]
+            }
+            """;
+
+        var repo = Assert.Single(CorpusManifestLoader.Parse(json).Repos);
+
+        Assert.Equal("Latin1_General_CI_AS", repo.DeclaredCollation);
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", repo.TempdbCollation);
+    }
+
+    [Fact]
+    public void Parse_NoTempdbCollationStated_DefaultsToNull()
+    {
+        var json = """
+            {
+              "repos": [
+                {
+                  "name": "example",
+                  "url": "https://github.com/example/example",
+                  "commitSha": "abcdef0123456789abcdef0123456789abcdef01",
+                  "license": "MIT",
+                  "ddlPaths": ["db/schema/**/*.sql"]
+                }
+              ]
+            }
+            """;
+
+        Assert.Null(Assert.Single(CorpusManifestLoader.Parse(json).Repos).TempdbCollation);
+    }
+
+    [Fact]
     public void Parse_EmptyRepoList_Succeeds()
     {
         var manifest = CorpusManifestLoader.Parse("""{ "repos": [] }""");

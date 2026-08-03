@@ -112,6 +112,19 @@ public sealed class DatabaseCatalog
 
     public Collation? DefaultCollation { get; set; }
 
+    /// <summary>
+    /// tempdb's own server-level collation - a real SQL Server's tempdb frequently differs from
+    /// a user database's collation (it's set once at instance install time, not per-database), so
+    /// a #temp table or table variable's columns should default to THIS, not
+    /// <see cref="DefaultCollation"/>. Null (the default) falls back to <see cref="DefaultCollation"/>
+    /// exactly like before this property existed - set only when a manifest/CLI value actually
+    /// supplies one, never guessed.
+    /// </summary>
+    public Collation? TempdbCollation { get; set; }
+
+    /// <summary>The collation a temp table/table variable's columns should default to - <see cref="TempdbCollation"/> when known, else <see cref="DefaultCollation"/> (today's behavior, preserved when tempdb's own collation was never supplied).</summary>
+    public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
+
     /// <summary>Everything Pass 1 saw but could not resolve into catalog data - never silently dropped.</summary>
     public SkipLedger Skipped { get; } = new();
 

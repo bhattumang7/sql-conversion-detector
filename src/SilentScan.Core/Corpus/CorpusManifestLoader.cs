@@ -70,6 +70,11 @@ public static partial class CorpusManifestLoader
             throw new InvalidDataException($"'{dto.Name}': declaredCollation '{collation}' doesn't look like a SQL Server collation name.");
         }
 
+        if (dto.TempdbCollation is { Length: > 0 } tempdbCollation && !CollationNameShape().IsMatch(tempdbCollation))
+        {
+            throw new InvalidDataException($"'{dto.Name}': tempdbCollation '{tempdbCollation}' doesn't look like a SQL Server collation name.");
+        }
+
         return new CorpusRepoEntry(
             dto.Name,
             dto.Url,
@@ -79,7 +84,8 @@ public static partial class CorpusManifestLoader
             dto.ProcPaths ?? [],
             dto.DeclaredCollation,
             dto.Notes,
-            dto.TemplateSubstitutions);
+            dto.TemplateSubstitutions,
+            dto.TempdbCollation);
     }
 
     private sealed record ManifestDto([property: JsonPropertyName("repos")] IReadOnlyList<RepoDto> Repos);
@@ -93,5 +99,6 @@ public static partial class CorpusManifestLoader
         IReadOnlyList<string>? ProcPaths,
         string? DeclaredCollation,
         string? Notes,
-        IReadOnlyDictionary<string, string>? TemplateSubstitutions);
+        IReadOnlyDictionary<string, string>? TemplateSubstitutions,
+        string? TempdbCollation = null);
 }

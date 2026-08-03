@@ -110,7 +110,7 @@ public static class ScanCorpusCommand
 
             var files = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
             var parseResults = files.Select(f => ParseCorpusFile(repo, f)).ToList();
-            var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation);
+            var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation, manifestTempdbCollation: repo.TempdbCollation);
 
             // CLAUDE.md's corpus-admission criterion, actually consulted rather than merely
             // computed and displayed (an audit finding: ParseHealthReport.ParseSuccessRate

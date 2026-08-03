@@ -402,6 +402,70 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_TempTableColumn_DefaultsToManifestTempdbCollationNotDatabaseCollation()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE #Staging (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CI_AS",
+            manifestTempdbCollation: "SQL_Latin1_General_CP1_CI_AS");
+
+        var col = catalog.Find("#Staging")!.FindColumn("Col")!;
+
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", col.Type!.Collation!.Name);
+    }
+
+    [Fact]
+    public void Build_TableVariableColumn_DefaultsToManifestTempdbCollationNotDatabaseCollation()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.UsesTableVar AS
+                BEGIN
+                    DECLARE @t TABLE (Col VARCHAR(20) NOT NULL);
+                    SELECT 1;
+                END
+                """)],
+            manifestDeclaredCollation: "Latin1_General_CI_AS",
+            manifestTempdbCollation: "SQL_Latin1_General_CP1_CI_AS");
+
+        var tableVar = catalog.Find("@t", "dbo.UsesTableVar")!;
+
+        Assert.Equal("SQL_Latin1_General_CP1_CI_AS", tableVar.FindColumn("Col")!.Type!.Collation!.Name);
+    }
+
+    [Fact]
+    public void Build_NoManifestTempdbCollation_TempTableFallsBackToDatabaseCollation()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE #Staging (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CI_AS");
+
+        Assert.Equal("Latin1_General_CI_AS", catalog.Find("#Staging")!.FindColumn("Col")!.Type!.Collation!.Name);
+    }
+
+    [Fact]
+    public void Build_CaseSensitiveDeclaredCollation_LedgersAnHonestWarning()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CS_AS");
+
+        Assert.Contains(
+            catalog.Skipped.Entries,
+            e => e.ConstructKind == "case-sensitive collation" && e.Reason.Contains("Latin1_General_CS_AS", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CaseInsensitiveDeclaredCollation_NoCaseSensitivityWarning()
+    {
+        var catalog = CatalogBuilder.Build(
+            [Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")],
+            manifestDeclaredCollation: "Latin1_General_CI_AS");
+
+        Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "case-sensitive collation");
+    }
+
+    [Fact]
     public void Build_NoDatabaseCollationAnySource_ColumnCollationStaysNull()
     {
         var catalog = CatalogBuilder.Build([Parse("CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);")]);

@@ -23,4 +23,22 @@ public sealed class CollationTests
         Assert.False(collation.IsSqlFamily);
         Assert.True(collation.IsWindowsFamily);
     }
+
+    [Theory]
+    [InlineData("Latin1_General_CS_AS")]
+    [InlineData("SQL_Latin1_General_CP1_CS_AS")]
+    [InlineData("Latin1_General_BIN")]
+    [InlineData("Latin1_General_100_BIN2")]
+    public void IsCaseSensitive_CsOrBinaryCollation_ReturnsTrue(string name)
+    {
+        Assert.True(new Collation(name).IsCaseSensitive);
+    }
+
+    [Theory]
+    [InlineData("Latin1_General_CI_AS")]
+    [InlineData("SQL_Latin1_General_CP1_CI_AS")]
+    public void IsCaseSensitive_CiCollation_ReturnsFalse(string name)
+    {
+        Assert.False(new Collation(name).IsCaseSensitive);
+    }
 }
