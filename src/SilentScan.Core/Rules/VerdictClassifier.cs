@@ -24,7 +24,33 @@ public static class VerdictClassifier
     /// what a parameter/variable's own coercibility tier does here, so anything not provably a
     /// literal stays Unknown rather than guessed. Defaults to false (the conservative case).
     /// </param>
-    public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false)
+    /// <param name="operatorText">
+    /// The comparison operator's rendered text (e.g. "=", "LIKE"), or null when unknown/not
+    /// applicable. The matrix's RangeSeek cells (<see cref="TypePairOutcome.DynamicRangeSeekAvailable"/>)
+    /// were all originally probed with a single equality comparison against a variable - oracle-
+    /// verified directly to NOT generalize to every operator/operand shape: a LIKE predicate
+    /// whose pattern is not a literal (the pattern's shape is unknown at compile time, so the
+    /// optimizer can't build the same range rewrite an equality or a literal-pattern LIKE gets)
+    /// loses the dynamic range seek and is genuinely ScanForced instead. Only matters for cells
+    /// that would otherwise be RangeSeek; every other outcome (SeekPreserved/ScanForced/
+    /// OperandClash/Unknown) is operator-invariant in every pair sampled.
+    /// </param>
+    /// <remarks>
+    /// A column-vs-column operand shape (e.g. a JOIN predicate) was investigated as a possible
+    /// third correction alongside <paramref name="operatorText"/> - an initial sample (both sides
+    /// indexed) showed the same RangeSeek-losing pattern the non-literal-LIKE case does. Further
+    /// probing showed that result is confounded: whether <c>GetRangeThroughConvert</c> appears
+    /// for a column-vs-column comparison depends on whether the OTHER column is ALSO indexed
+    /// (both indexed: no dynamic range seek in the plan; only the classified side indexed - the
+    /// far more common real-world shape - the dynamic range seek IS present, agreeing with the
+    /// matrix). That makes it a plan-SHAPE-dependent fact in the sense CLAUDE.md's own oracle
+    /// discipline warns against trusting ("Oracle is plan-XML based, never plan-shape based"),
+    /// not a stable type-pair fact the matrix's (Category, Category, Collation) key could safely
+    /// encode - a blanket column-vs-column correction would misclassify the common single-
+    /// indexed-side join as ScanForced when it is genuinely RangeSeek. Deliberately NOT
+    /// implemented; column-vs-column keeps the matrix's plain column-vs-variable-probed answer.
+    /// </remarks>
+    public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null)
     {
         if (columnType is null || otherType is null)
         {
@@ -70,21 +96,28 @@ public static class VerdictClassifier
             return ClassifySameCategory(columnType, otherType);
         }
 
-        // Every other cross-category pair - same family (int vs bigint, char vs nvarchar,
-        // date vs datetime, ...) or cross-family (varchar column vs int/datetime/guid value,
-        // and the reverse) - is decided by ONE authority: the Docker-oracle-probed matrix.
-        // The official precedence list is not reliable enough on its own to report a verdict
-        // from: the matrix has found cases where the optimizer silently elides the conversion
-        // (tinyint/smallint vs real survive un-converted - their whole domain is exactly
-        // representable in float) and cases where same-category-looking pairs never convert
-        // the column at all (char vs varchar). A cell with no recorded probe is UNKNOWN, never
-        // guessed from precedence direction - the precedence list is used elsewhere only to
-        // decide operand *typing* (e.g. literal widening), never a verdict. A genuine collation
-        // MISMATCH between two resolved, non-literal string-family operands was already routed
-        // to OperandClash above, so by construction the only reason `columnType`'s own collation
-        // matters here is to pick which probed collation family's matrix column applies -
-        // `otherType`'s collation is irrelevant from this point on (either it agrees with
-        // columnType's, or the other operand is a literal, which never conflicts).
+        return ClassifyCrossCategory(columnType, otherType, otherIsLiteral, operatorText);
+    }
+
+    /// <summary>
+    /// Every cross-category pair - same family (int vs bigint, char vs nvarchar, date vs
+    /// datetime, ...) or cross-family (varchar column vs int/datetime/guid value, and the
+    /// reverse) - is decided by ONE authority: the Docker-oracle-probed matrix. The official
+    /// precedence list is not reliable enough on its own to report a verdict from: the matrix has
+    /// found cases where the optimizer silently elides the conversion (tinyint/smallint vs real
+    /// survive un-converted - their whole domain is exactly representable in float) and cases
+    /// where same-category-looking pairs never convert the column at all (char vs varchar). A
+    /// cell with no recorded probe is UNKNOWN, never guessed from precedence direction - the
+    /// precedence list is used elsewhere only to decide operand *typing* (e.g. literal widening),
+    /// never a verdict. A genuine collation MISMATCH between two resolved, non-literal
+    /// string-family operands was already routed to OperandClash by the caller, so by
+    /// construction the only reason <paramref name="columnType"/>'s own collation matters here is
+    /// to pick which probed collation family's matrix column applies - <paramref name="otherType"/>'s
+    /// collation is irrelevant from this point on (either it agrees with columnType's, or the
+    /// other operand is a literal, which never conflicts).
+    /// </summary>
+    private static Verdict ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
+    {
         var collationName = columnType.IsStringFamily ? columnType.Collation?.Name : null;
 
         var outcome = columnType.IsStringFamily && collationName is null
@@ -115,7 +148,19 @@ public static class VerdictClassifier
             return Verdict.SeekPreserved;
         }
 
-        return outcome.DynamicRangeSeekAvailable ? Verdict.RangeSeek : Verdict.ScanForced;
+        if (!outcome.DynamicRangeSeekAvailable)
+        {
+            return Verdict.ScanForced;
+        }
+
+        // The matrix cell says RangeSeek (probed as column vs. a variable, under `=`) - a LIKE
+        // predicate whose pattern is not a literal loses that dynamic range seek and falls back
+        // to ScanForced, the genuinely worse outcome (oracle-confirmed on the flagship
+        // VarChar/NVarChar Windows-collation pair). Never turns a ScanForced cell INTO a
+        // RangeSeek. See Classify's own remarks for why an analogous correction is NOT made for
+        // a column-vs-column operand shape.
+        var isNonLiteralLike = string.Equals(operatorText, "LIKE", StringComparison.Ordinal) && !otherIsLiteral;
+        return isNonLiteralLike ? Verdict.ScanForced : Verdict.RangeSeek;
     }
 
     private static bool IsOutOfModelCategory(SqlTypeCategory category) =>

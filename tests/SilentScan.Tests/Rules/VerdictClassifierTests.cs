@@ -33,6 +33,49 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
+    public void Classify_VarcharColumnLikeNVarcharVariable_WindowsCollation_ScanForced()
+    {
+        // Oracle-verified directly (Docker SQL Server): the matrix's RangeSeek cells were probed
+        // as column-vs-variable under `=` - a LIKE predicate whose pattern is NOT a literal loses
+        // the dynamic range seek (the pattern's shape is unknown at compile time, so the optimizer
+        // can't build the same range rewrite an equality or a literal-pattern LIKE gets), and is
+        // genuinely ScanForced instead of RangeSeek. This was previously misclassified: the matrix
+        // was probed with `=` only and applied uniformly to every operator.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: WindowsCollation);
+        var value = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value, operatorText: "LIKE"));
+    }
+
+    [Fact]
+    public void Classify_VarcharColumnLikeNVarcharLiteralPattern_WindowsCollation_StillRangeSeek()
+    {
+        // Near-miss: a LIKE pattern that IS a literal (its shape is known at compile time) keeps
+        // the dynamic range seek, agreeing with `=` - oracle-verified directly. otherIsLiteral
+        // is what distinguishes this from the non-literal-pattern case above.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: WindowsCollation);
+        var value = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
+
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, value, otherIsLiteral: true, operatorText: "LIKE"));
+    }
+
+    [Fact]
+    public void Classify_VarcharColumnVsNVarcharColumn_WindowsCollation_StillRangeSeek()
+    {
+        // Column-vs-column (e.g. a JOIN predicate) was investigated as a possible correction
+        // alongside the LIKE one below, but the divergence turned out confounded: whether the
+        // dynamic range seek disappears from the plan depends on whether the OTHER column is
+        // ALSO indexed (both indexed: it disappears; only the classified side indexed - the far
+        // more common real shape - it's present, agreeing with the matrix). That's a plan-shape-
+        // dependent fact, not a stable type-pair one, so no correction is made here - column-vs-
+        // column keeps the matrix's plain answer. See VerdictClassifier.Classify's own remarks.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: WindowsCollation);
+        var otherColumn = new SqlType(SqlTypeCategory.NVarChar, Length: 20, Collation: WindowsCollation);
+
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, otherColumn));
+    }
+
+    [Fact]
     public void Classify_NVarcharColumnVsVarcharValue_DirectionMatters_SeekPreserved()
     {
         // The VALUE converts here (varchar has lower precedence than nvarchar), so the

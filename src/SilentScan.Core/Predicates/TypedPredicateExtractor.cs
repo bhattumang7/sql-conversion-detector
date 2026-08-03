@@ -861,7 +861,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var verdict = VerdictClassifier.Classify(column.Type, otherType);
+            var verdict = VerdictClassifier.Classify(column.Type, otherType, operatorText: "IN");
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
@@ -933,7 +933,7 @@ public static class TypedPredicateExtractor
             // novel "= ANY" string would need its own probe-shape support this pass has no
             // reason to duplicate for what is, for every purpose downstream of this point, the
             // same finding.
-            var verdict = VerdictClassifier.Classify(column.Type, otherType);
+            var verdict = VerdictClassifier.Classify(column.Type, otherType, operatorText: "IN");
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
@@ -1101,7 +1101,7 @@ public static class TypedPredicateExtractor
         {
             var otherIsLiteral = other is PredicateOperand.Value { IsLiteral: true };
             var otherType = other is PredicateOperand.Value value ? value.Type : ((PredicateOperand.Column)other).Type;
-            var verdict = VerdictClassifier.Classify(column.Type, otherType, otherIsLiteral);
+            var verdict = VerdictClassifier.Classify(column.Type, otherType, otherIsLiteral, operatorText);
 
             Findings.Add(new TypedPredicateFinding(verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn));
         }
@@ -1244,7 +1244,7 @@ public static class TypedPredicateExtractor
             // registers every CREATE/ALTER FUNCTION with a scalar RETURNS clause under its
             // qualified name). A function this scan never saw declared, or one whose RETURNS
             // clause is itself unresolvable, still resolves Unknown - never guessed.
-            var qualifiedName = ResolveFunctionQualifiedName(functionCall);
+            var qualifiedName = SchemaObjectNameHelper.QualifyFunctionCall(functionCall);
             if (catalog.TryGetScalarFunctionReturnType(qualifiedName, out var udfType))
             {
                 if (udfType is null)
@@ -1262,16 +1262,6 @@ public static class TypedPredicateExtractor
                 PredicateOperandConstructKind, $"function '{name}' has no return-type resolution - resolved Unknown");
 
             return new PredicateOperand.Value(Type: null);
-        }
-
-        /// <summary>schema.name for a function call target, defaulting to dbo exactly like <see cref="SchemaObjectNameHelper.Resolve"/> does for tables - a function call has no dedicated SchemaObjectName of its own (FunctionName and CallTarget are separate properties), so this rebuilds the same shape by hand.</summary>
-        private static string ResolveFunctionQualifiedName(FunctionCall functionCall)
-        {
-            var schema = functionCall.CallTarget is MultiPartIdentifierCallTarget { MultiPartIdentifier.Identifiers: [.., { } last] }
-                ? last.Value
-                : SchemaObjectNameHelper.DefaultSchema;
-
-            return $"{schema}.{functionCall.FunctionName.Value}";
         }
 
         /// <summary>
