@@ -33,6 +33,10 @@ namespace SilentScan.Core.Predicates;
 /// own synthesized comparison. Lets the corpus oracle actually probe this finding instead of
 /// merely trusting the classifier that detected it - previously this had no oracle path at all.
 /// </param>
+/// <param name="Confidence">
+/// How much this finding's own claim can be trusted - see <see cref="FindingConfidence"/>.
+/// Defaults to <see cref="FindingConfidence.High"/>, same as every statically-derived finding.
+/// </param>
 public sealed record SargabilityFinding(
     SargabilityFindingKind Kind,
     string ColumnName,
@@ -43,4 +47,5 @@ public sealed record SargabilityFinding(
     SourceSpan? DynamicSqlCallSite = null,
     string? TableQualifiedName = null,
     bool? Indexed = null,
-    string? PredicateFragmentText = null);
+    string? PredicateFragmentText = null,
+    FindingConfidence Confidence = FindingConfidence.High);

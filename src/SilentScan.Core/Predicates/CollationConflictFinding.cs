@@ -23,4 +23,5 @@ public sealed record CollationConflictFinding(
     string SourcePath,
     int Line,
     int ColumnPosition,
-    SourceSpan? DynamicSqlCallSite = null);
+    SourceSpan? DynamicSqlCallSite = null,
+    FindingConfidence Confidence = FindingConfidence.High);

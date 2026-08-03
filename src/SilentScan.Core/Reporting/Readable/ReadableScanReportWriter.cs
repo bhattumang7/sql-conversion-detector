@@ -149,7 +149,7 @@ public static class ReadableScanReportWriter
 
     private static IReadOnlyList<string> TypedRow(TypedPredicateFinding finding, string? pathBase) =>
     [
-        Where(finding.SourcePath, finding.Line, finding.DynamicSqlCallSite, pathBase),
+        Where(finding.SourcePath, finding.Line, finding.DynamicSqlCallSite, pathBase, finding.Confidence),
         $"{finding.Column.TableQualifiedName}.{finding.Column.ColumnName}",
         DescribeType(finding.Column.Type),
         $"{finding.Operator} {DescribeOperand(finding.OtherOperand)}{(finding.UnknownReason is { } reason ? $" ({reason})" : string.Empty)}",
@@ -181,7 +181,7 @@ public static class ReadableScanReportWriter
             [WhereHeader, "Left", "Right", "Operator"],
             [.. report.CollationConflictFindings.Select(f => new List<string>
             {
-                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
+                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
                 $"{f.FirstTableQualifiedName}.{f.FirstColumnName} COLLATE {f.FirstCollationName}",
                 $"{f.SecondTableQualifiedName}.{f.SecondColumnName} COLLATE {f.SecondCollationName}",
                 f.Operator,
@@ -202,7 +202,7 @@ public static class ReadableScanReportWriter
             [WhereHeader, ColumnHeader, "Computed by", "Underlying base columns"],
             [.. report.ExpressionDerivedFindings.Select(f => new List<string>
             {
-                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
+                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
                 f.ColumnName,
                 f.TransformationChain.Count == 0
                     ? "unknown"
@@ -227,7 +227,7 @@ public static class ReadableScanReportWriter
             [WhereHeader, ColumnHeader, "Target type", "Source type", "Risk"],
             [.. report.WriteLossFindings.Select(f => new List<string>
             {
-                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
+                Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TargetType.ToString(),
                 f.SourceType.ToString(),
@@ -271,7 +271,7 @@ public static class ReadableScanReportWriter
                 [WhereHeader, ColumnHeader, "Indexed", "Detail"],
                 [.. ordered.Select(f => new List<string>
                 {
-                    Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase),
+                    Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
                     f.TableQualifiedName is { } table ? $"{table}.{f.ColumnName}" : f.ColumnName,
                     f.Indexed switch { true => "yes", false => "no", null => "unresolved" },
                     f.Detail ?? "-",
@@ -382,16 +382,21 @@ public static class ReadableScanReportWriter
         _ => "predicates",
     };
 
-    private static string Where(string sourcePath, int line, SourceSpan? dynamicSqlCallSite, string? pathBase)
+    private static string Where(string sourcePath, int line, SourceSpan? dynamicSqlCallSite, string? pathBase, FindingConfidence confidence = FindingConfidence.High)
     {
         var location = $"{Relative(sourcePath, pathBase)}:{line.ToString(CultureInfo.InvariantCulture)}";
 
         // The call site is worth saying only when it is somewhere else: a finding remapped back
         // onto the EXEC line it came from would otherwise read "x.sql:69 (in dynamic SQL run at
         // x.sql:69)", which tells the reader nothing they cannot see.
-        return dynamicSqlCallSite is { } span && (span.SourcePath != sourcePath || span.Line != line)
+        var withCallSite = dynamicSqlCallSite is { } span && (span.SourcePath != sourcePath || span.Line != line)
             ? $"{location} (in dynamic SQL run at {Relative(span.SourcePath, pathBase)}:{span.Line.ToString(CultureInfo.InvariantCulture)})"
             : location;
+
+        // A finding resting on a dynamic-SQL fold that had to assume a value (a symbolic
+        // placeholder) is never High - said plainly here rather than only in the JSON/SARIF, so a
+        // reader of the human-facing report cannot mistake it for an ordinary, fully-proven one.
+        return confidence == FindingConfidence.High ? withCallSite : $"{withCallSite} [{confidence.ToString().ToUpperInvariant()} CONFIDENCE]";
     }
 
     /// <summary>

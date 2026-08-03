@@ -55,7 +55,7 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(SargabilityFinding finding)
     {
-        var ruleId = SarifRuleCatalog.Tier1RuleId(finding.Kind);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.Tier1RuleId(finding.Kind), finding.Confidence);
 
         // A syntactic pattern is only worth a reader's full attention when it's confirmed on a
         // real, leading-key-indexed column - one where there was an actual seek to lose. finding
@@ -66,6 +66,7 @@ public static class SarifReportWriter
         // one - the single largest source of unranked noise this pass produced.
         var isConfirmedIndexed = finding.Indexed == true;
         var level = isConfirmedIndexed && finding.Kind != SargabilityFindingKind.LikePatternNotLiteral ? LevelWarning : LevelNote;
+        level = FloorLevelForConfidence(level, finding.Confidence);
         var detail = finding.Detail is null ? string.Empty : $" ({finding.Detail})";
         var indexNote = finding.TableQualifiedName is { } table
             ? $" [{table}.{finding.ColumnName}, indexed={IndexedDisplay(finding.Indexed)}]"
@@ -77,7 +78,7 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(TypedPredicateFinding finding)
     {
-        var ruleId = SarifRuleCatalog.VerdictRuleId(finding.Verdict);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.VerdictRuleId(finding.Verdict), finding.Confidence);
         var baseLevel = finding.Verdict switch
         {
             Verdict.ScanForced => LevelError,
@@ -91,6 +92,7 @@ public static class SarifReportWriter
         // repos has been on an unindexed column (an audit finding), so without this every one of
         // them reported at "error" regardless of whether an index was ever in play.
         var level = finding.Column.Indexed ? baseLevel : DowngradeOneLevel(baseLevel);
+        level = FloorLevelForConfidence(level, finding.Confidence);
 
         var depthNote = DescribeDepth(finding.Column.Depth);
         var indexNote = DescribeIndexNote(finding.Column);
@@ -114,8 +116,10 @@ public static class SarifReportWriter
         // otherwise-available seek.
         var anyUnderlyingIndexed = finding.UnderlyingBaseColumns.Any(bc => bc.Indexed);
         var level = anyUnderlyingIndexed ? LevelError : DowngradeOneLevel(LevelError);
+        level = FloorLevelForConfidence(level, finding.Confidence);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ExpressionDerivedRuleId, finding.Confidence);
 
-        return BuildResult(SarifRuleCatalog.ExpressionDerivedRuleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
     private static SarifResult ToResult(CollationConflictFinding finding)
@@ -125,18 +129,21 @@ public static class SarifReportWriter
         // finding is; the query does not compile at all (oracle-verified: SQL Server Msg 468),
         // which outranks every seek-versus-scan concern.
         var message = $"Collation conflict: '{finding.FirstTableQualifiedName}.{finding.FirstColumnName}' (COLLATE {finding.FirstCollationName}) {finding.Operator} '{finding.SecondTableQualifiedName}.{finding.SecondColumnName}' (COLLATE {finding.SecondCollationName}) does not compile.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CollationConflictRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
 
-        return BuildResult(SarifRuleCatalog.CollationConflictRuleId, LevelError, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)
     {
         // Always warning, not error/downgraded-by-index the way a seek/scan finding is - "is
         // this column indexed" has no bearing on whether a write silently loses data.
-        var ruleId = SarifRuleCatalog.WriteLossRuleId(finding.Kind);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WriteLossRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TargetType}) is assigned a {finding.SourceType} value - {DescribeWriteLossKind(finding.Kind)}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
-        return BuildResult(ruleId, LevelWarning, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }
 
     private static SarifResult ToResult(DynamicSqlFinding finding)
@@ -155,6 +162,16 @@ public static class SarifReportWriter
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
+
+    /// <summary>
+    /// Floors a finding's computed level to <c>note</c> once its confidence drops below
+    /// <see cref="FindingConfidence.High"/> - a finding resting on an assumption (a dynamic-SQL
+    /// symbolic placeholder standing in for a value this scanner could not prove constant) never
+    /// outranks one resting on real source text, regardless of what its own severity would
+    /// otherwise compute to.
+    /// </summary>
+    private static string FloorLevelForConfidence(string level, FindingConfidence confidence) =>
+        confidence == FindingConfidence.High ? level : LevelNote;
 
     private static string DowngradeOneLevel(string level) => level switch
     {

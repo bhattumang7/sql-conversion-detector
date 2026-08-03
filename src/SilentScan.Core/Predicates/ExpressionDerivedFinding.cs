@@ -36,6 +36,10 @@ namespace SilentScan.Core.Predicates;
 /// <c>v.ComputedCol</c>), if any - a probe has to expose the SAME alias for
 /// <paramref name="PredicateFragmentText"/>'s own qualified column reference to resolve.
 /// </param>
+/// <param name="Confidence">
+/// How much this finding's own claim can be trusted - see <see cref="FindingConfidence"/>.
+/// Defaults to <see cref="FindingConfidence.High"/>, same as every statically-derived finding.
+/// </param>
 public sealed record ExpressionDerivedFinding(
     string ColumnName,
     string SourcePath,
@@ -46,7 +50,8 @@ public sealed record ExpressionDerivedFinding(
     SourceSpan? DynamicSqlCallSite = null,
     string? PredicateFragmentText = null,
     string? ImmediateRelationQualifiedName = null,
-    string? ImmediateRelationAlias = null);
+    string? ImmediateRelationAlias = null,
+    FindingConfidence Confidence = FindingConfidence.High);
 
 /// <summary>A real base table column found underneath an expression-derived provenance chain, and whether it's indexed (which is what makes the finding worth fixing).</summary>
 public sealed record UnderlyingBaseColumn(string TableQualifiedName, string ColumnName, bool Indexed);

@@ -17,4 +17,5 @@ public sealed record WriteLossFinding(
     string SourcePath,
     int Line,
     int ColumnPosition,
-    SourceSpan? DynamicSqlCallSite = null);
+    SourceSpan? DynamicSqlCallSite = null,
+    FindingConfidence Confidence = FindingConfidence.High);

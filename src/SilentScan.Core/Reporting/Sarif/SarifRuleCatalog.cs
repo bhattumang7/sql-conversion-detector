@@ -53,28 +53,73 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, "Unhandled Verdict."),
     };
 
-    public static IReadOnlyList<SarifRule> AllRules { get; } =
-    [
-        Rule(Tier1RuleId(SargabilityFindingKind.FunctionWrappedColumn), "A column is wrapped in a function call inside a predicate, preventing an index seek."),
-        Rule(Tier1RuleId(SargabilityFindingKind.CastOrConvertOnColumn), "A column has CAST/CONVERT applied to it inside a predicate."),
-        Rule(Tier1RuleId(SargabilityFindingKind.ColumnArithmetic), "A column has arithmetic applied to it inside a predicate."),
-        Rule(Tier1RuleId(SargabilityFindingKind.LeadingWildcardLike), "A LIKE predicate on a column starts with a wildcard, forcing a full scan."),
-        Rule(Tier1RuleId(SargabilityFindingKind.LikePatternNotLiteral), "A LIKE predicate's pattern is not a literal, so a leading wildcard can't be ruled out statically."),
-        Rule(VerdictRuleId(Verdict.ScanForced), "An implicit type conversion on the column side forces a full scan."),
-        Rule(VerdictRuleId(Verdict.RangeSeek), "An implicit type conversion on the column side permits only a dynamic range seek, not a direct seek."),
-        Rule(VerdictRuleId(Verdict.Unknown), "A predicate's sargability could not be determined (e.g. unresolved collation) - never guessed."),
-        Rule(VerdictRuleId(Verdict.SeekPreserved), "A predicate compares types where the seek is preserved (reported for completeness; not filtered into ScanReportBuilder's actionable findings)."),
-        Rule(VerdictRuleId(Verdict.OperandClash), "The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all - a definitive fact, not an absence of probe data."),
-        Rule(DynamicSqlAnalyzedRuleId, "A dynamic SQL call site with a provably-constant argument; its contents were reparsed and analyzed like static SQL."),
-        Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed."),
-        Rule(DynamicSqlInnerParseFailedRuleId, "A dynamic SQL call site's argument was provably constant but its reassembled text did not parse as T-SQL."),
-        Rule(ExpressionDerivedRuleId, "A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement's own derived table, or upstream in a view/TVF's SELECT list) - no index seek is possible regardless of the comparison's types."),
-        Rule(CollationConflictRuleId, "Two columns with genuinely different, incompatible collations are compared directly - this does not compile (SQL Server error 468, \"Cannot resolve the collation conflict\"), not a seek/scan question."),
-        Rule(WriteLossUnicodeReplacementRuleId, "An INSERT/UPDATE assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target - any character outside the target collation's codepage is silently replaced with '?', with no error."),
-        Rule(WriteLossApproximateTruncationRuleId, "An INSERT/UPDATE assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target - the fractional part is silently dropped, with no error."),
-        Rule(WriteLossNumericScaleNarrowingRuleId, "An INSERT/UPDATE assigns a DECIMAL/NUMERIC value to a target with a smaller scale - digits past the target's scale are silently rounded away, with no error."),
-        Rule(WriteLossTemporalPrecisionLossRuleId, "An INSERT/UPDATE assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target - the time-of-day component is silently dropped, with no error."),
-    ];
+    /// <summary>
+    /// The three <see cref="DynamicSqlOutcome"/> rule IDs are deliberately excluded from
+    /// <see cref="RuleId"/> suffixing: <see cref="Predicates.DynamicSqlFinding"/> has no
+    /// <see cref="FindingConfidence"/> field of its own - it reports the classification of an
+    /// EXEC/sp_executesql call site, not a defect claim with confidence in the value of anything.
+    /// </summary>
+    private static readonly HashSet<string> DynamicSqlOutcomeRuleIds = new(StringComparer.Ordinal)
+    {
+        DynamicSqlAnalyzedRuleId,
+        DynamicSqlUnanalyzableRuleId,
+        DynamicSqlInnerParseFailedRuleId,
+    };
+
+    /// <summary>
+    /// The rule ID a finding reports under, given its own confidence - a High-confidence finding
+    /// keeps the plain rule ID; anything less appends a confidence suffix so it stays
+    /// independently filterable in CI (GitHub code scanning can allow/suppress by rule ID prefix)
+    /// without disturbing the established <c>silentscan/&lt;family&gt;/&lt;name&gt;</c> scheme
+    /// that <see cref="AllRules"/> and its golden test are built on. Never call this with
+    /// <paramref name="baseRuleId"/> one of the <see cref="DynamicSqlOutcomeRuleIds"/> - those
+    /// findings carry no confidence to suffix by.
+    /// </summary>
+    public static string RuleId(string baseRuleId, FindingConfidence confidence) => confidence switch
+    {
+        FindingConfidence.High => baseRuleId,
+        FindingConfidence.Medium => $"{baseRuleId}/medium-confidence",
+        FindingConfidence.Low => $"{baseRuleId}/low-confidence",
+        _ => throw new ArgumentOutOfRangeException(nameof(confidence), confidence, "Unhandled FindingConfidence."),
+    };
+
+    public static IReadOnlyList<SarifRule> AllRules { get; } = BuildAllRules();
+
+    private static IReadOnlyList<SarifRule> BuildAllRules()
+    {
+        SarifRule[] baseRules =
+        [
+            Rule(Tier1RuleId(SargabilityFindingKind.FunctionWrappedColumn), "A column is wrapped in a function call inside a predicate, preventing an index seek."),
+            Rule(Tier1RuleId(SargabilityFindingKind.CastOrConvertOnColumn), "A column has CAST/CONVERT applied to it inside a predicate."),
+            Rule(Tier1RuleId(SargabilityFindingKind.ColumnArithmetic), "A column has arithmetic applied to it inside a predicate."),
+            Rule(Tier1RuleId(SargabilityFindingKind.LeadingWildcardLike), "A LIKE predicate on a column starts with a wildcard, forcing a full scan."),
+            Rule(Tier1RuleId(SargabilityFindingKind.LikePatternNotLiteral), "A LIKE predicate's pattern is not a literal, so a leading wildcard can't be ruled out statically."),
+            Rule(VerdictRuleId(Verdict.ScanForced), "An implicit type conversion on the column side forces a full scan."),
+            Rule(VerdictRuleId(Verdict.RangeSeek), "An implicit type conversion on the column side permits only a dynamic range seek, not a direct seek."),
+            Rule(VerdictRuleId(Verdict.Unknown), "A predicate's sargability could not be determined (e.g. unresolved collation) - never guessed."),
+            Rule(VerdictRuleId(Verdict.SeekPreserved), "A predicate compares types where the seek is preserved (reported for completeness; not filtered into ScanReportBuilder's actionable findings)."),
+            Rule(VerdictRuleId(Verdict.OperandClash), "The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all - a definitive fact, not an absence of probe data."),
+            Rule(DynamicSqlAnalyzedRuleId, "A dynamic SQL call site with a provably-constant argument; its contents were reparsed and analyzed like static SQL."),
+            Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed."),
+            Rule(DynamicSqlInnerParseFailedRuleId, "A dynamic SQL call site's argument was provably constant but its reassembled text did not parse as T-SQL."),
+            Rule(ExpressionDerivedRuleId, "A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement's own derived table, or upstream in a view/TVF's SELECT list) - no index seek is possible regardless of the comparison's types."),
+            Rule(CollationConflictRuleId, "Two columns with genuinely different, incompatible collations are compared directly - this does not compile (SQL Server error 468, \"Cannot resolve the collation conflict\"), not a seek/scan question."),
+            Rule(WriteLossUnicodeReplacementRuleId, "An INSERT/UPDATE assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target - any character outside the target collation's codepage is silently replaced with '?', with no error."),
+            Rule(WriteLossApproximateTruncationRuleId, "An INSERT/UPDATE assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target - the fractional part is silently dropped, with no error."),
+            Rule(WriteLossNumericScaleNarrowingRuleId, "An INSERT/UPDATE assigns a DECIMAL/NUMERIC value to a target with a smaller scale - digits past the target's scale are silently rounded away, with no error."),
+            Rule(WriteLossTemporalPrecisionLossRuleId, "An INSERT/UPDATE assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target - the time-of-day component is silently dropped, with no error."),
+        ];
+
+        // Only the Medium variant is generated: nothing in this tool produces a Low-confidence
+        // finding yet, and a rule entry with no possible producer would itself be the kind of
+        // silent-until-someone-checks noise CLAUDE.md's "never silently counted as clean" warns
+        // against - add the Low variant here the day a Low producer actually exists.
+        var mediumVariants = baseRules
+            .Where(rule => !DynamicSqlOutcomeRuleIds.Contains(rule.Id))
+            .Select(rule => Rule(RuleId(rule.Id, FindingConfidence.Medium), $"(Medium confidence) {rule.ShortDescription.Text}"));
+
+        return [.. baseRules, .. mediumVariants];
+    }
 
     private static SarifRule Rule(string id, string description) => new(id, new SarifMessage(description));
 }
