@@ -139,13 +139,15 @@ public static class TypedPredicateExtractor
         public List<WriteLossFinding> WriteLossFindings { get; } = [];
 
         /// <summary>
-        /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before the natural child walk reaches
-        /// an INSERT ... SELECT's own SELECT, and consumed (cleared) by the very next
+        /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before <see cref="ExplicitVisit(InsertStatement)"/>
+        /// walks the InsertSpecification, and consumed (cleared) by the very next
         /// <see cref="ExplicitVisit(QuerySpecification)"/> - which is always that exact SELECT,
         /// since InsertSpecification's Target/Columns contain no QuerySpecification of their own
-        /// to hit first. Consuming it before that override recurses into its OWN FromClause/select
-        /// list (which may contain a derived-table subquery, itself a QuerySpecification) is what
-        /// keeps a nested subquery from wrongly stealing these fields instead.
+        /// to hit first, and the WITH clause's own CTE bodies (which DO contain QuerySpecifications)
+        /// are walked separately, before these fields are ever set. Consuming it before that
+        /// override recurses into its OWN FromClause/select list (which may contain a derived-table
+        /// subquery, itself a QuerySpecification) is what keeps a nested subquery from wrongly
+        /// stealing these fields instead.
         /// </summary>
         private IReadOnlyList<CatalogColumn?>? _pendingInsertTargetColumns;
 
@@ -266,8 +268,18 @@ public static class TypedPredicateExtractor
         {
             var spec = node.InsertSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
+
+            // The WITH clause's CTE bodies are QuerySpecifications too, and the natural child walk
+            // reaches them BEFORE reaching InsertSpecification. Walk the WITH clause first (so
+            // CTE-body QuerySpecifications see no pending-insert fields and can't be mis-consumed
+            // as the INSERT's SELECT - which is what an `INSERT ... WITH cte AS (SELECT * FROM
+            // ...) SELECT ... FROM cte` shape hit, invalid-casting the CTE's SelectStarExpression
+            // to SelectScalarExpression). AnalyzeInsertWriteLoss then sets the pending fields for
+            // the next QuerySpecification, which is guaranteed to be the InsertSource's own SELECT.
+            node.WithCtesAndXmlNamespaces?.Accept(this);
             AnalyzeInsertWriteLoss(spec);
-            base.ExplicitVisit(node);
+            spec.Accept(this);
+
             _cteStack.Pop();
         }
 
@@ -656,7 +668,9 @@ public static class TypedPredicateExtractor
             var count = Math.Min(selectElements.Count, targetColumns.Count);
             for (var i = 0; i < count; i++)
             {
-                // AnalyzeInsertWriteLoss only stashes the pending fields when every select
+                // Only the InsertSource's own QuerySpecification reaches this method (the WITH
+                // clause's CTE bodies are walked separately, before the pending fields are ever
+                // set), and AnalyzeInsertWriteLoss only stashes those fields when every select
                 // element is a SelectScalarExpression, so this cast is safe.
                 var sourceExpression = ((SelectScalarExpression)selectElements[i]).Expression;
                 if (targetColumns[i]?.Type is not { } targetType)

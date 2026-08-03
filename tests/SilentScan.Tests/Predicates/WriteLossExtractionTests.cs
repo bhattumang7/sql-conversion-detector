@@ -286,4 +286,35 @@ public sealed class WriteLossExtractionTests
         Assert.Empty(result.WriteLossFindings);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "write target");
     }
+
+    [Fact]
+    public void Extract_InsertWithCteContainingSelectStar_DoesNotThrow()
+    {
+        // The WITH clause's CTE body is itself a QuerySpecification and is walked BEFORE
+        // InsertSpecification in ScriptDOM's natural child order - it must not be mistaken for
+        // the INSERT's own SELECT (whose select list AnalyzeInsertWriteLoss already guarded as
+        // scalar-only). A CTE body containing SELECT * previously invalid-cast
+        // SelectStarExpression to SelectScalarExpression.
+        var findings = Extract(
+            "CREATE TABLE dbo.Src (a INT NULL, b INT NULL, c INT NULL); CREATE TABLE dbo.T (a INT NULL, b INT NULL, c INT NULL);",
+            "WITH cte AS (SELECT * FROM dbo.Src) INSERT INTO dbo.T (a, b, c) SELECT a, b, c FROM cte;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_InsertWithCteContainingSelectStar_LossySource_FlagsWriteLoss()
+    {
+        // Same shape as above, but the INSERT's own SELECT (via the CTE) carries an NVARCHAR
+        // source into a VARCHAR target - proves the fix still lets AnalyzeSelectListWriteLoss
+        // run against the real InsertSource SELECT, not just avoid crashing.
+        var findings = Extract(
+            "CREATE TABLE dbo.Src (NCol NVARCHAR(20) NULL); CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
+            "WITH cte AS (SELECT * FROM dbo.Src) INSERT INTO dbo.T (VarCol) SELECT NCol FROM cte;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.Equal("dbo.T", finding.TableQualifiedName);
+        Assert.Equal("VarCol", finding.ColumnName);
+    }
 }
