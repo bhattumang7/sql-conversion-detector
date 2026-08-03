@@ -22,6 +22,15 @@ dotnet test
 
 `Directory.Build.props` treats warnings as errors and enables recommended
 analyzers solution-wide; a red build is a real defect, not noise to suppress.
+It also disables Roslyn's shared compiler server (`UseSharedCompilation`) -
+reproduced directly that two `dotnet build` invocations against this
+checkout racing the same server process can crash it outright ("Internal CLR
+error 0x80131506"). That doesn't make concurrent builds SAFE by itself
+(they can still race writing the same obj/bin output, MSB3026/MSB3030) -
+never run two `dotnet build`/`dotnet test` invocations against this checkout
+at the same time; `sonar-scan.ps1` guards itself against this with its own
+build lock (`.sonar-scan.lock`), but a manually-run `dotnet build` or
+`dotnet test` you launch yourself isn't covered by it.
 
 The Docker SQL Server above is a hard requirement for `dotnet test` overall,
 not just for `Integration/`: verdict-bearing tests across `Predicates/` also

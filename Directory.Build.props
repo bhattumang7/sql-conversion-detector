@@ -19,6 +19,17 @@
     <!-- Documentation comments are not required on every public member; the
          analyzers that matter here are correctness ones, not doc coverage. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- Root cause of a real, reproduced "Internal CLR error (0x80131506)" build crash: Roslyn's
+         shared compiler server (VBCSCompiler) is a single named-pipe process every `dotnet build`
+         invocation against this repo tries to spawn/attach to - two overlapping invocations
+         (concurrent sessions, or this project's own build + sonar-scan.ps1's internal build
+         racing) can hit that server mid-startup/mid-teardown and crash it outright. Reproduced
+         directly (four concurrent `dotnet build` runs against this checkout) and fixed by turning
+         the shared server off entirely: each invocation compiles standalone, so there is no
+         shared pipe left to race on. This does not by itself make concurrent builds SAFE (they
+         can still race on writing the same obj/bin output files - see sonar-scan.ps1's own lock
+         and docs/local-dev.md) - it only removes the specific native-crash failure mode. -->
+    <UseSharedCompilation>false</UseSharedCompilation>
   </PropertyGroup>
 
 </Project>

@@ -124,6 +124,34 @@ Write-Verbose "Coverage : $(if ($WithCoverage) { 'enabled' } else { 'skipped' })
 $dotnetTestFailed = $false
 $buildFailed      = $false
 
+# -- Build lock ---------------------------------------------------------------
+# Two `dotnet build`/`dotnet test` invocations against the SAME checkout's obj/bin output can
+# race each other - reproduced directly (concurrent `dotnet build` runs here hit real MSB3026/
+# MSB3030 file-lock failures, and separately a Roslyn shared-compiler-server crash) - so this
+# script never lets a second copy of itself run its own build/test steps concurrently. An
+# OS-level exclusive file lock (FileShare.None), not a plain "does a lock file exist" check: the
+# latter can't tell a stale lock from a live one after a crash, this can't be stale by
+# construction (the OS releases it the instant the holding process exits, however it exits).
+$LockPath = Join-Path $RootDir '.sonar-scan.lock'
+$LockStream = $null
+$lockWaitSeconds = 0
+$lockTimeoutSeconds = 300
+while ($true) {
+    try {
+        $LockStream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        break
+    } catch [System.IO.IOException] {
+        if ($lockWaitSeconds -eq 0) {
+            Write-Host "Another build/scan is already running against this checkout - waiting for it to finish..." -ForegroundColor Yellow
+        }
+        if ($lockWaitSeconds -ge $lockTimeoutSeconds) {
+            throw "Timed out after ${lockTimeoutSeconds}s waiting for another dotnet build/test/sonar-scan run against this checkout to finish (lock: $LockPath)."
+        }
+        Start-Sleep -Seconds 2
+        $lockWaitSeconds += 2
+    }
+}
+
 Push-Location $RootDir
 try {
     # -- [1/4] Clean ---------------------------------------------------------
@@ -235,6 +263,10 @@ finally {
     Pop-Location
     if ($PropsStashed -and (Test-Path $PropsBackup)) {
         Move-Item -Force $PropsBackup $PropsFile
+    }
+    if ($LockStream) {
+        $LockStream.Close()
+        Remove-Item -Force $LockPath -ErrorAction SilentlyContinue
     }
 }
 
