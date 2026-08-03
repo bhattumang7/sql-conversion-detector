@@ -15,6 +15,15 @@
 # process), a hard `timeout` guarantees the invocation can't hang indefinitely even so, and a
 # trap shuts down any lingering build server on exit regardless of outcome.
 #
+# A separate, rarer failure mode (also reproduced directly, 2026-08-03): if `dotnet build`
+# itself crashes outright (the documented "Internal CLR error 0x80131506" VBCSCompiler race -
+# see Directory.Build.props - can still happen on an unlucky overlap even with
+# UseSharedCompilation off), its own per-invocation worker processes can be orphaned without
+# their parent ever reaping them. These are NOT the persistent "build server" processes
+# `dotnet build-server shutdown` manages, so that call alone does not clean them up. `setsid`
+# below runs the real command in its own process group so this script's own trap can kill that
+# whole group on exit, regardless of whether the command exited, timed out, or crashed.
+#
 # Usage: scripts/dotnet-safe.sh test --filter "..."
 #        scripts/dotnet-safe.sh build
 #        DOTNET_SAFE_TIMEOUT=1200 scripts/dotnet-safe.sh test
@@ -32,12 +41,20 @@ log_dir="${TMPDIR:-/tmp}/dotnet-safe-logs"
 mkdir -p "$log_dir"
 log_file="$log_dir/$(date +%Y%m%d-%H%M%S 2>/dev/null || echo run)-$$.log"
 
+group_pid=""
 cleanup() {
+    if [ -n "$group_pid" ]; then
+        kill -TERM -- "-$group_pid" >/dev/null 2>&1 || true
+        sleep 1
+        kill -KILL -- "-$group_pid" >/dev/null 2>&1 || true
+    fi
     dotnet build-server shutdown >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-timeout --kill-after=30s "${timeout_seconds}s" dotnet "$@" > "$log_file" 2>&1
+setsid timeout --kill-after=30s "${timeout_seconds}s" dotnet "$@" > "$log_file" 2>&1 &
+group_pid=$!
+wait "$group_pid"
 exit_code=$?
 
 if [ "$exit_code" -eq 124 ] || [ "$exit_code" -eq 137 ]; then

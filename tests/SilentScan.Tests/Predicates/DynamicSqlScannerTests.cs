@@ -79,25 +79,12 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("non-literal-expression:subquery", finding.Reason);
     }
 
-    [Fact]
-    public void Scan_ExecOfVariableAssignedFromCaseExpression_ReasonNamesConditional()
-    {
-        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CASE WHEN 1 = 1 THEN N'SELECT 1' ELSE N'SELECT 2' END; EXEC(@sql);");
-
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("non-literal-expression:conditional", finding.Reason);
-    }
-
-    [Fact]
-    public void Scan_ExecOfVariableAssignedFromCastExpression_ReasonNamesCastOrConvert()
-    {
-        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'SELECT 1' AS NVARCHAR(MAX)); EXEC(@sql);");
-
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("non-literal-expression:cast-or-convert", finding.Reason);
-    }
+    // CASE/IIF and CAST/CONVERT are no longer unconditional declines - see the "CASE/IIF folding"
+    // and "CAST/CONVERT folding" sections below for what each now folds and what still declines
+    // (and why: CASE with both branches literal now unions; CAST to a pinned VARCHAR(n)/
+    // NVARCHAR(n) target now truncates - only a non-string or CHAR/NCHAR target still declines,
+    // under "non-literal-expression:cast-target-not-pinned", not the old generic
+    // "non-literal-expression:cast-or-convert", which no longer exists as a reason at all).
 
     [Fact]
     public void Scan_ExecOfVariableAssignedFromSubtraction_ReasonNamesUnsupportedOperator()
@@ -1303,6 +1290,182 @@ public sealed class DynamicSqlScannerTests
 
         var script = Assert.Single(result.AnalyzableScripts);
         Assert.Equal("SELECT * FROM Orders", script.InnerText);
+    }
+
+    // ------------------------------------------------------------------
+    // REPLACE folding: agree-under-both-comparisons or decline. Every expected string and every
+    // decline below was verified directly against a live Docker SQL Server instance.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_ReplaceWithNoCaseAmbiguity_TierC_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REPLACE(N'a-b-c', N'-', N'_'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("a_b_c", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ReplaceWhereOrdinalAndCaseInsensitiveDisagree_Declines()
+    {
+        // Oracle-verified: REPLACE('AbcABC','abc','X') is 'AbcABC' unchanged under an ordinal/
+        // case-sensitive comparison (no exact "abc" substring present) but 'XX' under a
+        // case-insensitive one - exactly the collation-dependent divergence this scanner has no
+        // way to resolve without knowing the real target collation.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REPLACE(N'AbcABC', N'abc', N'X'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:replace-collation-sensitive", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ReplaceWithEmptyPattern_Declines()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REPLACE(N'abc', N'', N'x'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:replace-empty-pattern", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ReplaceWithWrongArgumentCount_UnanalyzableAsFunctionCall()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REPLACE(N'abc', N'a'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+    }
+
+    // ------------------------------------------------------------------
+    // CAST/CONVERT folding onto a VARCHAR(n)/NVARCHAR(n) target only - every non-string target
+    // and CHAR/NCHAR's blank-padding declines rather than guessing a rendering.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_CastOfFoldedVariableToNVarcharWithTruncation_TierC_ProducesAnalyzableScript()
+    {
+        // Oracle-verified: CAST(N'HelloWorld' AS NVARCHAR(5)) silently truncates to 'Hello',
+        // no error - the shape #5 in the audit ("caller passes a query string cast to nvarchar
+        // before sp_executesql").
+        var result = Scan(
+            "DECLARE @raw NVARCHAR(MAX) = N'HelloWorld'; " +
+            "DECLARE @sql NVARCHAR(MAX) = CAST(@raw AS NVARCHAR(5)); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("Hello", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ConvertOfLiteralToVarcharWithinLength_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CONVERT(VARCHAR(20), N'SELECT 1'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_CastToNonStringTarget_Declines()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'select 1' AS INT); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:cast-target-not-pinned", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_CastToCharTarget_DeclinesBlankPaddingNotPinned()
+    {
+        // CHAR(n) blank-pads (oracle-verified: CAST('ab' AS char(5)) is 'ab   ') - a different,
+        // unverified-here rendering from VARCHAR(n)'s plain truncation, so this declines rather
+        // than guessing the padding.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'ab' AS CHAR(5)); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:cast-target-not-pinned", finding.Reason);
+    }
+
+    // ------------------------------------------------------------------
+    // Non-deterministic builtins - genuinely unknowable at compile time, reported with their own
+    // reason distinct from an ordinary unimplemented function call.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_ExecOfNewIdCastToString_Declines_NonDeterministicFunction()
+    {
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'DROP TABLE tbl_' + CAST(NEWID() AS NVARCHAR(36)); " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-deterministic-function", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfGetDate_Declines_NonDeterministicFunction()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CONVERT(VARCHAR(30), GETDATE()); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-deterministic-function", finding.Reason);
+    }
+
+    // ------------------------------------------------------------------
+    // CASE/IIF folding by unioning every branch - the discriminator/condition is never evaluated
+    // at all, so this works even when it references a variable this scanner has no value for.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_IifWithBothBranchesLiteral_UnionsIntoTwoAssemblies()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = IIF(@flag = 1, N'SELECT A', N'SELECT B'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT A", "SELECT B"], texts);
+    }
+
+    [Fact]
+    public void Scan_SearchedCaseWithAllBranchesLiteral_UnionsAcrossEveryWhenAndElse()
+    {
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = CASE " +
+            "WHEN @flags & 1 = 1 THEN N'SELECT A' " +
+            "WHEN @flags & 2 = 2 THEN N'SELECT B' " +
+            "ELSE N'SELECT C' END; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT A", "SELECT B", "SELECT C"], texts);
+    }
+
+    [Fact]
+    public void Scan_SearchedCaseWithNoElse_Declines()
+    {
+        // No ELSE means "no WHEN matched" returns SQL NULL, which this scanner's string-assembly
+        // model has no representation for - omitting that outcome from the union would be
+        // unsound, so it declines outright instead.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CASE WHEN @flags = 1 THEN N'SELECT A' END; EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:conditional", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_CaseWithOneUnfoldableBranch_Declines()
+    {
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = CASE WHEN @flags = 1 THEN N'SELECT A' ELSE CONVERT(VARCHAR(30), GETDATE()) END; " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:conditional", finding.Reason);
     }
 
     // ------------------------------------------------------------------

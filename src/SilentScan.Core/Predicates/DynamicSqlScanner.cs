@@ -940,6 +940,14 @@ public static class DynamicSqlScanner
                     when WhitelistedStringBuilders.Contains(functionName):
                     return TryFoldStringBuilder(builderCall, functionName, folded, foldingEnabled);
 
+                case FunctionCall { FunctionName.Value: var functionName } nonDeterministicCall
+                    when NonDeterministicFunctions.Contains(functionName):
+                    // A distinct reason from the generic ":function-call" below - NEWID()/
+                    // GETDATE()/RAND() aren't unimplemented, they're genuinely unknowable at
+                    // compile time regardless of how much folding this scanner ever grows, so
+                    // the study can state that plainly rather than lumping it with real gaps.
+                    return FoldAttempt.Fail("non-deterministic-function", Span(expression));
+
                 // LEFT/RIGHT are NOT parsed as an ordinary FunctionCall the way UPPER/LOWER/
                 // LTRIM/RTRIM/SUBSTRING are - ScriptDom gives them their own dedicated node types
                 // (LeftFunctionCall/RightFunctionCall, confirmed via reflection over the parsed
@@ -952,6 +960,15 @@ public static class DynamicSqlScanner
 
                 case RightFunctionCall rightCall:
                     return TryFoldLeftOrRight(rightCall.Parameters, "RIGHT", rightCall, folded, foldingEnabled);
+
+                case CastCall castCall:
+                    return TryFoldCastOrConvert(castCall.Parameter, castCall.DataType, castCall, folded, foldingEnabled);
+
+                case ConvertCall convertCall:
+                    return TryFoldCastOrConvert(convertCall.Parameter, convertCall.DataType, convertCall, folded, foldingEnabled);
+
+                case SimpleCaseExpression or SearchedCaseExpression or IIfCall:
+                    return TryFoldConditional(expression, folded, foldingEnabled);
 
                 default:
                     return FailNonLiteralExpression(expression);
@@ -995,22 +1012,39 @@ public static class DynamicSqlScanner
         }
 
         /// <summary>
-        /// Every string-builder function this scanner folds besides QUOTENAME (roadmap "fold
-        /// high-volume string-builder functions in dynamic SQL, oracle-checked") that ScriptDom
-        /// still parses as an ordinary <see cref="FunctionCall"/> - chosen because each is a pure
-        /// lexical operation with no collation-comparison semantics involved (unlike REPLACE/
-        /// CHARINDEX/PATINDEX, whose case-sensitivity depends on the CALLER's collation, which
-        /// this scanner has no access to at all - see <see cref="TryFoldQuoteName"/>'s own
-        /// remarks). UPPER/LOWER are the one entry here that still needs a per-input guard (<see
-        /// cref="IsSafeToCaseConvert"/>) rather than being unconditionally safe - oracle-verified:
-        /// the Turkish-family "dotless I" case mapping genuinely differs by collation for the
-        /// specific 'i'/'I' pair, even though every other ASCII letter's case mapping does not.
-        /// LEFT/RIGHT are deliberately NOT here - see the dedicated <see cref="LeftFunctionCall"/>/
-        /// <see cref="RightFunctionCall"/> cases in <see cref="TryFoldExpression"/>.
+        /// Every string-builder function this scanner folds besides QUOTENAME that ScriptDom
+        /// still parses as an ordinary <see cref="FunctionCall"/>. UPPER/LOWER need a per-input
+        /// guard (<see cref="IsSafeToCaseConvert"/>) rather than being unconditionally safe -
+        /// oracle-verified: the Turkish-family "dotless I" case mapping genuinely differs by
+        /// collation for the specific 'i'/'I' pair, even though every other ASCII letter's case
+        /// mapping does not. REPLACE's own case-sensitivity depends on the CALLER's collation the
+        /// same way (oracle-verified: <c>REPLACE('AbcABC','abc','X')</c> differs under CI vs CS
+        /// collation) - rather than a per-character static guard, <see cref="TryFoldReplace"/>
+        /// evaluates both an ordinal and an ordinal-ignore-case replace and folds only when they
+        /// agree, which is exactly the "does ANY plausible collation change the answer" question
+        /// IsSafeToCaseConvert answers by construction instead. CHARINDEX/PATINDEX have the same
+        /// collation dependency but return a position, not a string - out of scope for THIS table,
+        /// which only ever produces string segments. LEFT/RIGHT are deliberately NOT here - see
+        /// the dedicated <see cref="LeftFunctionCall"/>/<see cref="RightFunctionCall"/> cases in
+        /// <see cref="TryFoldExpression"/>.
         /// </summary>
         private static readonly HashSet<string> WhitelistedStringBuilders = new(StringComparer.OrdinalIgnoreCase)
         {
-            "UPPER", "LOWER", "LTRIM", "RTRIM", "SUBSTRING",
+            "UPPER", "LOWER", "LTRIM", "RTRIM", "SUBSTRING", "REPLACE",
+        };
+
+        /// <summary>
+        /// Every builtin this scanner declines to fold purely because its result is genuinely
+        /// unknowable at compile time (not because folding it is unimplemented) - reported with
+        /// its own <c>non-deterministic-function</c> reason in <see cref="TryFoldExpression"/> so
+        /// the study can state that plainly. <c>RAND()</c> with a literal seed argument IS
+        /// deterministic in T-SQL, but this scanner does not special-case that rare shape - a
+        /// seeded RAND still declines via this set, just like an unseeded one.
+        /// </summary>
+        private static readonly HashSet<string> NonDeterministicFunctions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "NEWID", "NEWSEQUENTIALID", "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME",
+            "SYSDATETIMEOFFSET", "RAND", "CHECKSUM", "BINARY_CHECKSUM",
         };
 
         private FoldAttempt TryFoldStringBuilder(FunctionCall functionCall, string functionName, Dictionary<string, FoldState> folded, bool foldingEnabled) =>
@@ -1019,6 +1053,7 @@ public static class DynamicSqlScanner
                 "UPPER" or "LOWER" => TryFoldCaseConversion(functionCall, functionName, folded, foldingEnabled),
                 "LTRIM" or "RTRIM" => TryFoldTrim(functionCall, functionName, folded, foldingEnabled),
                 "SUBSTRING" => TryFoldSubstring(functionCall, folded, foldingEnabled),
+                "REPLACE" => TryFoldReplace(functionCall, folded, foldingEnabled),
                 _ => FailNonLiteralExpression(functionCall),
             };
 
@@ -1179,6 +1214,144 @@ public static class DynamicSqlScanner
             return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, result)]);
         }
 
+        /// <summary>
+        /// REPLACE(source, pattern, replacement) folds when both a strictly-ordinal replace and
+        /// an ordinal-IGNORE-CASE replace produce the IDENTICAL result string - if neither
+        /// definition of "matches" changes the answer, no collation this scanner has never seen
+        /// (SQL_* vs Windows, case-sensitive vs case-insensitive, even a Turkish-family one) can
+        /// produce a THIRD answer either, since every one of them falls somewhere between these
+        /// two extremes of how aggressively "equal" characters are matched. This is the general
+        /// form of the same guarantee <see cref="IsSafeToCaseConvert"/> gives UPPER/LOWER by a
+        /// per-character check instead - oracle-verified root fact either way:
+        /// <c>REPLACE('AbcABC','abc','X')</c> differs under CI vs CS collation.
+        /// </summary>
+        private FoldAttempt TryFoldReplace(FunctionCall functionCall, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (functionCall.Parameters.Count != 3)
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var sourceAttempt, out var source))
+            {
+                return sourceAttempt;
+            }
+
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[1], folded, foldingEnabled, out var patternAttempt, out var pattern))
+            {
+                return patternAttempt;
+            }
+
+            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[2], folded, foldingEnabled, out var replacementAttempt, out var replacement))
+            {
+                return replacementAttempt;
+            }
+
+            if (pattern!.Length == 0)
+            {
+                // SQL Server's own behavior for an empty search pattern is not something this
+                // scanner has verified against the oracle, and .NET's string.Replace throws
+                // outright for an empty oldValue - declines rather than guessing either way.
+                return FoldAttempt.Fail("non-literal-expression:replace-empty-pattern", Span(functionCall));
+            }
+
+            var ordinalResult = source!.Replace(pattern, replacement, StringComparison.Ordinal);
+            var caseInsensitiveResult = source.Replace(pattern, replacement, StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(ordinalResult, caseInsensitiveResult, StringComparison.Ordinal))
+            {
+                return FoldAttempt.Fail("non-literal-expression:replace-collation-sensitive", Span(functionCall));
+            }
+
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, ordinalResult)]);
+        }
+
+        /// <summary>
+        /// CAST/CONVERT folds only onto a VARCHAR(n)/NVARCHAR(n) (or MAX) target - the one target
+        /// family whose rendering of an already-string source is pinned down (oracle-verified:
+        /// silently truncates an over-length value, no error). CHAR/NCHAR (blank-padding,
+        /// oracle-verified: <c>CAST('ab' AS char(5))</c> is <c>'ab   '</c>) and every non-string
+        /// target (int/date/decimal/...) each have their own rendering algorithm this scanner has
+        /// no verified implementation of - declined rather than guessing a format, per CLAUDE.md.
+        /// CONVERT's optional style argument is therefore irrelevant here too: style only affects
+        /// non-string-family renderings this fold never attempts.
+        /// </summary>
+        private FoldAttempt TryFoldCastOrConvert(
+            ScalarExpression source, DataTypeReference dataType, TSqlFragment site, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            var targetType = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
+            if (targetType is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar })
+            {
+                return FoldAttempt.Fail("non-literal-expression:cast-target-not-pinned", Span(site));
+            }
+
+            if (!TryFoldSingleAssemblyArgument(source, folded, foldingEnabled, out var attempt, out var input))
+            {
+                return attempt;
+            }
+
+            var result = !targetType.IsMax && targetType.Length is { } length && input!.Length > length
+                ? input[..length]
+                : input!;
+
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
+        }
+
+        /// <summary>
+        /// CASE/IIF folds by UNIONING every branch's own fold result - never by evaluating the
+        /// discriminator/condition, which this scanner has no boolean-predicate machinery for at
+        /// all (a WHEN clause is an arbitrary expression, not a value this scanner tracks). Since
+        /// which branch actually runs is unknown, the true result is PROVABLY one of the folded
+        /// branches - the same "known set of possible values" the IF/TRY-CATCH branch merges
+        /// already use, composing naturally with the assembly-set lattice rather than needing its
+        /// own merge rule. Requires an ELSE (a bare CASE with no matching WHEN and no ELSE returns
+        /// SQL NULL, which this scanner's assembly-set model has no representation for at all -
+        /// silently omitting that outcome from the union would be unsound, not merely imprecise,
+        /// so it declines instead) and requires every branch to fold - one unfoldable branch
+        /// taints the whole expression, matching every other all-or-nothing fold in this scanner.
+        /// </summary>
+        private FoldAttempt TryFoldConditional(ScalarExpression expression, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            var (valueExpressions, elseExpression) = expression switch
+            {
+                SimpleCaseExpression simpleCase => (simpleCase.WhenClauses.Select(w => w.ThenExpression), simpleCase.ElseExpression),
+                SearchedCaseExpression searchedCase => (searchedCase.WhenClauses.Select(w => w.ThenExpression), searchedCase.ElseExpression),
+                IIfCall iif => (new[] { iif.ThenExpression }, iif.ElseExpression),
+                _ => (Enumerable.Empty<ScalarExpression>(), null),
+            };
+
+            if (elseExpression is null)
+            {
+                return FoldAttempt.Fail("non-literal-expression:conditional", Span(expression));
+            }
+
+            IReadOnlyList<IReadOnlyList<LiteralSegment>> union = [];
+            var first = true;
+            foreach (var branch in valueExpressions.Append(elseExpression))
+            {
+                var attempt = TryFoldExpression(branch, folded, foldingEnabled);
+                if (!attempt.Success)
+                {
+                    return FoldAttempt.Fail("non-literal-expression:conditional", Span(expression));
+                }
+
+                if (first)
+                {
+                    union = attempt.Assemblies!;
+                    first = false;
+                    continue;
+                }
+
+                if (!TryUnionAssemblies(union, attempt.Assemblies!, out var merged))
+                {
+                    return FoldAttempt.Fail("diverges-across-if-branches:cardinality-cap", Span(expression));
+                }
+
+                union = merged;
+            }
+
+            return FoldAttempt.Ok(union);
+        }
+
         /// <summary>Folds a bare integer literal argument (e.g. LEFT/RIGHT/SUBSTRING's length or start position) - this scanner tracks only string variable values, so anything other than a literal (a variable, an expression) is declined rather than guessed.</summary>
         private static bool TryFoldIntegerLiteral(ScalarExpression expression, out int value)
         {
@@ -1210,16 +1383,11 @@ public static class DynamicSqlScanner
         }
 
         /// <summary>
-        /// <c>QUOTENAME</c> is the one function call this scanner ever folds (roadmap "fold
-        /// high-volume string-builder functions in dynamic SQL, oracle-checked") - the classic
-        /// <c>SET @sql = 'SELECT * FROM ' + QUOTENAME(@table)</c> pattern, where @table already
-        /// folded constant via Tier C, previously stopped dead at the function call even though
-        /// its result is fully determined. Chosen deliberately over other common builders like
-        /// REPLACE: QUOTENAME's escaping is a pure lexical operation, collation-independent,
-        /// where REPLACE's own case-sensitivity depends on the CALLER's collation (verified
-        /// directly - REPLACE('AbcABC','abc','X') differs under CI vs CS collation, and this
-        /// scanner has no catalog/collation available at the point it runs), so folding REPLACE
-        /// soundly isn't possible without a real risk of silently guessing wrong.
+        /// The classic <c>SET @sql = 'SELECT * FROM ' + QUOTENAME(@table)</c> pattern, where
+        /// @table already folded constant via Tier C, previously stopped dead at the function
+        /// call even though QUOTENAME's escaping is a pure, collation-independent lexical
+        /// operation with only one possible result - see <see cref="TryFoldReplace"/> for the
+        /// collation-SENSITIVE sibling case (REPLACE), folded by a different mechanism entirely.
         /// </summary>
         private FoldAttempt TryFoldQuoteName(FunctionCall functionCall, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
@@ -1330,13 +1498,20 @@ public static class DynamicSqlScanner
         /// immediately in the study's own numbers - no summary-side change needed. Extracted from
         /// TryFoldExpression's own switch to keep that method's cognitive complexity bounded.
         /// </summary>
+        /// <summary>
+        /// CastCall/ConvertCall and SimpleCaseExpression/SearchedCaseExpression/IIfCall each have
+        /// their own dedicated dispatch case earlier in <see cref="TryFoldExpression"/>'s switch
+        /// (<see cref="TryFoldCastOrConvert"/>, <see cref="TryFoldConditional"/>) - every caller
+        /// here either passes a <see cref="FunctionCall"/> directly (an arity/whitelist decline)
+        /// or reaches this method's own <c>default</c> arm in <see cref="TryFoldExpression"/>,
+        /// where those five types can never appear (already matched above). No case for them
+        /// remains here on purpose.
+        /// </summary>
         private FoldAttempt FailNonLiteralExpression(ScalarExpression expression) => expression switch
         {
             FunctionCall => FoldAttempt.Fail("non-literal-expression:function-call", Span(expression)),
             ColumnReferenceExpression => FoldAttempt.Fail("non-literal-expression:column-reference", Span(expression)),
             ScalarSubquery => FoldAttempt.Fail("non-literal-expression:subquery", Span(expression)),
-            SearchedCaseExpression or SimpleCaseExpression or IIfCall => FoldAttempt.Fail("non-literal-expression:conditional", Span(expression)),
-            CastCall or ConvertCall => FoldAttempt.Fail("non-literal-expression:cast-or-convert", Span(expression)),
             // Reaches here only for a BinaryExpressionType other than Add (Subtract, Multiply,
             // BitwiseAnd, ...) - Add is folded in TryFoldExpression itself; every other operator
             // on a dynamic SQL text expression is a distinct, rarer shape from a plain unhandled
