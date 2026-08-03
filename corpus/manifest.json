@@ -7,6 +7,7 @@
       "commitSha": "1ab31bc560415b570d57bb5ff9896f4698891321",
       "license": "MIT",
       "ddlPaths": [
+        "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Security/*.sql",
         "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/**/Tables/*.sql",
         "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Sequences/Sequences/*.sql",
         "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/Website/User Defined Types/*.sql"
@@ -17,7 +18,7 @@
         "samples/databases/wide-world-importers/wwi-ssdt/wwi-ssdt/**/Views/*.sql"
       ],
       "declaredCollation": "Latin1_General_100_CI_AS",
-      "notes": "Only the wide-world-importers/wwi-ssdt subtree of the sql-server-samples monorepo is cloned locally (the full monorepo is unrelated samples and far larger than needed). Full multi-schema business-app DDL: tables, views, functions, procs across Application/Sales/Purchasing/Warehouse/Security schemas. No CREATE DATABASE statement in the SSDT project itself, but wwi-ssdt/wwi-ssdt/WideWorldImporters.sqlproj declares <DefaultCollation>Latin1_General_100_CI_AS</DefaultCollation> directly - this is the collation SSDT deploys the database with, not a guess."
+      "notes": "Only the wide-world-importers/wwi-ssdt subtree of the sql-server-samples monorepo is cloned locally (the full monorepo is unrelated samples and far larger than needed). Full multi-schema business-app DDL: tables, views, functions, procs across Application/Sales/Purchasing/Warehouse/Security schemas. No CREATE DATABASE statement in the SSDT project itself, but wwi-ssdt/wwi-ssdt/WideWorldImporters.sqlproj declares <DefaultCollation>Latin1_General_100_CI_AS</DefaultCollation> directly - this is the collation SSDT deploys the database with, not a guess. Security/*.sql (added for scan-corpus-live, the engine-authoritative corpus path) holds every CREATE SCHEMA for Application/Sales/Purchasing/Warehouse/Website/WebApi/PowerBI/Reports/Integration/DataLoadSimulation alongside an EXEC sp_addextendedproperty per schema (whitelist-skipped, never executed) - every other already-declared file targets one of these non-dbo schemas, so without this glob NOTHING in this repo can actually deploy to a real database at all; the gap was invisible under the file-parsed catalog path (which never needed deployment to succeed to produce a finding) and only surfaced once the catalog came from actually deploying and reading the schema back."
     },
     {
       "name": "dnn-platform",

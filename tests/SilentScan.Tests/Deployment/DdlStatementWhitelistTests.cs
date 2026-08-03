@@ -108,4 +108,49 @@ public sealed class DdlStatementWhitelistTests
 
         Assert.Empty(DdlStatementWhitelist.DisallowedStatementTypeNames(batch));
     }
+
+    // ------------------------------------------------------------------
+    // allowProcedureAndTriggerDefinitions (roadmap "make the corpus catalog engine-
+    // authoritative") - verify-corpus's own default (false) must stay exactly as strict as
+    // before; the engine-authoritative corpus path opts in explicitly.
+    // ------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;", "CreateProcedureStatement")]
+    [InlineData("ALTER PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;", "AlterProcedureStatement")]
+    [InlineData("CREATE TRIGGER dbo.trg_Test ON dbo.T AFTER INSERT AS BEGIN SELECT 1; END;", "CreateTriggerStatement")]
+    public void DisallowedStatementTypeNames_ProcedureAndTriggerDefinitions_RejectedByDefault(string sql, string expectedTypeName)
+    {
+        var batch = ParseSingleBatch(sql);
+
+        Assert.Contains(expectedTypeName, DdlStatementWhitelist.DisallowedStatementTypeNames(batch));
+        Assert.Contains(expectedTypeName, DdlStatementWhitelist.DisallowedStatementTypeNames(batch, allowProcedureAndTriggerDefinitions: false));
+    }
+
+    [Theory]
+    [InlineData("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;")]
+    [InlineData("ALTER PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;")]
+    [InlineData("CREATE OR ALTER PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END;")]
+    [InlineData("CREATE TRIGGER dbo.trg_Test ON dbo.T AFTER INSERT AS BEGIN SELECT 1; END;")]
+    [InlineData("ALTER TRIGGER dbo.trg_Test ON dbo.T AFTER INSERT AS BEGIN SELECT 1; END;")]
+    public void DisallowedStatementTypeNames_ProcedureAndTriggerDefinitions_AllowedWhenOptedIn(string sql)
+    {
+        var batch = ParseSingleBatch(sql);
+
+        Assert.Empty(DdlStatementWhitelist.DisallowedStatementTypeNames(batch, allowProcedureAndTriggerDefinitions: true));
+    }
+
+    [Fact]
+    public void DisallowedStatementTypeNames_ExecInsideProcedureBody_StillRejectedEvenWhenOptedIn()
+    {
+        // Deploying a procedure's own DEFINITION never runs its body - but this whitelist's job
+        // is to keep an actual EXEC/DML statement from ever being the TOP-LEVEL statement of a
+        // batch that gets executed as-is. A statement INSIDE a proc body is opaque text to the
+        // deploying batch (never walked into), so this only proves the top-level classification
+        // itself is unaffected by what happens to be inside the body - not a claim that the body
+        // is inspected.
+        var batch = ParseSingleBatch("EXEC('DROP DATABASE master');");
+
+        Assert.Contains("ExecuteStatement", DdlStatementWhitelist.DisallowedStatementTypeNames(batch, allowProcedureAndTriggerDefinitions: true));
+    }
 }

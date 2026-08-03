@@ -53,6 +53,33 @@ public static class DdlStatementWhitelist
     ];
 
     /// <summary>
+    /// Procedure/trigger DEFINITIONS - never allowed for verify-corpus's own deployment (that
+    /// caller works from parsed proc-body text directly and never needed a proc's own row in
+    /// this deployment's <c>sys.sql_modules</c>), but required for the engine-authoritative
+    /// corpus path (roadmap "make the corpus catalog engine-authoritative"), where CLAUDE.md
+    /// explicitly requires module TEXT to come from the engine too, not just schema. A
+    /// <c>CREATE PROCEDURE ... AS &lt;body&gt;</c> statement is itself pure DDL - it registers the
+    /// definition's text in the catalog and never runs the body - so allowing it here does not
+    /// weaken "corpus DML and procs are never executed" at all: an actual <c>EXEC</c>/DML
+    /// statement inside that body is still caught and skipped by the SAME recursive whitelist
+    /// check the body of a deployed view/function already gets, since <see cref="IsAllowed"/>
+    /// only inspects the top-level batch statement kind - the body of a CREATE PROCEDURE is
+    /// opaque T-SQL text to the deploying batch, not a separate statement this whitelist walks
+    /// into (matching how a view's or function's own body was already opaque before this).
+    /// </summary>
+    private static readonly HashSet<Type> ProcedureAndTriggerDefinitionTypes =
+    [
+        typeof(CreateProcedureStatement),
+        typeof(AlterProcedureStatement),
+        typeof(CreateOrAlterProcedureStatement),
+        typeof(DropProcedureStatement),
+        typeof(CreateTriggerStatement),
+        typeof(AlterTriggerStatement),
+        typeof(CreateOrAlterTriggerStatement),
+        typeof(DropTriggerStatement),
+    ];
+
+    /// <summary>
     /// A session-setting statement (<c>SET ANSI_NULLS ON</c>, <c>SET QUOTED_IDENTIFIER ON</c>) -
     /// the standard SSMS-scripted batch header ahead of a CREATE. No DML risk: it changes parser
     /// behavior for the rest of the batch, nothing about the database's data.
@@ -70,43 +97,45 @@ public static class DdlStatementWhitelist
     /// an IF/BEGIN wrapper is control flow, not the kind of statement this whitelist exists to
     /// keep out (DML, procedural logic, permissions).
     /// </summary>
-    public static bool IsAllowed(TSqlStatement statement) => statement switch
+    public static bool IsAllowed(TSqlStatement statement, bool allowProcedureAndTriggerDefinitions = false) => statement switch
     {
         IfStatement ifStatement =>
-            (ifStatement.ThenStatement is null || IsAllowed(ifStatement.ThenStatement))
-            && (ifStatement.ElseStatement is null || IsAllowed(ifStatement.ElseStatement)),
+            (ifStatement.ThenStatement is null || IsAllowed(ifStatement.ThenStatement, allowProcedureAndTriggerDefinitions))
+            && (ifStatement.ElseStatement is null || IsAllowed(ifStatement.ElseStatement, allowProcedureAndTriggerDefinitions)),
 
         BeginEndBlockStatement beginEnd =>
-            beginEnd.StatementList.Statements.All(IsAllowed),
+            beginEnd.StatementList.Statements.All(s => IsAllowed(s, allowProcedureAndTriggerDefinitions)),
 
-        _ => IsAllowedPredicateSet(statement) || AllowedStatementTypes.Contains(statement.GetType()),
+        _ => IsAllowedPredicateSet(statement)
+            || AllowedStatementTypes.Contains(statement.GetType())
+            || (allowProcedureAndTriggerDefinitions && ProcedureAndTriggerDefinitionTypes.Contains(statement.GetType())),
     };
 
     /// <summary>Every statement type name in <paramref name="batch"/> that isn't on the whitelist, deduplicated (recursing through IF/BEGIN...END wrappers) - empty means the whole batch is deployable.</summary>
-    public static IReadOnlyList<string> DisallowedStatementTypeNames(TSqlBatch batch)
+    public static IReadOnlyList<string> DisallowedStatementTypeNames(TSqlBatch batch, bool allowProcedureAndTriggerDefinitions = false)
     {
         var disallowed = new List<string>();
         foreach (var statement in batch.Statements)
         {
-            CollectDisallowed(statement, disallowed);
+            CollectDisallowed(statement, allowProcedureAndTriggerDefinitions, disallowed);
         }
 
         return [.. disallowed.Distinct(StringComparer.Ordinal)];
     }
 
-    private static void CollectDisallowed(TSqlStatement statement, List<string> disallowed)
+    private static void CollectDisallowed(TSqlStatement statement, bool allowProcedureAndTriggerDefinitions, List<string> disallowed)
     {
         switch (statement)
         {
             case IfStatement ifStatement:
                 if (ifStatement.ThenStatement is not null)
                 {
-                    CollectDisallowed(ifStatement.ThenStatement, disallowed);
+                    CollectDisallowed(ifStatement.ThenStatement, allowProcedureAndTriggerDefinitions, disallowed);
                 }
 
                 if (ifStatement.ElseStatement is not null)
                 {
-                    CollectDisallowed(ifStatement.ElseStatement, disallowed);
+                    CollectDisallowed(ifStatement.ElseStatement, allowProcedureAndTriggerDefinitions, disallowed);
                 }
 
                 break;
@@ -114,13 +143,15 @@ public static class DdlStatementWhitelist
             case BeginEndBlockStatement beginEnd:
                 foreach (var inner in beginEnd.StatementList.Statements)
                 {
-                    CollectDisallowed(inner, disallowed);
+                    CollectDisallowed(inner, allowProcedureAndTriggerDefinitions, disallowed);
                 }
 
                 break;
 
             default:
-                if (!IsAllowedPredicateSet(statement) && !AllowedStatementTypes.Contains(statement.GetType()))
+                if (!IsAllowedPredicateSet(statement)
+                    && !AllowedStatementTypes.Contains(statement.GetType())
+                    && !(allowProcedureAndTriggerDefinitions && ProcedureAndTriggerDefinitionTypes.Contains(statement.GetType())))
                 {
                     disallowed.Add(statement.GetType().Name);
                 }

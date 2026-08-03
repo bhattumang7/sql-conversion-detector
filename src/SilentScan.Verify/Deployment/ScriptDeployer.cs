@@ -9,7 +9,7 @@ namespace SilentScan.Verify.Deployment;
 /// one connection, so CREATE DATABASE / USE / DDL land in the same session the way sqlcmd
 /// would run them (CLAUDE.md Verify: "deploy its DDL to a fresh database").
 /// </summary>
-public sealed class ScriptDeployer
+public sealed partial class ScriptDeployer
 {
     private readonly SqlServerOptions _options;
 
@@ -123,10 +123,11 @@ public sealed class ScriptDeployer
     /// after every pass, each prefixed with the label of the script it came from.
     /// </summary>
     public async Task<IReadOnlyList<string>> DeployWhitelistedDdlWithRetryAsync(
-        IReadOnlyList<(string Label, string Script)> scripts, string? initialDatabase = null, int maxPasses = 5, CancellationToken cancellationToken = default)
+        IReadOnlyList<(string Label, string Script)> scripts, string? initialDatabase = null, int maxPasses = 5,
+        bool allowProcedureAndTriggerDefinitions = false, CancellationToken cancellationToken = default)
     {
         var messages = new List<string>();
-        var pending = CollectWhitelistedBatches(scripts, messages);
+        var pending = CollectWhitelistedBatches(scripts, allowProcedureAndTriggerDefinitions, messages);
 
         await using var connection = new SqlConnection(_options.BuildConnectionString(initialDatabase));
         await connection.OpenAsync(cancellationToken);
@@ -141,7 +142,7 @@ public sealed class ScriptDeployer
 
     /// <summary>Parses every script, skips (with a message) any batch containing a non-whitelisted statement kind or a parse error, and returns the rest as raw batch text ready to execute.</summary>
     private static List<(string Label, string BatchText)> CollectWhitelistedBatches(
-        IReadOnlyList<(string Label, string Script)> scripts, List<string> messages)
+        IReadOnlyList<(string Label, string Script)> scripts, bool allowProcedureAndTriggerDefinitions, List<string> messages)
     {
         var pending = new List<(string Label, string BatchText)>();
 
@@ -160,7 +161,7 @@ public sealed class ScriptDeployer
 
             foreach (var batch in scriptBatches)
             {
-                var disallowed = DdlStatementWhitelist.DisallowedStatementTypeNames(batch);
+                var disallowed = DdlStatementWhitelist.DisallowedStatementTypeNames(batch, allowProcedureAndTriggerDefinitions);
                 if (disallowed.Count > 0)
                 {
                     messages.Add($"{label}: batch at line {batch.StartLine} skipped - contains non-whitelisted statement kind(s): {string.Join(", ", disallowed)}");
@@ -172,7 +173,8 @@ public sealed class ScriptDeployer
                     continue;
                 }
 
-                pending.Add((label, script.Substring(batch.StartOffset, batch.FragmentLength)));
+                var batchText = script.Substring(batch.StartOffset, batch.FragmentLength);
+                pending.Add((label, RewriteAlterToCreateOrAlter(batch, batchText)));
             }
         }
 
@@ -212,4 +214,40 @@ public sealed class ScriptDeployer
 
         return pending;
     }
+
+    private static readonly HashSet<Type> RewritableAlterStatementTypes =
+    [
+        typeof(AlterProcedureStatement), typeof(AlterFunctionStatement), typeof(AlterTriggerStatement), typeof(AlterViewStatement),
+    ];
+
+    /// <summary>
+    /// Real-world corpora routinely guard a proc/function/trigger/view definition with a
+    /// dynamic-SQL stub ("<c>IF OBJECT_ID(...) IS NULL EXEC('CREATE PROCEDURE ... AS RETURN
+    /// 0')</c>" then an unconditional <c>ALTER PROCEDURE</c> for the real body - First Responder
+    /// Kit's every sp_Blitz*.sql file is exactly this shape) specifically so the ALTER always
+    /// succeeds whether or not a PRIOR run already created the object. This deployer correctly
+    /// never executes that EXEC(...) stub (CLAUDE.md: corpus DML/procs are never executed) - but
+    /// that means the stub never runs EITHER, so the object genuinely does not exist yet when
+    /// the ALTER that follows tries to target it, and SQL Server rejects it outright ("Invalid
+    /// object name"). Rewriting the batch's own leading ALTER keyword to CREATE OR ALTER (only
+    /// ever applied when the batch's SOLE statement is confirmed by the parsed AST to be exactly
+    /// one of the four alterable kinds, never a blind string search) reproduces the stub
+    /// pattern's actual INTENT - "this definition wins, regardless of whether the object
+    /// previously existed" - without ever running arbitrary dynamic SQL to get there. A
+    /// malformed rewrite (extremely unlikely given the type-gated guard, but not provably
+    /// impossible against every real-world file's exact comment placement) fails deployment
+    /// exactly like any other bad batch - reported, never silently miscompiled.
+    /// </summary>
+    private static string RewriteAlterToCreateOrAlter(TSqlBatch batch, string batchText)
+    {
+        if (batch.Statements is not [{ } soleStatement] || !RewritableAlterStatementTypes.Contains(soleStatement.GetType()))
+        {
+            return batchText;
+        }
+
+        return AlterKeywordPattern().Replace(batchText, "CREATE OR ALTER", 1);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\bALTER\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex AlterKeywordPattern();
 }
