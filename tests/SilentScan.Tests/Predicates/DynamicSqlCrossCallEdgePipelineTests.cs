@@ -10,7 +10,7 @@ namespace SilentScan.Tests.Predicates;
 /// proc-call edges": a caller passes a string literal into a callee procedure's parameter, and
 /// the callee's OWN body builds dynamic SQL from that parameter. Before this, DynamicSqlScanner
 /// never seeded a proc's own formal parameters at all - any reference to one inside dynamic SQL
-/// failed as "undeclared-variable" regardless of what any caller passed. Runs through
+/// failed as "variable-not-in-scope" regardless of what any caller passed. Runs through
 /// ScanReportBuilder (ProcCallGraphBuilder -> DynamicSqlScanner -> DynamicSqlPipeline), the same
 /// entry point production uses, not DynamicSqlScanner in isolation.
 /// </summary>
@@ -56,7 +56,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.True(finding.Column.Indexed);
         Assert.NotNull(finding.DynamicSqlCallSite);
-        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Reason?.StartsWith("undeclared-variable", StringComparison.Ordinal) == true);
+        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Reason?.StartsWith("variable-not-in-scope", StringComparison.Ordinal) == true);
     }
 
     [Fact]

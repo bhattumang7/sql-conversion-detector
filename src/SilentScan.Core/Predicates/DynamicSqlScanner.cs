@@ -244,10 +244,10 @@ public static class DynamicSqlScanner
         /// <see cref="ProcCallGraph.SingleCallSiteFor"/> for why "exactly one call site THIS
         /// SCAN saw" is the only case a single value can be trusted at all. A parameter with
         /// zero call sites is left unseeded entirely (falls back to today's plain
-        /// "undeclared-variable" if referenced - unchanged behavior, not a regression). A
+        /// "variable-not-in-scope" if referenced - unchanged behavior, not a regression). A
         /// parameter seen at MULTIPLE call sites, or passed something other than a string
         /// literal at its one call site, is explicitly tainted with its own reason rather than
-        /// silently falling through to the generic "undeclared-variable" a caller-blind scan
+        /// silently falling through to the generic "variable-not-in-scope" a caller-blind scan
         /// would report - CLAUDE.md's "never silently counted as clean" applies to the REASON a
         /// dynamic SQL site is unanalyzable exactly as much as to whether it is.
         /// </summary>
@@ -266,7 +266,7 @@ public static class DynamicSqlScanner
                 // No call site THIS SCAN saw at all (application code, an unparsed caller, a
                 // synonym this scan didn't resolve) - the parameter genuinely IS declared, just
                 // with no known value. Seeds an honest, specific taint reason rather than
-                // returning null and falling through to the generic "undeclared-variable" a
+                // returning null and falling through to the generic "variable-not-in-scope" a
                 // caller-blind VariableReference lookup would otherwise report - that reason is
                 // misleading here: the variable IS declared, as a parameter, there is simply no
                 // known caller to learn its value from.
@@ -550,7 +550,7 @@ public static class DynamicSqlScanner
             {
                 if (!folded.TryGetValue(name, out var existing) || existing.Assemblies is null)
                 {
-                    folded[name] = FoldState.Tainted(existing?.TaintReason ?? "undeclared-variable", existing?.TaintLocation ?? Span(site));
+                    folded[name] = FoldState.Tainted(existing?.TaintReason ?? "variable-not-in-scope", existing?.TaintLocation ?? Span(site));
                     return;
                 }
 
@@ -1257,7 +1257,7 @@ public static class DynamicSqlScanner
 
             if (!folded.TryGetValue(variableRef.Name, out var state))
             {
-                return FoldAttempt.Fail("undeclared-variable", Span(variableRef));
+                return FoldAttempt.Fail("variable-not-in-scope", Span(variableRef));
             }
 
             return state.Assemblies is not null

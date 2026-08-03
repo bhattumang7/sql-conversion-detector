@@ -23,8 +23,8 @@ public sealed class DynamicSqlSummaryTests
         {
             new DynamicSqlFinding("a.sql", 1, 1, DynamicSqlOutcome.AnalyzedLiteral, null),
             new DynamicSqlFinding("a.sql", 2, 1, DynamicSqlOutcome.AnalyzedLiteral, null),
-            new DynamicSqlFinding("a.sql", 3, 1, DynamicSqlOutcome.Unanalyzable, "undeclared-variable"),
-            new DynamicSqlFinding("a.sql", 4, 1, DynamicSqlOutcome.Unanalyzable, "undeclared-variable"),
+            new DynamicSqlFinding("a.sql", 3, 1, DynamicSqlOutcome.Unanalyzable, "variable-not-in-scope"),
+            new DynamicSqlFinding("a.sql", 4, 1, DynamicSqlOutcome.Unanalyzable, "variable-not-in-scope"),
             new DynamicSqlFinding("a.sql", 5, 1, DynamicSqlOutcome.Unanalyzable, "goto-or-label-in-scope"),
             new DynamicSqlFinding("a.sql", 6, 1, DynamicSqlOutcome.InnerParseFailed, "Incorrect syntax."),
         };
@@ -35,7 +35,7 @@ public sealed class DynamicSqlSummaryTests
         Assert.Equal(2, summary.AnalyzedCount);
         Assert.Equal(3, summary.UnanalyzableCount);
         Assert.Equal(1, summary.InnerParseFailedCount);
-        Assert.Equal(new Dictionary<string, int> { ["undeclared-variable"] = 2, ["goto-or-label-in-scope"] = 1 }, summary.UnanalyzableReasonCounts);
+        Assert.Equal(new Dictionary<string, int> { ["variable-not-in-scope"] = 2, ["goto-or-label-in-scope"] = 1 }, summary.UnanalyzableReasonCounts);
         Assert.Equal(2d / 6d, summary.AnalyzedFraction);
     }
 
@@ -62,7 +62,7 @@ public sealed class DynamicSqlSummaryTests
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.AnalyzedLiteral, null),
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.AnalyzedLiteral, null),
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.AnalyzedLiteral, null),
-            new DynamicSqlFinding("a.sql", 20, 5, DynamicSqlOutcome.Unanalyzable, "undeclared-variable"),
+            new DynamicSqlFinding("a.sql", 20, 5, DynamicSqlOutcome.Unanalyzable, "variable-not-in-scope"),
         };
 
         var summary = DynamicSqlSummary.From(findings);
@@ -70,7 +70,7 @@ public sealed class DynamicSqlSummaryTests
         Assert.Equal(2, summary.TotalCallSites);
         Assert.Equal(1, summary.AnalyzedCount);
         Assert.Equal(1, summary.UnanalyzableCount);
-        Assert.Equal(1, summary.UnanalyzableReasonCounts["undeclared-variable"]);
+        Assert.Equal(1, summary.UnanalyzableReasonCounts["variable-not-in-scope"]);
         Assert.Equal(0.5d, summary.AnalyzedFraction);
     }
 

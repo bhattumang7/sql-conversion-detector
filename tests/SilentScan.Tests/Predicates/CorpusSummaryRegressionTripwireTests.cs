@@ -55,7 +55,7 @@ public sealed class CorpusSummaryRegressionTripwireTests
         // DynamicSqlSummary - the 5 EXEC/sp_executesql call sites the fixture plants (4
         // analyzable: literal/Tier B/Tier C/clean, 1 genuinely Unanalyzable: a procedure
         // parameter with no known caller in this fixture - value-seeding across proc-call edges
-        // now reports its own honest reason rather than the generic "undeclared-variable" a
+        // now reports its own honest reason rather than the generic "variable-not-in-scope" a
         // caller-blind lookup used to produce).
         var dynamicSql = report.DynamicSqlSummary;
         Assert.Equal(5, dynamicSql.TotalCallSites);

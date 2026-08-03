@@ -148,7 +148,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
         // usp_DynamicVariable_Fires' @Sql is a PROCEDURE PARAMETER (a runtime input, never a
         // local straight-line DECLARE) with no known caller in this fixture, so Tier C correctly
         // can't fold it either - value-seeding across proc-call edges reports its own honest
-        // reason here rather than the generic "undeclared-variable" a caller-blind lookup used
+        // reason here rather than the generic "variable-not-in-scope" a caller-blind lookup used
         // to produce (the variable IS declared, as a parameter, there's just no caller to learn
         // its value from).
         var finding = Assert.Single(_report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);

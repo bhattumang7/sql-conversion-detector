@@ -33,7 +33,7 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
 
@@ -481,7 +481,7 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
 
@@ -492,7 +492,7 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
 
@@ -688,7 +688,7 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
 
@@ -709,7 +709,7 @@ public sealed class DynamicSqlScannerTests
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
 
@@ -1066,7 +1066,7 @@ public sealed class DynamicSqlScannerTests
         // Zero edges for this callee (application code, an unparsed caller, a synonym this scan
         // didn't resolve) - the parameter IS declared, just with no known caller to seed from, so
         // this must report its own honest reason rather than the misleading generic
-        // "undeclared-variable" a caller-blind VariableReference lookup would otherwise produce.
+        // "variable-not-in-scope" a caller-blind VariableReference lookup would otherwise produce.
         var graph = new ProcCallGraph([]);
 
         var result = ScanWithCallGraph(
@@ -1084,7 +1084,7 @@ public sealed class DynamicSqlScannerTests
     {
         // FormalParameterIsOutput true means the argument flows callee-to-caller, never the
         // other direction - seeding it from anything would be backwards, so it must stay
-        // unseeded (falls back to "undeclared-variable" exactly like a genuinely unknown one).
+        // unseeded (falls back to "variable-not-in-scope" exactly like a genuinely unknown one).
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var argument = new ProcCallArgument("@Status", null, FormalParameterIsOutput: true, null, true, literal);
         var graph = SingleCallerGraph(argument);
@@ -1096,7 +1096,7 @@ public sealed class DynamicSqlScannerTests
 
         Assert.Empty(result.AnalyzableScripts);
         var finding = Assert.Single(result.Findings);
-        Assert.Equal("undeclared-variable", finding.Reason);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
     }
 
     // ------------------------------------------------------------------
