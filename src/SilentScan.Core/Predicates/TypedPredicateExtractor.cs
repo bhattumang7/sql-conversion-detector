@@ -74,13 +74,35 @@ public static class TypedPredicateExtractor
             }
         }
 
-        // Mirrors NonSargablePredicateScanner's identical tracker (CLAUDE.md Tier-1 scope note:
-        // "never a SELECT list, ORDER BY, or GROUP BY - there's no seek to lose"): a comparison
-        // that never filters rows isn't a verdict-bearing finding either, e.g. a CASE expression
-        // in a SELECT list comparing a column to a literal. Before this, TypedPredicateExtractor
-        // had no such gating at all and reported a ScanForced/RangeSeek verdict for ANY
-        // comparison anywhere in the tree, filter or not.
-        private bool _inFilterContext;
+        /// <summary>
+        /// Mirrors NonSargablePredicateScanner's identical tracker (CLAUDE.md Tier-1 scope note:
+        /// "never a SELECT list, ORDER BY, or GROUP BY - there's no seek to lose"): a comparison
+        /// that never filters rows isn't a verdict-bearing finding either, e.g. a CASE expression
+        /// in a SELECT list comparing a column to a literal. Before the boolean pair this enum
+        /// replaced existed, TypedPredicateExtractor had no such gating at all and reported a
+        /// ScanForced/RangeSeek verdict for ANY comparison anywhere in the tree, filter or not.
+        /// <see cref="SuppressedOperand"/> is a second, independent fact about the SAME node
+        /// (not extra state a single flag couldn't represent - every read site only ever
+        /// consults it while already in the <see cref="NotSeekable"/> branch): not "are we
+        /// filtering now" but "did we just leave an active filter to enter this operand
+        /// position" - used only to decide the ledger message, distinguishing a comparison
+        /// that's surprisingly not a seek predicate (textually inside a WHERE, but a CASE
+        /// WHEN-condition the optimizer never uses as one) from a comparison that was simply
+        /// never near a filter clause to begin with (silently excluded, unchanged).
+        /// </summary>
+        private enum PredicatePosition
+        {
+            /// <summary>Not a filtering position at all - a SELECT-list expression, ORDER BY, GROUP BY, or similar. Never ledgered; matches Tier-1's identical silent exclusion.</summary>
+            NotSeekable,
+
+            /// <summary>A genuine WHERE/HAVING/ON/MERGE-condition position - eligible for a verdict.</summary>
+            Seekable,
+
+            /// <summary>A CASE/IIF/COALESCE/NULLIF operand position reached by suspending an ENCLOSING active <see cref="Seekable"/> position (see <see cref="EnterOperandPosition"/>) - ledgered rather than silent, since this one is textually inside a filter clause.</summary>
+            SuppressedOperand,
+        }
+
+        private PredicatePosition _position;
 
         // Roadmap Phase E2: `WHERE NOT (Col = @p)` previously visited the inner
         // BooleanComparisonExpression completely unaware of the enclosing NOT - the default
@@ -91,19 +113,6 @@ public static class TypedPredicateExtractor
         // missing one). A bool rather than a stack because BooleanNotExpression nests by
         // toggling parity (NOT NOT X == X), never by depth.
         private bool _negated;
-
-        /// <summary>
-        /// True whenever a comparison currently reachable via default traversal is nested inside
-        /// a CASE/IIF/COALESCE/NULLIF branch (an OPERAND position) that sits within an
-        /// ENCLOSING, currently-active filter clause - distinct from a comparison that is simply
-        /// never in a filter position at all (a SELECT-list CASE, an ORDER BY expression), which
-        /// stays silently excluded exactly as before. The distinction matters for the ledger: a
-        /// comparison textually inside a WHERE that turns out not to be a real seek predicate
-        /// (because it's the WHEN-condition of a CASE the WHERE's own top-level comparison
-        /// happens to wrap) is surprising enough to leave a trace for, where a comparison that
-        /// was never near a filter clause to begin with is not. See <see cref="EnterOperandPosition"/>.
-        /// </summary>
-        private bool _suppressedActiveFilterContext;
 
         /// <summary>
         /// Roadmap Phase E3: the whole boolean predicate fragment currently being resolved (set
@@ -174,10 +183,8 @@ public static class TypedPredicateExtractor
             // WHERE's own nested subquery (an EXISTS/IN (SELECT ...)) would inherit "filter
             // context = true" for that subquery's unrelated SELECT list, and a top-level SELECT
             // list would inherit whatever the enclosing scope happened to be.
-            var previousFilterContext = _inFilterContext;
-            var previousSuppressed = _suppressedActiveFilterContext;
-            _inFilterContext = false;
-            _suppressedActiveFilterContext = false;
+            var previousPosition = _position;
+            _position = PredicatePosition.NotSeekable;
 
             // `_negated` is reset here too, for the identical reason: `WHERE NOT EXISTS (SELECT
             // ... WHERE a.x = b.y)` previously visited the inner `a.x = b.y` with `_negated` still
@@ -202,25 +209,24 @@ public static class TypedPredicateExtractor
             node.WindowClause?.Accept(this);
 
             _negated = previousNegated;
-            _inFilterContext = previousFilterContext;
-            _suppressedActiveFilterContext = previousSuppressed;
+            _position = previousPosition;
             _scopeStack.Pop();
         }
 
         public override void ExplicitVisit(WhereClause node)
         {
-            var previous = _inFilterContext;
-            _inFilterContext = true;
+            var previous = _position;
+            _position = PredicatePosition.Seekable;
             node.AcceptChildren(this);
-            _inFilterContext = previous;
+            _position = previous;
         }
 
         public override void ExplicitVisit(HavingClause node)
         {
-            var previous = _inFilterContext;
-            _inFilterContext = true;
+            var previous = _position;
+            _position = PredicatePosition.Seekable;
             node.AcceptChildren(this);
-            _inFilterContext = previous;
+            _position = previous;
         }
 
         /// <summary>A JOIN's ON clause is a filter context exactly like WHERE; the table references it joins are not (a derived-table subquery there has its own SELECT list to protect).</summary>
@@ -229,10 +235,10 @@ public static class TypedPredicateExtractor
             node.FirstTableReference?.Accept(this);
             node.SecondTableReference?.Accept(this);
 
-            var previous = _inFilterContext;
-            _inFilterContext = true;
+            var previous = _position;
+            _position = PredicatePosition.Seekable;
             node.SearchCondition?.Accept(this);
-            _inFilterContext = previous;
+            _position = previous;
         }
 
         // UPDATE/DELETE/MERGE previously pushed no FROM scope at all, so every predicate in
@@ -308,10 +314,10 @@ public static class TypedPredicateExtractor
             node.TableReference?.Accept(this);
             node.TopRowFilter?.Accept(this);
 
-            var previousFilterContext = _inFilterContext;
-            _inFilterContext = true;
+            var previousPosition = _position;
+            _position = PredicatePosition.Seekable;
             node.SearchCondition?.Accept(this);
-            _inFilterContext = previousFilterContext;
+            _position = previousPosition;
 
             foreach (var actionClause in node.ActionClauses)
             {
@@ -325,10 +331,10 @@ public static class TypedPredicateExtractor
         /// <summary>Splits a WHEN [NOT] MATCHED clause's own "AND &lt;cond&gt;" extra condition (a filter position) from its action body (an assignment/projection position) - see <see cref="ExplicitVisit(MergeSpecification)"/>.</summary>
         public override void ExplicitVisit(MergeActionClause node)
         {
-            var previousFilterContext = _inFilterContext;
-            _inFilterContext = true;
+            var previousPosition = _position;
+            _position = PredicatePosition.Seekable;
             node.SearchCondition?.Accept(this);
-            _inFilterContext = previousFilterContext;
+            _position = previousPosition;
 
             node.Action?.Accept(this);
         }
@@ -443,7 +449,7 @@ public static class TypedPredicateExtractor
         // already resolved through ResolveOperand's own ExpressionTypeInferencer branch) - the
         // inner `Col = N'X'` is a WHEN-condition ScriptDom's default traversal still walks into
         // (AcceptChildren recurses into WhenClauses regardless of what ResolveOperand already
-        // did with this same node), and it was previously visited with _inFilterContext still
+        // did with this same node), and it was previously visited with the position still
         // true, reporting a verdict for a comparison the optimizer never uses as a seek
         // predicate. SimpleCaseExpression/CoalesceExpression/NullIfExpression can't syntactically
         // embed a bare BooleanComparisonExpression the way SearchedCaseExpression/IIfCall can,
@@ -460,29 +466,46 @@ public static class TypedPredicateExtractor
         public override void ExplicitVisit(NullIfExpression node) => EnterOperandPosition(node);
 
         /// <summary>
-        /// Suspends filter-context/negation while walking a scalar-expression OPERAND subtree
-        /// (a CASE/IIF/COALESCE/NULLIF branch) via ScriptDom's own default traversal - anything
-        /// found in there is a value being computed, not a row filter, exactly like a SELECT-list
-        /// expression. <see cref="_suppressedActiveFilterContext"/> is only raised when there was
-        /// a real, active filter context to suspend (not merely absent to begin with), so the
-        /// three "not in filter context" checks below can tell "genuinely never in a filter" (stay
-        /// silent, unchanged) apart from "was in a filter, then descended into an operand
-        /// position" (ledger it - textually inside a WHERE is a surprising place for a comparison
-        /// to turn out not to be a seek predicate).
+        /// Suspends the seekable position (and negation) while walking a scalar-expression
+        /// OPERAND subtree (a CASE/IIF/COALESCE/NULLIF branch) via ScriptDom's own default
+        /// traversal - anything found in there is a value being computed, not a row filter,
+        /// exactly like a SELECT-list expression. Moves to <see cref="PredicatePosition.SuppressedOperand"/>
+        /// only when there was a real, active <see cref="PredicatePosition.Seekable"/> position to
+        /// suspend (not merely absent to begin with) - otherwise <see cref="PredicatePosition.NotSeekable"/>,
+        /// so the read sites can tell "genuinely never in a filter" (stay silent, unchanged) apart
+        /// from "was in a filter, then descended into an operand position" (ledger it - textually
+        /// inside a WHERE is a surprising place for a comparison to turn out not to be a seek
+        /// predicate).
         /// </summary>
         private void EnterOperandPosition(TSqlFragment node)
         {
-            var previousFilterContext = _inFilterContext;
-            var previousSuppressed = _suppressedActiveFilterContext;
-            if (_inFilterContext)
+            var previousPosition = _position;
+            _position = previousPosition == PredicatePosition.Seekable ? PredicatePosition.SuppressedOperand : PredicatePosition.NotSeekable;
+            node.AcceptChildren(this);
+            _position = previousPosition;
+        }
+
+        /// <summary>
+        /// True (the caller should stop, having already ledgered when appropriate) whenever the
+        /// current position isn't <see cref="PredicatePosition.Seekable"/> - shared by every
+        /// predicate-kind visitor (IN, ANY/SOME/ALL, and the common `=`/`&lt;&gt;`/range-operator
+        /// path in <see cref="TryAddFinding"/>) that has no operator-specific "not sargable
+        /// regardless of type match" case of its own to report first (unlike NOT BETWEEN/NOT LIKE
+        /// above, which ledger a different reason when genuinely in a seekable position).
+        /// </summary>
+        private bool SkipIfNotSeekable(TSqlFragment node)
+        {
+            if (_position == PredicatePosition.Seekable)
             {
-                _suppressedActiveFilterContext = true;
+                return false;
             }
 
-            _inFilterContext = false;
-            node.AcceptChildren(this);
-            _inFilterContext = previousFilterContext;
-            _suppressedActiveFilterContext = previousSuppressed;
+            if (_position == PredicatePosition.SuppressedOperand)
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, OperandPositionConstructKind, OperandPositionLedgerReason);
+            }
+
+            return true;
         }
 
         private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
@@ -779,11 +802,11 @@ public static class TypedPredicateExtractor
             var isNotBetween = node.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween || _negated;
             if (isNotBetween)
             {
-                if (_scopeStack.Count > 0 && _inFilterContext)
+                if (_scopeStack.Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT BETWEEN is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
-                else if (_suppressedActiveFilterContext)
+                else if (_position == PredicatePosition.SuppressedOperand)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, OperandPositionConstructKind, OperandPositionLedgerReason);
                 }
@@ -814,11 +837,11 @@ public static class TypedPredicateExtractor
                 // wrong cause: fixing the type mismatch would not make this predicate seek. Only
                 // recorded when this would otherwise have been a candidate (real scope, real
                 // filter context) - mirrors every other "not eligible for a verdict" skip below.
-                if (_scopeStack.Count > 0 && _inFilterContext)
+                if (_scopeStack.Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
-                else if (_suppressedActiveFilterContext)
+                else if (_position == PredicatePosition.SuppressedOperand)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, OperandPositionConstructKind, OperandPositionLedgerReason);
                 }
@@ -844,18 +867,13 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            if (!_inFilterContext)
+            // Inside a query, just not in a filtering position (a SELECT-list CASE branch, an
+            // ORDER BY expression) - no seek to lose, not a predicate at all, so this is excluded
+            // silently exactly like Tier-1 already excludes it, not ledgered. Unless an enclosing
+            // filter clause's own active context was suspended to get here (this IN is itself a
+            // CASE/IIF/COALESCE/NULLIF branch) - see EnterOperandPosition/SkipIfNotSeekable.
+            if (SkipIfNotSeekable(node))
             {
-                // Inside a query, just not in a filtering position (a SELECT-list CASE branch,
-                // an ORDER BY expression) - no seek to lose, not a predicate at all, so this is
-                // excluded silently exactly like Tier-1 already excludes it, not ledgered. Unless
-                // an enclosing filter clause's own active context was suspended to get here (this
-                // IN is itself a CASE/IIF/COALESCE/NULLIF branch) - see EnterOperandPosition.
-                if (_suppressedActiveFilterContext)
-                {
-                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, OperandPositionConstructKind, OperandPositionLedgerReason);
-                }
-
                 return;
             }
 
@@ -912,13 +930,8 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            if (!_inFilterContext)
+            if (SkipIfNotSeekable(node))
             {
-                if (_suppressedActiveFilterContext)
-                {
-                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, OperandPositionConstructKind, OperandPositionLedgerReason);
-                }
-
                 return;
             }
 
@@ -1032,18 +1045,13 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            if (!_inFilterContext)
+            // Inside a query, just not in a filtering position (a SELECT-list CASE branch, an
+            // ORDER BY expression) - no seek to lose, not a predicate at all, so this is excluded
+            // silently exactly like Tier-1 already excludes it, not ledgered. Unless an enclosing
+            // filter clause's own active context was suspended to get here (this comparison is
+            // itself a CASE/IIF/COALESCE/NULLIF branch) - see EnterOperandPosition/SkipIfNotSeekable.
+            if (SkipIfNotSeekable(node))
             {
-                // Inside a query, just not in a filtering position (a SELECT-list CASE branch,
-                // an ORDER BY expression) - no seek to lose, not a predicate at all, so this is
-                // excluded silently exactly like Tier-1 already excludes it, not ledgered. Unless
-                // an enclosing filter clause's own active context was suspended to get here (this
-                // comparison is itself a CASE/IIF/COALESCE/NULLIF branch) - see EnterOperandPosition.
-                if (_suppressedActiveFilterContext)
-                {
-                    ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, OperandPositionConstructKind, OperandPositionLedgerReason);
-                }
-
                 return;
             }
 
