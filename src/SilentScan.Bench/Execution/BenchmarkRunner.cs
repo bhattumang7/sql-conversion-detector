@@ -1,6 +1,8 @@
 using Microsoft.Data.SqlClient;
 using SilentScan.Bench.Reporting;
 using SilentScan.Bench.Scenarios;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Rules;
 using SilentScan.Verify;
 using SilentScan.Verify.Deployment;
 
@@ -96,7 +98,26 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
             cell.Selectivity,
             Median(runs.Select(r => r.LogicalReads)),
             Median(runs.Select(r => r.CpuMs)),
-            Median(runs.Select(r => r.ElapsedMs)));
+            Median(runs.Select(r => r.ElapsedMs)),
+            StaticVerdict(cell.Scenario, cell.Matched));
+    }
+
+    /// <summary>
+    /// What <see cref="VerdictClassifier"/> itself predicts for this cell's exact type pair - a
+    /// Matched row is always SeekPreserved by construction (its param IS the column's own type/
+    /// collation, never reclassified), never a guess; a Mismatched row is classified for real,
+    /// reusing the same code path the scan pipeline uses rather than duplicating its logic.
+    /// </summary>
+    private static Verdict StaticVerdict(TypePairScenario scenario, bool matched)
+    {
+        if (matched)
+        {
+            return Verdict.SeekPreserved;
+        }
+
+        var columnType = new SqlType(scenario.ColumnCategory, Collation: scenario.Collation);
+        var otherType = new SqlType(scenario.MismatchedOtherCategory);
+        return VerdictClassifier.Classify(columnType, otherType, otherIsLiteral: false, operatorText: "=");
     }
 
     /// <summary>One cell's identity within the benchmark matrix - bundled so <see cref="RunCellAsync"/> stays under the parameter-count limit as the matrix grows another dimension.</summary>

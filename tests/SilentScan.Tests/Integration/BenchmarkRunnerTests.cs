@@ -94,7 +94,31 @@ public sealed class BenchmarkRunnerTests : IAsyncLifetime
         var csv = CsvReportWriter.Write(results);
         var lines = csv.TrimEnd().Split('\n');
 
-        Assert.Equal("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs", lines[0].TrimEnd('\r'));
+        Assert.Equal("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs,StaticVerdict", lines[0].TrimEnd('\r'));
         Assert.Equal(results.Count + 1, lines.Length);
+    }
+
+    [Fact]
+    public async Task RunAsync_StampsTheStaticVerdictVerdictClassifierPredictsForEachCell()
+    {
+        // The task this exists for: a bare Matched=false row gives no way to tell "this row
+        // confirms the classifier" from "this row contradicts it" without cross-referencing the
+        // matrix by hand. Every row must now carry that answer directly - a Matched row is
+        // trivially SeekPreserved (its param IS the column's own type), and each collation
+        // family's Mismatched row must carry the verdict VerdictClassifier itself predicts for
+        // that exact pair (SQL_* -> ScanForced, Windows -> RangeSeek).
+        var sqlFamily = TypePairScenario.VarCharVsNVarChar("SQL_Latin1_General_CP1_CI_AS");
+        var windowsFamily = TypePairScenario.VarCharVsNVarChar("Latin1_General_CI_AS");
+        var runner = new BenchmarkRunner(_options);
+
+        var results = await runner.RunAsync(DatabaseName, [sqlFamily, windowsFamily], [RowCount]);
+
+        Assert.All(results.Where(r => r.Matched), r => Assert.Equal(SilentScan.Core.Rules.Verdict.SeekPreserved, r.StaticVerdict));
+        Assert.All(
+            results.Where(r => !r.Matched && r.ScenarioName == sqlFamily.Name),
+            r => Assert.Equal(SilentScan.Core.Rules.Verdict.ScanForced, r.StaticVerdict));
+        Assert.All(
+            results.Where(r => !r.Matched && r.ScenarioName == windowsFamily.Name),
+            r => Assert.Equal(SilentScan.Core.Rules.Verdict.RangeSeek, r.StaticVerdict));
     }
 }

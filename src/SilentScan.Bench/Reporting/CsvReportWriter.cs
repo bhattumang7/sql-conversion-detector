@@ -13,7 +13,7 @@ public static class CsvReportWriter
         // identical regardless of what platform generated it - this file feeds a published
         // study's charts, not just a human reading it in a terminal.
         var builder = new StringBuilder();
-        builder.Append("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs\n");
+        builder.Append("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs,StaticVerdict\n");
 
         foreach (var r in results)
         {
@@ -25,7 +25,8 @@ public static class CsvReportWriter
                 r.Selectivity.ToString(),
                 r.MedianLogicalReads.ToString(CultureInfo.InvariantCulture),
                 r.MedianCpuMs.ToString(CultureInfo.InvariantCulture),
-                r.MedianElapsedMs.ToString(CultureInfo.InvariantCulture)));
+                r.MedianElapsedMs.ToString(CultureInfo.InvariantCulture),
+                r.StaticVerdict.ToString()));
             builder.Append('\n');
         }
 

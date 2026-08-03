@@ -1,5 +1,6 @@
 using SilentScan.Bench.Reporting;
 using SilentScan.Bench.Scenarios;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Tests.Bench;
 
@@ -15,14 +16,14 @@ public sealed class CsvReportWriterTests
     {
         var results = new[]
         {
-            new BenchmarkResult("VarCharVsNVarChar_SQL", 10_000, LegacyCardinalityEstimation: true, Matched: false, QuerySelectivity.SingleRow, 1234, 56, 78),
+            new BenchmarkResult("VarCharVsNVarChar_SQL", 10_000, LegacyCardinalityEstimation: true, Matched: false, QuerySelectivity.SingleRow, 1234, 56, 78, Verdict.ScanForced),
         };
 
         var csv = CsvReportWriter.Write(results);
 
         Assert.Equal(
-            "ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs\n"
-            + "VarCharVsNVarChar_SQL,10000,true,false,SingleRow,1234,56,78\n",
+            "ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs,StaticVerdict\n"
+            + "VarCharVsNVarChar_SQL,10000,true,false,SingleRow,1234,56,78,ScanForced\n",
             csv);
     }
 
@@ -31,7 +32,7 @@ public sealed class CsvReportWriterTests
     {
         var csv = CsvReportWriter.Write([]);
 
-        Assert.Equal("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs\n", csv);
+        Assert.Equal("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs,StaticVerdict\n", csv);
     }
 
     [Fact]
@@ -39,8 +40,8 @@ public sealed class CsvReportWriterTests
     {
         var results = new[]
         {
-            new BenchmarkResult("Scenario", 1, true, true, QuerySelectivity.SingleRow, 1, 1, 1),
-            new BenchmarkResult("Scenario", 2, false, false, QuerySelectivity.OnePercent, 2, 2, 2),
+            new BenchmarkResult("Scenario", 1, true, true, QuerySelectivity.SingleRow, 1, 1, 1, Verdict.SeekPreserved),
+            new BenchmarkResult("Scenario", 2, false, false, QuerySelectivity.OnePercent, 2, 2, 2, Verdict.ScanForced),
         };
 
         var csv = CsvReportWriter.Write(results);
@@ -53,8 +54,8 @@ public sealed class CsvReportWriterTests
     {
         var results = new[]
         {
-            new BenchmarkResult("A", 1, true, true, QuerySelectivity.SingleRow, 1, 1, 1),
-            new BenchmarkResult("B", 2, false, false, QuerySelectivity.TenPercent, 2, 2, 2),
+            new BenchmarkResult("A", 1, true, true, QuerySelectivity.SingleRow, 1, 1, 1, Verdict.SeekPreserved),
+            new BenchmarkResult("B", 2, false, false, QuerySelectivity.TenPercent, 2, 2, 2, Verdict.ScanForced),
         };
 
         var csv = CsvReportWriter.Write(results);
