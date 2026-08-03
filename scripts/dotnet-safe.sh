@@ -29,7 +29,7 @@
 #        DOTNET_SAFE_TIMEOUT=1200 scripts/dotnet-safe.sh test
 set -u
 
-if [ "$#" -eq 0 ]; then
+if [[ "$#" -eq 0 ]]; then
     echo "usage: $0 <dotnet-subcommand> [args...]" >&2
     exit 2
 fi
@@ -43,12 +43,13 @@ log_file="$log_dir/$(date +%Y%m%d-%H%M%S 2>/dev/null || echo run)-$$.log"
 
 group_pid=""
 cleanup() {
-    if [ -n "$group_pid" ]; then
+    if [[ -n "$group_pid" ]]; then
         kill -TERM -- "-$group_pid" >/dev/null 2>&1 || true
         sleep 1
         kill -KILL -- "-$group_pid" >/dev/null 2>&1 || true
     fi
     dotnet build-server shutdown >/dev/null 2>&1 || true
+    return 0
 }
 trap cleanup EXIT
 
@@ -57,9 +58,9 @@ group_pid=$!
 wait "$group_pid"
 exit_code=$?
 
-if [ "$exit_code" -eq 124 ] || [ "$exit_code" -eq 137 ]; then
+if [[ "$exit_code" -eq 124 ]] || [[ "$exit_code" -eq 137 ]]; then
     echo "dotnet $* TIMED OUT after ${timeout_seconds}s - killed. Full log: $log_file" >&2
-elif [ "$exit_code" -ne 0 ]; then
+elif [[ "$exit_code" -ne 0 ]]; then
     echo "dotnet $* FAILED (exit $exit_code). Full log: $log_file" >&2
 else
     echo "dotnet $* succeeded. Full log: $log_file"

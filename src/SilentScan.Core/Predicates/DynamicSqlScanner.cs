@@ -72,6 +72,9 @@ public static class DynamicSqlScanner
     /// </summary>
     private const int MaxAssembliesPerVariable = 32;
 
+    /// <summary>Emitted at every site that hits <see cref="MaxAssembliesPerVariable"/> - one shared constant so the reason string can't drift between the union, cross-concat, and argument-combination cap sites.</summary>
+    private const string CardinalityCapReason = "diverges-across-if-branches:cardinality-cap";
+
     private readonly record struct FoldAttempt(IReadOnlyList<IReadOnlyList<LiteralSegment>>? Assemblies, string? Reason, SourceSpan? Location)
     {
         public bool Success => Assemblies is not null;
@@ -562,7 +565,7 @@ public static class DynamicSqlScanner
 
                 folded[name] = TryCartesianConcat(existing.Assemblies, rhs.Assemblies!, out var combined)
                     ? FoldState.Constant(combined)
-                    : FoldState.Tainted("diverges-across-if-branches:cardinality-cap", Span(site));
+                    : FoldState.Tainted(CardinalityCapReason, Span(site));
                 return;
             }
 
@@ -611,14 +614,11 @@ public static class DynamicSqlScanner
                     continue;
                 }
 
-                foreach (var alternative in alternatives)
+                foreach (var alternative in alternatives.Where(a => string.Equals(a.GuardText, guardText, StringComparison.Ordinal)))
                 {
-                    if (string.Equals(alternative.GuardText, guardText, StringComparison.Ordinal))
-                    {
-                        resolved ??= new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
-                        resolved[key] = alternative.State;
-                        break;
-                    }
+                    resolved ??= new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+                    resolved[key] = alternative.State;
+                    break;
                 }
             }
 
@@ -1026,7 +1026,7 @@ public static class DynamicSqlScanner
 
                 if (!TryCartesianConcat(assemblies, attempt.Assemblies!, out var next))
                 {
-                    AddFinding(Unanalyzable(node, "diverges-across-if-branches:cardinality-cap"));
+                    AddFinding(Unanalyzable(node, CardinalityCapReason));
                     return;
                 }
 
@@ -1213,7 +1213,7 @@ public static class DynamicSqlScanner
                     when WhitelistedStringBuilders.Contains(functionName):
                     return TryFoldStringBuilder(builderCall, functionName, folded, foldingEnabled);
 
-                case FunctionCall { FunctionName.Value: var functionName } nonDeterministicCall
+                case FunctionCall { FunctionName.Value: var functionName }
                     when NonDeterministicFunctions.Contains(functionName):
                     // A distinct reason from the generic ":function-call" below - NEWID()/
                     // GETDATE()/RAND() aren't unimplemented, they're genuinely unknowable at
@@ -1281,7 +1281,7 @@ public static class DynamicSqlScanner
 
             return TryCartesianConcat(left.Assemblies!, right.Assemblies!, out var concatenated)
                 ? FoldAttempt.Ok(concatenated)
-                : FoldAttempt.Fail("diverges-across-if-branches:cardinality-cap", Span(binary));
+                : FoldAttempt.Fail(CardinalityCapReason, Span(binary));
         }
 
         /// <summary>
@@ -1595,7 +1595,7 @@ public static class DynamicSqlScanner
 
                 if (!TryUnionAssemblies(union, attempt.Assemblies!, out var merged))
                 {
-                    return FoldAttempt.Fail("diverges-across-if-branches:cardinality-cap", Span(expression));
+                    return FoldAttempt.Fail(CardinalityCapReason, Span(expression));
                 }
 
                 union = merged;
@@ -1773,7 +1773,7 @@ public static class DynamicSqlScanner
 
                 if (results.Count == MaxAssembliesPerVariable)
                 {
-                    return FoldAttempt.Fail("diverges-across-if-branches:cardinality-cap", Span(site));
+                    return FoldAttempt.Fail(CardinalityCapReason, Span(site));
                 }
 
                 results.Add([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, value)]);
@@ -2032,6 +2032,22 @@ public static class DynamicSqlScanner
                 // scope has no such caller, so the value itself is unused here.
                 BuildSequence(statements, entryBlock, exitBlocks, new Stack<(int Header, int After)>());
 
+                var predecessors = BuildPredecessors();
+                var outStates = new Dictionary<string, FoldState>?[_blocks.Count];
+
+                RunFixpoint(entryBlock, initialSeed, predecessors, outStates);
+                RunFinalEmissionPass(entryBlock, initialSeed, predecessors, outStates);
+
+                // The scope's own "final" state (what WalkScopedBody reads an OUTPUT parameter
+                // back from) is the merge of every block execution can actually fall off the end
+                // at - RETURN and an unconditional GOTO each already end their block with no
+                // fallthrough successor, so they contribute nothing here, matching that a
+                // procedure exiting through either one never reaches its own implicit end.
+                return MergeExitStates(exitBlocks, outStates);
+            }
+
+            private List<int>[] BuildPredecessors()
+            {
                 var predecessors = new List<int>[_blocks.Count];
                 for (var i = 0; i < _blocks.Count; i++)
                 {
@@ -2046,24 +2062,40 @@ public static class DynamicSqlScanner
                     }
                 }
 
-                var outStates = new Dictionary<string, FoldState>?[_blocks.Count];
+                return predecessors;
+            }
 
+            /// <summary>Merges block <paramref name="index"/>'s entry state and runs its steps - the one computation shared by the fixpoint loop and the final emission-enabled pass. Null means the block has no known entry state yet (an unreached predecessor this round).</summary>
+            private Dictionary<string, FoldState>? ComputeBlockOutput(
+                int index, int entryBlock, Dictionary<string, FoldState> initialSeed, List<int>[] predecessors, Dictionary<string, FoldState>?[] outStates)
+            {
+                var merged = MergeEntry(index, entryBlock, initialSeed, predecessors, outStates);
+                if (merged is null)
+                {
+                    return null;
+                }
+
+                var working = new Dictionary<string, FoldState>(merged, StringComparer.OrdinalIgnoreCase);
+                foreach (var step in _blocks[index].Steps)
+                {
+                    step(working);
+                }
+
+                return working;
+            }
+
+            private void RunFixpoint(int entryBlock, Dictionary<string, FoldState> initialSeed, List<int>[] predecessors, Dictionary<string, FoldState>?[] outStates)
+            {
                 visitor._suppressEmission = true;
                 for (var round = 0; round < MaxRounds; round++)
                 {
                     var changed = false;
                     for (var i = 0; i < _blocks.Count; i++)
                     {
-                        var merged = MergeEntry(i, entryBlock, initialSeed, predecessors, outStates);
-                        if (merged is null)
+                        var working = ComputeBlockOutput(i, entryBlock, initialSeed, predecessors, outStates);
+                        if (working is null)
                         {
                             continue;
-                        }
-
-                        var working = new Dictionary<string, FoldState>(merged, StringComparer.OrdinalIgnoreCase);
-                        foreach (var step in _blocks[i].Steps)
-                        {
-                            step(working);
                         }
 
                         if (outStates[i] is null || !StatesEqual(outStates[i]!, working))
@@ -2079,33 +2111,30 @@ public static class DynamicSqlScanner
                         break;
                     }
                 }
+            }
 
-                // States are stable now - re-run once more with emission enabled. Same inputs,
-                // same steps, so this reproduces the exact same outputs; the only difference is
-                // that EXEC/output-summary side effects are no longer suppressed.
+            /// <summary>
+            /// States are stable now - re-run once more with emission enabled. Same inputs,
+            /// same steps, so this reproduces the exact same outputs; the only difference is
+            /// that EXEC/output-summary side effects are no longer suppressed.
+            /// </summary>
+            private void RunFinalEmissionPass(int entryBlock, Dictionary<string, FoldState> initialSeed, List<int>[] predecessors, Dictionary<string, FoldState>?[] outStates)
+            {
                 visitor._suppressEmission = false;
                 for (var i = 0; i < _blocks.Count; i++)
                 {
-                    var merged = MergeEntry(i, entryBlock, initialSeed, predecessors, outStates);
-                    if (merged is null)
+                    var working = ComputeBlockOutput(i, entryBlock, initialSeed, predecessors, outStates);
+                    if (working is null)
                     {
                         continue;
                     }
 
-                    var working = new Dictionary<string, FoldState>(merged, StringComparer.OrdinalIgnoreCase);
-                    foreach (var step in _blocks[i].Steps)
-                    {
-                        step(working);
-                    }
-
                     outStates[i] = working;
                 }
+            }
 
-                // The scope's own "final" state (what WalkScopedBody reads an OUTPUT parameter
-                // back from) is the merge of every block execution can actually fall off the end
-                // at - RETURN and an unconditional GOTO each already end their block with no
-                // fallthrough successor, so they contribute nothing here, matching that a
-                // procedure exiting through either one never reaches its own implicit end.
+            private static Dictionary<string, FoldState> MergeExitStates(List<int> exitBlocks, Dictionary<string, FoldState>?[] outStates)
+            {
                 Dictionary<string, FoldState>? finalState = null;
                 foreach (var exitBlock in exitBlocks)
                 {
