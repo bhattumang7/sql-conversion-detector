@@ -182,4 +182,24 @@ public sealed class KnownGapCharacterizationTests
     // (and therefore TypeAliases) is available, so a CREATE TYPE ... FROM alias used in the
     // declaration now resolves to its real underlying type instead of null. Moved to
     // Predicates/DynamicSqlParameterAliasPipelineTests.cs.
+
+    // ------------------------------------------------------------------
+    // Proc call graph: per-call-site re-typing
+    // ------------------------------------------------------------------
+
+    // PerCallSiteChildProcRetyping (roadmap "build per-call-site re-typing of child-proc
+    // predicates, oracle-backed") turned out to be a NON-GAP on investigation, not a fix - every
+    // scalar CREATE PROCEDURE parameter is always typed from its own declaration, independent of
+    // any caller. SqlTypeReferenceResolver.Resolve only returns null for TVPs (which a scalar
+    // predicate never compares) or an unresolvable user-type alias - and an unresolvable alias
+    // would fail identically for a caller's own DECLARE of that same alias type, so seeding a
+    // callee's parameter from a call site's argument type would gain nothing a real oracle probe
+    // could confirm. A call site's literal argument never flows into how the callee's body types
+    // its own parameter under T-SQL's own binding rules, so there is no re-typing decision left
+    // for the tool to make. TypedPredicateExtractor's externalVariables/MergeSeededParameters
+    // seeding mechanism (used for dynamic-SQL nested-script parameters, where a caller-provided
+    // value genuinely CAN leave a nested declaration's type missing) already exists and is
+    // reusable without new plumbing if a genuine per-call-site typing gap is ever found in
+    // proc-to-proc calls specifically - see Predicates/DynamicSqlParameterAliasPipelineTests.cs
+    // for the positive coverage of that existing mechanism.
 }
