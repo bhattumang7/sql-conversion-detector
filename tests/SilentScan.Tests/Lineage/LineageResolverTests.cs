@@ -200,14 +200,34 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
-    public void Resolve_FunctionCallInSelectList_ResolvesToExpressionWithNoInferredType()
+    public void Resolve_BuiltinFixedReturnTypeFunctionCallInSelectList_ResolvesInferredType()
     {
+        // YEAR() is a curated fixed-return-type builtin (BuiltinFunctionTypeResolver) -
+        // ScalarExpressionResolver now types it the same way TypedPredicateExtractor and
+        // ComputedColumnTypeResolver do, rather than always falling to Unknown.
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (CreatedAt DATETIME2 NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT YEAR(CreatedAt) AS CreatedYear FROM dbo.Orders;");
 
         var view = lineage.Find("dbo.vw_Orders")!;
         var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("CreatedYear")!.Provenance);
+
+        Assert.NotNull(expr.InferredType);
+        Assert.Equal(SqlTypeCategory.Int, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_ScalarUdfCallInSelectList_ResolvesToExpressionWithNoInferredType()
+    {
+        // A scalar UDF is not in the curated builtin table and is out of scope for this pass
+        // (lineage does not maintain a scalar-UDF return-type registry) - it must stay Unknown,
+        // never guessed.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (CreatedAt DATETIME2 NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT dbo.fn_FormatDate(CreatedAt) AS CreatedLabel FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("CreatedLabel")!.Provenance);
 
         Assert.Null(expr.InferredType);
     }

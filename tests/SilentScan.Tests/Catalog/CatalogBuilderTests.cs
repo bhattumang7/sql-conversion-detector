@@ -258,9 +258,31 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithUnresolvableExpression_StaysUnknownAndLedgered()
     {
-        // A function call inside a computed column expression is a deliberately unresolved
-        // case (out of ComputedColumnTypeResolver's narrow scope) - it must stay Unknown AND
-        // reach the skip ledger, never silently vanish with no trace.
+        // A scalar UDF call inside a computed column expression is a deliberately unresolved
+        // case: the UDF return-type registry isn't built yet at this point in CatalogBuilder's
+        // pass ordering (unlike predicates/lineage, which run after the catalog is complete) - it
+        // must stay Unknown AND reach the skip ledger, never silently vanish with no trace.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Created DATETIME NOT NULL,
+                CreatedLabel AS (dbo.fn_FormatDate(Created))
+            );
+            """);
+
+        var createdLabel = catalog.Find("dbo.T")!.FindColumn("CreatedLabel")!;
+
+        Assert.Null(createdLabel.Type);
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "computed column type" && e.Reason.Contains("CreatedLabel", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithBuiltinFixedReturnTypeFunction_InfersType()
+    {
+        // YEAR() is a curated fixed-return-type builtin (BuiltinFunctionTypeResolver) - a
+        // computed column built from it now types identically to the same call appearing in a
+        // predicate or a view's SELECT list, closing the asymmetry ComputedColumnTypeResolver
+        // previously had against ScalarExpressionResolver/TypedPredicateExtractor.
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -271,8 +293,28 @@ public sealed class CatalogBuilderTests
 
         var createdYear = catalog.Find("dbo.T")!.FindColumn("CreatedYear")!;
 
-        Assert.Null(createdYear.Type);
-        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "computed column type" && e.Reason.Contains("CreatedYear", StringComparison.Ordinal));
+        Assert.NotNull(createdYear.Type);
+        Assert.Equal(SqlTypeCategory.Int, createdYear.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithBuiltinFirstArgumentTypeFunction_InfersSiblingColumnType()
+    {
+        // ISNULL(Price, 0) takes its first argument's own type - proves the recursive Resolve
+        // call inside ComputedColumnTypeResolver.ResolveFunctionCall correctly re-enters the
+        // full expression-typing pipeline for the argument, not just a bare-leaf lookup.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.T
+            (
+                Price DECIMAL(10, 2) NOT NULL,
+                SafePrice AS (ISNULL(Price, 0))
+            );
+            """);
+
+        var safePrice = catalog.Find("dbo.T")!.FindColumn("SafePrice")!;
+
+        Assert.NotNull(safePrice.Type);
+        Assert.Equal(SqlTypeCategory.Decimal, safePrice.Type!.Category);
     }
 
     [Fact]

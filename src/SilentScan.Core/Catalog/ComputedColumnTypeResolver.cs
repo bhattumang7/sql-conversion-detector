@@ -81,20 +81,37 @@ internal static class ComputedColumnTypeResolver
     /// <summary>
     /// Delegates to the shared <see cref="Rules.ExpressionTypeInferencer"/> (roadmap Phase B) for
     /// every expression shape it owns (arithmetic, CASE/COALESCE/NULLIF/IIF, CAST/CONVERT,
-    /// parenthesis/unary) - the leaf callback resolves only a bare sibling-column reference,
-    /// which is all a computed column's own expression can legitimately contain beyond those
-    /// shapes (no catalog/scope machinery exists at this point in CatalogBuilder's pass
-    /// ordering for anything richer, e.g. a function call needing the scalar-UDF registry).
+    /// parenthesis/unary) - the leaf callback resolves a bare sibling-column reference or a
+    /// built-in function call via the same curated <see cref="Rules.BuiltinFunctionTypeResolver"/>
+    /// table predicates and lineage both consult, so `Total AS (ISNULL(Price, 0) * Qty)` types
+    /// identically to the same expression appearing in a view's SELECT list or a WHERE clause.
+    /// A scalar UDF call still resolves Unknown here (never guessed): the return-type registry
+    /// isn't built yet at this point in CatalogBuilder's pass ordering, unlike predicates/lineage
+    /// which run after the catalog is complete.
     /// </summary>
     private static SqlType? Resolve(
         ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
-        Rules.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes), typeAliases);
+        Rules.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes, typeAliases), typeAliases);
 
-    private static SqlType? ResolveLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes) => expression switch
+    private static SqlType? ResolveLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) => expression switch
     {
         ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] } =>
             columnTypes.GetValueOrDefault(last.Value),
 
+        FunctionCall functionCall => ResolveFunctionCall(functionCall, columnTypes, typeAliases),
+
         _ => null,
     };
+
+    private static SqlType? ResolveFunctionCall(FunctionCall functionCall, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    {
+        var name = functionCall.FunctionName.Value;
+
+        if (Rules.BuiltinFunctionTypeResolver.TakesFirstArgumentType(name) && functionCall.Parameters.Count > 0)
+        {
+            return Resolve(functionCall.Parameters[0], columnTypes, typeAliases);
+        }
+
+        return Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
+    }
 }

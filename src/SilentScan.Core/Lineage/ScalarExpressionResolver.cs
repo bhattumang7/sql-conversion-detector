@@ -19,7 +19,8 @@ public static class ScalarExpressionResolver
         IReadOnlyList<ScopeEntry> OrderedRelations,
         string SourcePath,
         SkipLedger? Ledger,
-        IReadOnlyDictionary<string, SqlType>? TypeAliases);
+        IReadOnlyDictionary<string, SqlType>? TypeAliases,
+        DatabaseCatalog? Catalog = null);
 
     public static ColumnProvenance Resolve(
         ScalarExpression expression,
@@ -27,8 +28,9 @@ public static class ScalarExpressionResolver
         IReadOnlyList<ScopeEntry> orderedRelations,
         string sourcePath,
         SkipLedger? ledger = null,
-        IReadOnlyDictionary<string, SqlType>? typeAliases = null) =>
-        Resolve(expression, new ExpressionContext(scope, orderedRelations, sourcePath, ledger, typeAliases));
+        IReadOnlyDictionary<string, SqlType>? typeAliases = null,
+        DatabaseCatalog? catalog = null) =>
+        Resolve(expression, new ExpressionContext(scope, orderedRelations, sourcePath, ledger, typeAliases, catalog));
 
     private static ColumnProvenance Resolve(ScalarExpression expression, ExpressionContext context) => expression switch
     {
@@ -48,8 +50,51 @@ public static class ScalarExpressionResolver
             or SearchedCaseExpression or SimpleCaseExpression =>
             ResolveTypedExpression(expression, context),
 
+        // A built-in scalar function call (ISNULL/UPPER/LEFT/...) or a scalar UDF - previously
+        // always InferredType: null here regardless of how trivially typeable the call was,
+        // even though the IDENTICAL expression typed correctly when it appeared directly in a
+        // predicate (TypedPredicateExtractor.ResolveFunctionCallOperand already consulted
+        // BuiltinFunctionTypeResolver/the UDF registry). `CREATE VIEW v AS SELECT ISNULL(x,'')
+        // AS c` left c permanently untyped, so every predicate through v against c went Unknown
+        // even though the same WHERE ISNULL(x,'') = 'y' inline classified normally - the
+        // asymmetry this method now closes.
+        FunctionCall functionCall => ResolveFunctionCall(functionCall, context),
+
         _ => ResolveGenericExpression(expression, context),
     };
+
+    /// <summary>Mirrors TypedPredicateExtractor.ResolveFunctionCallOperand's three-tier lookup (first-argument-type builtins, fixed-return-type builtins, then the scalar-UDF registry), reusing the exact same curated tables so the two passes can never disagree about what a given function types as. A function this scan never saw declared, or one this curated table doesn't cover, still resolves Unknown - never guessed.</summary>
+    private static ColumnProvenance.Expression ResolveFunctionCall(FunctionCall functionCall, ExpressionContext context)
+    {
+        var inputs = CollectColumnInputs(functionCall, context);
+        var name = functionCall.FunctionName.Value;
+
+        if (BuiltinFunctionTypeResolver.TakesFirstArgumentType(name) && functionCall.Parameters.Count > 0)
+        {
+            var firstArgType = ColumnProvenanceAnalysis.TryGetScalarType(Resolve(functionCall.Parameters[0], context));
+            return new ColumnProvenance.Expression(firstArgType, inputs, context.SourcePath, functionCall.StartLine);
+        }
+
+        var fixedType = BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
+        if (fixedType is not null)
+        {
+            return new ColumnProvenance.Expression(fixedType, inputs, context.SourcePath, functionCall.StartLine);
+        }
+
+        // Not a built-in - try the scalar UDF return-type registry, when a catalog is available
+        // (the lineage pass always has one; a caller resolving an expression before a catalog
+        // exists simply gets Unknown here, same as before this method existed).
+        if (context.Catalog is { } catalog)
+        {
+            var qualifiedName = SchemaObjectNameHelper.QualifyFunctionCall(functionCall);
+            if (catalog.TryGetScalarFunctionReturnType(qualifiedName, out var udfType))
+            {
+                return new ColumnProvenance.Expression(udfType, inputs, context.SourcePath, functionCall.StartLine);
+            }
+        }
+
+        return new ColumnProvenance.Expression(InferredType: null, inputs, context.SourcePath, functionCall.StartLine);
+    }
 
     private static ColumnProvenance.Expression ResolveTypedExpression(ScalarExpression expression, ExpressionContext context)
     {
