@@ -97,6 +97,15 @@ public static class ScanCorpusCommand
         var hadMissingRepo = false;
         var hadDialectSniffingFailure = false;
 
+        // Each repo's scan is completely independent of every other's - its own catalog, its own
+        // parse results, no shared state at all - so the CPU-heavy work (parsing + the full
+        // catalog/lineage/predicate pipeline + collation sensitivity) runs in parallel across
+        // repos (CLAUDE.md roadmap: "scale the scan pipeline"). The missing-clone check stays
+        // sequential first (fast, and needs to run before anything expensive), and every
+        // stderr write/shared-collection update happens afterward, in a single-threaded pass
+        // over the parallel results sorted by repo name - so warning output and the aggregated
+        // report stay exactly as deterministic as a plain sequential loop would produce.
+        var existingRepos = new List<(CorpusRepoEntry Repo, string RepoRoot)>();
         foreach (var repo in manifest.Repos)
         {
             var repoRoot = Path.Combine(clonesRoot, RepoDirectoryName(repo.Url));
@@ -108,10 +117,16 @@ public static class ScanCorpusCommand
                 continue;
             }
 
-            var files = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
-            var parseResults = files.Select(f => ParseCorpusFile(repo, f)).ToList();
-            var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation, manifestTempdbCollation: repo.TempdbCollation);
+            existingRepos.Add((repo, repoRoot));
+        }
 
+        var scannedRepos = existingRepos
+            .AsParallel()
+            .Select(entry => ScanOneRepo(entry.Repo, entry.RepoRoot))
+            .ToList();
+
+        foreach (var scanned in scannedRepos.OrderBy(s => s.Repo.Name, StringComparer.Ordinal))
+        {
             // CLAUDE.md's corpus-admission criterion, actually consulted rather than merely
             // computed and displayed (an audit finding: ParseHealthReport.ParseSuccessRate
             // existed and was even documented as "the corpus dialect-sniffing signal," but
@@ -121,26 +136,16 @@ public static class ScanCorpusCommand
             // repo was still deliberately curated into corpus/manifest.json, so its findings
             // are reported either way, but a reader now gets the same honest signal CLAUDE.md
             // promises instead of having to notice a low ParseSuccessRate buried in the JSON.
-            if (!report.ParseHealth.PassesDialectSniffing)
+            if (!scanned.Report.ParseHealth.PassesDialectSniffing)
             {
                 stderr.WriteLine(
-                    $"warning: '{repo.Name}' parse success rate {report.ParseHealth.ParseSuccessRate:P1} is below the " +
-                    $"{ParseHealthReport.MinimumAcceptableParseSuccessRate:P0} dialect-sniffing threshold ({report.ParseHealth.FilesWithErrors} of {report.ParseHealth.TotalFiles} files had parse errors) - findings are still reported, but treat them with reduced confidence.");
+                    $"warning: '{scanned.Repo.Name}' parse success rate {scanned.Report.ParseHealth.ParseSuccessRate:P1} is below the " +
+                    $"{ParseHealthReport.MinimumAcceptableParseSuccessRate:P0} dialect-sniffing threshold ({scanned.Report.ParseHealth.FilesWithErrors} of {scanned.Report.ParseHealth.TotalFiles} files had parse errors) - findings are still reported, but treat them with reduced confidence.");
                 hadDialectSniffingFailure = true;
             }
 
-            // A repo with no declaredCollation makes the flagship varchar-vs-nvarchar rule
-            // structurally unreachable (VerdictClassifier: unresolved collation -> UNKNOWN,
-            // never a guess) - re-running under both collation-family assumptions turns that
-            // silent UNKNOWN into an honest "here's what it would be either way" (CLAUDE.md
-            // precision discipline: an unqualified UNKNOWN looks identical to "nothing here,"
-            // which is a different and stronger claim than what was actually established).
-            var collationSensitivity = repo.DeclaredCollation is null
-                ? CollationSensitivityReport.Analyze(parseResults)
-                : null;
-
-            reportsByRepo[repo.Name] = new CorpusRepoScanResult(report, collationSensitivity);
-            readableRepos.Add(new ReadableCorpusRepo(repo.Name, report, collationSensitivity, repoRoot));
+            reportsByRepo[scanned.Repo.Name] = new CorpusRepoScanResult(scanned.Report, scanned.CollationSensitivity);
+            readableRepos.Add(new ReadableCorpusRepo(scanned.Repo.Name, scanned.Report, scanned.CollationSensitivity, scanned.RepoRoot));
         }
 
         var content = reportFormat == ReportFormat.Json
@@ -157,6 +162,28 @@ public static class ScanCorpusCommand
 
         return hadMissingRepo || hadDialectSniffingFailure ? 1 : 0;
     }
+
+    /// <summary>One repo's full scan (parse + catalog/lineage/predicate pipeline + collation sensitivity) - self-contained and side-effect-free, so it's safe to run concurrently with every other repo's.</summary>
+    private static ScannedRepo ScanOneRepo(CorpusRepoEntry repo, string repoRoot)
+    {
+        var files = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
+        var parseResults = files.Select(f => ParseCorpusFile(repo, f)).ToList();
+        var report = ScanReportBuilder.BuildFromParseResults(parseResults, repo.DeclaredCollation, manifestTempdbCollation: repo.TempdbCollation);
+
+        // A repo with no declaredCollation makes the flagship varchar-vs-nvarchar rule
+        // structurally unreachable (VerdictClassifier: unresolved collation -> UNKNOWN,
+        // never a guess) - re-running under both collation-family assumptions turns that
+        // silent UNKNOWN into an honest "here's what it would be either way" (CLAUDE.md
+        // precision discipline: an unqualified UNKNOWN looks identical to "nothing here,"
+        // which is a different and stronger claim than what was actually established).
+        var collationSensitivity = repo.DeclaredCollation is null
+            ? CollationSensitivityReport.Analyze(parseResults)
+            : null;
+
+        return new ScannedRepo(repo, repoRoot, report, collationSensitivity);
+    }
+
+    private sealed record ScannedRepo(CorpusRepoEntry Repo, string RepoRoot, ScanReport Report, CollationSensitivityReport? CollationSensitivity);
 
     private static SqlParseResult ParseCorpusFile(CorpusRepoEntry repo, string path)
     {

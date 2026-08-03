@@ -86,16 +86,26 @@ public static class ScanReportBuilder
         // reads (SelectIntoLineagePass docs: closes a silent-drop gap, not just an Unknown one).
         SelectIntoLineagePass.Apply(catalog, lineage, usableParseResults);
 
-        // Own ledger instance, not lineage.Skipped - the shared resolvers this pass calls
-        // (FromScopeResolver/ScalarExpressionResolver/CteResolver) hardcode AnalysisPass.Lineage
-        // on every entry they record regardless of which pass invoked them, so folding Tier-1's
-        // entries into lineage.Skipped would tag them identically anyway; keeping a distinct
-        // instance at least keeps this pass's own accounting separate and explicit, matching how
-        // the typed extraction results below carry their own SkippedConstructs list rather than
-        // writing into lineage's.
-        var tier1Ledger = new SkipLedger();
-        var tier1Findings = usableParseResults.SelectMany(r => NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: tier1Ledger)).ToList();
-        var extractionResults = usableParseResults.Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
+        // catalog/lineage are read-only from this point on (SelectIntoLineagePass.Apply just
+        // above was the last write to catalog; nothing here mutates either) - every file's
+        // Tier-1 scan and typed extraction is fully independent of every other file's, so both
+        // run in parallel (CLAUDE.md roadmap: "scale the scan pipeline"). Each file gets its OWN
+        // ledger/result rather than sharing one mutable accumulator across threads (SkipLedger is
+        // explicitly not thread-safe), merged back together afterward; final findings are sorted
+        // by source path/line below regardless, so the parallel completion order never leaks into
+        // the report's own deterministic ordering.
+        var tier1PerFile = usableParseResults
+            .AsParallel()
+            .Select(r =>
+            {
+                var fileLedger = new SkipLedger();
+                var findings = NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: fileLedger).ToList();
+                return (Findings: findings, Skipped: fileLedger.Entries);
+            })
+            .ToList();
+        var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
+        var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
+        var extractionResults = usableParseResults.AsParallel().Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
         var collationConflictFindings = extractionResults.SelectMany(r => r.CollationConflictFindings).ToList();
@@ -103,7 +113,7 @@ public static class ScanReportBuilder
         var skippedConstructs = new List<SkippedConstruct>();
         skippedConstructs.AddRange(catalog.Skipped.Entries);
         skippedConstructs.AddRange(lineage.Skipped.Entries);
-        skippedConstructs.AddRange(tier1Ledger.Entries);
+        skippedConstructs.AddRange(tier1SkippedEntries);
         skippedConstructs.AddRange(extractionResults.SelectMany(r => r.SkippedConstructs));
 
         // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/
