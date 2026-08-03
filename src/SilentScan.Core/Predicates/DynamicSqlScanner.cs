@@ -932,6 +932,16 @@ public static class DynamicSqlScanner
                 case ParenthesisExpression paren:
                     return TryFoldExpression(paren.Expression, folded, foldingEnabled);
 
+                // A block comment sitting directly between two `+` concatenation operators
+                // (`'a' + /* comment */ + 'b'`) parses not as three-term concatenation but as
+                // `'a' + (+'b')` - confirmed directly against the parsed tree: the second `+` is
+                // a UnaryExpression wrapping 'b', not a second BinaryExpression operand. Unary
+                // plus is semantically a no-op for a string operand (it does not exist as a real
+                // T-SQL operator on strings; this is purely how the parser resolves the token),
+                // so folding through to the inner expression is exact, not an approximation.
+                case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
+                    return TryFoldExpression(unary.Expression, folded, foldingEnabled);
+
                 case FunctionCall { FunctionName.Value: var functionName } quoteNameCall
                     when string.Equals(functionName, "QUOTENAME", StringComparison.OrdinalIgnoreCase):
                     return TryFoldQuoteName(quoteNameCall, folded, foldingEnabled);
@@ -1073,21 +1083,19 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var attempt, out var input))
+            return TryFoldOverArgumentCombinations([functionCall.Parameters[0]], folded, foldingEnabled, functionCall, values =>
             {
-                return attempt;
-            }
+                var input = values[0];
+                if (!IsSafeToCaseConvert(input))
+                {
+                    return FoldAttempt.Fail("non-literal-expression:case-conversion-collation-sensitive", Span(functionCall));
+                }
 
-            if (!IsSafeToCaseConvert(input!))
-            {
-                return FoldAttempt.Fail("non-literal-expression:case-conversion-collation-sensitive", Span(functionCall));
-            }
-
-            var converted = string.Equals(functionName, "UPPER", StringComparison.OrdinalIgnoreCase)
-                ? input!.ToUpperInvariant()
-                : input!.ToLowerInvariant();
-
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, converted)]);
+                var converted = string.Equals(functionName, "UPPER", StringComparison.OrdinalIgnoreCase)
+                    ? input.ToUpperInvariant()
+                    : input.ToLowerInvariant();
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, converted)]);
+            });
         }
 
         private static bool IsSafeToCaseConvert(string input) => input.All(c => c is not ('i' or 'I') && c <= 127);
@@ -1107,16 +1115,13 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var attempt, out var input))
+            return TryFoldOverArgumentCombinations([functionCall.Parameters[0]], folded, foldingEnabled, functionCall, values =>
             {
-                return attempt;
-            }
-
-            var trimmed = string.Equals(functionName, "LTRIM", StringComparison.OrdinalIgnoreCase)
-                ? input!.TrimStart(' ')
-                : input!.TrimEnd(' ');
-
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, trimmed)]);
+                var trimmed = string.Equals(functionName, "LTRIM", StringComparison.OrdinalIgnoreCase)
+                    ? values[0].TrimStart(' ')
+                    : values[0].TrimEnd(' ');
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, trimmed)]);
+            });
         }
 
         /// <summary>
@@ -1138,11 +1143,6 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:other", Span(site));
             }
 
-            if (!TryFoldSingleAssemblyArgument(parameters[0], folded, foldingEnabled, out var attempt, out var input))
-            {
-                return attempt;
-            }
-
             if (!TryFoldIntegerLiteral(parameters[1], out var length))
             {
                 return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(parameters[1]));
@@ -1153,13 +1153,15 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:negative-length", Span(site));
             }
 
-            var input0 = input!;
-            var clampedLength = Math.Min(length, input0.Length);
-            var result = string.Equals(functionName, "LEFT", StringComparison.OrdinalIgnoreCase)
-                ? input0[..clampedLength]
-                : input0[^clampedLength..];
-
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
+            return TryFoldOverArgumentCombinations([parameters[0]], folded, foldingEnabled, site, values =>
+            {
+                var input0 = values[0];
+                var clampedLength = Math.Min(length, input0.Length);
+                var result = string.Equals(functionName, "LEFT", StringComparison.OrdinalIgnoreCase)
+                    ? input0[..clampedLength]
+                    : input0[^clampedLength..];
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
+            });
         }
 
         /// <summary>
@@ -1182,11 +1184,6 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var attempt, out var input))
-            {
-                return attempt;
-            }
-
             if (!TryFoldIntegerLiteral(functionCall.Parameters[1], out var start) || !TryFoldIntegerLiteral(functionCall.Parameters[2], out var length))
             {
                 return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(functionCall));
@@ -1202,16 +1199,18 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:substring-start-below-one", Span(functionCall));
             }
 
-            var input0 = input!;
-            if (start > input0.Length)
+            return TryFoldOverArgumentCombinations([functionCall.Parameters[0]], folded, foldingEnabled, functionCall, values =>
             {
-                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, string.Empty)]);
-            }
+                var input0 = values[0];
+                if (start > input0.Length)
+                {
+                    return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, string.Empty)]);
+                }
 
-            var clampedLength = Math.Min(length, input0.Length - (start - 1));
-            var result = input0.Substring(start - 1, clampedLength);
-
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, result)]);
+                var clampedLength = Math.Min(length, input0.Length - (start - 1));
+                var result = input0.Substring(start - 1, clampedLength);
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, result)]);
+            });
         }
 
         /// <summary>
@@ -1232,37 +1231,28 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var sourceAttempt, out var source))
-            {
-                return sourceAttempt;
-            }
+            return TryFoldOverArgumentCombinations(
+                [functionCall.Parameters[0], functionCall.Parameters[1], functionCall.Parameters[2]], folded, foldingEnabled, functionCall,
+                values =>
+                {
+                    var (source, pattern, replacement) = (values[0], values[1], values[2]);
+                    if (pattern.Length == 0)
+                    {
+                        // SQL Server's own behavior for an empty search pattern is not something
+                        // this scanner has verified against the oracle, and .NET's string.Replace
+                        // throws outright for an empty oldValue - declines rather than guessing.
+                        return FoldAttempt.Fail("non-literal-expression:replace-empty-pattern", Span(functionCall));
+                    }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[1], folded, foldingEnabled, out var patternAttempt, out var pattern))
-            {
-                return patternAttempt;
-            }
+                    var ordinalResult = source.Replace(pattern, replacement, StringComparison.Ordinal);
+                    var caseInsensitiveResult = source.Replace(pattern, replacement, StringComparison.OrdinalIgnoreCase);
+                    if (!string.Equals(ordinalResult, caseInsensitiveResult, StringComparison.Ordinal))
+                    {
+                        return FoldAttempt.Fail("non-literal-expression:replace-collation-sensitive", Span(functionCall));
+                    }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[2], folded, foldingEnabled, out var replacementAttempt, out var replacement))
-            {
-                return replacementAttempt;
-            }
-
-            if (pattern!.Length == 0)
-            {
-                // SQL Server's own behavior for an empty search pattern is not something this
-                // scanner has verified against the oracle, and .NET's string.Replace throws
-                // outright for an empty oldValue - declines rather than guessing either way.
-                return FoldAttempt.Fail("non-literal-expression:replace-empty-pattern", Span(functionCall));
-            }
-
-            var ordinalResult = source!.Replace(pattern, replacement, StringComparison.Ordinal);
-            var caseInsensitiveResult = source.Replace(pattern, replacement, StringComparison.OrdinalIgnoreCase);
-            if (!string.Equals(ordinalResult, caseInsensitiveResult, StringComparison.Ordinal))
-            {
-                return FoldAttempt.Fail("non-literal-expression:replace-collation-sensitive", Span(functionCall));
-            }
-
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, ordinalResult)]);
+                    return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, ordinalResult)]);
+                });
         }
 
         /// <summary>
@@ -1284,16 +1274,14 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:cast-target-not-pinned", Span(site));
             }
 
-            if (!TryFoldSingleAssemblyArgument(source, folded, foldingEnabled, out var attempt, out var input))
+            return TryFoldOverArgumentCombinations([source], folded, foldingEnabled, site, values =>
             {
-                return attempt;
-            }
-
-            var result = !targetType.IsMax && targetType.Length is { } length && input!.Length > length
-                ? input[..length]
-                : input!;
-
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
+                var input = values[0];
+                var result = !targetType.IsMax && targetType.Length is { } length && input.Length > length
+                    ? input[..length]
+                    : input;
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
+            });
         }
 
         /// <summary>
@@ -1396,59 +1384,98 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
-            if (!TryFoldSingleAssemblyArgument(functionCall.Parameters[0], folded, foldingEnabled, out var inputAttempt, out var input))
-            {
-                return inputAttempt;
-            }
+            var arguments = functionCall.Parameters.Count == 2
+                ? new[] { functionCall.Parameters[0], functionCall.Parameters[1] }
+                : new[] { functionCall.Parameters[0] };
 
-            string? delimiterText = null;
-            if (functionCall.Parameters.Count == 2
-                && !TryFoldSingleAssemblyArgument(functionCall.Parameters[1], folded, foldingEnabled, out var delimiterAttempt, out delimiterText))
+            return TryFoldOverArgumentCombinations(arguments, folded, foldingEnabled, functionCall, values =>
             {
-                return delimiterAttempt;
-            }
+                var input = values[0];
+                var delimiterText = values.Count == 2 ? values[1] : null;
 
-            var quoted = QuoteName(input!, delimiterText);
-            if (quoted is null)
-            {
-                // Oracle-verified: QUOTENAME itself returns SQL NULL for an input over 128
-                // characters or an unrecognized delimiter - concatenating NULL propagates NULL
-                // through the whole @sql build, a materially different runtime outcome this
-                // scanner has no NULL-tracking representation for. Failing the fold (rather than
-                // silently treating it as an empty/unwrapped string) is the honest call.
-                return FoldAttempt.Fail("non-literal-expression:quotename-null-result", Span(functionCall));
-            }
+                var quoted = QuoteName(input, delimiterText);
+                if (quoted is null)
+                {
+                    // Oracle-verified: QUOTENAME itself returns SQL NULL for an input over 128
+                    // characters or an unrecognized delimiter - concatenating NULL propagates
+                    // NULL through the whole @sql build, a materially different runtime outcome
+                    // this scanner has no NULL-tracking representation for. Failing the fold
+                    // (rather than silently treating it as an empty/unwrapped string) is honest.
+                    return FoldAttempt.Fail("non-literal-expression:quotename-null-result", Span(functionCall));
+                }
 
-            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, quoted)]);
+                return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, quoted)]);
+            });
         }
 
         /// <summary>
-        /// Folds one function-call argument that must resolve to exactly ONE concrete value to
-        /// be usable inside a string-builder function (QUOTENAME and, roadmap, its sibling
-        /// whitelisted builders) - an argument itself carrying multiple possible assemblies (a
-        /// variable set by divergent IF branches upstream) is a rare compound shape this scanner
-        /// declines rather than cross-producing through the partial-NULL edge cases a function
-        /// like QUOTENAME can hit per-combination.
+        /// Folds every string-builder function's argument(s) and cross-products across whichever
+        /// ones carry more than one possible assembly (a variable set by divergent IF branches
+        /// upstream - the shape a WHERE-clause accumulator's REPLACE/CAST/QUOTENAME step sits
+        /// downstream of), calling <paramref name="perCombination"/> once per combination of
+        /// concrete argument values and unioning the results - the same technique <see
+        /// cref="TryCartesianConcat"/> already uses for concatenation, generalized to an arbitrary
+        /// per-function transform. A single argument is just a cross product of size one, so every
+        /// caller goes through this uniformly rather than a separate single-value fast path.
+        ///
+        /// Declines the WHOLE fold, not just one combination, the moment <paramref
+        /// name="perCombination"/> fails for any single combination: an assembly SET means "one of
+        /// these is what really happens at runtime" - if one combination would itself hit a
+        /// different runtime outcome (a negative LEFT/RIGHT length, a QUOTENAME NULL result, a
+        /// REPLACE collation divergence), this scanner cannot represent "sometimes these N
+        /// strings, sometimes something else" in its model, so honesty requires declining
+        /// entirely rather than silently dropping that one possibility from the set.
         /// </summary>
-        private bool TryFoldSingleAssemblyArgument(
-            ScalarExpression expression, Dictionary<string, FoldState> folded, bool foldingEnabled, out FoldAttempt attempt, out string? value)
+        private FoldAttempt TryFoldOverArgumentCombinations(
+            ScalarExpression[] stringArguments,
+            Dictionary<string, FoldState> folded,
+            bool foldingEnabled,
+            TSqlFragment site,
+            Func<IReadOnlyList<string>, FoldAttempt> perCombination)
         {
-            attempt = TryFoldExpression(expression, folded, foldingEnabled);
-            if (!attempt.Success)
+            var argumentValueSets = new List<IReadOnlyList<string>>(stringArguments.Length);
+            foreach (var argument in stringArguments)
             {
-                value = null;
-                return false;
+                var attempt = TryFoldExpression(argument, folded, foldingEnabled);
+                if (!attempt.Success)
+                {
+                    return attempt;
+                }
+
+                argumentValueSets.Add(attempt.Assemblies!.Select(a => string.Concat(a.Select(s => s.Value))).ToList());
             }
 
-            if (attempt.Assemblies!.Count > 1)
+            IEnumerable<IReadOnlyList<string>> combinations = [Array.Empty<string>()];
+            foreach (var valueSet in argumentValueSets)
             {
-                attempt = FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(expression));
-                value = null;
-                return false;
+                combinations = combinations.SelectMany(prefix => valueSet.Select(value => (IReadOnlyList<string>)[.. prefix, value]));
             }
 
-            value = string.Concat(attempt.Assemblies[0].Select(s => s.Value));
-            return true;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var results = new List<IReadOnlyList<LiteralSegment>>();
+            foreach (var combination in combinations)
+            {
+                var attempt = perCombination(combination);
+                if (!attempt.Success)
+                {
+                    return attempt;
+                }
+
+                var value = string.Concat(attempt.Assemblies![0].Select(s => s.Value));
+                if (!seen.Add(value))
+                {
+                    continue;
+                }
+
+                if (results.Count == MaxAssembliesPerVariable)
+                {
+                    return FoldAttempt.Fail("diverges-across-if-branches:cardinality-cap", Span(site));
+                }
+
+                results.Add([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, value)]);
+            }
+
+            return FoldAttempt.Ok(results);
         }
 
         /// <summary>

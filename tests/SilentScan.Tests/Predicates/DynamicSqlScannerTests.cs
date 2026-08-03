@@ -1338,6 +1338,40 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("non-literal-expression:function-call", finding.Reason);
     }
 
+    [Fact]
+    public void Scan_ReplaceOnVariableDivergedAcrossIfBranches_CrossProductsIntoUnionedAssemblies()
+    {
+        // The WHERE-clause accumulator shape: @sql already carries two possible values from an
+        // earlier optional-filter IF, THEN gets REPLACE'd before the EXEC - REPLACE must
+        // cross-product over @sql's own assembly set, not decline the moment it sees more than
+        // one possible input.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 '; " +
+            "IF 1 = 1 SET @sql = @sql + N'AND t.col = ''$X$'' '; " +
+            "SET @sql = REPLACE(@sql, '$X$', 'Y'); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT 1 ", "SELECT 1 AND t.col = 'Y' "], texts);
+    }
+
+    [Fact]
+    public void Scan_ReplaceOnVariableDivergedAcrossIfBranches_DeclinesWholeFoldIfAnyCombinationCollationDiverges()
+    {
+        // One of the two possible @sql values hits the ordinal-vs-case-insensitive divergence
+        // REPLACE always declines for - since an assembly SET means "one of these really
+        // happens", the whole fold must decline rather than silently dropping just that branch.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'AbcABC'; " +
+            "IF 1 = 1 SET @sql = N'plain'; " +
+            "SET @sql = REPLACE(@sql, 'abc', 'X'); " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:replace-collation-sensitive", finding.Reason);
+    }
+
     // ------------------------------------------------------------------
     // CAST/CONVERT folding onto a VARCHAR(n)/NVARCHAR(n) target only - every non-string target
     // and CHAR/NCHAR's blank-padding declines rather than guessing a rendering.
