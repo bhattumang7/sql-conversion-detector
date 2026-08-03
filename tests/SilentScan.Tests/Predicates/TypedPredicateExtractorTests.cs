@@ -45,6 +45,24 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_VariableDeclaredInAnEarlierAdHocBatch_DoesNotLeakIntoALaterBatchWithNoDeclareOfItsOwn()
+    {
+        // DECLARE'd variable types are batch-scoped in real T-SQL - a variable declared in one
+        // GO-separated ad-hoc batch (no CREATE PROCEDURE wrapper to reset scope at) must not
+        // silently type a same-named, un-declared reference in a LATER batch from the first
+        // batch's stale type. Before the fix, @x's INT type from batch 2 leaked into batch 3,
+        // silently classifying Col = @x as SeekPreserved (int vs int) instead of Unknown.
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "DECLARE @x INT = 1; SELECT 1;",
+            "SELECT 1 FROM dbo.T WHERE Col = @x;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
+        Assert.Equal("operand-type-unresolved", finding.UnknownReason);
+    }
+
+    [Fact]
     public void Extract_UnknownVerdict_CarriesAStableReasonCode()
     {
         var findings = Extract(

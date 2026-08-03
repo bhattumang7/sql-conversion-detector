@@ -368,6 +368,33 @@ public static class TypedPredicateExtractor
         // qualified name each override passes through is also this body's temp-table/table-
         // variable scope key (Phase 2.5), matching CatalogBuilder's identical scoping so a
         // predicate inside a procedure can find that same procedure's own temp objects.
+        /// <summary>
+        /// DECLARE'd variable types are batch-scoped in real T-SQL (a `GO`-separated batch
+        /// starts with none) - without this, an ad-hoc batch with no CREATE PROCEDURE/FUNCTION/
+        /// TRIGGER wrapper (so none of VisitProcedureOrFunctionBody/VisitTriggerBody's own
+        /// _variables.Clear() ever fires) inherited whatever an EARLIER batch in the same file
+        /// happened to DECLARE, and a later reference to a same-named variable with no DECLARE
+        /// of its own silently typed itself from that stale, unrelated batch instead of Unknown.
+        /// Resets to exactly the externally-seeded set (DynamicSqlPipeline's sp_executesql
+        /// parameter seeding) rather than an unconditional clear - a reparsed dynamic-SQL
+        /// fragment is always exactly one batch (real T-SQL rejects GO inside a string executed
+        /// via EXEC()/sp_executesql, so this can never fire more than once for that case anyway),
+        /// and those seeded parameters must still be visible for it.
+        /// </summary>
+        public override void ExplicitVisit(TSqlBatch node)
+        {
+            _variables.Clear();
+            if (externalVariables is not null)
+            {
+                foreach (var (name, type) in externalVariables)
+                {
+                    _variables[name] = type;
+                }
+            }
+
+            node.AcceptChildren(this);
+        }
+
         public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
 
         public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
