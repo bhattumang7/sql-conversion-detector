@@ -112,6 +112,37 @@ public static class DynamicSqlScanner
 
         public List<ProcedureOutputSummary> OutputSummaries { get; } = [];
 
+        /// <summary>
+        /// Set while <see cref="ControlFlowGraph.Solve"/>'s (or <see cref="HandleWhile"/>'s own)
+        /// fixpoint is still converging - a block or loop iteration whose steps include an EXEC
+        /// can run several times as predecessor/prior-iteration states change round to round, but
+        /// a Finding/Script/OutputSummary must be produced exactly once, from the FINAL converged
+        /// state. Every place that would otherwise call Findings.Add/Scripts.Add/
+        /// OutputSummaries.Add directly goes through <see cref="AddFinding"/>/<see
+        /// cref="AddScript"/> (or checks this flag itself, for <see
+        /// cref="RecordOutputParameterSummaries"/>) so provisional rounds are silent and only the
+        /// designated final pass actually reports anything. Always false outside a fixpoint (the
+        /// ordinary recursive walk runs each statement exactly once already, so it never needs
+        /// this at all).
+        /// </summary>
+        private bool _suppressEmission;
+
+        private void AddFinding(DynamicSqlFinding finding)
+        {
+            if (!_suppressEmission)
+            {
+                Findings.Add(finding);
+            }
+        }
+
+        private void AddScript(DynamicSqlScript script)
+        {
+            if (!_suppressEmission)
+            {
+                Scripts.Add(script);
+            }
+        }
+
         /// <summary>Walks a fresh variable scope (a batch, or a proc/function body) in source order, returning the final fold state of every variable this scope declared - <see cref="WalkScopedBody"/>'s own caller needs this to read back an OUTPUT parameter's final value.</summary>
         public Dictionary<string, FoldState> WalkScope(IList<TSqlStatement> statements, IReadOnlyDictionary<string, FoldState>? initialSeed = null)
         {
@@ -124,8 +155,16 @@ public static class DynamicSqlScanner
                 }
             }
 
-            var foldingEnabled = !ContainsGotoOrLabel(statements);
-            WalkStatements(statements, folded, foldingEnabled);
+            // A GOTO/label anywhere in scope used to disable folding for the ENTIRE scope
+            // outright - sound, but a strictly looser bound than the language actually allows.
+            // ControlFlowGraph.Solve models the jump as a real edge instead, so only the
+            // variables actually caught in genuine control-flow divergence pay for it.
+            if (ContainsGotoOrLabel(statements))
+            {
+                return new ControlFlowGraph(this).Solve(statements, folded);
+            }
+
+            WalkStatements(statements, folded, foldingEnabled: true);
             return folded;
         }
 
@@ -166,7 +205,7 @@ public static class DynamicSqlScanner
                     continue;
                 }
 
-                if (folded.TryGetValue(formal.VariableName.Value, out var state) && state.Assemblies is { } assemblies)
+                if (!_suppressEmission && folded.TryGetValue(formal.VariableName.Value, out var state) && state.Assemblies is { } assemblies)
                 {
                     var values = assemblies.Select(a => string.Concat(a.Select(s => s.Value))).Distinct(StringComparer.Ordinal).ToList();
                     OutputSummaries.Add(new ProcedureOutputSummary(qualifiedName, formal.VariableName.Value, values));
@@ -521,41 +560,60 @@ public static class DynamicSqlScanner
             MergeUnioningDivergent(folded, thenDict, elseDict, ifStatement, "diverges-across-if-branches");
         }
 
+        /// <summary>
+        /// Solves the loop body as a genuine fixpoint instead of pre-tainting every variable it
+        /// assigns before even walking it: <c>Header_0 = loop entry state</c>,
+        /// <c>Header_{n+1} = merge(loop entry, body applied to Header_n)</c>, iterated until
+        /// stable (guaranteed - the assembly-set lattice is monotonic and bounded by
+        /// <see cref="MaxAssembliesPerVariable"/>, past which a variable that keeps growing new
+        /// values every iteration widens straight to taint, same absorbing-taint semantics as
+        /// every other merge). A variable the body never touches keeps its entry value from
+        /// round zero, unioned with itself forever after - reference-stable, so it converges
+        /// immediately rather than needing the full round count. A variable the body assigns the
+        /// SAME literal every iteration converges to that one value once the union stops
+        /// growing, typically within two or three rounds. The fixpoint IS the state after the
+        /// loop exits (having run zero, one, or many times) - nothing further to merge in
+        /// afterward. EXEC/OUTPUT-summary emission is suppressed during the search (each
+        /// candidate round is provisional) and replayed exactly once, from the converged header,
+        /// once the search settles - <see cref="_suppressEmission"/>.
+        /// </summary>
         private void HandleWhile(WhileStatement whileStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
             var bodyStatements = NormalizeToStatementList(whileStatement.Statement);
-            var bodyDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+            var loopEntry = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
 
-            // Any variable the loop body assigns ANYWHERE within it - even after an EXEC that
-            // reads it in program order - cannot be trusted at that EXEC either: the value is
-            // only "as of loop entry" on iteration 1, and this scanner walks the body exactly
-            // once, so an EXEC folded against entry-state would silently analyze different SQL
-            // than what runs on iteration 2+ while still reporting AnalyzedLiteral. Taint those
-            // variables BEFORE walking so any EXEC inside the body referencing one comes out
-            // Unanalyzable instead. A variable the body never assigns is untouched here and can
-            // still fold normally using the state as of loop entry.
-            var assignedInBody = CollectAssignedVariableNames(bodyStatements);
-            foreach (var name in assignedInBody)
+            var wasSuppressed = _suppressEmission;
+            _suppressEmission = true;
+
+            var header = new Dictionary<string, FoldState>(loopEntry, StringComparer.OrdinalIgnoreCase);
+            const int maxIterations = MaxAssembliesPerVariable + 2;
+            for (var iteration = 0; iteration < maxIterations; iteration++)
             {
-                bodyDict[name] = FoldState.Tainted("while-loop-body-self-mutates", Span(whileStatement));
+                var bodyResult = new Dictionary<string, FoldState>(header, StringComparer.OrdinalIgnoreCase);
+                WalkStatements(bodyStatements, bodyResult, foldingEnabled);
+
+                var nextHeader = MergeInto(loopEntry, bodyResult, "while-loop-body");
+                var converged = StatesEqual(nextHeader, header);
+                header = nextHeader;
+                if (converged)
+                {
+                    break;
+                }
             }
 
-            WalkStatements(bodyStatements, bodyDict, foldingEnabled);
-
-            // A while body may run zero, one, or many times, so nothing it touches can be
-            // trusted after the loop either.
-            MergeTaintingDivergent(folded, bodyDict, folded, whileStatement, "while-loop-body");
-        }
-
-        private static HashSet<string> CollectAssignedVariableNames(IList<TSqlStatement> statements)
-        {
-            var collector = new AssignedVariableCollector();
-            foreach (var statement in statements)
+            _suppressEmission = wasSuppressed;
+            if (!wasSuppressed)
             {
-                statement.Accept(collector);
+                // Reproduces the exact same fold results (header is now a fixpoint, so applying
+                // the body to it again changes nothing) - this time with emission enabled.
+                WalkStatements(bodyStatements, new Dictionary<string, FoldState>(header, StringComparer.OrdinalIgnoreCase), foldingEnabled);
             }
 
-            return collector.Names;
+            folded.Clear();
+            foreach (var (key, value) in header)
+            {
+                folded[key] = value;
+            }
         }
 
         private void HandleTryCatch(TryCatchStatement tryCatch, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -572,45 +630,16 @@ public static class DynamicSqlScanner
         }
 
         /// <summary>
-        /// Because <paramref name="branchA"/>/<paramref name="branchB"/> start as shallow
-        /// clones of <paramref name="folded"/>, an entry a branch never touched still holds
-        /// the exact same <see cref="FoldState"/> reference as in <paramref name="folded"/> -
-        /// so reference (in)equality alone tells us whether either branch could have changed a
-        /// variable, with no content comparison needed. Any real divergence taints; this
-        /// deliberately never tries to prove two branches produced textually-equal values. Used
-        /// ONLY by <see cref="HandleWhile"/>'s own post-loop merge: a loop body can run zero,
-        /// one, or many times, which is NOT reducible to "one of these two known branch outcomes"
-        /// the way an IF's THEN/ELSE or a TRY/CATCH's TRY/CATCH are - <see
-        /// cref="MergeUnioningDivergent"/> is what those two use instead.
-        /// </summary>
-        private void MergeTaintingDivergent(
-            Dictionary<string, FoldState> folded, Dictionary<string, FoldState> branchA, Dictionary<string, FoldState> branchB, TSqlStatement owner, string reason)
-        {
-            var touched = new HashSet<string>(branchA.Keys, StringComparer.OrdinalIgnoreCase);
-            touched.UnionWith(branchB.Keys);
-
-            foreach (var key in touched)
-            {
-                var before = folded.GetValueOrDefault(key);
-                if (!ReferenceEquals(before, branchA.GetValueOrDefault(key)) || !ReferenceEquals(before, branchB.GetValueOrDefault(key)))
-                {
-                    folded[key] = FoldState.Tainted(reason, Span(owner));
-                }
-            }
-        }
-
-        /// <summary>
         /// An IF's THEN/ELSE or a TRY/CATCH's TRY/CATCH are each exactly one of two mutually
-        /// exclusive, fully-determined outcomes - unlike a WHILE body (<see
-        /// cref="MergeTaintingDivergent"/>), which can run zero, one, or many times. When BOTH
-        /// branches independently folded a touched variable to a constant assembly set, the real
+        /// exclusive, fully-determined outcomes - unlike a WHILE body (<see cref="HandleWhile"/>,
+        /// which solves its own genuine fixpoint since a loop can run zero, one, or many times).
+        /// When BOTH branches independently folded a touched variable to a constant assembly set, the real
         /// value after the statement is PROVABLY one of the two branches' own assemblies, so this
         /// unions them (deduplicated, cardinality-capped - see <see cref="TryUnionAssemblies"/>)
         /// instead of tainting - the optional-filter accumulation pattern this scanner previously
         /// declined outright (CLAUDE.md dynamic SQL policy). A variable only one branch actually
         /// assigned differently still merges here (reference-inequality against the
-        /// pre-statement state decides "touched", exactly as <see
-        /// cref="MergeTaintingDivergent"/> already did) - only a variable BOTH branches leave
+        /// pre-statement state decides "touched") - only a variable BOTH branches leave
         /// bit-for-bit unchanged from <paramref name="folded"/> is skipped entirely.
         /// </summary>
         private void MergeUnioningDivergent(
@@ -676,6 +705,53 @@ public static class DynamicSqlScanner
             }
 
             return FoldState.Tainted(reason, location);
+        }
+
+        /// <summary>
+        /// A full two-way state merge (every key either side has, not just the ones already
+        /// known to be "touched") - unlike <see cref="MergeUnioningDivergent"/>'s own touched-set
+        /// restriction (safe there because both its inputs are always full clones of the SAME
+        /// pre-statement dictionary), <see cref="HandleWhile"/>'s fixpoint and
+        /// <see cref="ControlFlowGraph"/>'s own predecessor merges combine states that may never
+        /// have shared a common ancestor dictionary at all, so every key must be considered. A
+        /// key both sides trace back to the SAME <see cref="FoldState"/> object (no divergence
+        /// through this path) is kept as-is rather than needlessly re-wrapped through <see
+        /// cref="MergeOne"/> - <see cref="StatesEqual"/>'s own convergence check depends on this
+        /// to detect a genuine fixpoint via reference equality instead of a deep value compare.
+        /// </summary>
+        private static Dictionary<string, FoldState> MergeInto(Dictionary<string, FoldState> a, Dictionary<string, FoldState> b, string reason)
+        {
+            var result = new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
+            var keys = new HashSet<string>(a.Keys, StringComparer.OrdinalIgnoreCase);
+            keys.UnionWith(b.Keys);
+
+            foreach (var key in keys)
+            {
+                var av = a.GetValueOrDefault(key);
+                var bv = b.GetValueOrDefault(key);
+                result[key] = ReferenceEquals(av, bv) ? av! : MergeOne(av, bv, reason, default);
+            }
+
+            return result;
+        }
+
+        /// <summary>Reference-equality state comparison - sound as a fixpoint convergence check specifically because <see cref="MergeInto"/> preserves a key's existing object reference whenever both sides already agreed, so "nothing changed" and "still reference-equal" coincide exactly.</summary>
+        private static bool StatesEqual(Dictionary<string, FoldState> a, Dictionary<string, FoldState> b)
+        {
+            if (a.Count != b.Count)
+            {
+                return false;
+            }
+
+            foreach (var (key, value) in a)
+            {
+                if (!b.TryGetValue(key, out var otherValue) || !ReferenceEquals(value, otherValue))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -856,13 +932,13 @@ public static class DynamicSqlScanner
                 var attempt = TryFoldExpression(element, folded, foldingEnabled);
                 if (!attempt.Success)
                 {
-                    Findings.Add(Unanalyzable(node, attempt.Reason!));
+                    AddFinding(Unanalyzable(node, attempt.Reason!));
                     return;
                 }
 
                 if (!TryCartesianConcat(assemblies, attempt.Assemblies!, out var next))
                 {
-                    Findings.Add(Unanalyzable(node, "diverges-across-if-branches:cardinality-cap"));
+                    AddFinding(Unanalyzable(node, "diverges-across-if-branches:cardinality-cap"));
                     return;
                 }
 
@@ -871,7 +947,7 @@ public static class DynamicSqlScanner
 
             foreach (var assembly in assemblies)
             {
-                Scripts.Add(BuildScript(node, assembly, parameterDeclarationText: null, argumentBindings: null));
+                AddScript(BuildScript(node, assembly, parameterDeclarationText: null, argumentBindings: null));
             }
         }
 
@@ -879,21 +955,21 @@ public static class DynamicSqlScanner
         {
             if (procRef.Parameters.Count == 0)
             {
-                Findings.Add(Unanalyzable(node, "non-literal-argument"));
+                AddFinding(Unanalyzable(node, "non-literal-argument"));
                 return;
             }
 
             var statementArg = ResolveNamedOrPositionalArgument(procRef.Parameters, index: 0, "@stmt", "@statement");
             if (statementArg is null)
             {
-                Findings.Add(Unanalyzable(node, "non-literal-argument"));
+                AddFinding(Unanalyzable(node, "non-literal-argument"));
                 return;
             }
 
             var queryAttempt = TryFoldExpression(statementArg, folded, foldingEnabled);
             if (!queryAttempt.Success)
             {
-                Findings.Add(Unanalyzable(node, queryAttempt.Reason!));
+                AddFinding(Unanalyzable(node, queryAttempt.Reason!));
                 return;
             }
 
@@ -901,7 +977,7 @@ public static class DynamicSqlScanner
             var argumentBindings = ResolveArgumentBindings(procRef);
             foreach (var assembly in queryAttempt.Assemblies!)
             {
-                Scripts.Add(BuildScript(node, assembly, parameterDeclarationText, argumentBindings));
+                AddScript(BuildScript(node, assembly, parameterDeclarationText, argumentBindings));
             }
         }
 
@@ -1675,15 +1751,45 @@ public static class DynamicSqlScanner
         private static IList<TSqlStatement> NormalizeToStatementList(TSqlStatement statement) =>
             statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
 
+        /// <summary>
+        /// Whether GOTO/LABEL appears anywhere WITHIN THIS SAME SCOPE - deliberately NOT a plain
+        /// <see cref="GotoLabelDetector"/> sweep over the whole fragment subtree, which would
+        /// also find one buried inside a NESTED procedure/function/trigger body sharing this
+        /// batch. That nested body is a wholly separate scope with its own upcoming <see
+        /// cref="WalkScope"/> call (and its own, independent goto/label determination) -
+        /// wrongly triggering control-flow-graph mode for the OUTER scope over an inner scope's
+        /// label doesn't just cost precision, it makes the outer scope's <c>ProcedureStatementBodyBase</c>
+        /// leaf step re-invoke a full NESTED <see cref="ControlFlowGraph.Solve"/> from inside
+        /// this scope's own fixpoint search, corrupting the shared <see cref="_suppressEmission"/>
+        /// flag between the two (reproduced directly: a single proc containing a label emitted
+        /// its own EXEC's finding three times over). Recurses into BEGIN/END, IF/WHILE/TRY-CATCH -
+        /// the constructs that share THIS scope - and stops at a nested scope boundary, mirroring
+        /// exactly the traversal <see cref="ControlFlowGraph.PreRegisterLabels"/>/
+        /// <see cref="ControlFlowGraph.BuildSequence"/> already use for the same reason.
+        /// </summary>
         private static bool ContainsGotoOrLabel(IList<TSqlStatement> statements)
         {
-            var detector = new GotoLabelDetector();
             foreach (var statement in statements)
             {
-                statement.Accept(detector);
-                if (detector.Found)
+                switch (statement)
                 {
-                    return true;
+                    case GoToStatement or LabelStatement:
+                        return true;
+
+                    case BeginEndBlockStatement block when ContainsGotoOrLabel(block.StatementList.Statements):
+                        return true;
+
+                    case IfStatement ifStatement
+                        when ContainsGotoOrLabel(NormalizeToStatementList(ifStatement.ThenStatement))
+                            || (ifStatement.ElseStatement is not null && ContainsGotoOrLabel(NormalizeToStatementList(ifStatement.ElseStatement))):
+                        return true;
+
+                    case WhileStatement whileStatement when ContainsGotoOrLabel(NormalizeToStatementList(whileStatement.Statement)):
+                        return true;
+
+                    case TryCatchStatement tryCatch
+                        when ContainsGotoOrLabel(tryCatch.TryStatements.Statements) || ContainsGotoOrLabel(tryCatch.CatchStatements.Statements):
+                        return true;
                 }
             }
 
@@ -1720,30 +1826,431 @@ public static class DynamicSqlScanner
             public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
         }
 
-        /// <summary>Every variable name a SET or SELECT-assignment statement anywhere in the visited subtree assigns - used to pre-taint a loop body's self-mutated variables before walking it.</summary>
-        private sealed class AssignedVariableCollector : TSqlFragmentVisitor
-        {
-            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-            public override void Visit(SetVariableStatement node) => Names.Add(node.Variable.Name);
-
-            public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
-        }
-
         /// <summary>
         /// Every variable name mentioned anywhere in a fragment, read or written alike - the
-        /// sound upper bound <see cref="TaintReferencedVariables"/> taints against. Broader than
-        /// <see cref="AssignedVariableCollector"/> on purpose: that collector proves a definite
-        /// write (SET/SELECT-assign only, used to pre-taint a loop body before walking it), while
-        /// this one bounds a POSSIBLE write for a statement whose own semantics this scanner
-        /// doesn't model at all - a plain mention (e.g. inside a WHERE clause or PRINT) is not
-        /// provably a write, but it is the only variables that possibly could be one.
+        /// sound upper bound <see cref="TaintReferencedVariables"/> taints against for a
+        /// statement whose own semantics this scanner doesn't model at all: a plain mention
+        /// (e.g. inside a WHERE clause or PRINT) is not provably a write, but it is the only
+        /// variables that possibly could be one, since T-SQL locals cannot alias.
         /// </summary>
         private sealed class ReferencedVariableCollector : TSqlFragmentVisitor
         {
             public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
 
             public override void Visit(VariableReference node) => Names.Add(node.Name);
+        }
+
+        /// <summary>
+        /// Replaces "a GOTO/label anywhere disables folding for the whole scope" with a real
+        /// basic-block control-flow graph, solved by fixpoint - GOTO/labels become ordinary
+        /// edges instead of a bail-out. <see cref="Visitor.HandleWhile"/>'s own loop-body
+        /// fixpoint is a separate, always-on improvement (a WHILE needs no nested GOTO/LABEL to
+        /// benefit from it) - here, a WHILE with no nested goto/label of its OWN is simply one
+        /// opaque step in the graph that calls it exactly as it would outside control-flow-graph
+        /// mode entirely.
+        ///
+        /// IF/WHILE/TRY-CATCH are decomposed into their own blocks ONLY when their own subtree
+        /// contains a nested GOTO or LABEL (<see cref="ContainsGotoOrLabelInSubtree"/>) - the
+        /// (overwhelming majority) that don't are left as a single opaque step reusing <see
+        /// cref="Visitor.HandleIf"/>/<see cref="Visitor.HandleWhile"/>/
+        /// <see cref="Visitor.HandleTryCatch"/> completely unchanged, so this pays its own
+        /// traversal cost only on the actual path to or from a label, never on ordinary
+        /// branching that happens to share a procedure body with one.
+        ///
+        /// The fold lattice (a variable's assembly SET, taint as the absorbing bottom) is
+        /// monotonic and bounded (union only grows a set, capped at
+        /// <see cref="MaxAssembliesPerVariable"/>, past which it taints) - the fixpoint below is
+        /// therefore GUARANTEED to converge, <see cref="MaxRounds"/> is a generous bound on a
+        /// pathological graph size, not a heuristic cutoff that could leave the answer wrong.
+        /// </summary>
+        private sealed class ControlFlowGraph(Visitor visitor)
+        {
+            private const int MaxRounds = 50;
+
+            private sealed class Block
+            {
+                public List<Action<Dictionary<string, FoldState>>> Steps { get; } = [];
+
+                public List<int> Successors { get; } = [];
+            }
+
+            private readonly List<Block> _blocks = [];
+            private readonly Dictionary<string, int> _labelBlocks = new(StringComparer.OrdinalIgnoreCase);
+
+            private int NewBlock()
+            {
+                _blocks.Add(new Block());
+                return _blocks.Count - 1;
+            }
+
+            private static string NormalizeLabel(string labelValue) => labelValue.TrimEnd(':');
+
+            private static bool ContainsGotoOrLabelInSubtree(TSqlFragment fragment)
+            {
+                var detector = new GotoLabelDetector();
+                fragment.Accept(detector);
+                return detector.Found;
+            }
+
+            public Dictionary<string, FoldState> Solve(IList<TSqlStatement> statements, Dictionary<string, FoldState> initialSeed)
+            {
+                PreRegisterLabels(statements);
+                var entryBlock = NewBlock();
+                var exitBlocks = new List<int>();
+                // BuildSequence already appends its own final block to exitBlocks whenever it
+                // completes reachably - the return value only matters to a RECURSIVE caller
+                // (BuildIf/BuildWhile/BuildTryCatch chaining into what follows); the top-level
+                // scope has no such caller, so the value itself is unused here.
+                BuildSequence(statements, entryBlock, exitBlocks, new Stack<(int Header, int After)>());
+
+                var predecessors = new List<int>[_blocks.Count];
+                for (var i = 0; i < _blocks.Count; i++)
+                {
+                    predecessors[i] = [];
+                }
+
+                for (var i = 0; i < _blocks.Count; i++)
+                {
+                    foreach (var successor in _blocks[i].Successors)
+                    {
+                        predecessors[successor].Add(i);
+                    }
+                }
+
+                var outStates = new Dictionary<string, FoldState>?[_blocks.Count];
+
+                visitor._suppressEmission = true;
+                for (var round = 0; round < MaxRounds; round++)
+                {
+                    var changed = false;
+                    for (var i = 0; i < _blocks.Count; i++)
+                    {
+                        var merged = MergeEntry(i, entryBlock, initialSeed, predecessors, outStates);
+                        if (merged is null)
+                        {
+                            continue;
+                        }
+
+                        var working = new Dictionary<string, FoldState>(merged, StringComparer.OrdinalIgnoreCase);
+                        foreach (var step in _blocks[i].Steps)
+                        {
+                            step(working);
+                        }
+
+                        if (outStates[i] is null || !StatesEqual(outStates[i]!, working))
+                        {
+                            changed = true;
+                        }
+
+                        outStates[i] = working;
+                    }
+
+                    if (!changed && round > 0)
+                    {
+                        break;
+                    }
+                }
+
+                // States are stable now - re-run once more with emission enabled. Same inputs,
+                // same steps, so this reproduces the exact same outputs; the only difference is
+                // that EXEC/output-summary side effects are no longer suppressed.
+                visitor._suppressEmission = false;
+                for (var i = 0; i < _blocks.Count; i++)
+                {
+                    var merged = MergeEntry(i, entryBlock, initialSeed, predecessors, outStates);
+                    if (merged is null)
+                    {
+                        continue;
+                    }
+
+                    var working = new Dictionary<string, FoldState>(merged, StringComparer.OrdinalIgnoreCase);
+                    foreach (var step in _blocks[i].Steps)
+                    {
+                        step(working);
+                    }
+
+                    outStates[i] = working;
+                }
+
+                // The scope's own "final" state (what WalkScopedBody reads an OUTPUT parameter
+                // back from) is the merge of every block execution can actually fall off the end
+                // at - RETURN and an unconditional GOTO each already end their block with no
+                // fallthrough successor, so they contribute nothing here, matching that a
+                // procedure exiting through either one never reaches its own implicit end.
+                Dictionary<string, FoldState>? finalState = null;
+                foreach (var exitBlock in exitBlocks)
+                {
+                    if (outStates[exitBlock] is not { } exitState)
+                    {
+                        continue;
+                    }
+
+                    finalState = finalState is null
+                        ? new Dictionary<string, FoldState>(exitState, StringComparer.OrdinalIgnoreCase)
+                        : MergeInto(finalState, exitState, "diverges-in-control-flow-graph");
+                }
+
+                return finalState ?? new Dictionary<string, FoldState>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            private static Dictionary<string, FoldState>? MergeEntry(
+                int block, int entryBlock, Dictionary<string, FoldState> initialSeed, List<int>[] predecessors, Dictionary<string, FoldState>?[] outStates)
+            {
+                Dictionary<string, FoldState>? merged = block == entryBlock
+                    ? new Dictionary<string, FoldState>(initialSeed, StringComparer.OrdinalIgnoreCase)
+                    : null;
+
+                foreach (var predecessor in predecessors[block])
+                {
+                    if (outStates[predecessor] is not { } predecessorState)
+                    {
+                        continue;
+                    }
+
+                    merged = merged is null
+                        ? new Dictionary<string, FoldState>(predecessorState, StringComparer.OrdinalIgnoreCase)
+                        : MergeInto(merged, predecessorState, "diverges-in-control-flow-graph");
+                }
+
+                return merged;
+            }
+
+            private void PreRegisterLabels(IList<TSqlStatement> statements)
+            {
+                foreach (var statement in statements)
+                {
+                    switch (statement)
+                    {
+                        case LabelStatement label:
+                            _labelBlocks[NormalizeLabel(label.Value)] = NewBlock();
+                            break;
+
+                        case BeginEndBlockStatement block:
+                            PreRegisterLabels(block.StatementList.Statements);
+                            break;
+
+                        case IfStatement ifStatement:
+                            PreRegisterLabels(NormalizeToStatementList(ifStatement.ThenStatement));
+                            if (ifStatement.ElseStatement is not null)
+                            {
+                                PreRegisterLabels(NormalizeToStatementList(ifStatement.ElseStatement));
+                            }
+
+                            break;
+
+                        case WhileStatement whileStatement:
+                            PreRegisterLabels(NormalizeToStatementList(whileStatement.Statement));
+                            break;
+
+                        case TryCatchStatement tryCatch:
+                            PreRegisterLabels(tryCatch.TryStatements.Statements);
+                            PreRegisterLabels(tryCatch.CatchStatements.Statements);
+                            break;
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Links <paramref name="statements"/> into the block graph starting at <paramref
+            /// name="current"/>, returning the block execution falls through to afterward, or
+            /// null when this sequence can never fall through (ends in RETURN, an unconditional
+            /// GOTO, or every branch of its last construct exits some other way). Every reached
+            /// dead end (a RETURN, or simply running out of statements) is appended to <paramref
+            /// name="exitBlocks"/> - <see cref="Solve"/> merges all of them for the scope's own
+            /// final state.
+            /// </summary>
+            private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+            {
+                // `reachable` tracks whether `current` is actually reachable via fallthrough from
+                // the PREVIOUS statement - false right after a GOTO/RETURN/BREAK/CONTINUE (or a
+                // nested construct that never falls through). Statements can still follow one in
+                // well-formed T-SQL (most commonly a LABEL some other jump targets), so this must
+                // keep scanning rather than stop outright - an early return here would leave
+                // every statement after it, including the very label an earlier GOTO jumps to,
+                // never linked into the graph at all (reproduced directly: an unconditional GOTO
+                // straight to a label immediately followed by the EXEC left that EXEC's own
+                // block permanently unreached, silently reporting no finding and no script at
+                // all instead of the fold it should have produced).
+                var reachable = true;
+                foreach (var statement in statements)
+                {
+                    if (!reachable)
+                    {
+                        // Dead code unless a label here makes it reachable via GOTO instead -
+                        // either way, resume building into a fresh, currently-unlinked block so a
+                        // label buried inside still gets its own contents populated correctly,
+                        // without spuriously wiring it as a successor of whatever came before.
+                        current = NewBlock();
+                        reachable = true;
+                    }
+
+                    switch (statement)
+                    {
+                        case LabelStatement label:
+                            var labelBlock = _labelBlocks[NormalizeLabel(label.Value)];
+                            _blocks[current].Successors.Add(labelBlock);
+                            current = labelBlock;
+                            break;
+
+                        case GoToStatement goTo:
+                            _blocks[current].Successors.Add(_labelBlocks[goTo.LabelName.Value]);
+                            reachable = false;
+                            break;
+
+                        case ReturnStatement:
+                            exitBlocks.Add(current);
+                            reachable = false;
+                            break;
+
+                        case BeginEndBlockStatement block:
+                            var afterBlock = BuildSequence(block.StatementList.Statements, current, exitBlocks, loopStack);
+                            if (afterBlock is null)
+                            {
+                                reachable = false;
+                            }
+                            else
+                            {
+                                current = afterBlock.Value;
+                            }
+
+                            break;
+
+                        case IfStatement ifStatement when ContainsGotoOrLabelInSubtree(ifStatement):
+                            current = BuildIf(ifStatement, current, exitBlocks, loopStack);
+                            break;
+
+                        case WhileStatement whileStatement when ContainsGotoOrLabelInSubtree(whileStatement):
+                            current = BuildWhile(whileStatement, current, exitBlocks, loopStack);
+                            break;
+
+                        case TryCatchStatement tryCatch when ContainsGotoOrLabelInSubtree(tryCatch):
+                            current = BuildTryCatch(tryCatch, current, exitBlocks, loopStack);
+                            break;
+
+                        // The (overwhelming majority) IF/WHILE/TRY-CATCH whose own subtree has
+                        // no nested GOTO/LABEL - a single opaque step reusing the existing,
+                        // already-correct recursive handler unchanged.
+                        case IfStatement ifOpaque:
+                            _blocks[current].Steps.Add(folded => visitor.HandleIf(ifOpaque, folded, foldingEnabled: true));
+                            break;
+
+                        case WhileStatement whileOpaque:
+                            _blocks[current].Steps.Add(folded => visitor.HandleWhile(whileOpaque, folded, foldingEnabled: true));
+                            break;
+
+                        case TryCatchStatement tryCatchOpaque:
+                            _blocks[current].Steps.Add(folded => visitor.HandleTryCatch(tryCatchOpaque, folded, foldingEnabled: true));
+                            break;
+
+                        case BreakStatement when loopStack.Count > 0:
+                            _blocks[current].Successors.Add(loopStack.Peek().After);
+                            reachable = false;
+                            break;
+
+                        case ContinueStatement when loopStack.Count > 0:
+                            _blocks[current].Successors.Add(loopStack.Peek().Header);
+                            reachable = false;
+                            break;
+
+                        default:
+                            var captured = statement;
+                            _blocks[current].Steps.Add(folded => visitor.WalkStatement(captured, folded, foldingEnabled: true));
+                            break;
+                    }
+                }
+
+                if (!reachable)
+                {
+                    return null;
+                }
+
+                exitBlocks.Add(current);
+                return current;
+            }
+
+            private int BuildIf(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+            {
+                var thenEntry = NewBlock();
+                _blocks[current].Successors.Add(thenEntry);
+                var thenExit = BuildSequence(NormalizeToStatementList(ifStatement.ThenStatement), thenEntry, exitBlocks, loopStack);
+
+                int? elseExit;
+                if (ifStatement.ElseStatement is not null)
+                {
+                    var elseEntry = NewBlock();
+                    _blocks[current].Successors.Add(elseEntry);
+                    elseExit = BuildSequence(NormalizeToStatementList(ifStatement.ElseStatement), elseEntry, exitBlocks, loopStack);
+                }
+                else
+                {
+                    // No ELSE: the condition being false falls straight through from the IF's
+                    // own block, exactly like HandleIf's untouched-else-clone does today.
+                    elseExit = current;
+                }
+
+                var join = NewBlock();
+                if (thenExit is { } te)
+                {
+                    _blocks[te].Successors.Add(join);
+                }
+
+                if (elseExit is { } ee)
+                {
+                    _blocks[ee].Successors.Add(join);
+                }
+
+                return join;
+            }
+
+            private int BuildWhile(WhileStatement whileStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+            {
+                var header = NewBlock();
+                _blocks[current].Successors.Add(header);
+
+                var bodyEntry = NewBlock();
+                var after = NewBlock();
+                _blocks[header].Successors.Add(bodyEntry);
+                _blocks[header].Successors.Add(after);
+
+                loopStack.Push((header, after));
+                var bodyExit = BuildSequence(NormalizeToStatementList(whileStatement.Statement), bodyEntry, exitBlocks, loopStack);
+                loopStack.Pop();
+
+                if (bodyExit is { } be)
+                {
+                    _blocks[be].Successors.Add(header);
+                }
+
+                return after;
+            }
+
+            private int BuildTryCatch(TryCatchStatement tryCatch, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+            {
+                var tryEntry = NewBlock();
+                var catchEntry = NewBlock();
+                _blocks[current].Successors.Add(tryEntry);
+
+                // CATCH only runs if TRY throws mid-way, so how far TRY got is unknowable - an
+                // edge straight from the PRE-TRY block, never from any point inside TRY itself,
+                // matching HandleTryCatch's own "CATCH starts from the pre-TRY state" today.
+                _blocks[current].Successors.Add(catchEntry);
+
+                var tryExit = BuildSequence(tryCatch.TryStatements.Statements, tryEntry, exitBlocks, loopStack);
+                var catchExit = BuildSequence(tryCatch.CatchStatements.Statements, catchEntry, exitBlocks, loopStack);
+
+                var join = NewBlock();
+                if (tryExit is { } tex)
+                {
+                    _blocks[tex].Successors.Add(join);
+                }
+
+                if (catchExit is { } cex)
+                {
+                    _blocks[cex].Successors.Add(join);
+                }
+
+                return join;
+            }
         }
     }
 }

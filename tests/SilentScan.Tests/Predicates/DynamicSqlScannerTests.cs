@@ -148,10 +148,13 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableInProcContainingGoto_Unanalyzable()
+    public void Scan_ExecOfVariableInProcContainingGoto_ProducesAnalyzableScript()
     {
-        // A GOTO anywhere in the proc can jump past/around assignments in ways a straight-line
-        // walk can't safely reason about - folding is disabled for the whole scope.
+        // A GOTO/label used to disable folding for the WHOLE enclosing scope outright, on the
+        // theory that a jump can move execution past/around assignments in ways a straight-line
+        // walk can't safely reason about - true of an arbitrary jump in general, but this one
+        // provably never crosses any assignment of @sql at all: the control-flow graph models
+        // it as a real edge straight to the label, same value either way.
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_Test AS BEGIN " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -160,10 +163,75 @@ public sealed class DynamicSqlScannerTests
             "EXEC(@sql); " +
             "END;");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("goto-or-label-in-scope", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAfterLabelThatCannotReachTheExec_ProducesAnalyzableScript()
+    {
+        // A label sitting AFTER the EXEC, referenced by a jump that itself can never reach the
+        // EXEC (here, jumped to only from further still down) - the CFG's own reachability, not
+        // a blanket "this scope has a label somewhere" rule, is what must decide this.
+        var result = Scan(
+            "CREATE PROCEDURE dbo.usp_Purge AS BEGIN " +
+            "DECLARE @sql NVARCHAR(MAX) = N'DELETE FROM dbo.Orders WHERE RegionCode = ''EMEA'''; " +
+            "EXEC(@sql); " +
+            "IF 1 = 0 GOTO Cleanup; " +
+            "Cleanup: " +
+            "RETURN; " +
+            "END;");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("DELETE FROM dbo.Orders WHERE RegionCode = 'EMEA'", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableReassignedIdenticallyOnEveryPathThroughABackwardJump_ProducesAnalyzableScript()
+    {
+        // A backward jump that DOES re-enter above the EXEC, but re-assigns the exact same
+        // literal on every path into it - the fixpoint must converge on that one value rather
+        // than declining just because a back-edge exists at all.
+        var result = Scan(
+            "CREATE PROCEDURE dbo.usp_ReadWithRetry AS BEGIN " +
+            "DECLARE @sql NVARCHAR(MAX); " +
+            "Retry: " +
+            "SET @sql = N'SELECT OrderId FROM dbo.Orders WHERE OrderCode = ''A100'''; " +
+            "EXEC(@sql); " +
+            "IF 1 = 0 GOTO Retry; " +
+            "END;");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'A100'", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedIdenticallyOnEveryLoopIteration_ProducesAnalyzableScript()
+    {
+        // A WHILE body that assigns the SAME literal every iteration used to be pre-tainted
+        // unconditionally before even examining what the body actually does - HandleWhile now
+        // solves its own genuine fixpoint (Header_0 = loop entry, Header_n+1 = merge(loop entry,
+        // body applied to Header_n)) regardless of whether this scope needs control-flow-graph
+        // mode for an unrelated GOTO/label - a loop-invariant assignment must fold to that one
+        // value, not widen to taint by default just because the loop touches it.
+        var result = Scan(
+            "CREATE PROCEDURE dbo.usp_RefreshBuckets AS BEGIN " +
+            "DECLARE @i INT = 1; " +
+            "DECLARE @sql NVARCHAR(MAX); " +
+            "WHILE @i <= 3 " +
+            "BEGIN " +
+            "    SET @sql = N'UPDATE dbo.Orders SET Refreshed = 1 WHERE StatusCode = ''OPEN'''; " +
+            "    EXEC(@sql); " +
+            "    SET @i = @i + 1; " +
+            "END " +
+            "END;");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("UPDATE dbo.Orders SET Refreshed = 1 WHERE StatusCode = 'OPEN'", script.InnerText);
     }
 
     [Fact]
@@ -182,20 +250,23 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableAfterWhileLoopThatTouchesIt_Unanalyzable()
+    public void Scan_ExecOfVariableAfterWhileLoopThatAssignsTheSameLiteralEveryIteration_BothOutcomesAnalyzed()
     {
-        // A while body may run zero, one, or many times, so nothing it reassigns can be
-        // trusted after the loop.
+        // A while body may run zero, one, or many times - this scanner never evaluates the
+        // condition, so both "never entered" (@sql keeps its pre-loop value) and "ran at least
+        // once" (@sql holds whatever the body's own fixpoint converges to) are genuinely
+        // possible outcomes, not a reason to decline. The body assigns the SAME literal on
+        // every iteration it does run, so the fixpoint converges to exactly two values, not an
+        // ever-growing set.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @i INT = 0; " +
             "WHILE @i < 1 BEGIN SET @sql = N'SELECT 2'; SET @i += 1; END " +
             "EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("while-loop-body", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT 1", "SELECT 2"], texts);
     }
 
     [Fact]
@@ -721,12 +792,12 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_ExecInsideWhileLoopThatSelfMutatesTheExecutedVariable_Unanalyzable()
     {
-        // The counterpart to Scan_ExecInsideWhileLoopUsingPreLoopValue_TierC above: here the
-        // loop body itself reassigns @sql AFTER the EXEC reads it, in program order. Folding
-        // this against loop-entry state is only valid for iteration 1 - iteration 2+ runs SQL
-        // this scanner never analyzed, while the site would otherwise still report
-        // AnalyzedLiteral. This is exactly the DynamicSqlScanner audit's "iteration 2+ executes
-        // different SQL under an AnalyzedLiteral claim" finding.
+        // The loop body itself reassigns @sql AFTER the EXEC reads it, in program order,
+        // appending more text each time it runs - a genuine unbounded accumulator with no fixed
+        // iteration count this scanner evaluates, so the possible-value set grows every round
+        // and is guaranteed to exceed the cardinality cap. Declines correctly, but now for the
+        // real, specific reason (the accumulation genuinely never bounds itself), not a blanket
+        // "this loop touches @sql" taint applied before the body was even examined.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @i INT = 0; " +
@@ -734,7 +805,7 @@ public sealed class DynamicSqlScannerTests
 
         Assert.Empty(result.AnalyzableScripts);
         var finding = Assert.Single(result.Findings);
-        Assert.Equal("while-loop-body-self-mutates", finding.Reason);
+        Assert.Equal("while-loop-body:cardinality-cap", finding.Reason);
     }
 
     [Fact]
