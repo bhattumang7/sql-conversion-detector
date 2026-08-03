@@ -566,6 +566,16 @@ public static class CatalogBuilder
             if (phase == BuildPhase.ApplyEverythingElse && node is ProcedureStatementBodyBase { Parameters: { } parameters })
             {
                 RegisterTableValuedParameters(parameters);
+
+                // Triggers reach this same method via VisitScopedBody but are never a
+                // ProcedureStatementBodyBase (they take no parameters), so this only ever
+                // registers a real CREATE/ALTER PROCEDURE's own signature - the foundation the
+                // procedure call graph (Predicates.ProcCallGraphBuilder) matches EXEC call sites'
+                // arguments against.
+                if (node is CreateProcedureStatement or AlterProcedureStatement or CreateOrAlterProcedureStatement)
+                {
+                    RegisterProcedureParameters(parameters);
+                }
             }
 
             node.AcceptChildren(this);
@@ -601,6 +611,30 @@ public static class CatalogBuilder
                     tableType with { SchemaName = null, Name = parameter.VariableName.Value, Kind = CatalogTableKind.TableVariable },
                     _currentScope);
             }
+        }
+
+        /// <summary>
+        /// Every declared parameter, scalar or table-valued, keyed under the procedure's own
+        /// qualified name (<c>_currentScope</c>, already set by the caller) - declaration order
+        /// preserved, since a positional <c>EXEC proc @a, @b</c> call site can only match
+        /// arguments to formals by that order, and a TVP counts as a positional slot exactly
+        /// like a scalar one even though it has no <see cref="SqlType"/> of its own (recorded
+        /// with a null type, same as any other parameter this pass couldn't type - never simply
+        /// omitted, which would shift every later formal's position out of alignment with the
+        /// real declaration).
+        /// </summary>
+        private void RegisterProcedureParameters(IList<ProcedureParameter> parameters)
+        {
+            var registered = new List<ProcedureParameterInfo>(parameters.Count);
+            foreach (var parameter in parameters)
+            {
+                var isTableValued = parameter.DataType is UserDataTypeReference userType
+                    && catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is { Kind: CatalogTableKind.TableType };
+                var resolvedType = isTableValued ? null : SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, catalog.TypeAliases);
+                registered.Add(new ProcedureParameterInfo(parameter.VariableName.Value, resolvedType, parameter.Modifier == ParameterModifier.Output));
+            }
+
+            catalog.AddProcedureParameters(_currentScope!, registered);
         }
 
         /// <summary>

@@ -1340,6 +1340,60 @@ public sealed class CatalogBuilderTests
         Assert.NotNull(catalog.Find("dbo.Orders"));
     }
 
+    [Fact]
+    public void Build_ProcedureParameters_RegisteredInDeclarationOrderWithOutputFlag()
+    {
+        var catalog = BuildFrom("""
+            CREATE PROCEDURE dbo.FindOrder
+                @OrderId int,
+                @Status varchar(20) OUTPUT
+            AS
+            BEGIN
+                RETURN;
+            END
+            """);
+
+        Assert.True(catalog.TryGetProcedureParameters("dbo.FindOrder", out var parameters));
+        Assert.Equal(2, parameters.Count);
+
+        Assert.Equal("@OrderId", parameters[0].Name);
+        Assert.Equal(SqlTypeCategory.Int, parameters[0].Type!.Category);
+        Assert.False(parameters[0].IsOutput);
+
+        Assert.Equal("@Status", parameters[1].Name);
+        Assert.Equal(SqlTypeCategory.VarChar, parameters[1].Type!.Category);
+        Assert.True(parameters[1].IsOutput);
+    }
+
+    [Fact]
+    public void Build_ProcedureNeverDeclared_TryGetProcedureParametersReturnsFalse()
+    {
+        var catalog = BuildFrom("CREATE TABLE dbo.T (Id int NOT NULL);");
+
+        Assert.False(catalog.TryGetProcedureParameters("dbo.NeverDeclared", out var parameters));
+        Assert.Null(parameters);
+    }
+
+    [Fact]
+    public void Build_ProcedureWithTableValuedParameter_RegistersItWithNullTypeAtItsRealPosition()
+    {
+        // A TVP still occupies a real positional slot in the parameter list (the procedure call
+        // graph's positional-argument matching depends on this) even though it has no SqlType of
+        // its own to report - recorded as null, not omitted.
+        var catalog = BuildFrom("""
+            CREATE TYPE dbo.CodeList AS TABLE (Code varchar(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.Callee (@Codes dbo.CodeList READONLY, @After int) AS SELECT 1;
+            """);
+
+        Assert.True(catalog.TryGetProcedureParameters("dbo.Callee", out var parameters));
+        Assert.Equal(2, parameters.Count);
+        Assert.Equal("@Codes", parameters[0].Name);
+        Assert.Null(parameters[0].Type);
+        Assert.Equal("@After", parameters[1].Name);
+        Assert.Equal(SqlTypeCategory.Int, parameters[1].Type!.Category);
+    }
+
     private static SqlParseResult Parse(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

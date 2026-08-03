@@ -2,6 +2,9 @@ using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Core.Catalog;
 
+/// <summary>One scalar parameter of a CREATE/ALTER PROCEDURE, in declaration order - <paramref name="Type"/> is null when the parameter's own DataType couldn't be resolved, never guessed.</summary>
+public sealed record ProcedureParameterInfo(string Name, SqlType? Type, bool IsOutput);
+
 /// <summary>All tables/views/temp tables/table variables discovered across a scanned folder (Pass 1 output).</summary>
 public sealed class DatabaseCatalog
 {
@@ -15,6 +18,9 @@ public sealed class DatabaseCatalog
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>SQL Server forbids chaining (a synonym's target can't itself be a synonym), but a corpus can contain a broken/legacy script that does it anyway - bounds the walk so a real or accidental cycle can never loop instead of resolving.</summary>
@@ -52,6 +58,23 @@ public sealed class DatabaseCatalog
     /// <summary>True only when a CREATE/ALTER FUNCTION with this qualified name was seen with a scalar (non-table) return type - a table-valued function or an unseen name both return false, so a caller can distinguish "not a scalar UDF" from "a scalar UDF whose type didn't resolve".</summary>
     public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
+
+    /// <summary>
+    /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the
+    /// procedure's qualified name - the foundation the procedure call graph (<see
+    /// cref="Predicates.ProcCallGraphBuilder"/>) matches an <c>EXEC</c> call site's positional and
+    /// named arguments against. Registered even when a parameter's type couldn't be resolved
+    /// (null), matching the same "we saw this and could not type it" honesty
+    /// <see cref="AddScalarFunctionReturnType"/> already follows for functions. A table-valued
+    /// parameter is deliberately excluded here - it has no scalar SqlType to seed anything with,
+    /// and is already registered separately as a scoped table (<see cref="AddOrReplace(CatalogTable, string?)"/>).
+    /// </summary>
+    public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters) =>
+        _procedureParametersByQualifiedName[qualifiedName] = parameters;
+
+    /// <summary>True only when a CREATE/ALTER PROCEDURE with this qualified name was seen - an unregistered/unresolvable callee (a system proc, or a name this scan never saw) returns false rather than an empty list, so a caller can tell "no parameters" apart from "unknown procedure".</summary>
+    public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
+        _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out parameters!);
 
     /// <summary>Registers <c>CREATE SYNONYM name FOR target</c> - a pure name-&gt;name mapping, so it belongs in the same phase type aliases do (nothing else needs to have been resolved first).</summary>
     public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
