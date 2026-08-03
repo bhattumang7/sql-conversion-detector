@@ -806,4 +806,158 @@ public sealed class DynamicSqlScannerTests
         var finding = Assert.Single(result.Findings);
         Assert.Equal("undeclared-variable", finding.Reason);
     }
+
+    // ------------------------------------------------------------------
+    // QUOTENAME folding (roadmap "fold high-volume string-builder functions in dynamic SQL,
+    // oracle-checked") - every expected string below was verified directly against a live Docker
+    // SQL Server instance, not assumed from documentation.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_ExecOfQuoteNameOnLiteral_DefaultBracketDelimiter_FoldsToBracketedText()
+    {
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = 'SELECT * FROM ' + QUOTENAME(N'Orders'); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM [Orders]", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfQuoteNameOnFoldedVariable_TierC_FoldsToBracketedText()
+    {
+        // The realistic pattern this fold exists for: a variable that already folded constant
+        // via straight-line DECLARE tracing, THEN wrapped in QUOTENAME.
+        var result = Scan(
+            "DECLARE @table VARCHAR(50) = 'Orders'; " +
+            "DECLARE @sql VARCHAR(MAX) = 'SELECT * FROM ' + QUOTENAME(@table); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM [Orders]", script.InnerText);
+    }
+
+    // Real T-SQL's EXEC('...') string-list form only accepts a char literal, local variable, or
+    // +-concatenation of those (ScriptDom rejects a bare function call there directly, verified:
+    // "EXEC(QUOTENAME(...))" is itself a syntax error) - so every QUOTENAME scenario below routes
+    // through a DECLARE assignment first, exactly like real dynamic SQL code has to.
+    private static DynamicSqlExtractionResult ScanQuoteName(string quoteNameExpression) =>
+        Scan($"DECLARE @sql NVARCHAR(MAX) = {quoteNameExpression}; EXEC(@sql);");
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_EmbeddedCloseBracket_EscapesByDoubling()
+    {
+        var result = ScanQuoteName("QUOTENAME(N'ab]c')");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("[ab]]c]", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_EmbeddedOpenBracket_NeverEscaped()
+    {
+        // Only the CLOSING delimiter character is ever escaped - oracle-verified: QUOTENAME('ab[c')
+        // returns "[ab[c]", not "[ab[[c]".
+        var result = ScanQuoteName("QUOTENAME(N'ab[c')");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("[ab[c]", script.InnerText);
+    }
+
+    /// <summary>T-SQL source-text escaping (doubling an embedded single quote) for embedding an arbitrary string as a literal in a TEST's own generated SQL - unrelated to QUOTENAME's own escaping, which happens inside the engine once parsed.</summary>
+    private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+
+    [Theory]
+    // inputWithEmbeddedCloseChar always contains the family's own close character so every case
+    // actually exercises the doubling QUOTENAME itself performs, not just the wrap.
+    [InlineData("'", "ab'c", "'ab''c'")]
+    [InlineData("\"", "ab\"c", "\"ab\"\"c\"")]
+    [InlineData("(", "ab)c", "(ab))c)")] // only ')' is the escaped close char for the paren family, doubled
+    [InlineData("<", "ab>c", "<ab>>c>")]
+    [InlineData("{", "ab}c", "{ab}}c}")]
+    public void Scan_QuoteNameOnLiteral_RecognizedDelimiter_MatchesOracleEscaping(string delimiter, string inputWithEmbeddedCloseChar, string expected)
+    {
+        var result = ScanQuoteName(
+            $"QUOTENAME({AsSqlStringLiteral(inputWithEmbeddedCloseChar)}, {AsSqlStringLiteral(delimiter)})");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(expected, script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_UnrecognizedDelimiter_UnanalyzableWithNullResultReason()
+    {
+        // Oracle-verified: QUOTENAME('abc', 'x') returns SQL NULL for real (not brackets, not an
+        // error) - concatenating NULL propagates NULL through the whole @sql build, which this
+        // scanner has no representation for, so it must fail the fold rather than guess.
+        var result = ScanQuoteName("QUOTENAME(N'abc', N'x')");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:quotename-null-result", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_MultiCharacterDelimiter_UnanalyzableWithNullResultReason()
+    {
+        var result = ScanQuoteName("QUOTENAME(N'abc', N'ab')");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:quotename-null-result", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_InputOver128Characters_UnanalyzableWithNullResultReason()
+    {
+        // Oracle-verified boundary: QUOTENAME on a 128-character input still returns a real
+        // value; 129 characters returns SQL NULL.
+        var result = ScanQuoteName($"QUOTENAME(N'{new string('a', 129)}')");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:quotename-null-result", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_Input128Characters_Folds()
+    {
+        var input = new string('a', 128);
+        var result = ScanQuoteName($"QUOTENAME(N'{input}')");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal($"[{input}]", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnLiteral_EmptyDelimiter_DefaultsToBrackets()
+    {
+        var result = ScanQuoteName("QUOTENAME(N'abc', N'')");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("[abc]", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameOnColumnReference_Unanalyzable()
+    {
+        // The argument itself can't fold - QUOTENAME's own result is then equally unknowable,
+        // same as any other function call whose input isn't provably constant.
+        var result = ScanQuoteName("QUOTENAME(SomeColumn)");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:column-reference", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_QuoteNameWithThreeArguments_UnanalyzableAsFunctionCall()
+    {
+        // Not a real QUOTENAME overload - ScriptDom still parses it as a FunctionCall, and this
+        // scanner declines rather than guessing which two of the three arguments matter.
+        var result = ScanQuoteName("QUOTENAME(N'a', N'[', N'extra')");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+    }
 }

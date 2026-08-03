@@ -679,9 +679,101 @@ public static class DynamicSqlScanner
                 case ParenthesisExpression paren:
                     return TryFoldExpression(paren.Expression, folded, foldingEnabled);
 
+                case FunctionCall { FunctionName.Value: var functionName } quoteNameCall
+                    when string.Equals(functionName, "QUOTENAME", StringComparison.OrdinalIgnoreCase):
+                    return TryFoldQuoteName(quoteNameCall, folded, foldingEnabled);
+
                 default:
                     return FailNonLiteralExpression(expression);
             }
+        }
+
+        /// <summary>
+        /// <c>QUOTENAME</c> is the one function call this scanner ever folds (roadmap "fold
+        /// high-volume string-builder functions in dynamic SQL, oracle-checked") - the classic
+        /// <c>SET @sql = 'SELECT * FROM ' + QUOTENAME(@table)</c> pattern, where @table already
+        /// folded constant via Tier C, previously stopped dead at the function call even though
+        /// its result is fully determined. Chosen deliberately over other common builders like
+        /// REPLACE: QUOTENAME's escaping is a pure lexical operation, collation-independent,
+        /// where REPLACE's own case-sensitivity depends on the CALLER's collation (verified
+        /// directly - REPLACE('AbcABC','abc','X') differs under CI vs CS collation, and this
+        /// scanner has no catalog/collation available at the point it runs), so folding REPLACE
+        /// soundly isn't possible without a real risk of silently guessing wrong.
+        /// </summary>
+        private FoldAttempt TryFoldQuoteName(FunctionCall functionCall, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (functionCall.Parameters.Count is < 1 or > 2)
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            var inputAttempt = TryFoldExpression(functionCall.Parameters[0], folded, foldingEnabled);
+            if (!inputAttempt.Success)
+            {
+                return inputAttempt;
+            }
+
+            string? delimiterText = null;
+            if (functionCall.Parameters.Count == 2)
+            {
+                var delimiterAttempt = TryFoldExpression(functionCall.Parameters[1], folded, foldingEnabled);
+                if (!delimiterAttempt.Success)
+                {
+                    return delimiterAttempt;
+                }
+
+                delimiterText = string.Concat(delimiterAttempt.Segments!.Select(s => s.Value));
+            }
+
+            var input = string.Concat(inputAttempt.Segments!.Select(s => s.Value));
+            var quoted = QuoteName(input, delimiterText);
+            if (quoted is null)
+            {
+                // Oracle-verified: QUOTENAME itself returns SQL NULL for an input over 128
+                // characters or an unrecognized delimiter - concatenating NULL propagates NULL
+                // through the whole @sql build, a materially different runtime outcome this
+                // scanner has no NULL-tracking representation for. Failing the fold (rather than
+                // silently treating it as an empty/unwrapped string) is the honest call.
+                return FoldAttempt.Fail("non-literal-expression:quotename-null-result", Span(functionCall));
+            }
+
+            return FoldAttempt.Ok([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, quoted)]);
+        }
+
+        /// <summary>
+        /// QUOTENAME's exact algorithm, oracle-verified against the live Docker instance rather
+        /// than assumed from documentation alone: only the CLOSING delimiter character is ever
+        /// escaped (doubled) inside the input - the opening one is left untouched even when it
+        /// appears in the input (e.g. <c>QUOTENAME('ab[c')</c> stays <c>[ab[c]</c>, not
+        /// <c>[ab[[c]</c>). A one-character delimiter outside the nine SQL Server recognizes, a
+        /// multi-character delimiter, or an input over 128 characters all return null exactly
+        /// as the real QUOTENAME returns SQL NULL for those - never a guessed fallback.
+        /// </summary>
+        private static string? QuoteName(string input, string? delimiter)
+        {
+            if (input.Length > 128)
+            {
+                return null;
+            }
+
+            var (open, close) = delimiter switch
+            {
+                null or "" or "[" or "]" => ('[', ']'),
+                "(" or ")" => ('(', ')'),
+                "<" or ">" => ('<', '>'),
+                "{" or "}" => ('{', '}'),
+                "'" => ('\'', '\''),
+                "\"" => ('"', '"'),
+                _ => ('\0', '\0'),
+            };
+
+            if (open == '\0')
+            {
+                return null;
+            }
+
+            var escaped = input.Replace(close.ToString(), new string(close, 2), StringComparison.Ordinal);
+            return $"{open}{escaped}{close}";
         }
 
         /// <summary>
