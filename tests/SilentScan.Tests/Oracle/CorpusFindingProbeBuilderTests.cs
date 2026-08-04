@@ -164,4 +164,73 @@ public sealed class CorpusFindingProbeBuilderTests
 
         Assert.Contains("FROM [dbo].[T] WHERE [Col]", probe, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Build_ColumnIsTempTable_PrependsACreateTableDeclaration()
+    {
+        // A temp table (proc-body-scoped: CLAUDE.md's "the only parser-derived catalog data is
+        // module-body objects the engine can't expose") never exists standalone in a probe
+        // session on its own - without a CREATE TABLE first, this probe would fail to compile
+        // with "Invalid object name" even though the finding's own classification never depended
+        // on the probe succeeding.
+        var column = new PredicateOperand.Column("#TraceStatus", "TraceFlag", new SqlType(SqlTypeCategory.VarChar, Length: 10), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("""
+            CREATE TABLE [#TraceStatus] ([TraceFlag] VARCHAR(10));
+            DECLARE @p INT;
+            SELECT 1 FROM [#TraceStatus] WHERE [TraceFlag] = @p;
+            """, probe);
+    }
+
+    [Fact]
+    public void Build_ColumnVsColumnBothTempTables_PrependsBothCreateTableDeclarations()
+    {
+        var column = new PredicateOperand.Column("#missing_index_pretty", "executions", new SqlType(SqlTypeCategory.NVarChar, Length: 128), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Column("##BlitzCacheProcs", "ExecutionCount", new SqlType(SqlTypeCategory.BigInt), Indexed: false, Depth: 0, Provenance);
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("""
+            CREATE TABLE [#missing_index_pretty] ([executions] NVARCHAR(128));
+            CREATE TABLE [##BlitzCacheProcs] ([ExecutionCount] BIGINT);
+            SELECT 1 FROM [#missing_index_pretty] AS t1 CROSS JOIN [##BlitzCacheProcs] AS t2 WHERE t1.[executions] = t2.[ExecutionCount];
+            """, probe);
+    }
+
+    [Fact]
+    public void Build_ColumnVsColumnSelfJoinOnSameTempTable_DeclaresBothColumnsOnOneCreateTable()
+    {
+        // A self-join (BuildColumnProbe aliasing the same temp table as t1 and t2) must not
+        // synthesize two colliding CREATE TABLEs, and must not drop whichever column only the
+        // SECOND reference named - both live on the one object this probe actually creates.
+        var column = new PredicateOperand.Column("#T", "ColA", new SqlType(SqlTypeCategory.Int), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Column("#T", "ColB", new SqlType(SqlTypeCategory.BigInt), Indexed: false, Depth: 0, Provenance);
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.Equal("""
+            CREATE TABLE [#T] ([ColA] INT, [ColB] BIGINT);
+            SELECT 1 FROM [#T] AS t1 CROSS JOIN [#T] AS t2 WHERE t1.[ColA] = t2.[ColB];
+            """, probe);
+    }
+
+    [Fact]
+    public void Build_ColumnIsOrdinaryTable_NoCreateTableDeclarationPrepended()
+    {
+        // Regression guard: an ordinary (non-#temp) table must never get a synthesized CREATE
+        // TABLE prepended - it already exists as a real deployed object.
+        var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+
+        var probe = CorpusFindingProbeBuilder.Build(finding);
+
+        Assert.DoesNotContain("CREATE TABLE", probe, StringComparison.Ordinal);
+    }
 }

@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
 
 namespace SilentScan.Verify.Oracle;
@@ -31,12 +32,100 @@ public static class CorpusFindingProbeBuilder
         var column = Bracket(finding.Column.ImmediateColumnName ?? finding.Column.ColumnName);
         var op = NormalizeOperatorForProbe(finding.Operator);
 
-        return finding.OtherOperand switch
+        var probeBody = finding.OtherOperand switch
         {
             PredicateOperand.Value { Type: not null } value => BuildValueProbe(table, column, op, value),
             PredicateOperand.Column otherColumn => BuildColumnProbe(table, column, op, otherColumn),
             _ => null,
         };
+
+        if (probeBody is null)
+        {
+            return null;
+        }
+
+        var scaffolding = BuildTempTableScaffolding(finding);
+        return scaffolding is null ? probeBody : scaffolding + probeBody;
+    }
+
+    /// <summary>
+    /// A finding's own column, or its "other" side when that's a column too, can name a real
+    /// object this probe's session never deployed to standalone at all: a <c>#temp</c>/
+    /// <c>##global temp</c> table CLAUDE.md already tracks the shape of (parser-derived catalog
+    /// data the engine itself can't expose, since the table only ever existed transiently inside
+    /// the ORIGINAL proc's own execution). Without this, every finding against one failed
+    /// outright with "Invalid object name" - not a soundness gap (the finding's own classification
+    /// never depended on the probe), but a real, avoidable loss of oracle coverage for a genuinely
+    /// common corpus shape. Oracle-verified (SET SHOWPLAN_XML ON compiles a <c>CREATE TABLE
+    /// #T(...); SELECT ... FROM #T ...;</c> batch as one unit, establishing the temp table's
+    /// schema for the second statement's own compilation) that this is sound under compile-only
+    /// SHOWPLAN_XML, never touching real data. Declared using ONLY the type this scanner already
+    /// resolved for the referenced column - the temp table's OTHER columns (never touched by this
+    /// probe) are never synthesized, since inventing types for them this scanner never actually
+    /// saw would be a guess.
+    /// </summary>
+    private static string? BuildTempTableScaffolding(TypedPredicateFinding finding)
+    {
+        // An ordered list, not a Dictionary (CLAUDE.md: "deterministic output ordering") - a
+        // self-join probe (BuildColumnProbe aliasing the SAME temp table as both t1 and t2)
+        // needs every column either side references declared on the ONE synthesized object, not
+        // two colliding CREATE TABLEs or a table missing whichever column only the second
+        // reference named, so tables are grouped by qualified name here rather than emitted as
+        // two independent declarations.
+        var tables = new List<(string QualifiedName, List<(string ColumnName, SqlType Type)> Columns)>();
+
+        AddTempTableColumn(
+            finding.Column.ImmediateRelationQualifiedName ?? finding.Column.TableQualifiedName,
+            finding.Column.ImmediateColumnName ?? finding.Column.ColumnName,
+            finding.Column.Type, tables);
+
+        if (finding.OtherOperand is PredicateOperand.Column otherColumn)
+        {
+            AddTempTableColumn(
+                otherColumn.ImmediateRelationQualifiedName ?? otherColumn.TableQualifiedName,
+                otherColumn.ImmediateColumnName ?? otherColumn.ColumnName,
+                otherColumn.Type, tables);
+        }
+
+        if (tables.Count == 0)
+        {
+            return null;
+        }
+
+        var declarations = tables.Select(t =>
+        {
+            var columnDefinitions = string.Join(", ", t.Columns.Select(c => $"{Bracket(c.ColumnName)} {SqlTypeSyntaxFormatter.Format(c.Type)}"));
+            return $"CREATE TABLE {BracketQualifiedName(t.QualifiedName)} ({columnDefinitions});{Environment.NewLine}";
+        });
+
+        return string.Concat(declarations);
+    }
+
+    private static void AddTempTableColumn(
+        string qualifiedName, string columnName, SqlType? type, List<(string QualifiedName, List<(string ColumnName, SqlType Type)> Columns)> tables)
+    {
+        // A temp table name is always a single bare identifier (T-SQL has no schema-qualified
+        // #temp table syntax) - '#'/'##' is checked on the name itself, never split apart. A
+        // type this scanner couldn't render as T-SQL syntax (SqlTypeSyntaxFormatter.Format
+        // returning null) drops just this ONE column's declaration rather than the whole probe -
+        // Build's own caller already declines the whole probe if scaffolding alone can't make it
+        // compile, via the ordinary "still fails, ProbeFailed" path.
+        if (!qualifiedName.StartsWith('#') || type is null || SqlTypeSyntaxFormatter.Format(type) is null)
+        {
+            return;
+        }
+
+        var table = tables.FirstOrDefault(t => string.Equals(t.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase));
+        if (table.Columns is null)
+        {
+            table = (qualifiedName, []);
+            tables.Add(table);
+        }
+
+        if (!table.Columns.Any(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase)))
+        {
+            table.Columns.Add((columnName, type));
+        }
     }
 
     // IN-list findings collapse the whole list to one effective "other type" for classification
