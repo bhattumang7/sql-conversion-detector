@@ -24,6 +24,18 @@
 # below runs the real command in its own process group so this script's own trap can kill that
 # whole group on exit, regardless of whether the command exited, timed out, or crashed.
 #
+# A THIRD failure mode (reproduced directly, 2026-08-04, in a session with an editor's C#
+# language server attached to this repo): `dotnet build-server shutdown` requests a shutdown but
+# does not itself block until the VBCSCompiler/MSBuild node processes have actually exited - a
+# subsequent invocation launched moments later (this script's own next run, or the language
+# server's background build) can start while the previous server is still mid-teardown, hitting
+# the exact 0x80131506 race this script otherwise defends against. wait_for_stray_build_processes
+# below closes that gap on BOTH ends of every invocation: before launching the real command (so
+# this run starts from a genuinely clean slate, not just after a shutdown REQUEST) and after it
+# exits (so the NEXT invocation - from this script or anything else - does too). It only ever
+# targets VBCSCompiler/MSBuild.dll node-mode workers by name, never the language server's own
+# long-lived BuildHost process, which is a legitimate, actively-used part of the editor session.
+#
 # Usage: scripts/dotnet-safe.sh test --filter "..."
 #        scripts/dotnet-safe.sh build
 #        DOTNET_SAFE_TIMEOUT=1200 scripts/dotnet-safe.sh test
@@ -41,6 +53,28 @@ log_dir="${TMPDIR:-/tmp}/dotnet-safe-logs"
 mkdir -p "$log_dir"
 log_file="$log_dir/$(date +%Y%m%d-%H%M%S 2>/dev/null || echo run)-$$.log"
 
+# Waits (bounded) for any stray VBCSCompiler/MSBuild node-mode worker owned by this user to exit
+# on its own after a `build-server shutdown` request; force-kills whatever is left once the
+# bound is hit rather than let it keep racing every future invocation - the actual root cause of
+# the repeated-crash failure mode above, not a cosmetic cleanup.
+wait_for_stray_build_processes() {
+    local pattern='VBCSCompiler|MSBuild\.dll.*nodemode'
+    local max_wait_seconds=10
+    local waited=0
+    while pgrep -u "$(id -u)" -f "$pattern" >/dev/null 2>&1; do
+        if [[ "$waited" -ge "$max_wait_seconds" ]]; then
+            pkill -KILL -u "$(id -u)" -f "$pattern" >/dev/null 2>&1 || true
+            break
+        fi
+
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
+dotnet build-server shutdown >/dev/null 2>&1 || true
+wait_for_stray_build_processes
+
 group_pid=""
 cleanup() {
     if [[ -n "$group_pid" ]]; then
@@ -49,6 +83,7 @@ cleanup() {
         kill -KILL -- "-$group_pid" >/dev/null 2>&1 || true
     fi
     dotnet build-server shutdown >/dev/null 2>&1 || true
+    wait_for_stray_build_processes
     return 0
 }
 trap cleanup EXIT
