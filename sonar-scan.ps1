@@ -87,6 +87,31 @@ $IsVerbose = $VerbosePreference -eq 'Continue'
 # `dotnet` child this script launches inherits it.
 $env:MSBUILDDISABLENODEREUSE = '1'
 
+# Same root cause scripts/dotnet-safe.sh's own wait_for_stray_build_processes closes, reproduced
+# directly in THIS script (2026-08-04): `dotnet build-server shutdown` only requests a shutdown,
+# it does not block until the VBCSCompiler/MSBuild node-mode processes have actually exited - the
+# [3/4] Build step below can start while a PRIOR invocation's server is still mid-teardown (this
+# script's own earlier run, or scripts/dotnet-safe.sh's, or an editor's language server attached
+# to the repo) and hit the documented 0x80131506 crash. Only ever targets those two process
+# names by name, never a language server's own long-lived BuildHost process.
+function Wait-ForStrayBuildProcesses {
+    $pattern = 'VBCSCompiler|MSBuild\.dll.*nodemode'
+    $maxWaitSeconds = 10
+    $uid = (& id -u)
+    for ($waited = 0; $waited -le $maxWaitSeconds; $waited++) {
+        & pgrep -u $uid -f $pattern *> $null
+        if ($LASTEXITCODE -ne 0) { return }
+        if ($waited -eq $maxWaitSeconds) {
+            & pkill -KILL -u $uid -f $pattern 2>$null
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+}
+
+& dotnet build-server shutdown *> $null
+Wait-ForStrayBuildProcesses
+
 function Invoke-Step {
     param(
         [Parameter(Mandatory)] [string]$Label,
@@ -315,6 +340,8 @@ finally {
         $LockStream.Close()
         Remove-Item -Force $LockPath -ErrorAction SilentlyContinue
     }
+    & dotnet build-server shutdown *> $null
+    Wait-ForStrayBuildProcesses
 }
 
 if ($buildFailed)      { Write-Warning "Build did not fully succeed - some C# files were not analyzed." }
