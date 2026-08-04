@@ -2137,4 +2137,109 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("symbolic-value-in-function-argument", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
+
+    [Fact]
+    public void Scan_ExecOfNCharCrLfConcatenation_ProducesAnalyzableScript()
+    {
+        // Corpus-measured (WWI's DeactivateTemporalTablesBeforeDataLoad.sql): @CrLf is built as
+        // NCHAR(13) + NCHAR(10), then spliced pervasively into every downstream dynamic SQL
+        // block - previously the single largest real blocker in the "non-literal-expression:
+        // function-call" bucket, since NCHAR/CHAR weren't foldable at all.
+        var result = Scan(
+            "DECLARE @CrLf NVARCHAR(2) = NCHAR(13) + NCHAR(10); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + @CrLf + N'WHERE 1 = 1'; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1\r\nWHERE 1 = 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfCharOutOfRange_Unanalyzable()
+    {
+        // Near-miss: CHAR's valid range is [0, 255] (oracle-verified) - 256 returns SQL NULL,
+        // which this scanner has no LiteralSegment representation for, so the fold must decline
+        // rather than guess.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'x' + CHAR(256); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:char-out-of-range", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfNCharOfNonLiteralArgument_StillRefuses()
+    {
+        // Near-miss: NCHAR's own argument isn't foldable to an integer literal (a plain column
+        // reference has no meaning here, so this exercises the FailNonLiteralExpression fallback
+        // via a variable that was never declared).
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = NCHAR(@undeclaredCodePoint); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfIsNullOfFoldedFirstArgument_ProducesAnalyzableScript()
+    {
+        // A successfully-folded expression is provably non-NULL (a bare `SET @x = NULL` fails to
+        // fold outright), so ISNULL(a, b) always evaluates to `a` whenever `a` folds - `b` is
+        // never even inspected.
+        var result = Scan(
+            "DECLARE @suffix NVARCHAR(20) = N'Active'; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + ISNULL(@suffix, N'fallback'); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT Active", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfIsNullOfUnfoldableFirstArgument_PropagatesFirstArgumentReason()
+    {
+        // Near-miss: the first argument doesn't fold at all (undeclared variable) - ISNULL cannot
+        // fall back to the second argument, since a genuinely unfoldable first argument's runtime
+        // nullness is unknown.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = ISNULL(@undeclared, N'fallback'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfCoalesceOfFoldedFirstArgument_ProducesAnalyzableScript()
+    {
+        var result = Scan(
+            "DECLARE @suffix NVARCHAR(20) = N'Active'; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + COALESCE(@suffix, N'b', N'c'); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT Active", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfNullIf_StillRefuses()
+    {
+        // NULLIF is deliberately NOT folded, even when both arguments fold: unlike ISNULL/
+        // COALESCE it can produce a genuine SQL NULL (when the two arguments compare equal),
+        // which this scanner has no LiteralSegment representation for.
+        var result = Scan(
+            "DECLARE @a NVARCHAR(20) = N'x'; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + NULLIF(@a, N'y'); " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:other", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
 }

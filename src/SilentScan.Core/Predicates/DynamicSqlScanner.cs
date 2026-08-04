@@ -1341,6 +1341,32 @@ public static class DynamicSqlScanner
                     when string.Equals(functionName, FnQuoteName, StringComparison.OrdinalIgnoreCase):
                     return TryFoldQuoteName(quoteNameCall, folded, foldingEnabled);
 
+                case FunctionCall { FunctionName.Value: var functionName } charCall
+                    when string.Equals(functionName, FnChar, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(functionName, FnNChar, StringComparison.OrdinalIgnoreCase):
+                    return TryFoldCharOrNChar(charCall, functionName, folded, foldingEnabled);
+
+                // ISNULL(a, b): whenever this scanner successfully folds `a` at all, that value is
+                // PROVABLY non-NULL - a variable folds to Constant assemblies only by tracing a
+                // real literal/DECLARE/SET chain, and a bare `SET @x = NULL` fails to fold (no
+                // NullLiteral case anywhere in this switch) rather than being silently treated as
+                // some placeholder value. ISNULL therefore always evaluates to `a` whenever `a`
+                // folds, regardless of `b` - `b` is never even inspected, exactly mirroring
+                // CoalesceExpression below.
+                case FunctionCall { FunctionName.Value: var functionName } isNullCall
+                    when string.Equals(functionName, FnIsNull, StringComparison.OrdinalIgnoreCase) && isNullCall.Parameters.Count == 2:
+                    return TryFoldExpression(isNullCall.Parameters[0], folded, foldingEnabled);
+
+                // COALESCE(a, b, ...): same "a successfully-folded expression is provably non-NULL"
+                // argument as ISNULL above - the result is always `a`'s value whenever `a` folds,
+                // so later arguments are never inspected. NULLIF is deliberately NOT handled here:
+                // unlike ISNULL/COALESCE it can produce a genuine NULL even when its first argument
+                // folds (when the two arguments compare equal), which this scanner has no
+                // LiteralSegment representation for - it falls through to the generic
+                // "non-literal-expression:other" refusal below rather than being guessed at.
+                case CoalesceExpression { Expressions.Count: > 0 } coalesce:
+                    return TryFoldExpression(coalesce.Expressions[0], folded, foldingEnabled);
+
                 case FunctionCall { FunctionName.Value: var functionName } builderCall
                     when WhitelistedStringBuilders.Contains(functionName):
                     return TryFoldStringBuilder(builderCall, functionName, folded, foldingEnabled);
@@ -1450,6 +1476,9 @@ public static class DynamicSqlScanner
         private const string FnLeft = "LEFT";
         private const string FnRight = "RIGHT";
         private const string FnQuoteName = "QUOTENAME";
+        private const string FnChar = "CHAR";
+        private const string FnNChar = "NCHAR";
+        private const string FnIsNull = "ISNULL";
 
         /// <summary>
         /// Every builtin this scanner declines to fold purely because its result is genuinely
@@ -1984,6 +2013,37 @@ public static class DynamicSqlScanner
 
                 return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, quoted)]);
             });
+        }
+
+        /// <summary>
+        /// NCHAR(n)/CHAR(n) are pure, oracle-verified constant-value functions whenever their sole
+        /// integer argument folds to a literal: NCHAR(n) for n in [0, 65535] yields the Unicode
+        /// nchar(1) code point, CHAR(n) for n in [0, 255] yields the single-byte char(1) code
+        /// point (both ranges and the NULL-outside-range behavior confirmed against the Docker
+        /// oracle via DATALENGTH/SQL_VARIANT_PROPERTY - CHAR(0) is NOT null, matching neither
+        /// function's documented range being open at zero). A NULL result has no LiteralSegment
+        /// representation this scanner can propagate, so an out-of-range argument fails the fold
+        /// rather than guessing - same policy as QUOTENAME's own null-result case above. Closes
+        /// the single most common blocker in the pinned corpus: <c>NCHAR(13) + NCHAR(10)</c>
+        /// building a CRLF constant that then taints everything concatenated with it.
+        /// </summary>
+        private FoldAttempt TryFoldCharOrNChar(FunctionCall functionCall, string functionName, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            var isNational = string.Equals(functionName, FnNChar, StringComparison.OrdinalIgnoreCase);
+            if (functionCall.Parameters.Count != 1
+                || !TryFoldIntegerLiteral(functionCall.Parameters[0], folded, foldingEnabled, out var codePoint))
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            var maxCodePoint = isNational ? 65535 : 255;
+            if (codePoint is < 0 || codePoint > maxCodePoint)
+            {
+                return FoldAttempt.Fail("non-literal-expression:char-out-of-range", Span(functionCall));
+            }
+
+            var value = ((char)codePoint).ToString();
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, value)]);
         }
 
         /// <summary>

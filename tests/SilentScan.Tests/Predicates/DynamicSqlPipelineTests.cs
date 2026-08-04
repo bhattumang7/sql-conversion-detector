@@ -579,4 +579,36 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
+
+    [Fact]
+    public async Task Analyze_NCharCrLfAndCoalesceSplicedIntoLiteral_ScanForced_OracleConfirmed()
+    {
+        // Corpus-measured (WWI's DeactivateTemporalTablesBeforeDataLoad.sql): dynamic SQL built
+        // with an NCHAR(13)+NCHAR(10) CRLF constant spliced between statement fragments, plus a
+        // COALESCE(known-constant, fallback) feeding the predicate's own literal value - both
+        // previously unfoldable, both provably reduce to a fixed value here. Col is VARCHAR/
+        // SQL_* collation compared against an N'...' literal - genuine column-side conversion.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "DECLARE @CrLf NVARCHAR(2) = NCHAR(13) + NCHAR(10); " +
+            "DECLARE @suffix NVARCHAR(20) = N'x'; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T' + @CrLf + N'WHERE Col = N''' + COALESCE(@suffix, N'fallback') + N'''';" +
+            "EXEC(@sql);");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        Assert.Equal("SELECT Col FROM dbo.T\r\nWHERE Col = N'x'", script.InnerText);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.True(typedFinding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
 }
