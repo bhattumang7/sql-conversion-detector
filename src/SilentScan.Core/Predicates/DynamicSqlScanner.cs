@@ -62,6 +62,15 @@ public static class DynamicSqlScanner
     private readonly record struct LiteralSegment(string SourcePath, int StartLine, int StartColumn, int PrefixLength, string Value);
 
     /// <summary>
+    /// The one place an assembly is ever flattened to a plain string - every other flattening
+    /// site in this file must go through here rather than concatenating <see cref="LiteralSegment.Value"/>
+    /// directly, so that a future placeholder segment (an unknown-but-typed value standing in
+    /// for something this scanner could not prove constant) has exactly one choke point to gate:
+    /// today every segment is a real literal, so this always succeeds.
+    /// </summary>
+    private static string TryFlatten(IReadOnlyList<LiteralSegment> assembly) => string.Concat(assembly.Select(s => s.Value));
+
+    /// <summary>
     /// One statically-provable constant value a folded expression could assemble to - a single
     /// concatenation chain of literal segments. Plural assemblies (see <see cref="FoldAttempt"/>/
     /// <see cref="FoldState"/>) exist because a control-flow join point (IF/TRY-CATCH) can leave a
@@ -235,7 +244,7 @@ public static class DynamicSqlScanner
 
                 if (!_suppressEmission && folded.TryGetValue(formal.VariableName.Value, out var state) && state.Assemblies is { } assemblies)
                 {
-                    var values = assemblies.Select(a => string.Concat(a.Select(s => s.Value))).Distinct(StringComparer.Ordinal).ToList();
+                    var values = assemblies.Select(TryFlatten).Distinct(StringComparer.Ordinal).ToList();
                     OutputSummaries.Add(new ProcedureOutputSummary(qualifiedName, formal.VariableName.Value, values));
                 }
             }
@@ -860,7 +869,7 @@ public static class DynamicSqlScanner
             var result = new List<IReadOnlyList<LiteralSegment>>();
             foreach (var assembly in a.Concat(b))
             {
-                if (!seen.Add(string.Concat(assembly.Select(s => s.Value))))
+                if (!seen.Add(TryFlatten(assembly)))
                 {
                     continue;
                 }
@@ -898,7 +907,7 @@ public static class DynamicSqlScanner
                 foreach (var r in right)
                 {
                     List<LiteralSegment> merged = [.. l, .. r];
-                    if (!seen.Add(string.Concat(merged.Select(s => s.Value))))
+                    if (!seen.Add(TryFlatten(merged)))
                     {
                         continue;
                     }
@@ -1126,7 +1135,7 @@ public static class DynamicSqlScanner
                 return null;
             }
 
-            return string.Concat(attempt.Assemblies[0].Select(s => s.Value));
+            return TryFlatten(attempt.Assemblies[0]);
         }
 
         /// <summary>
@@ -1673,7 +1682,7 @@ public static class DynamicSqlScanner
                 return false;
             }
 
-            value = string.Concat(attempt.Assemblies[0].Select(s => s.Value)).TrimEnd(' ').Length;
+            value = TryFlatten(attempt.Assemblies[0]).TrimEnd(' ').Length;
             return true;
         }
 
@@ -1749,7 +1758,7 @@ public static class DynamicSqlScanner
                     return attempt;
                 }
 
-                argumentValueSets.Add(attempt.Assemblies!.Select(a => string.Concat(a.Select(s => s.Value))).ToList());
+                argumentValueSets.Add(attempt.Assemblies!.Select(TryFlatten).ToList());
             }
 
             IEnumerable<IReadOnlyList<string>> combinations = [Array.Empty<string>()];
@@ -1768,7 +1777,7 @@ public static class DynamicSqlScanner
                     return attempt;
                 }
 
-                var value = string.Concat(attempt.Assemblies![0].Select(s => s.Value));
+                var value = TryFlatten(attempt.Assemblies![0]);
                 if (!seen.Add(value))
                 {
                     continue;
