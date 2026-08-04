@@ -1,6 +1,6 @@
 using Microsoft.Data.SqlClient;
 
-namespace SilentScan.Live.Catalog;
+namespace SilentScan.Verify.Catalog;
 
 /// <summary>
 /// Reads every module body (view/procedure/scalar or table-valued function/trigger definition)

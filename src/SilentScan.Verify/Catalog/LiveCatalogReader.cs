@@ -4,7 +4,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
 
-namespace SilentScan.Live.Catalog;
+namespace SilentScan.Verify.Catalog;
 
 /// <summary>
 /// Builds a <see cref="DatabaseCatalog"/> directly from a live database's own system metadata

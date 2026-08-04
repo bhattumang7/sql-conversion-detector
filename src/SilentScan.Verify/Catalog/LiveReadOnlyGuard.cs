@@ -2,7 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Parsing;
 
-namespace SilentScan.Live.Catalog;
+namespace SilentScan.Verify.Catalog;
 
 /// <summary>
 /// The code-level backstop for "a connected live database is scanned read-only" (CLAUDE.md hard

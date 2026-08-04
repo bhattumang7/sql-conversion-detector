@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
+using SilentScan.Verify.Catalog;
 using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Live.Catalog;

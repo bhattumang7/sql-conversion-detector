@@ -1,6 +1,6 @@
 using SilentScan.Core.Catalog;
 
-namespace SilentScan.Live.Catalog;
+namespace SilentScan.Verify.Catalog;
 
 /// <summary>
 /// Maps a <c>sys.types.name</c> value (the base type name a live column/parameter/alias

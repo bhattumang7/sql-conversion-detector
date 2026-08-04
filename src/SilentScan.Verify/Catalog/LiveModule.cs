@@ -1,4 +1,4 @@
-namespace SilentScan.Live.Catalog;
+namespace SilentScan.Verify.Catalog;
 
 /// <summary>One row of <c>sys.sql_modules</c> joined back to its owning <c>sys.objects</c> entry - a view, procedure, scalar/inline/multi-statement function, or trigger with a readable T-SQL body.</summary>
 public sealed record LiveModule(string SchemaName, string ObjectName, string ObjectTypeCode, string Definition, bool UsesQuotedIdentifier)

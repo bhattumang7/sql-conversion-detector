@@ -1,7 +1,7 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
-using SilentScan.Live.Catalog;
+using SilentScan.Verify.Catalog;
 using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;

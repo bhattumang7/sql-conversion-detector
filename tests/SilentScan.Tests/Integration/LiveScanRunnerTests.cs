@@ -1,6 +1,6 @@
 using SilentScan.Core.Rules;
 using SilentScan.Live;
-using SilentScan.Live.Catalog;
+using SilentScan.Verify.Catalog;
 using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Integration;

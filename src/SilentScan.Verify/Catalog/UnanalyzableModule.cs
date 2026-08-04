@@ -1,4 +1,4 @@
-namespace SilentScan.Live.Catalog;
+namespace SilentScan.Verify.Catalog;
 
 /// <summary>Why a module found in the catalog could not be analyzed - never a silent omission (CLAUDE.md dynamic-SQL policy's same honesty rule, applied to modules with no T-SQL body to analyze at all).</summary>
 public enum UnanalyzableModuleReason

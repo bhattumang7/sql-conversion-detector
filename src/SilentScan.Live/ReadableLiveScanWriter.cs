@@ -1,6 +1,7 @@
 using System.Globalization;
 using SilentScan.Core.Reporting.Readable;
 using SilentScan.Live.Catalog;
+using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live;
 

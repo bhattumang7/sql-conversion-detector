@@ -4,6 +4,7 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Live.Catalog;
+using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live;
 

@@ -15,7 +15,7 @@ public static class ScanReportBuilder
     /// hard scope: "Everything goes via the database — no file-parsed catalog, no file-only
     /// scan") - this method no longer infers one from <paramref name="allParseResults"/> itself.
     /// Every real caller reads the catalog from a live database's own metadata
-    /// (<c>SilentScan.Live.Catalog.LiveCatalogReader</c>, via <c>LiveScanRunner</c>/
+    /// (<c>SilentScan.Verify.Catalog.LiveCatalogReader</c>, via <c>LiveScanRunner</c>/
     /// <c>CorpusLiveScanRunner</c>) - the only place file-parsed catalog inference
     /// (<see cref="CatalogBuilder"/>) still runs at all is <c>DatabaseCatalog.MergeFileModeExtras</c>,
     /// contributing what engine metadata alone cannot see (temp tables, table variables, a scalar

@@ -1,4 +1,4 @@
-using SilentScan.Live.Catalog;
+using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Tests.Catalog;
 

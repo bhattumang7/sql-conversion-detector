@@ -2,6 +2,7 @@ using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
 using SilentScan.Live;
 using SilentScan.Live.Catalog;
+using SilentScan.Verify.Catalog;
 using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;

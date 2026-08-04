@@ -1,6 +1,7 @@
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
+using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live.Catalog;
 
