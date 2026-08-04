@@ -36,6 +36,15 @@
 # targets VBCSCompiler/MSBuild.dll node-mode workers by name, never the language server's own
 # long-lived BuildHost process, which is a legitimate, actively-used part of the editor session.
 #
+# Even with both ends covered, a genuinely FRESH race is still possible - the language server can
+# start its own independent build at the exact instant this script's real command starts theirs,
+# with no stale process for the checks above to have caught beforehand (reproduced directly,
+# 2026-08-04, immediately after a clean run of this same script). This is the specific,
+# documented, external, non-deterministic race Directory.Build.props already accepts as possible
+# "on an unlucky overlap even with UseSharedCompilation off" - so the real command is retried
+# once, and only once, and only when the exit code and log both match that EXACT signature, never
+# for an ordinary build/test failure.
+#
 # Usage: scripts/dotnet-safe.sh test --filter "..."
 #        scripts/dotnet-safe.sh build
 #        DOTNET_SAFE_TIMEOUT=1200 scripts/dotnet-safe.sh test
@@ -89,10 +98,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-setsid timeout --kill-after=30s "${timeout_seconds}s" dotnet "$@" > "$log_file" 2>&1 &
-group_pid=$!
-wait "$group_pid"
-exit_code=$?
+max_attempts=2
+attempt=1
+while :; do
+    setsid timeout --kill-after=30s "${timeout_seconds}s" dotnet "$@" > "$log_file" 2>&1 &
+    group_pid=$!
+    wait "$group_pid"
+    exit_code=$?
+
+    if [[ "$exit_code" -eq 134 ]] && [[ "$attempt" -lt "$max_attempts" ]] && grep -q "Internal CLR error" "$log_file" 2>/dev/null; then
+        echo "dotnet $* hit the known VBCSCompiler race (attempt ${attempt}/${max_attempts}) - clearing stray processes and retrying..." >&2
+        dotnet build-server shutdown >/dev/null 2>&1 || true
+        wait_for_stray_build_processes
+        attempt=$((attempt + 1))
+        log_file="$log_dir/$(date +%Y%m%d-%H%M%S 2>/dev/null || echo run)-$$-retry.log"
+        continue
+    fi
+
+    break
+done
 
 if [[ "$exit_code" -eq 124 ]] || [[ "$exit_code" -eq 137 ]]; then
     echo "dotnet $* TIMED OUT after ${timeout_seconds}s - killed. Full log: $log_file" >&2
