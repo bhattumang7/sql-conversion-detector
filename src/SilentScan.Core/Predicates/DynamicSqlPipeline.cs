@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
@@ -169,15 +170,20 @@ public static class DynamicSqlPipeline
             new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, WriteLoss, Skipped);
     }
 
-    private static void ProcessScript(
-        DynamicSqlScript script,
-        DatabaseCatalog catalog,
-        LineageCatalog lineage,
-        int depth,
-        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
-        ResultAccumulator accumulator)
+    /// <summary>
+    /// Handles everything before ordinary Tier-1/typed extraction can safely run: the
+    /// whole-statement-is-a-placeholder pre-parse check, the parse itself, reclassifying a parse
+    /// FAILURE as the scanner's own fault when a placeholder is present rather than the user's
+    /// source, and (once parsing succeeds) the placeholder position classifier. Returns false the
+    /// moment any of these already fully explains the site (a finding has been added, nothing
+    /// left to do); true only when ordinary extraction should proceed against
+    /// <paramref name="innerParseResult"/>.
+    /// </summary>
+    private static bool TryParseAndClassify(
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence>? placeholders, ResultAccumulator accumulator,
+        [NotNullWhen(true)] out SqlParseResult? innerParseResult)
     {
-        var placeholders = script.PlaceholderOccurrences;
+        innerParseResult = null;
 
         if (placeholders is { Count: > 0 } && IsEntirelyPlaceholder(script.InnerText, placeholders))
         {
@@ -189,13 +195,13 @@ public static class DynamicSqlPipeline
             accumulator.Findings.Add(new DynamicSqlFinding(
                 script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                 DynamicSqlOutcome.Unanalyzable, "symbolic-value-not-positionable:whole-statement"));
-            return;
+            return false;
         }
 
         var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}";
-        var innerParseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText);
+        var parseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText);
 
-        if (innerParseResult.HasErrors)
+        if (parseResult.HasErrors)
         {
             if (placeholders is { Count: > 0 })
             {
@@ -206,24 +212,26 @@ public static class DynamicSqlPipeline
                 accumulator.Findings.Add(new DynamicSqlFinding(
                     script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                     DynamicSqlOutcome.Unanalyzable, "symbolic-value-broke-parse"));
-                return;
+            }
+            else
+            {
+                var reason = parseResult.Errors[0].Message;
+                accumulator.Findings.Add(new DynamicSqlFinding(
+                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.InnerParseFailed, reason));
             }
 
-            var reason = innerParseResult.Errors[0].Message;
-            accumulator.Findings.Add(new DynamicSqlFinding(
-                script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.InnerParseFailed, reason));
-            return;
+            return false;
         }
 
         if (placeholders is { Count: > 0 })
         {
-            var classification = ClassifyPlaceholders(innerParseResult.Fragment, placeholders);
+            var classification = ClassifyPlaceholders(parseResult.Fragment, placeholders);
             if (classification == PlaceholderClassification.Unsupported)
             {
                 accumulator.Findings.Add(new DynamicSqlFinding(
                     script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                     DynamicSqlOutcome.Unanalyzable, "symbolic-value-unsupported-position"));
-                return;
+                return false;
             }
 
             if (classification == PlaceholderClassification.ObjectIdentifierOnly)
@@ -233,10 +241,11 @@ public static class DynamicSqlPipeline
                 // High confidence with zero findings, and Tier-1/typed extraction never runs at
                 // all: "zero findings" is a property of this code path, not of a downstream check
                 // that could silently miss something. Nested dynamic SQL inside a script whose
-                // OWN identity rests on a placeholder is never recursed into either (see below).
+                // OWN identity rests on a placeholder is never recursed into either (ProcessScript's
+                // own nested-recursion guard).
                 accumulator.Findings.Add(new DynamicSqlFinding(
                     script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
-                return;
+                return false;
             }
 
             // classification == Quoted: every placeholder sits inside a string literal in the
@@ -245,6 +254,24 @@ public static class DynamicSqlPipeline
             // the ordinary extractor below, never from the placeholder's declared type. Falls
             // through to the same extraction path a placeholder-free script takes; Remap stamps
             // script.Confidence (already Medium) onto whatever it finds.
+        }
+
+        innerParseResult = parseResult;
+        return true;
+    }
+
+    private static void ProcessScript(
+        DynamicSqlScript script,
+        DatabaseCatalog catalog,
+        LineageCatalog lineage,
+        int depth,
+        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
+        ResultAccumulator accumulator)
+    {
+        var placeholders = script.PlaceholderOccurrences;
+        if (!TryParseAndClassify(script, placeholders, accumulator, out var innerParseResult))
+        {
+            return;
         }
 
         accumulator.Findings.Add(new DynamicSqlFinding(
