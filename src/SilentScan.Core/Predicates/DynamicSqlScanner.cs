@@ -1334,7 +1334,7 @@ public static class DynamicSqlScanner
                     return TryFoldExpression(unary.Expression, folded, foldingEnabled);
 
                 case FunctionCall { FunctionName.Value: var functionName } quoteNameCall
-                    when string.Equals(functionName, "QUOTENAME", StringComparison.OrdinalIgnoreCase):
+                    when string.Equals(functionName, FnQuoteName, StringComparison.OrdinalIgnoreCase):
                     return TryFoldQuoteName(quoteNameCall, folded, foldingEnabled);
 
                 case FunctionCall { FunctionName.Value: var functionName } builderCall
@@ -1357,10 +1357,10 @@ public static class DynamicSqlScanner
                 // generic FunctionCall. Handled as their own cases rather than folded into
                 // WhitelistedStringBuilders's FunctionCall-only dispatch above.
                 case LeftFunctionCall leftCall:
-                    return TryFoldLeftOrRight(leftCall.Parameters, "LEFT", leftCall, folded, foldingEnabled);
+                    return TryFoldLeftOrRight(leftCall.Parameters, FnLeft, leftCall, folded, foldingEnabled);
 
                 case RightFunctionCall rightCall:
-                    return TryFoldLeftOrRight(rightCall.Parameters, "RIGHT", rightCall, folded, foldingEnabled);
+                    return TryFoldLeftOrRight(rightCall.Parameters, FnRight, rightCall, folded, foldingEnabled);
 
                 case CastCall castCall:
                     return TryFoldCastOrConvert(castCall.Parameter, castCall.DataType, castCall, folded, foldingEnabled);
@@ -1431,8 +1431,21 @@ public static class DynamicSqlScanner
         /// </summary>
         private static readonly HashSet<string> WhitelistedStringBuilders = new(StringComparer.OrdinalIgnoreCase)
         {
-            "UPPER", "LOWER", "LTRIM", "RTRIM", "SUBSTRING", "REPLACE",
+            FnUpper, FnLower, FnLtrim, FnRtrim, FnSubstring, FnReplace,
         };
+
+        // Named once so a function's identity is a single S1192-clean source of truth across the
+        // dispatch switch, WhitelistedStringBuilders, and PlaceholderTypeTransfer below, rather
+        // than the same literal typed out at each site independently.
+        private const string FnUpper = "UPPER";
+        private const string FnLower = "LOWER";
+        private const string FnLtrim = "LTRIM";
+        private const string FnRtrim = "RTRIM";
+        private const string FnSubstring = "SUBSTRING";
+        private const string FnReplace = "REPLACE";
+        private const string FnLeft = "LEFT";
+        private const string FnRight = "RIGHT";
+        private const string FnQuoteName = "QUOTENAME";
 
         /// <summary>
         /// Every builtin this scanner declines to fold purely because its result is genuinely
@@ -1448,13 +1461,96 @@ public static class DynamicSqlScanner
             "SYSDATETIMEOFFSET", "RAND", "CHECKSUM", "BINARY_CHECKSUM",
         };
 
+        /// <summary>
+        /// Per-builtin knowledge of how a call transforms a symbolic (placeholder) input's TYPE -
+        /// consulted only by <see cref="TryTransferPlaceholderThroughFunction"/>, when the source
+        /// argument couldn't be folded to a real value at all. Every entry preserves category and
+        /// collation (never widens what's actually known); none of them ever change collation.
+        /// UPPER/LOWER/LTRIM/RTRIM return the exact input type unchanged - oracle-verified
+        /// (<c>UPPER(CAST('a' AS varchar(10)))</c> stays <c>varchar(10)</c>, per
+        /// SQL_VARIANT_PROPERTY against the Docker oracle, not widened to <c>varchar(max)</c> or
+        /// narrowed to <c>varchar(1)</c>). SUBSTRING/LEFT/RIGHT can only shorten, never change
+        /// category/collation - the existing oracle direction-control fixture for placeholders
+        /// already proves verdicts are category-driven, not length-driven, so carrying the input's
+        /// own declared length through here (rather than the true, unknowable runtime length)
+        /// never affects the seek/scan verdict this scanner exists to compute. REPLACE cannot
+        /// change its SOURCE argument's own type either way, regardless of what the pattern/
+        /// replacement turn out to be - <see cref="TryFoldReplace"/> only ever consults this table
+        /// for its source argument, never pattern/replacement, so those still refuse as before
+        /// when they're not themselves literal. A function absent from this table has no known
+        /// type effect and the placeholder fold declines with the same
+        /// <c>symbolic-value-in-function-argument</c> reason it always has.
+        /// </summary>
+        private static readonly Dictionary<string, Func<SqlType, SqlType>> PlaceholderTypeTransfer = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [FnUpper] = t => t,
+            [FnLower] = t => t,
+            [FnLtrim] = t => t,
+            [FnRtrim] = t => t,
+            [FnSubstring] = t => t,
+            [FnLeft] = t => t,
+            [FnRight] = t => t,
+            [FnReplace] = t => t,
+
+            // QUOTENAME always returns nvarchar(258) regardless of the input's own type/length -
+            // oracle-verified (SQL_VARIANT_PROPERTY MaxLength = 516 bytes = 258 UTF-16 code
+            // units), the one entry here that does NOT preserve the input type.
+            [FnQuoteName] = _ => new SqlType(SqlTypeCategory.NVarChar, Length: 258),
+        };
+
+        /// <summary>
+        /// The general mechanism that closes "a placeholder folded through a known function still
+        /// refuses": when <paramref name="source"/>'s own fold is a PURE placeholder (a single
+        /// assembly holding nothing but one placeholder segment - never a value this function
+        /// could actually run on, per <see cref="TryFlattenArgumentValues"/>'s own reasoning),
+        /// this function's TYPE effect on that placeholder is looked up in
+        /// <see cref="PlaceholderTypeTransfer"/> (or supplied directly via
+        /// <paramref name="explicitTargetType"/> for CAST/CONVERT, whose target type is already
+        /// pinned by the call site's own syntax) rather than the whole fold refusing outright.
+        /// Returns null - not a <see cref="FoldAttempt"/> - whenever <paramref name="source"/>
+        /// isn't a pure placeholder at all (it folded to a real value, failed outright, or folded
+        /// to more than one assembly - the multi-assembly case, e.g. a variable set differently
+        /// across IF branches where one branch is symbolic, is deliberately left unhandled here
+        /// and still refuses via the ordinary <see cref="TryFoldOverArgumentCombinations"/> path,
+        /// exactly as before this method existed - not a regression, an edge case intentionally
+        /// left for a future pass rather than faked), signalling "handle this the normal way" to
+        /// the caller. A MIXED assembly (literal text alongside a placeholder, e.g.
+        /// <c>'prefix' + @sym</c>) is likewise not pure and falls through to null, so it still
+        /// refuses exactly as before.
+        /// </summary>
+        private FoldAttempt? TryTransferPlaceholderThroughFunction(
+            ScalarExpression source, string functionKey, TSqlFragment site,
+            Dictionary<string, FoldState> folded, bool foldingEnabled, SqlType? explicitTargetType = null)
+        {
+            var attempt = TryFoldExpression(source, folded, foldingEnabled);
+            if (!attempt.Success || attempt.Assemblies!.Count != 1 || attempt.Assemblies[0].Count != 1)
+            {
+                return null;
+            }
+
+            if (attempt.Assemblies[0][0].PlaceholderType is not { } inputType)
+            {
+                return null;
+            }
+
+            var transferred = explicitTargetType
+                ?? (PlaceholderTypeTransfer.TryGetValue(functionKey, out var transfer) ? transfer(inputType) : null);
+            if (transferred is null)
+            {
+                return FoldAttempt.Fail("symbolic-value-in-function-argument", Span(source));
+            }
+
+            var token = PlaceholderToken(site.StartLine, site.StartColumn);
+            return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, token, transferred)]);
+        }
+
         private FoldAttempt TryFoldStringBuilder(FunctionCall functionCall, string functionName, Dictionary<string, FoldState> folded, bool foldingEnabled) =>
             functionName.ToUpperInvariant() switch
             {
-                "UPPER" or "LOWER" => TryFoldCaseConversion(functionCall, functionName, folded, foldingEnabled),
-                "LTRIM" or "RTRIM" => TryFoldTrim(functionCall, functionName, folded, foldingEnabled),
-                "SUBSTRING" => TryFoldSubstring(functionCall, folded, foldingEnabled),
-                "REPLACE" => TryFoldReplace(functionCall, folded, foldingEnabled),
+                FnUpper or FnLower => TryFoldCaseConversion(functionCall, functionName, folded, foldingEnabled),
+                FnLtrim or FnRtrim => TryFoldTrim(functionCall, functionName, folded, foldingEnabled),
+                FnSubstring => TryFoldSubstring(functionCall, folded, foldingEnabled),
+                FnReplace => TryFoldReplace(functionCall, folded, foldingEnabled),
                 _ => FailNonLiteralExpression(functionCall),
             };
 
@@ -1474,6 +1570,11 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
+            if (TryTransferPlaceholderThroughFunction(functionCall.Parameters[0], functionName, functionCall, folded, foldingEnabled) is { } transferred)
+            {
+                return transferred;
+            }
+
             return TryFoldOverArgumentCombinations([functionCall.Parameters[0]], folded, foldingEnabled, functionCall, values =>
             {
                 var input = values[0];
@@ -1482,7 +1583,7 @@ public static class DynamicSqlScanner
                     return FoldAttempt.Fail("non-literal-expression:case-conversion-collation-sensitive", Span(functionCall));
                 }
 
-                var converted = string.Equals(functionName, "UPPER", StringComparison.OrdinalIgnoreCase)
+                var converted = string.Equals(functionName, FnUpper, StringComparison.OrdinalIgnoreCase)
                     ? input.ToUpperInvariant()
                     : input.ToLowerInvariant();
                 return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, converted)]);
@@ -1506,9 +1607,14 @@ public static class DynamicSqlScanner
                 return FailNonLiteralExpression(functionCall);
             }
 
+            if (TryTransferPlaceholderThroughFunction(functionCall.Parameters[0], functionName, functionCall, folded, foldingEnabled) is { } transferred)
+            {
+                return transferred;
+            }
+
             return TryFoldOverArgumentCombinations([functionCall.Parameters[0]], folded, foldingEnabled, functionCall, values =>
             {
-                var trimmed = string.Equals(functionName, "LTRIM", StringComparison.OrdinalIgnoreCase)
+                var trimmed = string.Equals(functionName, FnLtrim, StringComparison.OrdinalIgnoreCase)
                     ? values[0].TrimStart(' ')
                     : values[0].TrimEnd(' ');
                 return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, trimmed)]);
@@ -1544,11 +1650,16 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:negative-length", Span(site));
             }
 
+            if (TryTransferPlaceholderThroughFunction(parameters[0], functionName, site, folded, foldingEnabled) is { } transferred)
+            {
+                return transferred;
+            }
+
             return TryFoldOverArgumentCombinations([parameters[0]], folded, foldingEnabled, site, values =>
             {
                 var input0 = values[0];
                 var clampedLength = Math.Min(length, input0.Length);
-                var result = string.Equals(functionName, "LEFT", StringComparison.OrdinalIgnoreCase)
+                var result = string.Equals(functionName, FnLeft, StringComparison.OrdinalIgnoreCase)
                     ? input0[..clampedLength]
                     : input0[^clampedLength..];
                 return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, result)]);
@@ -1591,6 +1702,11 @@ public static class DynamicSqlScanner
                 return FoldAttempt.Fail("non-literal-expression:substring-start-below-one", Span(functionCall));
             }
 
+            if (TryTransferPlaceholderThroughFunction(functionCall.Parameters[0], FnSubstring, functionCall, folded, foldingEnabled) is { } transferred)
+            {
+                return transferred;
+            }
+
             return TryFoldOverArgumentCombinations([functionCall.Parameters[0]], folded, foldingEnabled, functionCall, values =>
             {
                 var input0 = values[0];
@@ -1621,6 +1737,15 @@ public static class DynamicSqlScanner
             if (functionCall.Parameters.Count != 3)
             {
                 return FailNonLiteralExpression(functionCall);
+            }
+
+            // Only the SOURCE argument is eligible for a placeholder-type transfer - REPLACE
+            // cannot change its source's own type regardless of pattern/replacement, but if
+            // EITHER of those is itself unresolvable the ordinary combinations path below still
+            // refuses correctly, since this early-return only fires on the source argument.
+            if (TryTransferPlaceholderThroughFunction(functionCall.Parameters[0], FnReplace, functionCall, folded, foldingEnabled) is { } transferred)
+            {
+                return transferred;
             }
 
             return TryFoldOverArgumentCombinations(
@@ -1664,6 +1789,14 @@ public static class DynamicSqlScanner
             if (targetType is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar })
             {
                 return FoldAttempt.Fail("non-literal-expression:cast-target-not-pinned", Span(site));
+            }
+
+            // Unlike every other entry point into TryTransferPlaceholderThroughFunction, CAST/
+            // CONVERT's target type is already pinned by the call site's own syntax - no registry
+            // lookup needed or wanted; explicitTargetType overrides it directly.
+            if (TryTransferPlaceholderThroughFunction(source, functionKey: string.Empty, site, folded, foldingEnabled, explicitTargetType: targetType) is { } transferred)
+            {
+                return transferred;
             }
 
             return TryFoldOverArgumentCombinations([source], folded, foldingEnabled, site, values =>
@@ -1816,6 +1949,13 @@ public static class DynamicSqlScanner
             if (functionCall.Parameters.Count is < 1 or > 2)
             {
                 return FailNonLiteralExpression(functionCall);
+            }
+
+            // QUOTENAME's return type (nvarchar(258)) never depends on the delimiter argument, so
+            // this transfers on the input alone regardless of whether a delimiter was even given.
+            if (TryTransferPlaceholderThroughFunction(functionCall.Parameters[0], FnQuoteName, functionCall, folded, foldingEnabled) is { } transferred)
+            {
+                return transferred;
             }
 
             var arguments = functionCall.Parameters.Count == 2

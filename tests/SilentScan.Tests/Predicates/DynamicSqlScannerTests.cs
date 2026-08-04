@@ -1935,4 +1935,135 @@ public sealed class DynamicSqlScannerTests
         var finding = Assert.Single(result.Findings);
         Assert.Equal("no-initializer", finding.Reason);
     }
+
+    // WP2 (dynamic-SQL v2.1): a symbolic placeholder folded through a KNOWN builtin transfers its
+    // TYPE through the call, via BuiltinFunctionSemantics's TryTransferPlaceholderThroughFunction,
+    // instead of refusing with "symbolic-value-in-function-argument" - closing the single largest
+    // measured real-corpus gap (28 occurrences of that exact reason across the pinned 5-repo
+    // corpus at the time this landed). Each fires-fixture below asserts the SAME shape the
+    // no-initializer placeholder tests above already assert for a bare `EXEC(@sql)`: the whole
+    // EXEC argument becomes nothing but the one (function-wrapped) placeholder, so it still folds
+    // to a single AnalyzableScript at Medium confidence.
+
+    [Fact]
+    public void Scan_ExecOfUpperOfSymbolicVariable_TransfersPlaceholderType()
+    {
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = UPPER(@sym); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfLtrimOfSymbolicVariable_TransfersPlaceholderType()
+    {
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = LTRIM(@sym); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfLeftOfSymbolicVariable_TransfersPlaceholderType()
+    {
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = LEFT(@sym, 5); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfSubstringOfSymbolicVariable_TransfersPlaceholderType()
+    {
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = SUBSTRING(@sym, 1, 5); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfReplaceWithSymbolicSourceArgument_TransfersPlaceholderType()
+    {
+        // Only the SOURCE argument (@sql) is a placeholder - pattern/replacement stay literal, so
+        // this is the "pure placeholder source" case the type transfer is scoped to.
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = REPLACE(@sym, 'a', 'b'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfReplaceWithSymbolicPatternArgument_StillRefuses()
+    {
+        // Near-miss for the fires-fixture above: the placeholder is the PATTERN argument, not the
+        // source - TryTransferPlaceholderThroughFunction only ever inspects REPLACE's source
+        // argument (functionCall.Parameters[0]), so this still falls through to the ordinary
+        // TryFoldOverArgumentCombinations path and refuses exactly as it did before WP2.
+        var result = Scan("DECLARE @pattern NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = REPLACE('source text', @pattern, 'b'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("symbolic-value-in-function-argument", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfQuoteNameOfSymbolicVariable_TransfersPlaceholderType()
+    {
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = QUOTENAME(@sym); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfCastOfSymbolicVariableToVarchar_TransfersExplicitTargetType()
+    {
+        // CAST/CONVERT's target type is already pinned by the call site's own syntax, so this
+        // goes through TryTransferPlaceholderThroughFunction's explicitTargetType parameter
+        // rather than the PlaceholderTypeTransfer registry lookup the other functions use.
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql VARCHAR(MAX) = CAST(@sym AS VARCHAR(50)); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfCastOfSymbolicVariableToInt_StillRefuses()
+    {
+        // Near-miss: CAST's own pre-existing "target must be VARCHAR/NVARCHAR" guard runs BEFORE
+        // the placeholder-transfer check, so a non-string target still refuses exactly as before -
+        // WP2 only ever widens what a STRING-family fold can do, never a numeric one.
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = CAST(@sym AS INT); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:cast-target-not-pinned", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfUpperOfMixedLiteralAndSymbolicConcatenation_StillRefuses()
+    {
+        // Near-miss: the argument to UPPER is 'prefix' + @sql - a MIXED assembly (one literal
+        // segment, one placeholder segment), not a pure single-placeholder assembly.
+        // TryTransferPlaceholderThroughFunction only intercepts a pure placeholder (exactly one
+        // assembly holding exactly one placeholder segment), so this falls through to the
+        // ordinary path and refuses exactly as it did before WP2 - UPPER genuinely could destroy
+        // or reshape the literal portion depending on the placeholder's real runtime value.
+        var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = UPPER('prefix' + @sym); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("symbolic-value-in-function-argument", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
 }

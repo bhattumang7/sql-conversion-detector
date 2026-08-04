@@ -516,4 +516,67 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
+
+    /// <summary>
+    /// WP2's own oracle proof: before this change, wrapping a placeholder in a KNOWN builtin
+    /// (UPPER/CAST/...) refused the whole EXEC outright ("symbolic-value-in-function-argument"),
+    /// even though - for the QUOTED-position case these two tests exercise - the eventual
+    /// verdict is driven entirely by the REASSEMBLED text's own literal quoting (see
+    /// DynamicSqlPipeline.TryParseAndClassify's Quoted-classification comment), never by the
+    /// placeholder's own type. So the placeholder's transferred type doesn't change WHICH verdict
+    /// comes out here - what these prove is that the mechanism reaches a real, oracle-confirmed
+    /// finding at all instead of tainting the whole call site to Unanalyzable.
+    /// </summary>
+    [Fact]
+    public async Task Analyze_ProcParamNoKnownCaller_UpperOfPlaceholderInsideVarcharLiteral_SeekPreserved_OracleConfirmed()
+    {
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_FindByCol @Value NVARCHAR(10) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = ''' + UPPER(@Value) + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.SeekPreserved, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task Analyze_ProcParamNoKnownCaller_CastOfPlaceholderInsideNvarcharLiteral_ScanForced_OracleConfirmed()
+    {
+        // Exercises the OTHER code path through TryTransferPlaceholderThroughFunction - CAST's
+        // explicitTargetType parameter, not the PlaceholderTypeTransfer registry lookup UPPER
+        // above goes through.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_FindByCol @Value NVARCHAR(10) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + CAST(@Value AS VARCHAR(10)) + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
 }
