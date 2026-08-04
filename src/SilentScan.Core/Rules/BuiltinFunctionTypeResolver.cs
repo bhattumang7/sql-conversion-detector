@@ -41,6 +41,9 @@ public static class BuiltinFunctionTypeResolver
         ["MONTH"] = new SqlType(SqlTypeCategory.Int),
         ["YEAR"] = new SqlType(SqlTypeCategory.Int),
 
+        ["OBJECT_ID"] = new SqlType(SqlTypeCategory.Int),
+        ["OBJECTPROPERTY"] = new SqlType(SqlTypeCategory.Int),
+
         ["ROW_NUMBER"] = new SqlType(SqlTypeCategory.BigInt),
         ["RANK"] = new SqlType(SqlTypeCategory.BigInt),
         ["DENSE_RANK"] = new SqlType(SqlTypeCategory.BigInt),

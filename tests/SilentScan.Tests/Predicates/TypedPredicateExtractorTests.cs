@@ -1662,6 +1662,8 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         """,
         "CREATE TABLE dbo.OrdersGetDate (CreatedOn DATETIME NOT NULL);",
         "CREATE TABLE dbo.TLen (NameLength INT NOT NULL);",
+        "CREATE TABLE dbo.TObjectId (SourceObjectId INT NOT NULL);",
+        "CREATE TABLE dbo.TObjectProperty (IsShipped INT NOT NULL);",
         "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
         "CREATE TABLE dbo.TIsNull (Id INT NOT NULL);",
         "CREATE TABLE dbo.TStringFn (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -2602,6 +2604,37 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         var result = ExtractAll(
             "CREATE TABLE dbo.TLen (NameLength INT NOT NULL);",
             "SELECT 1 FROM dbo.TLen WHERE NameLength = LEN(N'hello');");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToObjectId_ResolvesFixedReturnType_OracleConfirmed()
+    {
+        // OBJECT_ID() types as INT (oracle-verified) - an INT column compared against it should
+        // classify normally instead of falling to Unknown, the same gap GETDATE()/LEN() close
+        // above.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TObjectId (SourceObjectId INT NOT NULL);",
+            "SELECT 1 FROM dbo.TObjectId WHERE SourceObjectId = OBJECT_ID(N'dbo.TObjectId');");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "predicate operand");
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToObjectPropertyIsMSShipped_ResolvesFixedReturnType_OracleConfirmed()
+    {
+        // OBJECTPROPERTY() also types as INT (oracle-verified).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TObjectProperty (IsShipped INT NOT NULL);",
+            "SELECT 1 FROM dbo.TObjectProperty WHERE IsShipped = OBJECTPROPERTY(OBJECT_ID(N'dbo.TObjectProperty'), N'IsMSShipped');");
 
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
