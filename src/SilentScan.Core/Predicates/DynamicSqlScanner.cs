@@ -133,6 +133,21 @@ public static class DynamicSqlScanner
         /// </summary>
         public IReadOnlyList<GuardedAlternative>? GuardedAlternatives { get; private init; }
 
+        /// <summary>
+        /// The resolved type this variable's own DECLARE named, set once at the DECLARE site and
+        /// carried forward through every later reassignment in the SAME scope (<see
+        /// cref="Visitor.AssignVariable"/> copies it from the prior state) regardless of whether
+        /// each reassignment itself folds. Exists for exactly one consumer: <see
+        /// cref="Visitor.MergeUnioningDivergent"/>'s handling of a variable that came into
+        /// existence fresh inside only ONE branch of an IF/TRY - T-SQL locals are batch-scoped
+        /// regardless of control-flow nesting, so on the branch that never reached the DECLARE,
+        /// the name is simply NULL, and this is what lets that be represented as a symbolic
+        /// placeholder of the RIGHT type instead of an opaque, type-less divergence taint. Null
+        /// for a variable this scan never saw a DECLARE for at all (a formal parameter, or one
+        /// whose DECLARE's own type didn't resolve).
+        /// </summary>
+        public SqlType? DeclaredType { get; private init; }
+
         public static FoldState Constant(IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies) => new() { Assemblies = assemblies };
 
         public static FoldState ConstantSingle(IReadOnlyList<LiteralSegment> segments) => Constant([segments]);
@@ -142,7 +157,12 @@ public static class DynamicSqlScanner
         public FoldState WithGuardedAlternatives(IReadOnlyList<GuardedAlternative>? alternatives) =>
             alternatives is null
                 ? this
-                : new FoldState { Assemblies = Assemblies, TaintReason = TaintReason, TaintLocation = TaintLocation, GuardedAlternatives = alternatives };
+                : new FoldState { Assemblies = Assemblies, TaintReason = TaintReason, TaintLocation = TaintLocation, GuardedAlternatives = alternatives, DeclaredType = DeclaredType };
+
+        public FoldState WithDeclaredType(SqlType? declaredType) =>
+            declaredType is null
+                ? this
+                : new FoldState { Assemblies = Assemblies, TaintReason = TaintReason, TaintLocation = TaintLocation, GuardedAlternatives = GuardedAlternatives, DeclaredType = declaredType };
     }
 
     private sealed class Visitor(
@@ -368,7 +388,8 @@ public static class DynamicSqlScanner
             }
 
             var token = PlaceholderToken(location.Line, location.Column);
-            return FoldState.ConstantSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)]);
+            return FoldState.ConstantSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)])
+                .WithDeclaredType(type);
         }
 
         private void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
@@ -633,10 +654,11 @@ public static class DynamicSqlScanner
                     continue;
                 }
 
+                var declaredType = SqlTypeReferenceResolver.Resolve(element.DataType, columnCollation: null);
                 var attempt = TryFoldExpression(element.Value, folded, foldingEnabled);
-                folded[name] = attempt.Success
+                folded[name] = (attempt.Success
                     ? FoldState.Constant(attempt.Assemblies!)
-                    : FoldState.Tainted(attempt.Reason!, attempt.Location!.Value);
+                    : FoldState.Tainted(attempt.Reason!, attempt.Location!.Value)).WithDeclaredType(declaredType);
             }
         }
 
@@ -708,9 +730,16 @@ public static class DynamicSqlScanner
         private void AssignVariable(
             string name, AssignmentKind kind, ScalarExpression? expression, bool functionCallExists, TSqlFragment site, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
+            // Carried forward onto whatever FoldState this reassignment produces (success or
+            // taint alike) - a variable's own DECLARE'd type doesn't change just because it was
+            // reassigned, and MergeUnioningDivergent's one-branch-only-declared case needs it to
+            // still be there after a THEN branch's DECLARE-then-SET pattern, not just immediately
+            // after the DECLARE itself.
+            var declaredType = folded.GetValueOrDefault(name)?.DeclaredType;
+
             if (functionCallExists || kind is not (AssignmentKind.Equals or AssignmentKind.AddEquals))
             {
-                folded[name] = FoldState.Tainted("unsupported-assignment", Span(site));
+                folded[name] = FoldState.Tainted("unsupported-assignment", Span(site)).WithDeclaredType(declaredType);
                 return;
             }
 
@@ -721,7 +750,7 @@ public static class DynamicSqlScanner
             // of crashing inside TryFoldExpression's null path.
             if (expression is null)
             {
-                folded[name] = FoldState.Tainted("unsupported-assignment", Span(site));
+                folded[name] = FoldState.Tainted("unsupported-assignment", Span(site)).WithDeclaredType(declaredType);
                 return;
             }
 
@@ -731,25 +760,25 @@ public static class DynamicSqlScanner
             {
                 if (!folded.TryGetValue(name, out var existing) || existing.Assemblies is null)
                 {
-                    folded[name] = FoldState.Tainted(existing?.TaintReason ?? "variable-not-in-scope", existing?.TaintLocation ?? Span(site));
+                    folded[name] = FoldState.Tainted(existing?.TaintReason ?? "variable-not-in-scope", existing?.TaintLocation ?? Span(site)).WithDeclaredType(declaredType);
                     return;
                 }
 
                 if (!rhs.Success)
                 {
-                    folded[name] = FoldState.Tainted(rhs.Reason!, rhs.Location!.Value);
+                    folded[name] = FoldState.Tainted(rhs.Reason!, rhs.Location!.Value).WithDeclaredType(declaredType);
                     return;
                 }
 
-                folded[name] = TryCartesianConcat(existing.Assemblies, rhs.Assemblies!, out var combined)
+                folded[name] = (TryCartesianConcat(existing.Assemblies, rhs.Assemblies!, out var combined)
                     ? FoldState.Constant(combined)
-                    : FoldState.Tainted(CardinalityCapReason, Span(site));
+                    : FoldState.Tainted(CardinalityCapReason, Span(site))).WithDeclaredType(declaredType);
                 return;
             }
 
-            folded[name] = rhs.Success
+            folded[name] = (rhs.Success
                 ? FoldState.Constant(rhs.Assemblies!)
-                : FoldState.Tainted(rhs.Reason!, rhs.Location!.Value);
+                : FoldState.Tainted(rhs.Reason!, rhs.Location!.Value)).WithDeclaredType(declaredType);
         }
 
         private void HandleIf(IfStatement ifStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
@@ -906,11 +935,44 @@ public static class DynamicSqlScanner
                     continue;
                 }
 
-                var merged = MergeOne(a, b, reason, location);
+                var merged = before is null && TryMergeFreshlyDeclaredInOneBranchOnly(a, b, location) is { } freshMerge
+                    ? freshMerge
+                    : MergeOne(a, b, reason, location);
                 folded[key] = guardText is not null && a is not null
                     ? merged.WithGuardedAlternatives(CombineGuardedAlternatives(guardText, before, a, b))
                     : merged;
             }
+        }
+
+        /// <summary>
+        /// A variable that came into existence fresh inside exactly ONE branch (not present in
+        /// the state BEFORE the IF/TRY at all, and never touched by the other branch either) is
+        /// not a genuine divergence at the join point - T-SQL locals are scoped to the whole
+        /// batch/body regardless of control-flow nesting, so on the path that never reached its
+        /// DECLARE, the name is simply NULL: a real, if less useful, value of its own declared
+        /// type. Only fires when the branch that DID declare it recorded a <see
+        /// cref="FoldState.DeclaredType"/> (set at DECLARE time, carried forward through
+        /// reassignment by <see cref="AssignVariable"/>) - without a type to synthesize a
+        /// placeholder from, this returns null and the caller falls back to the ordinary
+        /// divergence taint exactly as before this existed.
+        /// </summary>
+        private static FoldState? TryMergeFreshlyDeclaredInOneBranchOnly(FoldState? a, FoldState? b, SourceSpan location)
+        {
+            var present = (a, b) switch
+            {
+                (not null, null) => a,
+                (null, not null) => b,
+                _ => null,
+            };
+
+            if (present?.DeclaredType is not { } type)
+            {
+                return null;
+            }
+
+            var token = PlaceholderToken(location.Line, location.Column);
+            return FoldState.ConstantSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)])
+                .WithDeclaredType(type);
         }
 
         /// <summary>Bounds a variable's own accumulated <see cref="GuardedAlternative"/> list the same defensive way <see cref="MaxAssembliesPerVariable"/> bounds assembly sets - a proc with many sequential guarded IFs stops growing new entries rather than never terminating; losing the newest entry only means one later guard site stays unresolved, never a soundness break.</summary>

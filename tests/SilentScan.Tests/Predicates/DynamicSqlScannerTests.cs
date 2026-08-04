@@ -34,6 +34,30 @@ public sealed class DynamicSqlScannerTests
         Assert.Single(result.AnalyzableScripts);
     }
 
+    [Fact]
+    public void Scan_ExecOfVariableDeclaredOnlyInsideOneIfBranch_FoldsToSymbolicPlaceholder()
+    {
+        // T-SQL locals are scoped to the whole batch, not to the block they happen to be
+        // DECLARE'd inside - a variable declared (and assigned) only inside an IF's THEN branch,
+        // with no ELSE, is still perfectly legal to reference afterward: on the path that never
+        // ran the THEN branch, it is simply NULL. That is not a genuine divergence the way two
+        // branches assigning two DIFFERENT real values is - the variable's OWN declared type is
+        // still a hard guarantee regardless of which path ran, so this must fold to a symbolic
+        // placeholder (the same "known shape, unknown value" case an uninitialized DECLARE
+        // already gets), not the generic diverges-across-if-branches taint.
+        var result = Scan("""
+            IF @flag = 1
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'
+            END
+
+            EXEC (@sql)
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Single(result.AnalyzableScripts);
+    }
+
     private static DynamicSqlExtractionResult Scan(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

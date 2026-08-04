@@ -172,3 +172,11 @@ published externally without Umang's explicit go-ahead.
 # Mark down files
 Resist the urge to write down mark down files that wont have any meaning in 
 long term. If you have written down one, delete it after the work is done.
+
+# Build and test
+Never run `dotnet tet` or `dotnet build` directly - always go via dotnet-safe.sh.
+```
+scripts/dotnet-safe.sh build
+scripts/dotnet-safe.sh test
+scripts/dotnet-safe.sh test --filter "FullyQualifiedName~DynamicSql"
+```
