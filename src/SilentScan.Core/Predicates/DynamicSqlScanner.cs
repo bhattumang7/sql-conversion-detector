@@ -1789,6 +1789,51 @@ public static class DynamicSqlScanner
         }
 
         /// <summary>
+        /// Folds one string-builder function argument to its set of possible concrete string
+        /// values - every assembly must itself flatten to a real value (<see cref="TryFlatten"/>),
+        /// since a placeholder has no real value this pure function could actually be applied to
+        /// (CAST/SUBSTRING/REPLACE etc. can change the type, truncate, or destroy the token
+        /// outright, and none of this scanner's accepted EXEC positions ever need a placeholder's
+        /// TYPE to survive a function call) - the whole argument fails with its own reason the
+        /// moment any one assembly is a placeholder, mirroring <see
+        /// cref="TryFoldOverArgumentCombinations"/>'s own "decline the whole fold, not just one
+        /// possibility" policy one level up.
+        /// </summary>
+        private bool TryFlattenArgumentValues(
+            ScalarExpression argument, Dictionary<string, FoldState> folded, bool foldingEnabled, out List<string> values, out FoldAttempt failure)
+        {
+            var attempt = TryFoldExpression(argument, folded, foldingEnabled);
+            if (!attempt.Success)
+            {
+                values = [];
+                failure = attempt;
+                return false;
+            }
+
+            var result = new List<string>(attempt.Assemblies!.Count);
+            foreach (var assembly in attempt.Assemblies)
+            {
+                // A placeholder argument has no real value this pure function could actually be
+                // applied to - CAST/SUBSTRING/REPLACE etc. can change the type, truncate, or
+                // destroy the token outright, and none of this scanner's accepted EXEC positions
+                // ever need the placeholder's TYPE to survive a function call, so there is
+                // nothing to gain by trying to fold one through.
+                if (TryFlatten(assembly) is not { } flattened)
+                {
+                    values = [];
+                    failure = FoldAttempt.Fail("symbolic-value-in-function-argument", Span(argument));
+                    return false;
+                }
+
+                result.Add(flattened);
+            }
+
+            values = result;
+            failure = default;
+            return true;
+        }
+
+        /// <summary>
         /// Folds every string-builder function's argument(s) and cross-products across whichever
         /// ones carry more than one possible assembly (a variable set by divergent IF branches
         /// upstream - the shape a WHERE-clause accumulator's REPLACE/CAST/QUOTENAME step sits
@@ -1816,26 +1861,9 @@ public static class DynamicSqlScanner
             var argumentValueSets = new List<IReadOnlyList<string>>(stringArguments.Length);
             foreach (var argument in stringArguments)
             {
-                var attempt = TryFoldExpression(argument, folded, foldingEnabled);
-                if (!attempt.Success)
+                if (!TryFlattenArgumentValues(argument, folded, foldingEnabled, out var values, out var failure))
                 {
-                    return attempt;
-                }
-
-                var values = new List<string>(attempt.Assemblies!.Count);
-                foreach (var assembly in attempt.Assemblies)
-                {
-                    // A placeholder argument has no real value this pure function could actually
-                    // be applied to - CAST/SUBSTRING/REPLACE etc. can change the type, truncate,
-                    // or destroy the token outright, and none of this scanner's accepted EXEC
-                    // positions ever need the placeholder's TYPE to survive a function call, so
-                    // there is nothing to gain by trying to fold one through.
-                    if (TryFlatten(assembly) is not { } flattened)
-                    {
-                        return FoldAttempt.Fail("symbolic-value-in-function-argument", Span(argument));
-                    }
-
-                    values.Add(flattened);
+                    return failure;
                 }
 
                 argumentValueSets.Add(values);
