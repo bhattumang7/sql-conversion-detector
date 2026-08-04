@@ -359,7 +359,7 @@ public static partial class DynamicSqlPipeline
         // Propagates the outer script's own scope into the nested scanner - the reparsed inner
         // text has no CREATE PROCEDURE wrapper for it to discover the scope from itself, so
         // without this, propagation would silently die at nesting depth 2.
-        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope);
+        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope, catalog: catalog);
         var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, script)).ToList();
 
         if (nestedExtraction.AnalyzableScripts.Count == 0)

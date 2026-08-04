@@ -82,7 +82,7 @@ public static class ScanReportBuilder
         for (var round = 0; round < maxOutputSummaryRounds; round++)
         {
             dynamicSqlExtractions = usableParseResults
-                .Select(r => DynamicSqlScanner.Scan(r, callGraph: procCallGraph, outputSummaries: outputSummaryIndex))
+                .Select(r => DynamicSqlScanner.Scan(r, callGraph: procCallGraph, outputSummaries: outputSummaryIndex, catalog: catalog))
                 .ToList();
 
             var discoveredCount = outputSummaryIndex.Count;

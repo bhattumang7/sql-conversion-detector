@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -5,6 +6,34 @@ namespace SilentScan.Tests.Predicates;
 
 public sealed class DynamicSqlScannerTests
 {
+    [Fact]
+    public void Scan_SelectAssignmentFromSingleKnownTableColumn_FoldsToSymbolicPlaceholder()
+    {
+        // SELECT @var = expr FROM table is unconditionally tainted for a genuine reason (the
+        // assigned VALUE is data- and row-order-dependent), but when the FROM clause names
+        // exactly one catalog-known table and the assigned expression is a literal concatenated
+        // with one of that table's own columns, the expression's STRUCTURAL SHAPE is fully known
+        // even though the concrete row is not - the same "known shape, unknown value" case a
+        // proc parameter with no known caller already gets. This must resolve to an analyzable
+        // script, not the blanket select-assignment-not-pure taint.
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.SpecializedProcedureTemplates (SpecializedArea VARCHAR(50) NOT NULL, TemplateProcessorProcedureName VARCHAR(200) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Scratch @SpecializedArea VARCHAR(50) AS
+            BEGIN
+                DECLARE @TemplateProcessorProcedureName VARCHAR(200)
+                SELECT @TemplateProcessorProcedureName = 'EXEC ' + TemplateProcessorProcedureName
+                FROM dbo.SpecializedProcedureTemplates
+                WHERE SpecializedArea = @SpecializedArea
+
+                EXEC (@TemplateProcessorProcedureName)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Single(result.AnalyzableScripts);
+    }
+
     private static DynamicSqlExtractionResult Scan(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
@@ -17,6 +46,17 @@ public sealed class DynamicSqlScannerTests
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return DynamicSqlScanner.Scan(result, callGraph: new ProcCallGraph([]));
+    }
+
+    private static DynamicSqlExtractionResult ScanWithCatalog(string ddl, string sql)
+    {
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", ddl);
+        Assert.False(ddlResult.HasErrors, string.Join("; ", ddlResult.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return DynamicSqlScanner.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog);
     }
 
     [Fact]

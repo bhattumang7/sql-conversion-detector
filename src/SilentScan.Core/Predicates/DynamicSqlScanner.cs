@@ -40,14 +40,20 @@ public static class DynamicSqlScanner
     /// existed. Every scan (with or without summaries supplied) records its OWN procedures'
     /// OUTPUT-parameter results on <see cref="DynamicSqlExtractionResult.OutputSummaries"/>, which
     /// is how a caller assembles the index this parameter consumes in a later pass.
+    /// <paramref name="catalog"/>, when supplied, lets a <c>SELECT @var = expr FROM table</c>
+    /// assignment (otherwise unconditionally tainted) resolve a plain column reference inside
+    /// the assigned expression against that single source table's own column type, when the
+    /// FROM clause names exactly one table with no join - null (the default) leaves every such
+    /// assignment tainted exactly like before this capability existed.
     /// </summary>
     public static DynamicSqlExtractionResult Scan(
         SqlParseResult parseResult,
         DynamicSqlScope? enclosingScope = null,
         ProcCallGraph? callGraph = null,
-        IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaries = null)
+        IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaries = null,
+        DatabaseCatalog? catalog = null)
     {
-        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None, callGraph, outputSummaries);
+        var visitor = new Visitor(parseResult.SourcePath, enclosingScope ?? DynamicSqlScope.None, callGraph, outputSummaries, catalog);
         if (parseResult.Fragment is TSqlScript script)
         {
             foreach (var batch in script.Batches)
@@ -143,10 +149,21 @@ public static class DynamicSqlScanner
         string sourcePath,
         DynamicSqlScope initialScope,
         ProcCallGraph? callGraph,
-        IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaryIndex)
+        IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaryIndex,
+        DatabaseCatalog? catalog = null)
     {
 
         private DynamicSqlScope _scope = initialScope;
+
+        /// <summary>
+        /// Set only for the duration of folding one SELECT-assignment's own expression whose
+        /// FROM clause named exactly one, catalog-resolvable table with no join - lets
+        /// <see cref="TryFoldExpression"/>'s <see cref="ColumnReferenceExpression"/> case resolve
+        /// a plain column mention against THIS table's own column type. Null everywhere else
+        /// (ordinary variable-only folding never consults it), so this can never leak into an
+        /// unrelated fold call.
+        /// </summary>
+        private CatalogTable? _selectAssignmentTable;
 
         public List<DynamicSqlFinding> Findings { get; } = [];
 
@@ -643,6 +660,40 @@ public static class DynamicSqlScanner
                 foreach (var element in spec.SelectElements.Cast<SelectSetVariable>())
                 {
                     AssignVariable(element.Variable.Name, element.AssignmentKind, element.Expression, functionCallExists: false, element, folded, foldingEnabled);
+                }
+
+                return;
+            }
+
+            // A FROM clause makes the ASSIGNED VALUE data- and row-order-dependent (zero rows
+            // leaves the variable at its prior value; more than one silently keeps only the
+            // last), which is why the general case above stays tainted rather than reading a
+            // real value out of the table. But when the FROM clause names exactly one,
+            // catalog-resolvable table with no join, and the SELECT list is still the pure
+            // "every element is a variable assignment" shape, the assigned EXPRESSION'S
+            // STRUCTURAL SHAPE (a literal prefix concatenated with one of this table's own
+            // columns) is fully known even though the concrete row is not - the same "known
+            // shape, unknown value" placeholder treatment a proc parameter with no known call
+            // site already gets. <see cref="_selectAssignmentTable"/> lets the column-reference
+            // case inside <see cref="TryFoldExpression"/> resolve a plain column mention against
+            // this table's own column type for the DURATION of folding these assignments only.
+            if (catalog is not null
+                && select.QueryExpression is QuerySpecification { HavingClause: null, FromClause.TableReferences: [NamedTableReference namedTable] } fromSpec
+                && fromSpec.SelectElements.Count > 0
+                && fromSpec.SelectElements.All(e => e is SelectSetVariable)
+                && catalog.Find(SchemaObjectNameHelper.Qualify(namedTable.SchemaObject)) is { } table)
+            {
+                _selectAssignmentTable = table;
+                try
+                {
+                    foreach (var element in fromSpec.SelectElements.Cast<SelectSetVariable>())
+                    {
+                        AssignVariable(element.Variable.Name, element.AssignmentKind, element.Expression, functionCallExists: false, element, folded, foldingEnabled);
+                    }
+                }
+                finally
+                {
+                    _selectAssignmentTable = null;
                 }
 
                 return;
@@ -1368,6 +1419,9 @@ public static class DynamicSqlScanner
                 case VariableReference variableRef:
                     return TryFoldVariableReference(variableRef, folded, foldingEnabled);
 
+                case ColumnReferenceExpression colRef when _selectAssignmentTable is not null:
+                    return TryFoldSelectSourceColumn(colRef);
+
                 case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary:
                     return TryFoldConcatenation(binary, folded, foldingEnabled);
 
@@ -1479,6 +1533,29 @@ public static class DynamicSqlScanner
             return state.Assemblies is not null
                 ? FoldAttempt.Ok(state.Assemblies)
                 : FoldAttempt.Fail(state.TaintReason!, state.TaintLocation!.Value);
+        }
+
+        /// <summary>
+        /// A plain column mention inside a <c>SELECT @var = expr FROM table</c> assignment,
+        /// resolved against <see cref="_selectAssignmentTable"/> - the concrete row is never
+        /// known, but the column's OWN declared type is a real catalog fact, so this is the same
+        /// "known shape, unknown value" placeholder every other unseeded-but-typed value gets
+        /// (<see cref="SeedSymbolicOrTaint(ProcedureParameter, string)"/>), not a guess about
+        /// what's actually in the table. Only reachable when <see cref="_selectAssignmentTable"/>
+        /// is set (see the switch case in <see cref="TryFoldExpression"/>), so this never runs
+        /// for an ordinary predicate/expression column reference elsewhere.
+        /// </summary>
+        private FoldAttempt TryFoldSelectSourceColumn(ColumnReferenceExpression colRef)
+        {
+            var columnName = colRef.MultiPartIdentifier.Identifiers[^1].Value;
+            if (_selectAssignmentTable!.FindColumn(columnName)?.Type is not { } type)
+            {
+                return FoldAttempt.Fail("select-source-column-type-unresolved", Span(colRef));
+            }
+
+            var location = Span(colRef);
+            var token = PlaceholderToken(location.Line, location.Column);
+            return FoldAttempt.OkSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)]);
         }
 
         private FoldAttempt TryFoldConcatenation(BinaryExpression binary, Dictionary<string, FoldState> folded, bool foldingEnabled)
