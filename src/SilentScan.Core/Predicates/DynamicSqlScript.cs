@@ -53,15 +53,19 @@ public sealed record PlaceholderOccurrence(int InnerStartOffset, int Length, Sql
 /// scopes - to let an enclosing script's own declared parameter type stand in for this call's
 /// declared parameter when its own declaration can't otherwise resolve it.
 /// <see cref="Confidence"/> is how much this ONE assembly's own claim of being provably constant
-/// can be trusted - <see cref="FindingConfidence.High"/> when every segment is a real literal
-/// (every script today), lower once a segment can be an unknown-but-typed placeholder standing in
-/// for a value this scanner could not prove constant. One EXEC/sp_executesql call site can emit
-/// several <see cref="DynamicSqlScript"/>s (one per assembly) at DIFFERENT confidences - this
+/// can be trusted - <see cref="FindingConfidence.High"/> when every segment is a real literal,
+/// <see cref="FindingConfidence.Medium"/> once any segment is an unknown-but-typed placeholder
+/// standing in for a value this scanner could not prove constant (proc-parameter seeding with no
+/// known caller, an uninitialized DECLARE, ...) - computed exactly once, in
+/// <see cref="DynamicSqlScanner"/>'s own <c>BuildScript</c>, from whether any segment carries a
+/// placeholder, and never set directly anywhere else; <see cref="DynamicSqlPipeline"/>'s Remap/
+/// RemapNested propagate it onto every finding kind uniformly, so a High-confidence finding can
+/// never have passed through a placeholder-bearing script. One EXEC/sp_executesql call site can
+/// emit several <see cref="DynamicSqlScript"/>s (one per assembly) at DIFFERENT confidences - this
 /// field is per-script, not per-call-site, exactly so that can be represented.
-/// <see cref="PlaceholderOccurrences"/> is null for every script today (no producer seeds a
-/// placeholder segment yet) - once one does, it lets the pipeline classify each placeholder's
-/// syntactic position (quoted-literal, object-identifier, or neither) without re-parsing
-/// <see cref="InnerText"/> to find them.
+/// <see cref="PlaceholderOccurrences"/> is non-null exactly when <see cref="Confidence"/> is below
+/// High - it lets the pipeline classify each placeholder's syntactic position (quoted-literal,
+/// table-reference identifier, or neither) without re-parsing <see cref="InnerText"/> to find them.
 /// </summary>
 public sealed record DynamicSqlScript(
     SourceSpan CallSite,
