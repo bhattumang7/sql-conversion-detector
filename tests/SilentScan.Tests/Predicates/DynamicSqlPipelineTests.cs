@@ -611,4 +611,38 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
+
+    [Fact]
+    public async Task Analyze_ProcParamNoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_ScanForced_OracleConfirmed()
+    {
+        // Per-occurrence placeholder position proof, not per-statement shape: @LogTableName's
+        // placeholder sits entirely inside QUOTENAME's own identifier (never resolves to a real
+        // table, contributes nothing), while @Value's placeholder sits quoted inside N'''...''' -
+        // a genuine varchar-column-vs-nvarchar-literal comparison against the REAL dbo.T table,
+        // in the very same statement.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_JoinAndCheck @LogTableName SYSNAME, @Value NVARCHAR(10) AS " +
+            "BEGIN " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT t.Col FROM dbo.T AS t CROSS JOIN ' + QUOTENAME(@LogTableName) + " +
+            "N' AS lt WHERE t.Col = N''' + @Value + N''''; " +
+            "EXEC(@sql); " +
+            "END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
 }

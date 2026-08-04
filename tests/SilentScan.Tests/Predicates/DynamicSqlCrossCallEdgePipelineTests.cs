@@ -142,10 +142,10 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     {
         // Corpus-measured (First Responder Kit's sp_Blitz/sp_BlitzFirst, QUOTENAME-built FROM
         // targets alongside a real WHERE clause): the dynamically-named table is a full SELECT,
-        // not just DROP/TRUNCATE - IsObjectIdentifierOnlyStatement now admits any single-statement
-        // shape as long as EVERY placeholder occurrence sits inside a NamedTableReference's own
-        // identifier parts, since a synthesized __silentscan_sym_...__ token can never resolve to
-        // a real deployed table regardless of what else the statement's WHERE clause claims.
+        // not just DROP/TRUNCATE - AllPlaceholdersInSafePosition admits this because EVERY
+        // placeholder occurrence sits inside a NamedTableReference's own identifier parts, since a
+        // synthesized __silentscan_sym_...__ token can never resolve to a real deployed table
+        // regardless of what else the statement's WHERE clause claims.
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_SkipChecks @SchemaName SYSNAME, @TableName SYSNAME AS
             BEGIN
@@ -180,6 +180,64 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
         Assert.Equal("symbolic-value-unsupported-position", finding.Reason);
         Assert.Empty(report.TypedFindings);
         Assert.Empty(report.Tier1Findings);
+    }
+
+    [Fact]
+    public async Task NoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_QuotedOnePredicateStillFolds()
+    {
+        // Generalizes the fires-fixture above from "every occurrence is identifier-position" to
+        // a genuine MIX in the SAME statement (corpus-measured shape: First Responder Kit's
+        // output-to-table blocks mix an identifier-position table target with a quoted-position
+        // value in the same IF/INSERT). @LogTableName's placeholder sits entirely inside
+        // QUOTENAME's own identifier - it never resolves to a real table, so the CROSS JOIN
+        // contributes nothing - while @Status's placeholder sits quoted inside N'''...''', a
+        // genuine varchar-column-vs-nvarchar-literal comparison against the REAL dbo.Orders
+        // table in the SAME statement. Proves per-occurrence proof, not per-statement shape.
+        var report = await Scan("""
+            CREATE TABLE dbo.Orders (Status VARCHAR(20) NOT NULL, INDEX IX_Status (Status));
+            GO
+            CREATE PROCEDURE dbo.usp_JoinAndCheck @LogTableName SYSNAME, @Status NVARCHAR(20) AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) =
+                    N'SELECT o.Status FROM dbo.Orders AS o CROSS JOIN ' + QUOTENAME(@LogTableName) +
+                    N' AS lt WHERE o.Status = N''' + @Status + N'''';
+                EXEC(@sql);
+            END;
+            """, FindingConfidence.Medium);
+
+        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Status");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.True(finding.Column.Indexed);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public async Task NoKnownCaller_TwoStatementsOnlyOneHasAPlaceholder_SiblingStatementGetsOrdinaryExtraction()
+    {
+        // Generalizes further: a multi-STATEMENT script (two statements separated by `;` inside
+        // the same @sql), not just a multi-clause single statement. The first statement's INSERT
+        // target is entirely a placeholder identifier (never resolves, contributes nothing); the
+        // SECOND statement never touches the placeholder at all and gets full, ordinary
+        // extraction - a plain literal comparison against a real table, exactly as it would if
+        // the whole script were placeholder-free (the "one statement only" restriction the
+        // earlier identifier-only classifier needed no longer applies).
+        var report = await Scan("""
+            CREATE TABLE dbo.Customers (Name VARCHAR(20) NOT NULL, INDEX IX_Name (Name));
+            GO
+            CREATE PROCEDURE dbo.usp_TwoStatements @LogTableName SYSNAME AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) =
+                    N'INSERT INTO ' + QUOTENAME(@LogTableName) + N' (Msg) VALUES (''x'');' +
+                    N'SELECT Name FROM dbo.Customers WHERE Name = N''y'';';
+                EXEC(@sql);
+            END;
+            """, FindingConfidence.Medium);
+
+        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Name");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.True(finding.Column.Indexed);
     }
 
     [Fact]

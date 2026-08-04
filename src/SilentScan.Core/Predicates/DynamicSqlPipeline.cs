@@ -223,39 +223,23 @@ public static class DynamicSqlPipeline
             return false;
         }
 
-        if (placeholders is { Count: > 0 })
+        if (placeholders is { Count: > 0 } && !AllPlaceholdersInSafePosition(parseResult.Fragment, placeholders))
         {
-            var classification = ClassifyPlaceholders(parseResult.Fragment, placeholders);
-            if (classification == PlaceholderClassification.Unsupported)
-            {
-                accumulator.Findings.Add(new DynamicSqlFinding(
-                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
-                    DynamicSqlOutcome.Unanalyzable, "symbolic-value-unsupported-position"));
-                return false;
-            }
-
-            if (classification == PlaceholderClassification.ObjectIdentifierOnly)
-            {
-                // No value is assumed anywhere here - the whole statement is an allow-listed
-                // shape with no predicate concept at all (DROP TABLE/TRUNCATE TABLE), so this is
-                // High confidence with zero findings, and Tier-1/typed extraction never runs at
-                // all: "zero findings" is a property of this code path, not of a downstream check
-                // that could silently miss something. Nested dynamic SQL inside a script whose
-                // OWN identity rests on a placeholder is never recursed into either (ProcessScript's
-                // own nested-recursion guard).
-                accumulator.Findings.Add(new DynamicSqlFinding(
-                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
-                return false;
-            }
-
-            // classification == Quoted: every placeholder sits inside a string literal in the
-            // REPARSED text, so the generated predicate is a genuine varchar/nvarchar literal
-            // comparison BY CONSTRUCTION - the type comes from the reparsed SQL's own quoting via
-            // the ordinary extractor below, never from the placeholder's declared type. Falls
-            // through to the same extraction path a placeholder-free script takes; Remap stamps
-            // script.Confidence (already Medium) onto whatever it finds.
+            accumulator.Findings.Add(new DynamicSqlFinding(
+                script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
+                DynamicSqlOutcome.Unanalyzable, "symbolic-value-unsupported-position"));
+            return false;
         }
 
+        // A script with no placeholder, or one where every occurrence just proved itself safe
+        // (inside a string literal - a genuine varchar/nvarchar literal comparison BY
+        // CONSTRUCTION - or inside a table reference's own identifier parts, where a synthesized
+        // __silentscan_sym_...__ token can never resolve against the real catalog so the ordinary
+        // extractor below naturally finds nothing there), falls through to the same extraction
+        // path uniformly: no special-cased early return, and no "one statement only" restriction
+        // either - a sibling statement in the same multi-statement script that never touches a
+        // placeholder gets full, ordinary extraction. Remap stamps script.Confidence (already
+        // Medium whenever a placeholder exists at all) onto whatever it finds.
         innerParseResult = parseResult;
         return true;
     }
@@ -411,29 +395,26 @@ public static class DynamicSqlPipeline
         return string.IsNullOrWhiteSpace(remaining);
     }
 
-    private enum PlaceholderClassification
-    {
-        /// <summary>Every occurrence sits inside a string literal in the reparsed text - the generated predicate is a genuine varchar/nvarchar literal comparison by construction.</summary>
-        Quoted,
-
-        /// <summary>The whole script is exactly one DROP TABLE/TRUNCATE TABLE statement, and every occurrence sits inside one of ITS OWN identifier parts - no value is assumed, and the statement has no predicate concept to miss.</summary>
-        ObjectIdentifierOnly,
-
-        /// <summary>Neither of the above - refused rather than guessed at.</summary>
-        Unsupported,
-    }
-
-    private static PlaceholderClassification ClassifyPlaceholders(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
+    /// <summary>
+    /// Sound per-occurrence, not per-statement: EVERY placeholder occurrence anywhere in the
+    /// reparsed script must independently sit inside a string literal (a genuine varchar/nvarchar
+    /// literal comparison by construction) or inside a table reference's own identifier parts (a
+    /// synthesized <c>__silentscan_sym_...__</c> token can never collide with a real deployed
+    /// object, so nothing downstream is ever extracted against it) - never a bare value position
+    /// (a WHERE predicate, a SELECT expression), which still refuses. A script can freely MIX
+    /// both safe positions across multiple statements: a corpus-measured shape (First Responder
+    /// Kit's output-to-table blocks) has an <c>IF EXISTS(...) INSERT db.schema.table ...</c> where
+    /// one placeholder names the identifier and another sits quoted inside a literal in the SAME
+    /// or a SIBLING statement. Since this proves EVERY occurrence safe rather than special-casing
+    /// a whole-statement shape, there is no need to restrict which statement, or how many, the
+    /// script contains - a sibling statement that never touches a placeholder at all gets full,
+    /// ordinary extraction exactly as if the whole script were placeholder-free.
+    /// </summary>
+    private static bool AllPlaceholdersInSafePosition(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
     {
         var stringLiteralRanges = CollectStringLiteralRanges(fragment);
-        if (occurrences.All(o => IsWithinAnyRange(o, stringLiteralRanges)))
-        {
-            return PlaceholderClassification.Quoted;
-        }
-
-        return IsObjectIdentifierOnlyStatement(fragment, occurrences)
-            ? PlaceholderClassification.ObjectIdentifierOnly
-            : PlaceholderClassification.Unsupported;
+        var tableIdentifiers = CollectAllTableReferenceNames(fragment);
+        return occurrences.All(o => IsWithinAnyRange(o, stringLiteralRanges) || tableIdentifiers.Any(name => IsWithinIdentifier(name, o)));
     }
 
     private static List<(int Start, int End)> CollectStringLiteralRanges(TSqlFragment fragment)
@@ -461,59 +442,24 @@ public static class DynamicSqlPipeline
     }
 
     /// <summary>
-    /// Accepted for a batch containing EXACTLY one statement (any kind - a real corpus scan
-    /// found the dominant shape is a full INSERT/SELECT with its own WHERE clause, dynamically
-    /// naming the table it reads via QUOTENAME, e.g. First Responder Kit's
-    /// <c>SET @sql = N'INSERT ... SELECT ... FROM ' + QUOTENAME(@Server) + N'.' + QUOTENAME(@Db)
-    /// + N' WHERE ServerName IS NULL OR ...'</c> - the earlier DROP/TRUNCATE-only version of this
-    /// check refused this shape outright even though it's sound: the placeholder occupies ONLY a
-    /// <see cref="NamedTableReference"/>'s own identifier parts, so the reparsed text's table
-    /// name is a synthesized <c>__silentscan_sym_...__</c> token that can never collide with a
-    /// real deployed object - the catalog/lineage layer simply won't resolve it, so nothing
-    /// downstream is extracted against it regardless of how much WHERE/JOIN/subquery surface the
-    /// rest of the statement has. What actually matters is proven per-occurrence below, not
-    /// per-statement-shape: EVERY placeholder occurrence must sit inside a collected identifier
-    /// - one that sits in a VALUE position (a WHERE predicate, a SELECT expression) still refuses
-    /// via the ordinary <c>Unsupported</c> fallback, exactly as before. Restricted to exactly one
-    /// statement (not the whole batch) specifically to avoid suppressing extraction on OTHER,
-    /// unrelated statements in the same script that have nothing to do with the symbolic table -
-    /// this classification's own admission means "run zero extraction, zero findings" for
-    /// whatever it accepts, so admitting a multi-statement batch would be a real recall loss on
-    /// statements that never needed a placeholder-safety exemption in the first place.
+    /// Every table any statement in <paramref name="fragment"/> reads or writes, or targets via
+    /// DROP/TRUNCATE - a real corpus scan found the dominant shape is a full INSERT/SELECT with
+    /// its own WHERE clause, dynamically naming the table it reads via QUOTENAME, e.g. First
+    /// Responder Kit's <c>SET @sql = N'INSERT ... SELECT ... FROM ' + QUOTENAME(@Server) + N'.'
+    /// + QUOTENAME(@Db) + N' WHERE ServerName IS NULL OR ...'</c>, alongside DROP TABLE/TRUNCATE
+    /// TABLE's own distinct (non-<see cref="NamedTableReference"/>) target syntax. Scans the
+    /// WHOLE fragment - not one statement - since <see cref="AllPlaceholdersInSafePosition"/>
+    /// proves safety per OCCURRENCE, not per statement-shape, so there is no reason to restrict
+    /// which table names are even eligible to match. Deliberately NOT a general SchemaObjectName
+    /// collector - a CAST target's UserDataTypeReference or a scalar function call's own name
+    /// also carry a SchemaObjectName, and a placeholder there is a TYPE or FUNCTION identity, not
+    /// a table one; admitting those under this same "unresolvable ⇒ no downstream claim"
+    /// reasoning would be a different (and unverified) argument.
     /// </summary>
-    private static bool IsObjectIdentifierOnlyStatement(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
-    {
-        if (fragment is not TSqlScript { Batches: [{ Statements: [var statement] }] })
-        {
-            return false;
-        }
-
-        List<SchemaObjectName> names = statement switch
-        {
-            DropTableStatement drop => [.. drop.Objects],
-            TruncateTableStatement truncate => [truncate.TableName],
-            _ => [],
-        };
-
-        names.AddRange(CollectTableReferenceNames(statement));
-
-        return names.Count > 0 && occurrences.All(o => names.Any(name => IsWithinIdentifier(name, o)));
-    }
-
-    /// <summary>
-    /// Every table this <paramref name="statement"/> reads or writes, from wherever a
-    /// <see cref="NamedTableReference"/> appears - FROM, JOIN, an UPDATE/DELETE/MERGE target, or
-    /// an INSERT INTO target all use this same node type, so one visitor covers every statement
-    /// kind uniformly rather than a per-kind extraction. Deliberately NOT a general
-    /// SchemaObjectName collector - a CAST target's UserDataTypeReference or a scalar function
-    /// call's own name also carry a SchemaObjectName, and a placeholder there is a TYPE or
-    /// FUNCTION identity, not a table one; admitting those under this same "unresolvable ⇒ no
-    /// downstream claim" reasoning would be a different (and unverified) argument.
-    /// </summary>
-    private static List<SchemaObjectName> CollectTableReferenceNames(TSqlFragment statement)
+    private static List<SchemaObjectName> CollectAllTableReferenceNames(TSqlFragment fragment)
     {
         var collector = new TableReferenceNameCollector();
-        statement.Accept(collector);
+        fragment.Accept(collector);
         return collector.Names;
     }
 
@@ -524,6 +470,18 @@ public static class DynamicSqlPipeline
         public override void ExplicitVisit(NamedTableReference node)
         {
             Names.Add(node.SchemaObject);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DropTableStatement node)
+        {
+            Names.AddRange(node.Objects);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(TruncateTableStatement node)
+        {
+            Names.Add(node.TableName);
             base.ExplicitVisit(node);
         }
     }
