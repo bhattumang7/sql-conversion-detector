@@ -140,4 +140,60 @@ public sealed class DynamicSqlSegmentMapTests
 
         Assert.Throws<InvalidOperationException>(() => map.Map(1, 1));
     }
+
+    [Fact]
+    public void AppendPlaceholder_ReturnsItsOwnInnerStartOffset()
+    {
+        var map = new DynamicSqlSegmentMap();
+        map.AppendLiteral("test.sql", startLine: 1, startColumn: 6, prefixLength: 1, value: "SELECT ");
+
+        var innerStart = map.AppendPlaceholder("test.sql", startLine: 9, startColumn: 3, value: "__silentscan_sym_L9C3__");
+
+        Assert.Equal("SELECT ".Length, innerStart);
+        Assert.Equal(innerStart, map.InnerText.IndexOf("__silentscan_sym_L9C3__", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Map_PositionInsidePlaceholder_CollapsesToPlaceholderOrigin()
+    {
+        var map = new DynamicSqlSegmentMap();
+        map.AppendLiteral("test.sql", startLine: 1, startColumn: 6, prefixLength: 1, value: "SELECT ");
+        map.AppendPlaceholder("test.sql", startLine: 9, startColumn: 3, value: "__silentscan_sym_L9C3__");
+
+        // Every position inside the placeholder token - start, middle, end - collapses to the
+        // SAME origin: there is no real source text underneath it to walk column-by-column
+        // through, unlike an ordinary literal segment.
+        var start = map.Map(innerLine: 1, innerColumn: "SELECT ".Length + 1);
+        var middle = map.Map(innerLine: 1, innerColumn: "SELECT ".Length + 10);
+        var end = map.Map(innerLine: 1, innerColumn: "SELECT ".Length + "__silentscan_sym_L9C3__".Length);
+
+        foreach (var span in new[] { start, middle, end })
+        {
+            Assert.Equal("test.sql", span.SourcePath);
+            Assert.Equal(9, span.Line);
+            Assert.Equal(3, span.Column);
+        }
+    }
+
+    [Fact]
+    public void Map_PositionInRealLiteralAfterPlaceholder_MapsToItsOwnOrigin_NotThePlaceholder()
+    {
+        var map = new DynamicSqlSegmentMap();
+
+        // EXEC('SELECT ' + @sym + ' FROM T') where @sym folds to a placeholder - the literal
+        // after the placeholder must still map to ITS OWN real source position, unaffected by
+        // the opaque segment sitting between it and the first literal.
+        map.AppendLiteral("test.sql", startLine: 1, startColumn: 6, prefixLength: 1, value: "SELECT ");
+        map.AppendPlaceholder("test.sql", startLine: 4, startColumn: 12, value: "__silentscan_sym_L4C12__");
+        map.AppendLiteral("test.sql", startLine: 1, startColumn: 40, prefixLength: 1, value: " FROM T");
+
+        Assert.Equal("SELECT __silentscan_sym_L4C12__ FROM T", map.InnerText);
+
+        var fIndex = map.InnerText.IndexOf("FROM", StringComparison.Ordinal);
+        var span = map.Map(innerLine: 1, innerColumn: fIndex + 1);
+
+        Assert.Equal("test.sql", span.SourcePath);
+        Assert.Equal(1, span.Line);
+        Assert.Equal(41 + 1, span.Column); // content starts at 40 + prefixLength 1 = 41, "FROM" is offset 1 into " FROM T"
+    }
 }

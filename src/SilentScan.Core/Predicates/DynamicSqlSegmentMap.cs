@@ -15,7 +15,7 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public sealed class DynamicSqlSegmentMap
 {
-    private sealed record Segment(int InnerStart, string Value, string SourcePath, int StartLine, int ContentStartColumn);
+    private sealed record Segment(int InnerStart, string Value, string SourcePath, int StartLine, int ContentStartColumn, bool IsPlaceholder = false);
 
     private readonly List<Segment> _segments = [];
     private readonly StringBuilder _innerText = new();
@@ -33,6 +33,26 @@ public sealed class DynamicSqlSegmentMap
         _innerText.Append(value);
     }
 
+    /// <summary>
+    /// Appends a synthesized placeholder token - standing in for a value this scanner could not
+    /// prove constant - occupying real space in <see cref="InnerText"/> so the reparsed SQL stays
+    /// syntactically valid, but with no real source text underneath it: unlike
+    /// <see cref="AppendLiteral"/>, <paramref name="value"/> is a token this scanner invented, not
+    /// something ScriptDOM decoded from the file, so there is no quote-escaping or multi-line
+    /// arithmetic to do when <see cref="Map"/> is later asked for a position inside it - every
+    /// such position collapses to this call's own origin, <paramref name="startLine"/>/
+    /// <paramref name="startColumn"/>. Returns the token's own start offset within
+    /// <see cref="InnerText"/> so the caller can build a <see cref="PlaceholderOccurrence"/> for it
+    /// without re-deriving that offset from a string search.
+    /// </summary>
+    public int AppendPlaceholder(string sourcePath, int startLine, int startColumn, string value)
+    {
+        var innerStart = _innerText.Length;
+        _segments.Add(new Segment(innerStart, value, sourcePath, startLine, startColumn, IsPlaceholder: true));
+        _innerText.Append(value);
+        return innerStart;
+    }
+
     /// <summary>Maps a 1-based (line, column) position in <see cref="InnerText"/> back to its source origin.</summary>
     public SourceSpan Map(int innerLine, int innerColumn)
     {
@@ -44,6 +64,15 @@ public sealed class DynamicSqlSegmentMap
         var text = InnerText;
         var offset = ToOffset(text, innerLine, innerColumn);
         var segment = FindSegment(offset);
+
+        if (segment.IsPlaceholder)
+        {
+            // No real source text underneath a placeholder token - every position inside it
+            // collapses to the token's own origin, rather than running LocateWithinValue's
+            // quote-counting/line-delta arithmetic against text this scanner invented.
+            return new SourceSpan(segment.SourcePath, segment.StartLine, segment.ContentStartColumn);
+        }
+
         var localOffset = Math.Clamp(offset - segment.InnerStart, 0, segment.Value.Length);
 
         var (lineDelta, column) = LocateWithinValue(segment.Value, localOffset, segment.ContentStartColumn);

@@ -22,6 +22,17 @@ public sealed record DynamicSqlScope(string? ProcScope, SchemaObjectName? Trigge
 }
 
 /// <summary>
+/// One symbolic placeholder token inside a <see cref="DynamicSqlScript.InnerText"/> - where it
+/// sits (<paramref name="InnerStartOffset"/>/<paramref name="Length"/>), what type it stands in
+/// for, and where in the original source the unfoldable value actually came from. Built once, in
+/// <see cref="DynamicSqlScanner"/>'s own <c>BuildScript</c>, straight from the segment list that
+/// produced <see cref="DynamicSqlScript.InnerText"/> - never re-derived later by searching the
+/// assembled text for the token, which would be fragile the moment two placeholders of the same
+/// type ever produced identical-looking (but differently-positioned) tokens.
+/// </summary>
+public sealed record PlaceholderOccurrence(int InnerStartOffset, int Length, SqlType Type, SourceSpan Origin);
+
+/// <summary>
 /// A dynamic SQL call site whose argument was provably constant (Tier A of CLAUDE.md's dynamic
 /// SQL policy) - reassembled into a single piece of T-SQL text ready to reparse, plus the map
 /// needed to translate any finding inside it back to where that text actually came from in the
@@ -47,6 +58,10 @@ public sealed record DynamicSqlScope(string? ProcScope, SchemaObjectName? Trigge
 /// for a value this scanner could not prove constant. One EXEC/sp_executesql call site can emit
 /// several <see cref="DynamicSqlScript"/>s (one per assembly) at DIFFERENT confidences - this
 /// field is per-script, not per-call-site, exactly so that can be represented.
+/// <see cref="PlaceholderOccurrences"/> is null for every script today (no producer seeds a
+/// placeholder segment yet) - once one does, it lets the pipeline classify each placeholder's
+/// syntactic position (quoted-literal, object-identifier, or neither) without re-parsing
+/// <see cref="InnerText"/> to find them.
 /// </summary>
 public sealed record DynamicSqlScript(
     SourceSpan CallSite,
@@ -55,4 +70,5 @@ public sealed record DynamicSqlScript(
     string? ParameterDeclarationText,
     DynamicSqlScope Scope,
     IReadOnlyDictionary<string, string>? ArgumentBindings = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High,
+    IReadOnlyList<PlaceholderOccurrence>? PlaceholderOccurrences = null);

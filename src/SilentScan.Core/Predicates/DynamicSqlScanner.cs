@@ -59,7 +59,21 @@ public static class DynamicSqlScanner
         return new DynamicSqlExtractionResult(visitor.Findings, visitor.Scripts, visitor.OutputSummaries);
     }
 
-    private readonly record struct LiteralSegment(string SourcePath, int StartLine, int StartColumn, int PrefixLength, string Value);
+    /// <param name="SourcePath">The file this literal segment's real source text came from - or, for a placeholder, the file the unfoldable value was found in.</param>
+    /// <param name="StartLine">1-based line the segment's real source text starts at (or, for a placeholder, the value's origin).</param>
+    /// <param name="StartColumn">1-based column the segment's real source text starts at (or, for a placeholder, the value's origin).</param>
+    /// <param name="PrefixLength">Raw characters before a literal's content (1 for <c>'</c>, 2 for <c>N'</c>) - always 0 for a placeholder, which has no quote prefix of its own.</param>
+    /// <param name="Value">The segment's own text as it appears in the assembled string - the literal's already-unescaped value, or a placeholder's synthesized token.</param>
+    /// <param name="PlaceholderType">
+    /// Null for every ordinary literal segment (all of them, today). Non-null marks this segment
+    /// as a SYNTHESIZED token standing in for a value this scanner could prove has a declared
+    /// type but could not prove constant (an uninitialized DECLARE, a proc parameter with no/an
+    /// ambiguous known caller) - <see cref="Value"/> still holds real text (a
+    /// <c>__silentscan_sym_...__</c> token, never containing a quote), so the assembled string
+    /// stays syntactically valid T-SQL; there is simply no real source text underneath this one
+    /// segment. <see cref="Visitor.TryFlatten"/> is the single place this field is checked.
+    /// </param>
+    private readonly record struct LiteralSegment(string SourcePath, int StartLine, int StartColumn, int PrefixLength, string Value, SqlType? PlaceholderType = null);
 
     /// <summary>
     /// One statically-provable constant value a folded expression could assemble to - a single
@@ -235,8 +249,16 @@ public static class DynamicSqlScanner
 
                 if (!_suppressEmission && folded.TryGetValue(formal.VariableName.Value, out var state) && state.Assemblies is { } assemblies)
                 {
-                    var values = assemblies.Select(TryFlatten).Distinct(StringComparer.Ordinal).ToList();
-                    OutputSummaries.Add(new ProcedureOutputSummary(qualifiedName, formal.VariableName.Value, values));
+                    // An assembly containing a placeholder is not a proven value - skip it rather
+                    // than publishing a fabricated string as this OUTPUT parameter's summary. If
+                    // every assembly is a placeholder, no summary is published at all (matching
+                    // this method's own contract: no entry at all, never a guessed one), not an
+                    // empty-but-present one that could be mistaken for "proven to be empty".
+                    var values = assemblies.Select(TryFlatten).Where(v => v is not null).Select(v => v!).Distinct(StringComparer.Ordinal).ToList();
+                    if (values.Count > 0)
+                    {
+                        OutputSummaries.Add(new ProcedureOutputSummary(qualifiedName, formal.VariableName.Value, values));
+                    }
                 }
             }
         }
@@ -848,11 +870,31 @@ public static class DynamicSqlScanner
         /// <summary>
         /// The one place an assembly is ever flattened to a plain string - every other flattening
         /// site in this file must go through here rather than concatenating <see cref="LiteralSegment.Value"/>
-        /// directly, so that a future placeholder segment (an unknown-but-typed value standing in
-        /// for something this scanner could not prove constant) has exactly one choke point to gate:
-        /// today every segment is a real literal, so this always succeeds.
+        /// directly. Null whenever any segment is a placeholder (<see cref="LiteralSegment.PlaceholderType"/>
+        /// non-null): a placeholder's <see cref="LiteralSegment.Value"/> is a synthesized token,
+        /// never a value this scanner is entitled to treat as the real one, so every caller that
+        /// needs an actual runtime value (a @params declaration, a LEN, a pure-function argument)
+        /// must handle this failing rather than silently flattening a fabricated string.
         /// </summary>
-        private static string TryFlatten(IReadOnlyList<LiteralSegment> assembly) => string.Concat(assembly.Select(s => s.Value));
+        private static string? TryFlatten(IReadOnlyList<LiteralSegment> assembly) =>
+            assembly.Any(s => s.PlaceholderType is not null) ? null : string.Concat(assembly.Select(s => s.Value));
+
+        /// <summary>
+        /// The dedupe identity of an assembly - concatenated text for an ordinary (placeholder-free)
+        /// assembly, same as before this field existed (<see cref="TryFlatten"/> succeeds). A
+        /// placeholder segment instead contributes its type name bracketed in a control character
+        /// that cannot appear in real SQL text: the bracket matters, not just the type name,
+        /// because an unbracketed type name could collide with an unrelated literal assembly whose
+        /// own text happens to match it (a literal "prefixnvarchar" versus "prefix" plus a
+        /// placeholder of type nvarchar), and the token TEXT itself can't be used either (it would
+        /// let two DIFFERENT placeholder origins collide, since the token depends only on source
+        /// position, not on what's actually unknown). Two placeholders of the SAME type at the
+        /// same position in the key correctly collapse to one assembly (an unknown nvarchar value
+        /// here is an unknown nvarchar value here, regardless of which DECLARE it came from); two
+        /// of DIFFERENT types do not.
+        /// </summary>
+        private static string AssemblyDedupeKey(IReadOnlyList<LiteralSegment> assembly) =>
+            TryFlatten(assembly) ?? string.Concat(assembly.Select(s => s.PlaceholderType is { } type ? $"\u0001{type}\u0001" : s.Value));
 
         /// <summary>
         /// Deduplicates (by concatenated text) and caps the union of two branches' own assembly
@@ -869,7 +911,7 @@ public static class DynamicSqlScanner
             var result = new List<IReadOnlyList<LiteralSegment>>();
             foreach (var assembly in a.Concat(b))
             {
-                if (!seen.Add(TryFlatten(assembly)))
+                if (!seen.Add(AssemblyDedupeKey(assembly)))
                 {
                     continue;
                 }
@@ -907,7 +949,7 @@ public static class DynamicSqlScanner
                 foreach (var r in right)
                 {
                     List<LiteralSegment> merged = [.. l, .. r];
-                    if (!seen.Add(TryFlatten(merged)))
+                    if (!seen.Add(AssemblyDedupeKey(merged)))
                     {
                         continue;
                     }
@@ -1175,17 +1217,32 @@ public static class DynamicSqlScanner
             IReadOnlyDictionary<string, string>? argumentBindings)
         {
             var segmentMap = new DynamicSqlSegmentMap();
+            List<PlaceholderOccurrence>? occurrences = null;
             foreach (var segment in segments)
             {
-                segmentMap.AppendLiteral(segment.SourcePath, segment.StartLine, segment.StartColumn, segment.PrefixLength, segment.Value);
+                if (segment.PlaceholderType is { } placeholderType)
+                {
+                    var innerStart = segmentMap.AppendPlaceholder(segment.SourcePath, segment.StartLine, segment.StartColumn, segment.Value);
+                    occurrences ??= [];
+                    occurrences.Add(new PlaceholderOccurrence(
+                        innerStart, segment.Value.Length, placeholderType,
+                        new SourceSpan(segment.SourcePath, segment.StartLine, segment.StartColumn)));
+                }
+                else
+                {
+                    segmentMap.AppendLiteral(segment.SourcePath, segment.StartLine, segment.StartColumn, segment.PrefixLength, segment.Value);
+                }
             }
 
-            // Every segment is a real literal today - no producer yet seeds a placeholder
-            // segment, so this is always High. Becomes segments.Any(s => s.PlaceholderType is
-            // not null) ? Medium : High the day a producer exists.
-            const FindingConfidence confidence = FindingConfidence.High;
+            // Any placeholder segment means this ONE assembly rests on an assumption, not proven
+            // source text - Medium, regardless of where the placeholder ends up sitting in the
+            // reparsed statement. The pipeline's own position classifier (quoted-literal vs
+            // object-identifier vs neither) decides separately whether any finding is even
+            // emitted from this script at all; this field only ever needs to be a safe upper
+            // bound, not the final word on what gets reported.
+            var confidence = occurrences is null ? FindingConfidence.High : FindingConfidence.Medium;
 
-            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope, argumentBindings, confidence);
+            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope, argumentBindings, confidence, occurrences);
         }
 
         /// <summary>
@@ -1681,13 +1738,15 @@ public static class DynamicSqlScanner
         private bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, FoldState> folded, bool foldingEnabled, out int value)
         {
             var attempt = TryFoldExpression(argument, folded, foldingEnabled);
-            if (!attempt.Success || attempt.Assemblies!.Count != 1)
+            if (!attempt.Success || attempt.Assemblies!.Count != 1 || TryFlatten(attempt.Assemblies[0]) is not { } flattened)
             {
+                // A placeholder's LEN is not a number - this scanner does not know the real
+                // value, so it cannot know its length either.
                 value = 0;
                 return false;
             }
 
-            value = TryFlatten(attempt.Assemblies[0]).TrimEnd(' ').Length;
+            value = flattened.TrimEnd(' ').Length;
             return true;
         }
 
@@ -1763,7 +1822,23 @@ public static class DynamicSqlScanner
                     return attempt;
                 }
 
-                argumentValueSets.Add(attempt.Assemblies!.Select(TryFlatten).ToList());
+                var values = new List<string>(attempt.Assemblies!.Count);
+                foreach (var assembly in attempt.Assemblies)
+                {
+                    // A placeholder argument has no real value this pure function could actually
+                    // be applied to - CAST/SUBSTRING/REPLACE etc. can change the type, truncate,
+                    // or destroy the token outright, and none of this scanner's accepted EXEC
+                    // positions ever need the placeholder's TYPE to survive a function call, so
+                    // there is nothing to gain by trying to fold one through.
+                    if (TryFlatten(assembly) is not { } flattened)
+                    {
+                        return FoldAttempt.Fail("symbolic-value-in-function-argument", Span(argument));
+                    }
+
+                    values.Add(flattened);
+                }
+
+                argumentValueSets.Add(values);
             }
 
             IEnumerable<IReadOnlyList<string>> combinations = [Array.Empty<string>()];
@@ -1782,7 +1857,10 @@ public static class DynamicSqlScanner
                     return attempt;
                 }
 
-                var value = TryFlatten(attempt.Assemblies![0]);
+                // perCombination only ever builds a new LiteralSegment from the already-flattened
+                // REAL strings in argumentValueSets above - it can never introduce a placeholder,
+                // so this is always non-null.
+                var value = TryFlatten(attempt.Assemblies![0])!;
                 if (!seen.Add(value))
                 {
                     continue;
