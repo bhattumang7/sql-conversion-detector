@@ -256,14 +256,22 @@ try {
     # actually recompiled, so an up-to-date incremental build yields an empty
     # C# analysis. A failing project is not fatal - everything that did compile
     # is still analyzed - but it is called out loudly.
-    $exit = Invoke-Step "build" "dotnet" @('build', $Solution, '--no-incremental', '-v', 'minimal', '--nologo') $BuildTimeoutSeconds
+    #
+    # Routed through scripts/dotnet-safe.sh, not a bare `dotnet build` - that script is the one
+    # sanctioned entry point for building/testing this solution (docs/local-dev.md), and it
+    # already owns the exact VBCSCompiler-crash retry/cleanup this script would otherwise have to
+    # duplicate. DOTNET_SAFE_TIMEOUT sizes its own internal per-attempt timeout to match this
+    # step's own budget rather than dotnet-safe.sh's unrelated 900s default.
+    $env:DOTNET_SAFE_TIMEOUT = "$BuildTimeoutSeconds"
+    $exit = Invoke-Step "build" (Join-Path $RootDir 'scripts/dotnet-safe.sh') @('build', $Solution, '--no-incremental', '-v', 'minimal', '--nologo') $BuildTimeoutSeconds
     if ($exit -ne 0) {
         $buildFailed = $true
         Write-Warning "Build reported errors. Projects that failed to compile are NOT analyzed - their C# results will be missing. Continuing so the rest of the scan still uploads."
     }
 
     if ($WithCoverage) {
-        $exit = Invoke-Step "test" "dotnet" @(
+        $env:DOTNET_SAFE_TIMEOUT = "$TestTimeoutSeconds"
+        $exit = Invoke-Step "test" (Join-Path $RootDir 'scripts/dotnet-safe.sh') @(
             'test', $Solution, '--no-build',
             '--collect', 'XPlat Code Coverage;Format=opencover',
             '--results-directory', (Join-Path $RootDir 'TestResults'),
