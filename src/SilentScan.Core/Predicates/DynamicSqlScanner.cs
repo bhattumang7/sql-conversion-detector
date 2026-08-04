@@ -1180,7 +1180,12 @@ public static class DynamicSqlScanner
                 segmentMap.AppendLiteral(segment.SourcePath, segment.StartLine, segment.StartColumn, segment.PrefixLength, segment.Value);
             }
 
-            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope, argumentBindings);
+            // Every segment is a real literal today - no producer yet seeds a placeholder
+            // segment, so this is always High. Becomes segments.Any(s => s.PlaceholderType is
+            // not null) ? Medium : High the day a producer exists.
+            const FindingConfidence confidence = FindingConfidence.High;
+
+            return new DynamicSqlScript(CallSite(node), segmentMap.InnerText, segmentMap, parameterDeclarationText, _scope, argumentBindings, confidence);
         }
 
         /// <summary>

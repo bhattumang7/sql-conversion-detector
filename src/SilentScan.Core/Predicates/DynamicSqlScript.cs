@@ -41,6 +41,12 @@ public sealed record DynamicSqlScope(string? ProcScope, SchemaObjectName? Trigge
 /// cref="DynamicSqlPipeline"/>) uses this, and only this - never a blanket name match across
 /// scopes - to let an enclosing script's own declared parameter type stand in for this call's
 /// declared parameter when its own declaration can't otherwise resolve it.
+/// <see cref="Confidence"/> is how much this ONE assembly's own claim of being provably constant
+/// can be trusted - <see cref="FindingConfidence.High"/> when every segment is a real literal
+/// (every script today), lower once a segment can be an unknown-but-typed placeholder standing in
+/// for a value this scanner could not prove constant. One EXEC/sp_executesql call site can emit
+/// several <see cref="DynamicSqlScript"/>s (one per assembly) at DIFFERENT confidences - this
+/// field is per-script, not per-call-site, exactly so that can be represented.
 /// </summary>
 public sealed record DynamicSqlScript(
     SourceSpan CallSite,
@@ -48,4 +54,5 @@ public sealed record DynamicSqlScript(
     DynamicSqlSegmentMap SegmentMap,
     string? ParameterDeclarationText,
     DynamicSqlScope Scope,
-    IReadOnlyDictionary<string, string>? ArgumentBindings = null);
+    IReadOnlyDictionary<string, string>? ArgumentBindings = null,
+    FindingConfidence Confidence = FindingConfidence.High);

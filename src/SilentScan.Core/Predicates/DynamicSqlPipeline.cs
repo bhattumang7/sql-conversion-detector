@@ -63,11 +63,11 @@ public static class DynamicSqlPipeline
 
             accumulator.Findings.AddRange(perCallSite.Findings);
             accumulator.Skipped.AddRange(perCallSite.Skipped);
-            accumulator.Tier1.AddRange(DedupeTier1(perCallSite.Tier1));
-            accumulator.Typed.AddRange(TypedFindingDeduplicator.Dedupe(perCallSite.Typed));
-            accumulator.ExpressionDerived.AddRange(DedupeExpressionDerived(perCallSite.ExpressionDerived));
-            accumulator.CollationConflicts.AddRange(DedupeCollationConflicts(perCallSite.CollationConflicts));
-            accumulator.WriteLoss.AddRange(DedupeWriteLoss(perCallSite.WriteLoss));
+            accumulator.Tier1.AddRange(DedupeTier1(PreferBestConfidencePerKey(perCallSite.Tier1, Tier1Key, f => f.Confidence)));
+            accumulator.Typed.AddRange(TypedFindingDeduplicator.Dedupe(PreferBestConfidencePerKey(perCallSite.Typed, TypedKey, f => f.Confidence)));
+            accumulator.ExpressionDerived.AddRange(DedupeExpressionDerived(PreferBestConfidencePerKey(perCallSite.ExpressionDerived, ExpressionDerivedKey, f => f.Confidence)));
+            accumulator.CollationConflicts.AddRange(DedupeCollationConflicts(PreferBestConfidencePerKey(perCallSite.CollationConflicts, CollationConflictKey, f => f.Confidence)));
+            accumulator.WriteLoss.AddRange(DedupeWriteLoss(PreferBestConfidencePerKey(perCallSite.WriteLoss, WriteLossKey, f => f.Confidence)));
         }
 
         return accumulator.ToResult();
@@ -84,10 +84,14 @@ public static class DynamicSqlPipeline
     private static List<SargabilityFinding> DedupeTier1(List<SargabilityFinding> findings)
     {
         var seen = new HashSet<(SargabilityFindingKind Kind, string ColumnName, string? Detail, string? TableQualifiedName)>();
-        return findings
-            .Where(finding => seen.Add((finding.Kind, finding.ColumnName, finding.Detail, finding.TableQualifiedName)))
-            .ToList();
+        return findings.Where(finding => seen.Add(Tier1Key(finding))).ToList();
     }
+
+    private static (SargabilityFindingKind Kind, string ColumnName, string? Detail, string? TableQualifiedName) Tier1Key(SargabilityFinding finding) =>
+        (finding.Kind, finding.ColumnName, finding.Detail, finding.TableQualifiedName);
+
+    private static string TypedKey(TypedPredicateFinding finding) =>
+        TypedPredicateFindingIdentity.ComputeKey(finding.Column, finding.OtherOperand, finding.Operator);
 
     /// <summary>
     /// Keys on <see cref="TransformationSite.Description"/> only, never its own SourcePath/Line -
@@ -112,18 +116,36 @@ public static class DynamicSqlPipeline
     private static List<CollationConflictFinding> DedupeCollationConflicts(List<CollationConflictFinding> findings)
     {
         var seen = new HashSet<(string, string, string, string, string, string, string)>();
-        return findings.Where(finding => seen.Add((
-            finding.FirstTableQualifiedName, finding.FirstColumnName, finding.FirstCollationName,
-            finding.SecondTableQualifiedName, finding.SecondColumnName, finding.SecondCollationName, finding.Operator))).ToList();
+        return findings.Where(finding => seen.Add(CollationConflictKey(finding))).ToList();
     }
+
+    private static (string, string, string, string, string, string, string) CollationConflictKey(CollationConflictFinding finding) => (
+        finding.FirstTableQualifiedName, finding.FirstColumnName, finding.FirstCollationName,
+        finding.SecondTableQualifiedName, finding.SecondColumnName, finding.SecondCollationName, finding.Operator);
 
     private static List<WriteLossFinding> DedupeWriteLoss(List<WriteLossFinding> findings)
     {
         var seen = new HashSet<(string, string, WriteLossKind, SqlType, SqlType)>();
-        return findings
-            .Where(finding => seen.Add((finding.TableQualifiedName, finding.ColumnName, finding.Kind, finding.TargetType, finding.SourceType)))
-            .ToList();
+        return findings.Where(finding => seen.Add(WriteLossKey(finding))).ToList();
     }
+
+    private static (string, string, WriteLossKind, SqlType, SqlType) WriteLossKey(WriteLossFinding finding) =>
+        (finding.TableQualifiedName, finding.ColumnName, finding.Kind, finding.TargetType, finding.SourceType);
+
+    /// <summary>
+    /// Reorders <paramref name="findings"/> so that, within any set sharing the same
+    /// <paramref name="key"/>, the BEST (numerically lowest) <see cref="FindingConfidence"/> sorts
+    /// first - every Dedupe* helper above keeps the first occurrence per key, so this makes "the
+    /// same defect proven at High on one assembly and Medium on another survives as High" a
+    /// property of ordering rather than requiring each Dedupe* to grow its own confidence-aware
+    /// merge logic. <see cref="Enumerable.GroupBy{TSource,TKey}(IEnumerable{TSource},Func{TSource,TKey})"/>
+    /// and <see cref="Enumerable.OrderBy{TSource,TKey}(IEnumerable{TSource},Func{TSource,TKey})"/>
+    /// are both stable, so a caller whose findings are all the same confidence (every caller
+    /// today) gets byte-identical order.
+    /// </summary>
+    private static List<T> PreferBestConfidencePerKey<T, TKey>(List<T> findings, Func<T, TKey> key, Func<T, FindingConfidence> confidence)
+        where TKey : notnull =>
+        [.. findings.GroupBy(key).SelectMany(group => group.OrderBy(confidence))];
 
     /// <summary>Mutable accumulator for one <see cref="ProcessScript"/> loop's worth of findings - a plain field bag rather than growing the caller's own local-variable count, which is most of what was driving its cognitive complexity over the line.</summary>
     private sealed class ResultAccumulator
@@ -331,34 +353,37 @@ public static class DynamicSqlPipeline
     private static SourceSpan? RemapCallSite(SourceSpan? callSite, DynamicSqlScript outerScript) =>
         callSite is { } span ? outerScript.SegmentMap.Map(span.Line, span.Column) : null;
 
+    /// <summary>The worse (numerically higher) of two <see cref="FindingConfidence"/> values - a finding nested inside a script that itself rested on an assumption is never MORE trustworthy than that assumption.</summary>
+    private static FindingConfidence Worse(FindingConfidence a, FindingConfidence b) => (FindingConfidence)Math.Max((int)a, (int)b);
+
     private static SargabilityFinding Remap(SargabilityFinding finding, DynamicSqlScript script)
     {
         var span = script.SegmentMap.Map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
     private static TypedPredicateFinding Remap(TypedPredicateFinding finding, DynamicSqlScript script)
     {
         var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
     private static ExpressionDerivedFinding Remap(ExpressionDerivedFinding finding, DynamicSqlScript script)
     {
         var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
     private static CollationConflictFinding Remap(CollationConflictFinding finding, DynamicSqlScript script)
     {
         var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
     private static WriteLossFinding Remap(WriteLossFinding finding, DynamicSqlScript script)
     {
         var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
     private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script)
@@ -377,31 +402,31 @@ public static class DynamicSqlPipeline
     private static SargabilityFinding RemapNested(SargabilityFinding finding, DynamicSqlScript outerScript)
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
     }
 
     private static TypedPredicateFinding RemapNested(TypedPredicateFinding finding, DynamicSqlScript outerScript)
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
     }
 
     private static ExpressionDerivedFinding RemapNested(ExpressionDerivedFinding finding, DynamicSqlScript outerScript)
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
     }
 
     private static CollationConflictFinding RemapNested(CollationConflictFinding finding, DynamicSqlScript outerScript)
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
     }
 
     private static WriteLossFinding RemapNested(WriteLossFinding finding, DynamicSqlScript outerScript)
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript) };
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
     }
 }
 
