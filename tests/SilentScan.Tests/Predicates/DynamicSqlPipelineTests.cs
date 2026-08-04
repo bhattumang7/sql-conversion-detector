@@ -417,4 +417,103 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         // expression-derived finding, never as a direct column-side verdict against dbo.T.
         Assert.Empty(result.TypedFindings);
     }
+
+    /// <summary>
+    /// A proc parameter with no known caller (see <see cref="DynamicSqlScanner"/>'s
+    /// BuildParameterSeed) folds to a symbolic placeholder rather than tainting - these three
+    /// tests are the oracle proof that the resulting Medium-confidence finding is sound, not
+    /// merely plausible. Each parses/scans with an explicitly empty <see cref="ProcCallGraph"/>
+    /// so the parameter genuinely has zero known call sites, matching the real-world shape a
+    /// public entry-point procedure has.
+    /// </summary>
+    [Fact]
+    public async Task Analyze_ProcParamNoKnownCaller_PlaceholderInsideNvarcharLiteral_ScanForced_OracleConfirmed()
+    {
+        // The literal @Value is concatenated into has its own DATA "N" character right
+        // before the escaped quote (not a type-marker prefix - CLAUDE.md's own rule that only the
+        // REASSEMBLED text's quoting determines a literal's type, never the outer NVARCHAR
+        // variable that built it) - so the reparsed predicate is Col (VARCHAR/SQL_*) vs an
+        // NVARCHAR literal: a genuine column-side conversion, ScanForced.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_FindByCol @Value NVARCHAR(10) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + @Value + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.True(typedFinding.Column.Indexed);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task Analyze_ProcParamNoKnownCaller_PlaceholderInsideVarcharLiteral_SeekPreserved_OracleConfirmed()
+    {
+        // The direction control for the test above: identical shape, identical @Value declared
+        // type (NVARCHAR(10)), but the reassembled text's own quoting has no embedded "N" this
+        // time - Col (VARCHAR) vs a VARCHAR literal matches exactly, so the seek is preserved.
+        // Proves the verdict comes from the GENERATED SQL's own quoting, never from @Value's
+        // declared type - a future contributor "helpfully" typing the placeholder from the
+        // DECLARE instead of the generated text would make this test ScanForced and fail.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_FindByCol @Value NVARCHAR(10) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = ''' + @Value + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.SeekPreserved, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task Analyze_ProcParamNoKnownCaller_PlaceholderTokenLengthDiffers_SameConfirmedVerdict()
+    {
+        // The placeholder token embeds its own origin (line/column) - moving the DECLARE onto a
+        // much later line changes the token's TEXT LENGTH (more digits) without changing anything
+        // about the predicate's shape. Conversion direction is category-driven (VARCHAR vs
+        // NVARCHAR), never length-driven, so the confirmed verdict must be identical to the
+        // shorter-token test above.
+        var (catalog, lineage) = BuildCatalog();
+
+        var padding = new string('\n', 50);
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            padding +
+            "CREATE PROCEDURE dbo.usp_FindByCol @Value NVARCHAR(10) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + @Value + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
 }
