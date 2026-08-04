@@ -350,7 +350,7 @@ public static class DynamicSqlScanner
             return FoldState.ConstantSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)]);
         }
 
-        private static void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
+        private void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
         {
             foreach (var formal in formalParameters)
             {
@@ -368,7 +368,7 @@ public static class DynamicSqlScanner
                     ? FoldState.ConstantSingle([new LiteralSegment(
                         literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn,
                         literalArgument.PrefixLength, literalArgument.Value)])
-                    : FoldState.Tainted("parameter-not-seeded:non-literal-caller", edge.CallSite);
+                    : SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller");
             }
         }
 
@@ -385,16 +385,17 @@ public static class DynamicSqlScanner
         /// partially seeded from a subset of callers - a taint at even one call site means the
         /// parameter's true value set is unknown, not merely wider than what the literals show.
         /// </summary>
-        private static void SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
+        private void SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)
         {
-            foreach (var paramName in formalParameters.Select(formal => formal.VariableName.Value))
+            foreach (var formal in formalParameters)
             {
-                seed[paramName] = SeedOneParameterFromMultipleEdges(edges, paramName);
+                seed[formal.VariableName.Value] = SeedOneParameterFromMultipleEdges(edges, formal);
             }
         }
 
-        private static FoldState SeedOneParameterFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, string paramName)
+        private FoldState SeedOneParameterFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, ProcedureParameter formal)
         {
+            var paramName = formal.VariableName.Value;
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var assemblies = new List<IReadOnlyList<LiteralSegment>>();
 
@@ -404,7 +405,13 @@ public static class DynamicSqlScanner
                     a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
                 if (argument is null || argument.FormalParameterIsOutput || argument.LiteralArgument is not { } literalArgument)
                 {
-                    return FoldState.Tainted("parameter-not-seeded:non-literal-caller", edge.CallSite);
+                    // At least one known caller can't supply a literal - the parameter's true
+                    // value set genuinely includes something this scan can't pin down, so the
+                    // whole parameter folds to a symbolic placeholder of its own declared type
+                    // (same treatment Change 3 gives a single unseeded caller) rather than the
+                    // literals collected from OTHER callers so far, which would overstate what is
+                    // actually known.
+                    return SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller");
                 }
 
                 if (!seen.Add(literalArgument.Value))

@@ -138,8 +138,14 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
-    public async Task CallerPassesVariableNotLiteral_UnanalyzableWithNonLiteralCallerReason()
+    public async Task CallerPassesVariableNotLiteral_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
+        // @IncomingStatus is a variable, not a literal, so the single known caller can't supply a
+        // concrete value for @Status - but @Status's own declared type (NVARCHAR(20)) still
+        // resolves with no catalog needed, so it folds to a symbolic placeholder rather than a
+        // bare taint. dbo.Orders is never declared in this test's own DDL, so the reparsed
+        // predicate's column still never resolves to a real catalog table - unrelated to the
+        // seeding change, same as the other-caller-shapes tests above.
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
@@ -151,10 +157,10 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
             BEGIN
                 EXEC dbo.usp_FindByStatus @Status = @IncomingStatus;
             END;
-            """);
+            """, FindingConfidence.Medium);
 
-        var finding = Assert.Single(report.DynamicSqlFindings);
-        Assert.Equal("parameter-not-seeded:non-literal-caller", finding.Reason);
+        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
         Assert.Empty(report.TypedFindings);
     }
 }

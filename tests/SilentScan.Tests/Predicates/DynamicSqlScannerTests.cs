@@ -910,11 +910,15 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamWithMultipleCallers_OneCallerNonLiteral_StaysTainted()
+    public void Scan_ProcParamWithMultipleCallers_OneCallerNonLiteral_FoldsToSymbolicPlaceholder()
     {
         // Value-seeding requires EVERY known caller to supply a literal - a single non-literal
-        // caller means the parameter's true value set is unknown, not merely wider than what the
-        // OTHER callers' literals show, so this must not partially seed from the literal callers.
+        // caller means the parameter's true value set genuinely includes something this scan
+        // can't pin down, so the OTHER callers' literals are discarded rather than partially
+        // seeding just from them. With a resolvable declared type (NVARCHAR(20)), the whole
+        // parameter folds to a symbolic placeholder instead - the SAME treatment a single unseeded
+        // caller gets - rather than a bare taint, since T-SQL's own type contract for this proc
+        // still guarantees the runtime value really is this type.
         var literalArgument = new ProcCallArgument(
             "@Status", null, false, null, true, new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2));
         var variableArgument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
@@ -928,9 +932,9 @@ public sealed class DynamicSqlScannerTests
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
             graph);
 
-        Assert.Empty(result.AnalyzableScripts);
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("parameter-not-seeded:non-literal-caller", finding.Reason);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
     }
 
     [Fact]
@@ -1043,15 +1047,35 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamWithSingleNonLiteralCaller_UnanalyzableWithSpecificReason()
+    public void Scan_ProcParamWithSingleNonLiteralCaller_FoldsToSymbolicPlaceholder()
     {
         // One call site, but the actual argument was a variable, not a literal - nothing this
-        // scan can trace back to a concrete value.
+        // scan can trace back to a concrete value. With a resolvable declared type (NVARCHAR(20)),
+        // this folds to a symbolic placeholder rather than a bare taint.
         var argument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
         var graph = SingleCallerGraph(argument);
 
         var result = ScanWithCallGraph(
             $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            graph);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ProcParamWithSingleNonLiteralCaller_UnresolvableAliasType_StaysTainted()
+    {
+        // Same shape, but the declared type is a CREATE TYPE ... FROM alias, unresolvable without
+        // a catalog at this point in the pipeline - falls back to the honest taint reason rather
+        // than a placeholder claiming a type this scanner couldn't actually determine.
+        var argument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
+        var graph = SingleCallerGraph(argument);
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status dbo.StatusCodeType AS " +
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
             graph);
 
