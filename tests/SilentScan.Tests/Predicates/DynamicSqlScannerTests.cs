@@ -12,6 +12,45 @@ public sealed class DynamicSqlScannerTests
         return DynamicSqlScanner.Scan(result);
     }
 
+    private static DynamicSqlExtractionResult ScanWithEmptyCallGraph(string sql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return DynamicSqlScanner.Scan(result, callGraph: new ProcCallGraph([]));
+    }
+
+    [Fact]
+    public void Scan_ExecBuiltFromCursorFetchedVariables_TreatsFetchTargetsAsSymbolicPlaceholders()
+    {
+        // A cursor loop feeding EXEC from FETCH-populated variables is a common DBA/admin
+        // pattern (per-table/per-column maintenance scripts). FETCH INTO overwrites its target
+        // variables with a value this scanner can never know, but each target's OWN declared
+        // type is a hard T-SQL guarantee regardless of which row comes back - the same
+        // "known shape, unknown value" case an uninitialized DECLARE already gets. This must
+        // resolve to an analyzable script (parameterized on the two unknown-but-typed targets),
+        // not a blanket taint just because FETCH isn't one of the specially-modeled statements.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @ObjectName VARCHAR(128), @ColName VARCHAR(128), @SQL VARCHAR(500)
+                DECLARE cur CURSOR FOR SELECT TableName, ColumnName FROM dbo.SomeCatalog
+                OPEN cur
+                FETCH NEXT FROM cur INTO @ObjectName, @ColName
+                WHILE (@@FETCH_STATUS = 0)
+                BEGIN
+                    SET @SQL = 'UPDATE ' + @ObjectName + ' SET ' + @ColName + ' = NULL'
+                    EXEC (@SQL)
+                    FETCH NEXT FROM cur INTO @ObjectName, @ColName
+                END
+                CLOSE cur
+                DEALLOCATE cur
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.NotEmpty(result.AnalyzableScripts);
+    }
+
     [Fact]
     public void Scan_ExecOfLocallyDeclaredLiteralVariable_TierC_ProducesAnalyzableScript()
     {

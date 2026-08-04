@@ -531,6 +531,10 @@ public static class DynamicSqlScanner
                     HandleExecute(execute, folded, foldingEnabled);
                     break;
 
+                case FetchCursorStatement fetch:
+                    HandleFetch(fetch, folded);
+                    break;
+
                 case GoToStatement or LabelStatement:
                     // Already accounted for via ContainsGotoOrLabel at scope entry.
                     break;
@@ -539,18 +543,61 @@ public static class DynamicSqlScanner
                     // An unrecognized statement kind (PRINT, RAISERROR, INSERT/UPDATE/DELETE,
                     // WAITFOR, THROW, DBCC, ...) can only ever WRITE a scalar local through one
                     // of a small, closed set of T-SQL mechanisms this switch doesn't otherwise
-                    // model: the legacy "quirky update" (UPDATE ... SET @v = col), cursor
-                    // FETCH INTO, and RECEIVE's own SELECT-list variable targets. T-SQL locals
-                    // cannot alias, so any OTHER mention of a variable inside a statement of this
-                    // kind - a WHERE clause, a PRINT argument, a RAISERROR format arg - is
-                    // necessarily a READ, not a write, and must not disturb its folded state.
-                    // Taints exactly the variables one of those write mechanisms names (never a
-                    // blanket sweep of every mention), and leaves every other tracked variable,
-                    // and every statement with no write mechanism at all, completely untouched.
+                    // model: the legacy "quirky update" (UPDATE ... SET @v = col) and RECEIVE's
+                    // own SELECT-list variable targets (FETCH INTO has its own case above, now
+                    // that its targets get a typed placeholder instead of a blanket taint).
+                    // T-SQL locals cannot alias, so any OTHER mention of a variable inside a
+                    // statement of this kind - a WHERE clause, a PRINT argument, a RAISERROR
+                    // format arg - is necessarily a READ, not a write, and must not disturb its
+                    // folded state. Taints exactly the variables one of those write mechanisms
+                    // names (never a blanket sweep of every mention), and leaves every other
+                    // tracked variable, and every statement with no write mechanism at all,
+                    // completely untouched.
                     TaintWrittenVariables(folded, statement, "unsupported-statement-in-scope");
                     break;
             }
         }
+
+        /// <summary>
+        /// FETCH ... INTO overwrites each target variable with a value this scanner can never
+        /// know (a row from the cursor's result set) - but the variable's OWN declared type is a
+        /// hard T-SQL guarantee regardless of which row ends up there, exactly the same "known
+        /// shape, unknown value" case an uninitialized DECLARE already gets (<see
+        /// cref="SeedSymbolicOrTaint(ProcedureParameter, string)"/>). Recovers that type from whatever this variable's OWN
+        /// prior <see cref="FoldState"/> already proved - a single-segment symbolic placeholder
+        /// carries its own <see cref="LiteralSegment.PlaceholderType"/> - rather than re-deriving
+        /// it from the DECLARE site, which this pass no longer has in scope by the time it
+        /// reaches a FETCH, and re-seeds a FRESH placeholder token at the FETCH's own location so
+        /// two different FETCH iterations (or two different cursor variables) are never conflated
+        /// as "the same value". A target variable whose current state carries no recoverable
+        /// type (declared type didn't resolve, or the variable was never seen at all) falls back
+        /// to the same blanket taint every other unrecognized write gets.
+        /// </summary>
+        private void HandleFetch(FetchCursorStatement fetch, Dictionary<string, FoldState> folded)
+        {
+            if (fetch.IntoVariables is null)
+            {
+                return;
+            }
+
+            var location = Span(fetch);
+            foreach (var name in fetch.IntoVariables.Select(variable => variable.Name))
+            {
+                if (!folded.TryGetValue(name, out var existing))
+                {
+                    continue;
+                }
+
+                folded[name] = TryRecoverPlaceholderType(existing) is { } type
+                    ? FoldState.ConstantSingle([new LiteralSegment(
+                        location.SourcePath, location.Line, location.Column, PrefixLength: 0,
+                        PlaceholderToken(location.Line, location.Column), type)])
+                    : FoldState.Tainted("unsupported-statement-in-scope", location);
+            }
+        }
+
+        private static SqlType? TryRecoverPlaceholderType(FoldState state) =>
+            state.Assemblies is [[{ PlaceholderType: { } type }]] ? type : null;
 
         private void HandleDeclare(DeclareVariableStatement declare, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
