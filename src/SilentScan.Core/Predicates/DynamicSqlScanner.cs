@@ -536,14 +536,18 @@ public static class DynamicSqlScanner
                     break;
 
                 default:
-                    // An unrecognized statement kind might mutate a tracked variable through a
-                    // mechanism this scanner doesn't model (OUTPUT INTO, cursor FETCH INTO,
-                    // RECEIVE ... INTO, ...). T-SQL locals cannot alias, so a statement can only
-                    // ever assign a variable it names literally - taints exactly the variables
-                    // this statement mentions (a strict superset of what it could have written)
-                    // rather than every variable currently tracked. An INSERT/UPDATE/PRINT/etc.
-                    // that never mentions @Where cannot have changed @Where, so @Where survives.
-                    TaintReferencedVariables(folded, statement, "unsupported-statement-in-scope");
+                    // An unrecognized statement kind (PRINT, RAISERROR, INSERT/UPDATE/DELETE,
+                    // WAITFOR, THROW, DBCC, ...) can only ever WRITE a scalar local through one
+                    // of a small, closed set of T-SQL mechanisms this switch doesn't otherwise
+                    // model: the legacy "quirky update" (UPDATE ... SET @v = col), cursor
+                    // FETCH INTO, and RECEIVE's own SELECT-list variable targets. T-SQL locals
+                    // cannot alias, so any OTHER mention of a variable inside a statement of this
+                    // kind - a WHERE clause, a PRINT argument, a RAISERROR format arg - is
+                    // necessarily a READ, not a write, and must not disturb its folded state.
+                    // Taints exactly the variables one of those write mechanisms names (never a
+                    // blanket sweep of every mention), and leaves every other tracked variable,
+                    // and every statement with no write mechanism at all, completely untouched.
+                    TaintWrittenVariables(folded, statement, "unsupported-statement-in-scope");
                     break;
             }
         }
@@ -2175,6 +2179,27 @@ public static class DynamicSqlScanner
         /// naming it directly. A variable this fragment never mentions cannot have changed, so
         /// it is left exactly as folded so far.
         /// </summary>
+        /// <summary>
+        /// Taints only the variables a statement of an otherwise-unmodeled kind could actually
+        /// have WRITTEN, per <see cref="WrittenVariableCollector"/>'s closed set of T-SQL write
+        /// mechanisms - unlike <see cref="TaintReferencedVariables"/>, which taints every mention
+        /// (read or write alike) and is reserved for constructs (EXEC of an uncataloged
+        /// procedure) where this scanner genuinely cannot bound what got mutated. A statement
+        /// this collector finds nothing in (the common case: PRINT, RAISERROR, INSERT/UPDATE/
+        /// DELETE/MERGE with no quirky-update variable target, WAITFOR, THROW, DBCC, ...) leaves
+        /// <paramref name="folded"/> byte-for-bit unchanged.
+        /// </summary>
+        private void TaintWrittenVariables(Dictionary<string, FoldState> folded, TSqlFragment fragment, string reason)
+        {
+            var location = Span(fragment);
+            var collector = new WrittenVariableCollector();
+            fragment.Accept(collector);
+            foreach (var name in collector.Names.Where(folded.ContainsKey))
+            {
+                folded[name] = FoldState.Tainted(reason, location);
+            }
+        }
+
         private void TaintReferencedVariables(Dictionary<string, FoldState> folded, TSqlFragment fragment, string reason, HashSet<string>? exclude = null)
         {
             var location = Span(fragment);
@@ -2284,6 +2309,46 @@ public static class DynamicSqlScanner
             public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
 
             public override void Visit(VariableReference node) => Names.Add(node.Name);
+        }
+
+        /// <summary>
+        /// The closed set of ways a T-SQL statement kind this scanner doesn't otherwise model
+        /// can WRITE a scalar local, used by <see cref="TaintWrittenVariables"/>:
+        /// <see cref="AssignmentSetClause.Variable"/> (the legacy "quirky update" - <c>UPDATE t
+        /// SET @v = col, col = expr</c> - reachable from both an ordinary UPDATE's own SET list
+        /// and a MERGE action's UPDATE SET list, since ScriptDom's grammar models both with the
+        /// same node type), <see cref="FetchCursorStatement.IntoVariables"/> (<c>FETCH ... INTO
+        /// @a, @b</c>), and <see cref="SelectSetVariable"/> as it appears inside a
+        /// <see cref="ReceiveStatement"/>'s own SELECT-list targets (<c>RECEIVE @v = column ...
+        /// FROM queue</c>) - a plain column reference on either side of any of these is a read,
+        /// never collected.
+        /// </summary>
+        private sealed class WrittenVariableCollector : TSqlFragmentVisitor
+        {
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public override void Visit(AssignmentSetClause node)
+            {
+                if (node.Variable is not null)
+                {
+                    Names.Add(node.Variable.Name);
+                }
+            }
+
+            public override void Visit(FetchCursorStatement node)
+            {
+                if (node.IntoVariables is null)
+                {
+                    return;
+                }
+
+                foreach (var variable in node.IntoVariables)
+                {
+                    Names.Add(variable.Name);
+                }
+            }
+
+            public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
         }
 
         /// <summary>

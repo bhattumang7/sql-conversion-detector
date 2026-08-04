@@ -353,21 +353,92 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableAfterUnrecognizedStatementMentioningIt_Unanalyzable()
+    public void Scan_ExecOfVariableAfterUnrecognizedStatementMerelyReadingIt_ProducesAnalyzableScript()
     {
-        // Precision-first default: an unrecognized statement kind that DOES name the tracked
-        // variable taints it, since this scanner can't rule out an unmodeled mechanism (e.g.
-        // OUTPUT INTO) having changed it through that mention.
+        // An unrecognized statement kind that only READS the tracked variable (here, an INSERT
+        // ... VALUES supplying it as a value) cannot have written it - T-SQL locals cannot
+        // alias, and INSERT has no mechanism to assign a scalar local. Mere mention is not
+        // grounds to taint; only a genuine write mechanism (quirky UPDATE, FETCH INTO, RECEIVE)
+        // is - see the near-miss tests below.
         var result = Scan(
             "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "INSERT INTO dbo.T (Col) VALUES (@sql); " +
             "EXEC(@sql);");
 
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAfterPrintReferencingIt_ProducesAnalyzableScript()
+    {
+        // PRINT can only read, never write, a scalar local.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "PRINT @sql; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAfterQuirkyUpdateAssignsIt_Unanalyzable()
+    {
+        // Near-miss: the legacy "quirky update" (UPDATE ... SET @v = col) is a genuine T-SQL
+        // scalar-write mechanism this scanner doesn't model the VALUE of - AssignmentSetClause
+        // .Variable, not a plain read, so @sql must still taint.
+        var result = Scan(
+            "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "UPDATE dbo.T SET @sql = Col; " +
+            "EXEC(@sql);");
+
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
         Assert.Equal("unsupported-statement-in-scope", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAfterFetchIntoAssignsIt_Unanalyzable()
+    {
+        // Near-miss: cursor FETCH INTO is a genuine write mechanism (FetchCursorStatement
+        // .IntoVariables) - @sql must still taint.
+        var result = Scan(
+            "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE cur CURSOR FOR SELECT Col FROM dbo.T; " +
+            "OPEN cur; " +
+            "FETCH NEXT FROM cur INTO @sql; " +
+            "CLOSE cur; " +
+            "DEALLOCATE cur; " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("unsupported-statement-in-scope", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfUnrelatedVariableAfterQuirkyUpdate_ProducesAnalyzableScript()
+    {
+        // The quirky update names a DIFFERENT variable (@other) - @sql, never named by it, must
+        // survive untainted.
+        var result = Scan(
+            "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "DECLARE @other NVARCHAR(MAX); " +
+            "UPDATE dbo.T SET @other = Col; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
     }
 
     [Fact]
