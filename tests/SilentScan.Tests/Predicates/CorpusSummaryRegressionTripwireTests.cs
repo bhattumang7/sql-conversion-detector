@@ -53,16 +53,18 @@ public sealed class CorpusSummaryRegressionTripwireTests
         Assert.Equal(9, typed.DistinctTotalClassified);
 
         // DynamicSqlSummary - the 5 EXEC/sp_executesql call sites the fixture plants (4
-        // analyzable: literal/Tier B/Tier C/clean, 1 genuinely Unanalyzable: a procedure
-        // parameter with no known caller in this fixture - value-seeding across proc-call edges
-        // now reports its own honest reason rather than the generic "variable-not-in-scope" a
-        // caller-blind lookup used to produce).
+        // analyzable: literal/Tier B/Tier C/clean, 1 genuinely Unanalyzable: EXEC(@Sql) where
+        // @Sql is a procedure parameter with no known caller in this fixture. The scanner now
+        // seeds @Sql as a symbolic placeholder of its own declared type (NVARCHAR(MAX) resolves
+        // fine with no catalog), but the WHOLE EXEC argument is nothing but that one placeholder -
+        // the pipeline's own position classifier refuses this shape before ever reparsing it,
+        // since there is no real SQL text left once the placeholder is removed.
         var dynamicSql = report.DynamicSqlSummary;
         Assert.Equal(5, dynamicSql.TotalCallSites);
         Assert.Equal(4, dynamicSql.AnalyzedCount);
         Assert.Equal(1, dynamicSql.UnanalyzableCount);
         Assert.Equal(0, dynamicSql.InnerParseFailedCount);
-        Assert.Equal(1, Assert.Contains("procedure-parameter:no-known-call-site", dynamicSql.UnanalyzableReasonCounts));
+        Assert.Equal(1, Assert.Contains("symbolic-value-not-positionable:whole-statement", dynamicSql.UnanalyzableReasonCounts));
 
         // SkippedConstructSummary - the fixture's one deliberately-unresolvable comparison
         // (both sides non-column), ledgered rather than silently dropped.

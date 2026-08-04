@@ -290,14 +290,17 @@ public static class DynamicSqlScanner
             {
                 // No call site THIS SCAN saw at all (application code, an unparsed caller, a
                 // synonym this scan didn't resolve) - the parameter genuinely IS declared, just
-                // with no known value. Seeds an honest, specific taint reason rather than
-                // returning null and falling through to the generic "variable-not-in-scope" a
-                // caller-blind VariableReference lookup would otherwise report - that reason is
-                // misleading here: the variable IS declared, as a parameter, there is simply no
-                // known caller to learn its value from.
+                // with no known value. When its declared type resolves, seeds a symbolic
+                // placeholder of that type (see SeedSymbolicOrTaint) rather than a bare taint -
+                // T-SQL's own type contract for the proc guarantees the runtime value really is
+                // of this type, so this is soundness-preserving, not a guess. Only when the type
+                // itself can't resolve (a CREATE TYPE ... FROM alias this scan can't look up
+                // without a catalog) does this fall back to an honest, specific taint reason
+                // rather than the generic "variable-not-in-scope" a caller-blind
+                // VariableReference lookup would otherwise report.
                 foreach (var formal in formalParameters)
                 {
-                    seed[formal.VariableName.Value] = FoldState.Tainted("procedure-parameter:no-known-call-site", Span(formal));
+                    seed[formal.VariableName.Value] = SeedSymbolicOrTaint(formal, "procedure-parameter:no-known-call-site");
                 }
 
                 return seed;
@@ -311,6 +314,40 @@ public static class DynamicSqlScanner
 
             SeedFromMultipleEdges(edges, formalParameters, seed);
             return seed;
+        }
+
+        /// <summary>
+        /// A token this scanner invents to stand in for a value it could not prove constant -
+        /// derived from the placeholder's OWN ORIGIN (path is carried separately on the segment;
+        /// this covers line/column), never a counter: HandleWhile and ControlFlowGraph.Solve
+        /// replay the same statements many times over a fixpoint, and a counter-based id would
+        /// renumber on every round, tainting at the cardinality cap and breaking deterministic
+        /// output. A regular T-SQL identifier containing no quote, so it can never break out of
+        /// a string literal it's concatenated into.
+        /// </summary>
+        private static string PlaceholderToken(int startLine, int startColumn) => $"__silentscan_sym_L{startLine}C{startColumn}__";
+
+        /// <summary>
+        /// Seeds <paramref name="formal"/> as a symbolic placeholder of its own declared type when
+        /// that type resolves - built-in types (varchar, int, ...) always do, since
+        /// <see cref="DynamicSqlScanner"/> runs before <see cref="Catalog.CatalogBuilder"/> and so
+        /// has no catalog to resolve a CREATE TYPE ... FROM alias through; only that alias case
+        /// falls back to <paramref name="taintReasonIfUnresolvable"/>. CLAUDE.md's "never guess":
+        /// an unresolvable type means genuinely nothing is known, not even a shape, so it must
+        /// stay a plain taint, not a placeholder claiming a type this scanner couldn't actually
+        /// determine.
+        /// </summary>
+        private FoldState SeedSymbolicOrTaint(ProcedureParameter formal, string taintReasonIfUnresolvable)
+        {
+            var location = Span(formal);
+            var type = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
+            if (type is null)
+            {
+                return FoldState.Tainted(taintReasonIfUnresolvable, location);
+            }
+
+            var token = PlaceholderToken(location.Line, location.Column);
+            return FoldState.ConstantSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)]);
         }
 
         private static void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, FoldState> seed)

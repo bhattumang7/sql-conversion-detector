@@ -146,14 +146,15 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     public void DynamicSqlUnanalyzable_IsPlantedAndFound()
     {
         // usp_DynamicVariable_Fires' @Sql is a PROCEDURE PARAMETER (a runtime input, never a
-        // local straight-line DECLARE) with no known caller in this fixture, so Tier C correctly
-        // can't fold it either - value-seeding across proc-call edges reports its own honest
-        // reason here rather than the generic "variable-not-in-scope" a caller-blind lookup used
-        // to produce (the variable IS declared, as a parameter, there's just no caller to learn
-        // its value from).
+        // local straight-line DECLARE) with no known caller in this fixture. Its declared type
+        // (NVARCHAR(MAX)) resolves fine with no catalog, so it now seeds as a symbolic
+        // placeholder rather than a bare taint - but EXEC(@Sql) is nothing but that ONE
+        // placeholder with no surrounding SQL text at all, so the pipeline's own position
+        // classifier refuses it before ever reparsing, with its own honest reason distinct from
+        // the generic "variable-not-in-scope" a caller-blind lookup would otherwise report.
         var finding = Assert.Single(_report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
 
-        Assert.Equal("procedure-parameter:no-known-call-site", finding.Reason);
+        Assert.Equal("symbolic-value-not-positionable:whole-statement", finding.Reason);
     }
 
     [Fact]

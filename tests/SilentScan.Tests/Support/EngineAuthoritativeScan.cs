@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Live;
 using SilentScan.Verify;
@@ -34,14 +35,14 @@ public static class EngineAuthoritativeScan
     /// its own); passing that same collation here preserves the test's original intent instead
     /// of leaving it to whatever the Docker instance's own server-level default happens to be.
     /// </summary>
-    public static async Task<ScanReport> ScanAsync(string sql, string? collation = null, CancellationToken cancellationToken = default)
+    public static async Task<ScanReport> ScanAsync(string sql, string? collation = null, FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
-        var result = await RunAsync(sql, collation, cancellationToken);
+        var result = await RunAsync(sql, collation, minimumConfidence, cancellationToken);
         return result.Report;
     }
 
     /// <summary>Same deployment as <see cref="ScanAsync"/>, returning the full <see cref="LiveScanResult"/> (catalog summary, module/parity diagnostics) for tests that need more than just the report.</summary>
-    public static async Task<LiveScanResult> RunAsync(string sql, string? collation = null, CancellationToken cancellationToken = default)
+    public static async Task<LiveScanResult> RunAsync(string sql, string? collation = null, FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
         var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
         var provisioner = new DatabaseProvisioner(Options);
@@ -49,7 +50,7 @@ public static class EngineAuthoritativeScan
         try
         {
             await new ScriptDeployer(Options).DeployAsync(WrapBareStatementsInProcedures(sql), databaseName, cancellationToken);
-            return await LiveScanRunner.RunAsync(Options.BuildConnectionString(databaseName), cancellationToken: cancellationToken);
+            return await LiveScanRunner.RunAsync(Options.BuildConnectionString(databaseName), cancellationToken: cancellationToken, minimumConfidence: minimumConfidence);
         }
         finally
         {
@@ -146,9 +147,9 @@ public static class EngineAuthoritativeScan
     /// guarantees, each separated by its own <c>GO</c> so a file that doesn't end in one can
     /// never bleed its last batch into the next file's first.
     /// </summary>
-    public static async Task<ScanReport> ScanFilesAsync(IReadOnlyList<string> sqlFilePaths, string? collation = null, CancellationToken cancellationToken = default)
+    public static async Task<ScanReport> ScanFilesAsync(IReadOnlyList<string> sqlFilePaths, string? collation = null, FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
         var combined = string.Join("\nGO\n", sqlFilePaths.Select(SqlScriptParser.DecodeFile));
-        return await ScanAsync(combined, collation, cancellationToken);
+        return await ScanAsync(combined, collation, minimumConfidence, cancellationToken);
     }
 }

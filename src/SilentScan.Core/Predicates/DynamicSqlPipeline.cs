@@ -1,3 +1,4 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
@@ -176,15 +177,74 @@ public static class DynamicSqlPipeline
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
         ResultAccumulator accumulator)
     {
+        var placeholders = script.PlaceholderOccurrences;
+
+        if (placeholders is { Count: > 0 } && IsEntirelyPlaceholder(script.InnerText, placeholders))
+        {
+            // No real SQL text survives once every placeholder is removed - EXEC(@sym) itself,
+            // or the equivalent after folding. There is nothing to reparse at all, so this must
+            // be caught BEFORE parsing: parsing a bare synthesized token and reporting whatever
+            // ScriptDOM makes of it would blame the user's source for a shape this scanner
+            // invented.
+            accumulator.Findings.Add(new DynamicSqlFinding(
+                script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
+                DynamicSqlOutcome.Unanalyzable, "symbolic-value-not-positionable:whole-statement"));
+            return;
+        }
+
         var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}";
         var innerParseResult = SqlScriptParser.ParseText(virtualPath, script.InnerText);
 
         if (innerParseResult.HasErrors)
         {
+            if (placeholders is { Count: > 0 })
+            {
+                // A placeholder token can break the surrounding syntax in ways ordinary source
+                // text wouldn't (e.g. sitting where only a keyword is legal) - reporting this as
+                // InnerParseFailed would read as "the user's own SQL doesn't parse", which isn't
+                // what happened: an ASSUMPTION this scanner made broke the parse, not the source.
+                accumulator.Findings.Add(new DynamicSqlFinding(
+                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
+                    DynamicSqlOutcome.Unanalyzable, "symbolic-value-broke-parse"));
+                return;
+            }
+
             var reason = innerParseResult.Errors[0].Message;
             accumulator.Findings.Add(new DynamicSqlFinding(
                 script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.InnerParseFailed, reason));
             return;
+        }
+
+        if (placeholders is { Count: > 0 })
+        {
+            var classification = ClassifyPlaceholders(innerParseResult.Fragment, placeholders);
+            if (classification == PlaceholderClassification.Unsupported)
+            {
+                accumulator.Findings.Add(new DynamicSqlFinding(
+                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
+                    DynamicSqlOutcome.Unanalyzable, "symbolic-value-unsupported-position"));
+                return;
+            }
+
+            if (classification == PlaceholderClassification.ObjectIdentifierOnly)
+            {
+                // No value is assumed anywhere here - the whole statement is an allow-listed
+                // shape with no predicate concept at all (DROP TABLE/TRUNCATE TABLE), so this is
+                // High confidence with zero findings, and Tier-1/typed extraction never runs at
+                // all: "zero findings" is a property of this code path, not of a downstream check
+                // that could silently miss something. Nested dynamic SQL inside a script whose
+                // OWN identity rests on a placeholder is never recursed into either (see below).
+                accumulator.Findings.Add(new DynamicSqlFinding(
+                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
+                return;
+            }
+
+            // classification == Quoted: every placeholder sits inside a string literal in the
+            // REPARSED text, so the generated predicate is a genuine varchar/nvarchar literal
+            // comparison BY CONSTRUCTION - the type comes from the reparsed SQL's own quoting via
+            // the ordinary extractor below, never from the placeholder's declared type. Falls
+            // through to the same extraction path a placeholder-free script takes; Remap stamps
+            // script.Confidence (already Medium) onto whatever it finds.
         }
 
         accumulator.Findings.Add(new DynamicSqlFinding(
@@ -233,7 +293,13 @@ public static class DynamicSqlPipeline
             accumulator.Skipped.Add(Remap(skippedConstruct, script));
         }
 
-        var nested = AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth);
+        // A script whose OWN identity rests on a placeholder never recurses into further
+        // nested dynamic SQL - a real runtime value could reshape the surrounding text in ways
+        // this scanner never modeled, so treating a nested candidate's findings as independently
+        // trustworthy would launder that same unproven assumption one level deeper.
+        var nested = placeholders is { Count: > 0 }
+            ? RefuseNestedCandidates(innerParseResult, script)
+            : AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth);
         accumulator.Findings.AddRange(nested.Findings);
         accumulator.Tier1.AddRange(nested.Tier1Findings);
         accumulator.Typed.AddRange(nested.TypedFindings);
@@ -285,6 +351,120 @@ public static class DynamicSqlPipeline
             [.. nestedResult.CollationConflictFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.WriteLossFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.SkippedConstructs.Select(s => Remap(s, script))]);
+    }
+
+    /// <summary>
+    /// The outer script itself rests on a placeholder - any dynamic SQL call site found INSIDE
+    /// its reparsed text inherits that same unproven context, so every candidate is reported
+    /// Unanalyzable rather than recursed into, remapped back to its real call site exactly like
+    /// the max-nesting-depth-exceeded case above. Any finding the nested scan itself already
+    /// produced (an unrelated Unanalyzable reason from ITS OWN folding) is remapped and kept too -
+    /// never silently dropped, CLAUDE.md.
+    /// </summary>
+    private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult innerParseResult, DynamicSqlScript script)
+    {
+        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope);
+        var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, script)).ToList();
+        findings.AddRange(nestedExtraction.AnalyzableScripts
+            .Select(nestedScript => script.SegmentMap.Map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
+            .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "nested-dynamic-sql-inside-symbolic-value")));
+
+        return new DynamicSqlPipelineResult(findings, [], [], [], [], [], []);
+    }
+
+    /// <summary>Whether every character of <paramref name="innerText"/> outside <paramref name="occurrences"/>' own spans is blank - <c>EXEC(@sym)</c> itself, or the equivalent after folding, where there is no real SQL text left to reparse at all.</summary>
+    private static bool IsEntirelyPlaceholder(string innerText, IReadOnlyList<PlaceholderOccurrence> occurrences)
+    {
+        var remaining = innerText;
+        foreach (var occurrence in occurrences.OrderByDescending(o => o.InnerStartOffset))
+        {
+            remaining = remaining.Remove(occurrence.InnerStartOffset, occurrence.Length);
+        }
+
+        return string.IsNullOrWhiteSpace(remaining);
+    }
+
+    private enum PlaceholderClassification
+    {
+        /// <summary>Every occurrence sits inside a string literal in the reparsed text - the generated predicate is a genuine varchar/nvarchar literal comparison by construction.</summary>
+        Quoted,
+
+        /// <summary>The whole script is exactly one DROP TABLE/TRUNCATE TABLE statement, and every occurrence sits inside one of ITS OWN identifier parts - no value is assumed, and the statement has no predicate concept to miss.</summary>
+        ObjectIdentifierOnly,
+
+        /// <summary>Neither of the above - refused rather than guessed at.</summary>
+        Unsupported,
+    }
+
+    private static PlaceholderClassification ClassifyPlaceholders(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
+    {
+        var stringLiteralRanges = CollectStringLiteralRanges(fragment);
+        if (occurrences.All(o => IsWithinAnyRange(o, stringLiteralRanges)))
+        {
+            return PlaceholderClassification.Quoted;
+        }
+
+        return IsObjectIdentifierOnlyStatement(fragment, occurrences)
+            ? PlaceholderClassification.ObjectIdentifierOnly
+            : PlaceholderClassification.Unsupported;
+    }
+
+    private static List<(int Start, int End)> CollectStringLiteralRanges(TSqlFragment fragment)
+    {
+        var collector = new StringLiteralRangeCollector();
+        fragment.Accept(collector);
+        return collector.Ranges;
+    }
+
+    private sealed class StringLiteralRangeCollector : TSqlFragmentVisitor
+    {
+        public List<(int Start, int End)> Ranges { get; } = [];
+
+        public override void ExplicitVisit(StringLiteral node)
+        {
+            Ranges.Add((node.StartOffset, node.StartOffset + node.FragmentLength));
+            base.ExplicitVisit(node);
+        }
+    }
+
+    private static bool IsWithinAnyRange(PlaceholderOccurrence occurrence, List<(int Start, int End)> ranges)
+    {
+        var end = occurrence.InnerStartOffset + occurrence.Length;
+        return ranges.Any(r => r.Start <= occurrence.InnerStartOffset && end <= r.End);
+    }
+
+    /// <summary>
+    /// Accepted only for a batch containing EXACTLY one statement of an allow-listed kind that
+    /// has no predicate concept at all (DROP TABLE, TRUNCATE TABLE) - deliberately conservative:
+    /// a SELECT/INSERT/UPDATE/DELETE could always have a WHERE/JOIN/subquery a placeholder in
+    /// object-name position sits alongside, and proving there is none would mean walking the
+    /// whole FROM/WHERE tree per statement type. CREATE INDEX is in the same family but is not
+    /// accepted here either (its own filtered-index predicate and included-columns list add real
+    /// surface this scanner does not yet reason about) - refusing a case that COULD have been
+    /// proven safe is a recall loss, never a precision one, which is the tie-breaker CLAUDE.md
+    /// asks for.
+    /// </summary>
+    private static bool IsObjectIdentifierOnlyStatement(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
+    {
+        if (fragment is not TSqlScript { Batches: [{ Statements: [var statement] }] })
+        {
+            return false;
+        }
+
+        IReadOnlyList<SchemaObjectName> names = statement switch
+        {
+            DropTableStatement drop => [.. drop.Objects],
+            TruncateTableStatement truncate => [truncate.TableName],
+            _ => [],
+        };
+
+        return names.Count > 0 && occurrences.All(o => names.Any(name => IsWithinIdentifier(name, o)));
+    }
+
+    private static bool IsWithinIdentifier(SchemaObjectName name, PlaceholderOccurrence occurrence)
+    {
+        var end = occurrence.InnerStartOffset + occurrence.Length;
+        return name.Identifiers.Any(id => id.StartOffset <= occurrence.InnerStartOffset && end <= id.StartOffset + id.FragmentLength);
     }
 
     /// <summary>

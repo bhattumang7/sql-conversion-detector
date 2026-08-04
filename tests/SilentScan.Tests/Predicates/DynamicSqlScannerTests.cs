@@ -1061,16 +1061,37 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamWithNoKnownCallers_ReasonNamesProcedureParameterNotUndeclaredVariable()
+    public void Scan_ProcParamWithNoKnownCallers_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
         // Zero edges for this callee (application code, an unparsed caller, a synonym this scan
-        // didn't resolve) - the parameter IS declared, just with no known caller to seed from, so
-        // this must report its own honest reason rather than the misleading generic
-        // "variable-not-in-scope" a caller-blind VariableReference lookup would otherwise produce.
+        // didn't resolve) - the parameter IS declared, with a resolvable declared type
+        // (NVARCHAR(20)), so its runtime value is seeded as a symbolic placeholder rather than
+        // tainted: T-SQL's own type contract for this proc guarantees the value really is this
+        // type, even though this scan has no known caller to learn the VALUE from - enough to
+        // fold the surrounding concatenation into one analyzable (Medium-confidence) script.
         var graph = new ProcCallGraph([]);
 
         var result = ScanWithCallGraph(
             $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            graph);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.Matches(@"^SELECT 1 WHERE Status = '__silentscan_sym_L\d+C\d+__'$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ProcParamWithNoKnownCallers_UnresolvableAliasTypeStaysTainted()
+    {
+        // A CREATE TYPE ... FROM alias can't resolve without a catalog, and DynamicSqlScanner
+        // runs before CatalogBuilder - so this falls back to the same honest, specific taint the
+        // scanner reported before symbolic placeholders existed, never a guessed type.
+        var graph = new ProcCallGraph([]);
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status dbo.StatusCodeType AS " +
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
             graph);
 
