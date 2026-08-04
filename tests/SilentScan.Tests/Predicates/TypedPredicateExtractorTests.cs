@@ -2721,6 +2721,29 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task PredicateAgainstInformationSchemaColumnsIntColumn_ResolvesAndClassifies_OracleConfirmed()
+    {
+        // INFORMATION_SCHEMA.COLUMNS has no CREATE DDL anywhere either (a built-in compatibility
+        // view, same story as sys.objects above) - before it was modeled, a predicate against it
+        // fell through as an unresolved FROM table reference exactly like sys.objects did.
+        // ORDINAL_POSITION is INT (oracle-verified); comparing it to an INT parameter is a
+        // same-category comparison, so the point of this test is that a real verdict was
+        // reached at all (not falling to Unknown/unresolved), independent of any collation
+        // question. No fixture DDL needed to deploy - INFORMATION_SCHEMA.COLUMNS always exists.
+        var result = ExtractAll(
+            "CREATE PROCEDURE dbo.usp_FindColumn @Pos INT AS BEGIN SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE ORDINAL_POSITION = @Pos; END");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("INFORMATION_SCHEMA.COLUMNS", finding.Column.TableQualifiedName);
+        Assert.Equal("ORDINAL_POSITION", finding.Column.ColumnName);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.False(finding.Column.Indexed);
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
     public async Task DoubleNotWrappedComparison_ClassifiesTheSameAsTheBareComparison_OracleConfirmed()
     {
         // Roadmap Phase E2: proves the NOT-polarity fix produces a REAL, oracle-confirmed

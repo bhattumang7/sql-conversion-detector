@@ -173,6 +173,29 @@ public static class SystemCatalogViewRegistry
         ("name", NVarChar128), ("schema_id", Int32), ("principal_id", Int32),
     ];
 
+    private static readonly SqlType NVarChar4000 = new(SqlTypeCategory.NVarChar, Length: 4000);
+    private static readonly SqlType VarChar3 = new(SqlTypeCategory.VarChar, Length: 3);
+    private static readonly SqlType VarChar10 = new(SqlTypeCategory.VarChar, Length: 10);
+
+    private static readonly IReadOnlyList<(string Name, SqlType Type)> InformationSchemaColumnsColumns =
+    [
+        ("TABLE_CATALOG", NVarChar128), ("TABLE_SCHEMA", NVarChar128), ("TABLE_NAME", NVarChar128),
+        ("COLUMN_NAME", NVarChar128), ("ORDINAL_POSITION", Int32), ("COLUMN_DEFAULT", NVarChar4000),
+        ("IS_NULLABLE", VarChar3), ("DATA_TYPE", NVarChar128),
+        ("CHARACTER_MAXIMUM_LENGTH", Int32), ("CHARACTER_OCTET_LENGTH", Int32),
+        ("NUMERIC_PRECISION", TinyInt8), ("NUMERIC_PRECISION_RADIX", SmallInt16), ("NUMERIC_SCALE", Int32),
+        ("DATETIME_PRECISION", SmallInt16),
+        ("CHARACTER_SET_CATALOG", NVarChar128), ("CHARACTER_SET_SCHEMA", NVarChar128), ("CHARACTER_SET_NAME", NVarChar128),
+        ("COLLATION_CATALOG", NVarChar128), ("COLLATION_SCHEMA", NVarChar128), ("COLLATION_NAME", NVarChar128),
+        ("DOMAIN_CATALOG", NVarChar128), ("DOMAIN_SCHEMA", NVarChar128), ("DOMAIN_NAME", NVarChar128),
+    ];
+
+    private static readonly IReadOnlyList<(string Name, SqlType Type)> InformationSchemaTablesColumns =
+    [
+        ("TABLE_CATALOG", NVarChar128), ("TABLE_SCHEMA", NVarChar128), ("TABLE_NAME", NVarChar128),
+        ("TABLE_TYPE", VarChar10),
+    ];
+
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<(string Name, SqlType Type)>> ByQualifiedName =
         new Dictionary<string, IReadOnlyList<(string Name, SqlType Type)>>(StringComparer.OrdinalIgnoreCase)
         {
@@ -188,6 +211,8 @@ public static class SystemCatalogViewRegistry
             ["sys.tables"] = SysTablesColumns,
             ["sys.databases"] = SysDatabasesColumns,
             ["sys.schemas"] = SysSchemasColumns,
+            ["INFORMATION_SCHEMA.COLUMNS"] = InformationSchemaColumnsColumns,
+            ["INFORMATION_SCHEMA.TABLES"] = InformationSchemaTablesColumns,
         };
 
     /// <summary>The column shape for <paramref name="qualifiedName"/> if it's one of the curated system catalog views, or null (never guessed).</summary>
