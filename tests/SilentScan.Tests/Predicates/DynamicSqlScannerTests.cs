@@ -2242,4 +2242,36 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("non-literal-expression:other", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
+
+    [Fact]
+    public void Scan_ExecOfServerPropertyCastToVarchar_ReportsEnvironmentDependentNotGenericFunctionCall()
+    {
+        // Corpus-measured (First Responder Kit): CAST(SERVERPROPERTY('ServerName') AS
+        // NVARCHAR(128)) feeding a REPLACE token-substitution build. SERVERPROPERTY is
+        // deterministic PER SERVER (unlike NEWID/GETDATE) but this scanner has no visibility
+        // into the target deployment - a distinct reason from both "unimplemented" and
+        // "non-deterministic", so the eventual study doesn't conflate the two.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)); " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("environment-dependent-function", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfGenuinelyUnsupportedFunction_StillReportsGenericFunctionCall()
+    {
+        // Near-miss: a function that is neither whitelisted, non-deterministic, nor
+        // environment-dependent keeps the ordinary generic reason - the new classification
+        // doesn't widen to swallow real gaps.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + SOUNDEX(N'x'); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
 }

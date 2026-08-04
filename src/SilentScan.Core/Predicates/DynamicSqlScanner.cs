@@ -1379,6 +1379,17 @@ public static class DynamicSqlScanner
                     // the study can state that plainly rather than lumping it with real gaps.
                     return FoldAttempt.Fail("non-deterministic-function", Span(expression));
 
+                case FunctionCall { FunctionName.Value: var functionName }
+                    when EnvironmentDependentFunctions.Contains(functionName):
+                    // A DIFFERENT unknowable from NonDeterministicFunctions above, worth its own
+                    // reason rather than reuse: SERVERPROPERTY('ServerName') returns the SAME
+                    // value on every call on a given server (unlike NEWID/GETDATE, which differ
+                    // per invocation) - it's unknowable because this scanner has no visibility
+                    // into the TARGET deployment, not because the value itself is unstable.
+                    // Corpus-measured (First Responder Kit): CAST(SERVERPROPERTY('ServerName') AS
+                    // NVARCHAR(128)) feeding a REPLACE token-substitution build.
+                    return FoldAttempt.Fail("environment-dependent-function", Span(expression));
+
                 // LEFT/RIGHT are NOT parsed as an ordinary FunctionCall the way UPPER/LOWER/
                 // LTRIM/RTRIM/SUBSTRING are - ScriptDom gives them their own dedicated node types
                 // (LeftFunctionCall/RightFunctionCall, confirmed via reflection over the parsed
@@ -1492,6 +1503,18 @@ public static class DynamicSqlScanner
         {
             "NEWID", "NEWSEQUENTIALID", "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME",
             "SYSDATETIMEOFFSET", "RAND", "CHECKSUM", "BINARY_CHECKSUM",
+        };
+
+        // SERVERPROPERTY is deterministic PER SERVER (unlike NonDeterministicFunctions above) but
+        // this scanner has no visibility into whichever server the analyzed script will actually
+        // run against - a real value this codebase simply cannot know, distinct in kind from
+        // "unimplemented". @@SERVERNAME/@@VERSION are GlobalVariableExpression nodes, not
+        // FunctionCall, and not added here without their own confirmed corpus occurrence in a real
+        // (non-string-literal) expression position - CLAUDE.md's "never guess" extends to scope,
+        // not just values.
+        private static readonly HashSet<string> EnvironmentDependentFunctions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "SERVERPROPERTY",
         };
 
         /// <summary>
