@@ -64,7 +64,8 @@ public sealed class VerifyCorpusCommandViewDeploymentTests : IDisposable
         var stderr = new StringWriter();
 
         var exitCode = await VerifyCorpusCommand.RunAsync(
-            _manifestPath, Path.Combine(_root, "clones"), repoFilter: null, SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+            new VerifyCorpusCommand.VerifyCorpusOptions(_manifestPath, Path.Combine(_root, "clones"), RepoFilter: null, "high"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
 
         var output = stdout.ToString();
 

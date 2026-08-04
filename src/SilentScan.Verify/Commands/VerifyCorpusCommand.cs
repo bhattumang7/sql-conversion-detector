@@ -51,36 +51,54 @@ public static class VerifyCorpusCommand
             Description = "Only verify the manifest entry with this name (default: all repos).",
         };
 
+        var confidenceOption = new Option<string>("--confidence")
+        {
+            Description = FindingConfidenceParsing.OptionDescription,
+            DefaultValueFactory = _ => "high",
+        };
+
         var command = new Command("verify-corpus", "Oracle-confirm ScanForced/RangeSeek findings for each corpus repo against a disposable SQL Server database.")
         {
             manifestOption,
             clonesRootOption,
             repoOption,
+            confidenceOption,
         };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
-            var manifestPath = parseResult.GetValue(manifestOption)!;
-            var clonesRoot = parseResult.GetValue(clonesRootOption)!;
-            var repoFilter = parseResult.GetValue(repoOption);
-            return await RunAsync(manifestPath, clonesRoot, repoFilter, SqlServerOptions.LocalDocker, Console.Out, Console.Error, cancellationToken);
+            var options = new VerifyCorpusOptions(
+                parseResult.GetValue(manifestOption)!,
+                parseResult.GetValue(clonesRootOption)!,
+                parseResult.GetValue(repoOption),
+                parseResult.GetValue(confidenceOption)!);
+            return await RunAsync(options, SqlServerOptions.LocalDocker, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
+    /// <summary>The flags <c>verify-corpus</c>'s own <c>RunAsync</c> takes together - bundled into one value so a caller doesn't add a bare parameter for every new flag and blow through Sonar's per-method parameter budget, the same pattern <c>SilentScan.Cli</c>'s own ReportOptions uses.</summary>
+    internal readonly record struct VerifyCorpusOptions(string ManifestPath, string ClonesRoot, string? RepoFilter, string Confidence);
+
     internal static async Task<int> RunAsync(
-        string manifestPath,
-        string clonesRoot,
-        string? repoFilter,
+        VerifyCorpusOptions options,
         SqlServerOptions sqlOptions,
         TextWriter stdout,
         TextWriter stderr,
         CancellationToken cancellationToken)
     {
+        var (manifestPath, clonesRoot, repoFilter, confidence) = options;
+
         if (!File.Exists(manifestPath))
         {
             await stderr.WriteLineAsync($"error: manifest not found: {manifestPath}");
+            return 1;
+        }
+
+        if (!FindingConfidenceParsing.TryParse(confidence, out var minimumConfidence))
+        {
+            await stderr.WriteLineAsync(FindingConfidenceParsing.UnknownConfidenceMessage(confidence));
             return 1;
         }
 
@@ -109,7 +127,7 @@ public static class VerifyCorpusCommand
             }
 
             await stderr.WriteLineAsync($"Verifying {repo.Name}...");
-            var summary = await VerifyRepoAsync(repo, repoRoot, context, cancellationToken);
+            var summary = await VerifyRepoAsync(repo, repoRoot, context, minimumConfidence, cancellationToken);
             summaries[repo.Name] = summary;
 
             // CLAUDE.md's corpus-admission criterion, actually consulted (an audit finding:
@@ -144,6 +162,7 @@ public static class VerifyCorpusCommand
         CorpusRepoEntry repo,
         string repoRoot,
         VerifyContext context,
+        FindingConfidence minimumConfidence,
         CancellationToken cancellationToken)
     {
         var allFiles = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
@@ -162,7 +181,7 @@ public static class VerifyCorpusCommand
         var catalog = CatalogBuilder.Build(usableParseResults, repo.DeclaredCollation, repo.TempdbCollation);
         var lineage = LineageResolver.Resolve(catalog, usableParseResults);
 
-        var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog);
+        var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog, minimumConfidence);
         var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
 
         // How many DISTINCT (table, column, operator, other-type) defects probeWorthy actually

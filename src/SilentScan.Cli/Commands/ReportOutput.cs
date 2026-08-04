@@ -28,30 +28,13 @@ internal static class ReportOutput
     internal const string OutputOptionDescription =
         "Write the report to this file instead of standard output. The parent directory must exist.";
 
-    internal const string ConfidenceOptionDescription =
-        "The least confident a finding may be and still be reported: high (default - only findings resting on real, provably-constant source text) or medium (also includes a dynamic-SQL finding derived from a value this scan could not prove constant, e.g. a symbolic placeholder standing in for an uninitialized or caller-unknown variable). Low is not yet produced by anything in this tool.";
+    internal const string ConfidenceOptionDescription = FindingConfidenceParsing.OptionDescription;
 
-    internal static bool TryParseConfidence(string confidence, out FindingConfidence parsed)
-    {
-        switch (confidence)
-        {
-            case "high":
-                parsed = FindingConfidence.High;
-                return true;
-            case "medium":
-                parsed = FindingConfidence.Medium;
-                return true;
-            case "low":
-                parsed = FindingConfidence.Low;
-                return true;
-            default:
-                parsed = FindingConfidence.High;
-                return false;
-        }
-    }
+    internal static bool TryParseConfidence(string confidence, out FindingConfidence parsed) =>
+        FindingConfidenceParsing.TryParse(confidence, out parsed);
 
     internal static string UnknownConfidenceMessage(string confidence) =>
-        $"error: unknown --confidence '{confidence}' (expected 'high', 'medium' or 'low')";
+        FindingConfidenceParsing.UnknownConfidenceMessage(confidence);
 
     internal static bool TryParseFormat(string format, out ReportFormat parsed)
     {

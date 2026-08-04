@@ -31,7 +31,8 @@ public sealed class VerifyCorpusCommandTests : IDisposable
         var stderr = new StringWriter();
 
         var exitCode = await VerifyCorpusCommand.RunAsync(
-            "/no/such/manifest.json", "corpus/_clones", repoFilter: null, SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+            new VerifyCorpusCommand.VerifyCorpusOptions("/no/such/manifest.json", "corpus/_clones", RepoFilter: null, "high"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("manifest not found", stderr.ToString());
@@ -44,7 +45,8 @@ public sealed class VerifyCorpusCommandTests : IDisposable
         var stderr = new StringWriter();
 
         var exitCode = await VerifyCorpusCommand.RunAsync(
-            _manifestPath, "corpus/_clones", repoFilter: "no-such-repo", SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+            new VerifyCorpusCommand.VerifyCorpusOptions(_manifestPath, "corpus/_clones", RepoFilter: "no-such-repo", "high"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("no manifest entry matches", stderr.ToString());
@@ -57,9 +59,28 @@ public sealed class VerifyCorpusCommandTests : IDisposable
         var stderr = new StringWriter();
 
         var exitCode = await VerifyCorpusCommand.RunAsync(
-            _manifestPath, "/no/such/clones-root", repoFilter: null, SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+            new VerifyCorpusCommand.VerifyCorpusOptions(_manifestPath, "/no/such/clones-root", RepoFilter: null, "high"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("no local clone at", stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_UnknownConfidence_ReturnsOneAndWritesError()
+    {
+        // verify-corpus's own --confidence must reject the same way scan-db/scan-corpus-live do
+        // (FindingConfidenceParsing is the single shared parser both CLIs use) - checked before
+        // this command ever deploys anything, so a typo fails fast rather than burning a full
+        // Docker provisioning cycle first.
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        var exitCode = await VerifyCorpusCommand.RunAsync(
+            new VerifyCorpusCommand.VerifyCorpusOptions(_manifestPath, "corpus/_clones", RepoFilter: null, "extreme"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("unknown --confidence", stderr.ToString());
     }
 }
