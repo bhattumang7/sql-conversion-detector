@@ -70,6 +70,7 @@ wait_for_stray_build_processes() {
         sleep 1
         waited=$((waited + 1))
     done
+    return 0
 }
 
 dotnet build-server shutdown >/dev/null 2>&1 || true
