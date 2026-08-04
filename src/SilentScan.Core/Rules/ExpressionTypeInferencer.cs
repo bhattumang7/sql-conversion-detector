@@ -146,25 +146,38 @@ public static class ExpressionTypeInferencer
 
         if (left.Category == right.Category)
         {
-            if (!left.IsStringFamily)
-            {
-                return left;
-            }
-
-            if (left.Collation is null)
-            {
-                return right;
-            }
-
-            if (right.Collation is null || left.Collation.Name == right.Collation.Name)
-            {
-                return left;
-            }
-
-            return null;
+            return left.IsStringFamily ? CombineSameCategoryStrings(left, right) : left;
         }
 
         var winner = left.Category > right.Category ? left : right;
         return winner.IsStringFamily ? new SqlType(winner.Category, Collation: winner.Collation) : new SqlType(winner.Category);
+    }
+
+    /// <summary>
+    /// Oracle-verified (sys.dm_exec_describe_first_result_set): a CASE/COALESCE-family result
+    /// combining two same-category string branches of DIFFERING length takes the WIDER of the
+    /// two (varchar(10) vs varchar(20) -&gt; varchar(20)), MAX whenever either side is MAX
+    /// regardless of position - never just one branch's own length picked arbitrarily, which is
+    /// what this used to do (a real bug: a view column like DNN Platform's
+    /// vw_Profile.PropertyValue - <c>CASE WHEN PropertyText IS NULL THEN PropertyValue ELSE
+    /// PropertyText END</c>, mixing nvarchar(3750) with nvarchar(MAX) - inferred the narrower
+    /// branch's own length instead of MAX, a genuine lineage-parity mismatch against the real
+    /// deployed column).
+    /// </summary>
+    private static SqlType? CombineSameCategoryStrings(SqlType left, SqlType right)
+    {
+        if (left.Collation is not null && right.Collation is not null && left.Collation.Name != right.Collation.Name)
+        {
+            return null;
+        }
+
+        var collation = left.Collation ?? right.Collation;
+        if (left.IsMax || right.IsMax)
+        {
+            return new SqlType(left.Category, Collation: collation, IsMax: true);
+        }
+
+        var length = left.Length is { } l && right.Length is { } r ? Math.Max(l, r) : left.Length ?? right.Length;
+        return new SqlType(left.Category, Length: length, Collation: collation);
     }
 }

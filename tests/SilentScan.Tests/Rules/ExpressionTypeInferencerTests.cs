@@ -196,4 +196,74 @@ public sealed class ExpressionTypeInferencerTests
 
         Assert.Null(Resolve("COALESCE(NULL, IntCol, UnknownCol)", typesByName));
     }
+
+    [Fact]
+    public void Resolve_SearchedCase_OracleVerified_SameCategoryDifferingLength_WidensToTheLonger()
+    {
+        // Oracle-verified (sys.dm_exec_describe_first_result_set): CASE WHEN 1=1 THEN
+        // Nvarchar10Col ELSE Nvarchar20Col END resolves nvarchar(20) against the real server -
+        // the WIDER of the two same-category branches, never just whichever branch this pass
+        // happened to resolve first (the real bug this test guards: DNN Platform's
+        // vw_Profile.PropertyValue - CASE WHEN PropertyText IS NULL THEN PropertyValue ELSE
+        // PropertyText END - mixed nvarchar(3750) with nvarchar(MAX) and was inferred as
+        // nvarchar(3750), a genuine mismatch against the real deployed column).
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
+            ["Nvarchar20Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 20),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN Nvarchar10Col ELSE Nvarchar20Col END", typesByName);
+
+        Assert.Equal(SqlTypeCategory.NVarChar, result!.Category);
+        Assert.Equal(20, result.Length);
+    }
+
+    [Fact]
+    public void Resolve_SearchedCase_OracleVerified_SameCategoryDifferingLengthReversedOrder_StillWidensToTheLonger()
+    {
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
+            ["Nvarchar20Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 20),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN Nvarchar20Col ELSE Nvarchar10Col END", typesByName);
+
+        Assert.Equal(20, result!.Length);
+    }
+
+    [Fact]
+    public void Resolve_SearchedCase_OracleVerified_OneBranchIsMax_ResultIsMaxRegardlessOfPosition()
+    {
+        // Oracle-verified: whichever side is MAX, the CASE result is nvarchar(max) - never the
+        // OTHER (fixed-length) branch's own length.
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
+            ["NvarcharMaxCol"] = new SqlType(SqlTypeCategory.NVarChar, IsMax: true),
+        };
+
+        var thenIsMax = Resolve("CASE WHEN 1 = 1 THEN NvarcharMaxCol ELSE Nvarchar10Col END", typesByName);
+        var elseIsMax = Resolve("CASE WHEN 1 = 1 THEN Nvarchar10Col ELSE NvarcharMaxCol END", typesByName);
+
+        Assert.True(thenIsMax!.IsMax);
+        Assert.True(elseIsMax!.IsMax);
+    }
+
+    [Fact]
+    public void Resolve_SearchedCase_OracleVerified_SameCategorySameLength_PreservesTheLength()
+    {
+        // Regression guard: the widening fix must not perturb the (dominant, already-correct)
+        // same-length case.
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN A ELSE B END", typesByName);
+
+        Assert.Equal(20, result!.Length);
+    }
 }
