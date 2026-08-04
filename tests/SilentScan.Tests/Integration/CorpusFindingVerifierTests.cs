@@ -48,6 +48,15 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
             GO
             CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode FROM dbo.Orders;
             GO
+            CREATE FUNCTION dbo.SplitStrings_CTE (@List NVARCHAR(MAX), @Delimiter NVARCHAR(255))
+            RETURNS @Items TABLE (Item NVARCHAR(4000))
+            WITH SCHEMABINDING
+            AS
+            BEGIN
+                INSERT INTO @Items SELECT 'x';
+                RETURN;
+            END;
+            GO
             """,
             DatabaseName);
     }
@@ -422,5 +431,59 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
         Assert.Equal(CorpusFindingOutcome.NotApplicable, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ColumnOnATempTable_ProbesSuccessfullyRatherThanProbeFailed()
+    {
+        // A #temp table only ever existed transiently inside the ORIGINAL proc's own execution
+        // (First Responder Kit's #TraceStatus, #missing_index_pretty) - before
+        // CorpusFindingProbeBuilder synthesized a CREATE TABLE for it, every finding against one
+        // failed outright with "Invalid object name", never even reaching CONVERT_IMPLICIT
+        // detection. No deployment needed here - the temp table is synthesized by the probe
+        // itself, fresh, inside its own compile-only session.
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            ColumnOperand("#TraceStatus", "TraceFlag", new SqlType(SqlTypeCategory.VarChar, Length: 10)),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        // The synthesized #TraceStatus has no index at all (only the one column this scanner
+        // actually resolved was declared) - the SAME honest ConfirmedUnindexed outcome an
+        // un-indexed corpus column already produces, not a fabricated Confirmed. What this test
+        // actually locks in is that the probe COMPILES and reaches a real CONVERT_IMPLICIT
+        // verdict at all, rather than failing outright with "Invalid object name".
+        Assert.Equal(CorpusFindingOutcome.ConfirmedUnindexed, result.Outcome);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ColumnOnAnInlineTableValuedFunction_ProbesSuccessfullyRatherThanProbeFailed()
+    {
+        // dbo.SplitStrings_CTE (deployed in InitializeAsync) needs two NVARCHAR arguments -
+        // before FunctionParameterReader/CorpusFindingProbeBuilder's function-argument support,
+        // "SELECT 1 FROM dbo.SplitStrings_CTE WHERE ..." failed to compile at all ("Parameters
+        // were not supplied for the function"), the exact real-world shape DNN Platform's
+        // ConvertListToTable/SplitStrings_CTE-derived findings hit. Item's own type (NVARCHAR)
+        // already has HIGHER string precedence than VARCHAR, so an Int other-operand (numeric
+        // beats every string type) is used here instead, to force a genuine column-side
+        // conversion - the same reasoning VerifyAsync_CharColumnVsIntLiteral_... above already
+        // relies on.
+        var finding = new TypedPredicateFinding(
+            Verdict.ScanForced,
+            ColumnOperand("dbo.SplitStrings_CTE", "Item", new SqlType(SqlTypeCategory.NVarChar, Length: 4000)),
+            new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int)),
+            "=",
+            "file.sql",
+            1,
+            1);
+
+        var result = await _verifier.VerifyAsync(DatabaseName, finding);
+
+        Assert.Equal(CorpusFindingOutcome.ConfirmedUnindexed, result.Outcome);
     }
 }

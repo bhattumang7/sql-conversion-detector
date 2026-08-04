@@ -233,4 +233,82 @@ public sealed class CorpusFindingProbeBuilderTests
 
         Assert.DoesNotContain("CREATE TABLE", probe, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Build_TableIsAFunction_RendersDummyTypedArgumentList()
+    {
+        // A finding's table can actually be an inline/multi-statement TVF - a bare reference
+        // ("FROM dbo.SplitStrings_CTE") is rejected by SQL Server outright ("Parameters were not
+        // supplied"), so a dummy CAST(NULL AS ...) per resolved parameter is synthesized instead.
+        // A dummy argument is never itself compared against anything, so its exact value has no
+        // bearing on the CONVERT_IMPLICIT signal this probe checks for the finding's own column.
+        var column = new PredicateOperand.Column("dbo.SplitStrings_CTE", "Item", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.VarChar, Length: 10));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+        var functionArguments = new Dictionary<string, IReadOnlyList<SqlType>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dbo.SplitStrings_CTE"] = [new SqlType(SqlTypeCategory.NVarChar, IsMax: true), new SqlType(SqlTypeCategory.NVarChar, Length: 255)],
+        };
+
+        var probe = CorpusFindingProbeBuilder.Build(finding, functionArguments);
+
+        Assert.Equal("""
+            DECLARE @p VARCHAR(10);
+            SELECT 1 FROM [dbo].[SplitStrings_CTE](CAST(NULL AS NVARCHAR(MAX)), CAST(NULL AS NVARCHAR(255))) WHERE [Item] = @p;
+            """, probe);
+    }
+
+    [Fact]
+    public void Build_TableIsAZeroParameterFunction_RendersEmptyArgumentList()
+    {
+        var column = new PredicateOperand.Column("dbo.GetActiveUsers", "UserName", new SqlType(SqlTypeCategory.NVarChar, Length: 100), Indexed: false, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.VarChar, Length: 10));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+        var functionArguments = new Dictionary<string, IReadOnlyList<SqlType>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dbo.GetActiveUsers"] = [],
+        };
+
+        var probe = CorpusFindingProbeBuilder.Build(finding, functionArguments);
+
+        Assert.Contains("FROM [dbo].[GetActiveUsers]() WHERE", probe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Build_FunctionArgumentsProvidedButTableNotInIt_LeavesReferenceBare()
+    {
+        // Only the qualified names FunctionArguments actually resolved get argument lists - a
+        // finding whose own table isn't a key (an ordinary table alongside a function
+        // resolved elsewhere in the same probe) must render bare, exactly as if the parameter
+        // were never supplied at all.
+        var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
+        var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+        var functionArguments = new Dictionary<string, IReadOnlyList<SqlType>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dbo.SomeOtherFunction"] = [new SqlType(SqlTypeCategory.Int)],
+        };
+
+        var probe = CorpusFindingProbeBuilder.Build(finding, functionArguments);
+
+        Assert.Contains("FROM [dbo].[Orders] WHERE", probe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Build_ColumnVsColumnOtherSideIsAFunction_RendersArgumentsOnTheOtherSideOnly()
+    {
+        var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
+        var other = new PredicateOperand.Column("dbo.SplitStrings_CTE", "Item", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), Indexed: false, Depth: 0, Provenance);
+        var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
+        var functionArguments = new Dictionary<string, IReadOnlyList<SqlType>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dbo.SplitStrings_CTE"] = [new SqlType(SqlTypeCategory.NVarChar, IsMax: true)],
+        };
+
+        var probe = CorpusFindingProbeBuilder.Build(finding, functionArguments);
+
+        Assert.Equal(
+            "SELECT 1 FROM [dbo].[Orders] AS t1 CROSS JOIN [dbo].[SplitStrings_CTE](CAST(NULL AS NVARCHAR(MAX))) AS t2 WHERE t1.[Status] = t2.[Item];",
+            probe);
+    }
 }

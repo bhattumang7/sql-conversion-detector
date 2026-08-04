@@ -25,17 +25,32 @@ namespace SilentScan.Verify.Oracle;
 /// </summary>
 public static class CorpusFindingProbeBuilder
 {
-    /// <summary>Returns the probe SQL for <paramref name="finding"/>, or null if the finding lacks enough type information to synthesize one (reported as not-probeable, never guessed).</summary>
-    public static string? Build(TypedPredicateFinding finding)
+    /// <summary>
+    /// Returns the probe SQL for <paramref name="finding"/>, or null if the finding lacks enough
+    /// type information to synthesize one (reported as not-probeable, never guessed).
+    /// <paramref name="functionArguments"/>, keyed by qualified name (case-insensitive), lets a
+    /// caller pre-resolve which of the finding's own table references are actually inline/multi-
+    /// statement table-valued functions (<see cref="FunctionParameterReader"/>) - SQL Server
+    /// rejects a bare <c>FROM dbo.SomeFunc</c> outright ("Parameters were not supplied"), so this
+    /// synthesizes a dummy, type-matched <c>CAST(NULL AS ...)</c> argument list instead. Absent
+    /// (the overwhelmingly common case) or missing the finding's own table leaves the reference
+    /// bare, exactly as before this parameter existed.
+    /// </summary>
+    public static string? Build(TypedPredicateFinding finding, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments = null)
     {
-        var table = BracketQualifiedName(finding.Column.ImmediateRelationQualifiedName ?? finding.Column.TableQualifiedName);
+        var table = FormatTableReference(finding.Column.ImmediateRelationQualifiedName ?? finding.Column.TableQualifiedName, functionArguments);
         var column = Bracket(finding.Column.ImmediateColumnName ?? finding.Column.ColumnName);
         var op = NormalizeOperatorForProbe(finding.Operator);
+
+        if (table is null)
+        {
+            return null;
+        }
 
         var probeBody = finding.OtherOperand switch
         {
             PredicateOperand.Value { Type: not null } value => BuildValueProbe(table, column, op, value),
-            PredicateOperand.Column otherColumn => BuildColumnProbe(table, column, op, otherColumn),
+            PredicateOperand.Column otherColumn => BuildColumnProbe(table, column, op, otherColumn, functionArguments),
             _ => null,
         };
 
@@ -46,6 +61,38 @@ public static class CorpusFindingProbeBuilder
 
         var scaffolding = BuildTempTableScaffolding(finding);
         return scaffolding is null ? probeBody : scaffolding + probeBody;
+    }
+
+    /// <summary>
+    /// Bare <c>[schema].[name]</c> for an ordinary table, or <c>[schema].[name](CAST(NULL AS
+    /// ...), ...)</c> when <paramref name="functionArguments"/> proves this qualified name is
+    /// actually a function - a dummy argument is never itself compared against anything, so its
+    /// exact value has no bearing on the CONVERT_IMPLICIT signal this probe checks for the
+    /// finding's own column. Null when the qualified name IS a known function but at least one
+    /// parameter's type couldn't be rendered as T-SQL syntax at all (a probe with a missing
+    /// argument would fail to compile, same as never resolving the type in the first place).
+    /// </summary>
+    private static string? FormatTableReference(string qualifiedName, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments)
+    {
+        var bracketed = BracketQualifiedName(qualifiedName);
+        if (functionArguments is null || !functionArguments.TryGetValue(qualifiedName, out var parameterTypes))
+        {
+            return bracketed;
+        }
+
+        var arguments = new List<string>(parameterTypes.Count);
+        foreach (var type in parameterTypes)
+        {
+            var typeSyntax = SqlTypeSyntaxFormatter.Format(type);
+            if (typeSyntax is null)
+            {
+                return null;
+            }
+
+            arguments.Add($"CAST(NULL AS {typeSyntax})");
+        }
+
+        return $"{bracketed}({string.Join(", ", arguments)})";
     }
 
     /// <summary>
@@ -165,9 +212,15 @@ public static class CorpusFindingProbeBuilder
             """;
     }
 
-    private static string? BuildColumnProbe(string table, string column, string op, PredicateOperand.Column otherColumn)
+    private static string? BuildColumnProbe(
+        string table, string column, string op, PredicateOperand.Column otherColumn, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments)
     {
-        var otherTable = BracketQualifiedName(otherColumn.ImmediateRelationQualifiedName ?? otherColumn.TableQualifiedName);
+        var otherTable = FormatTableReference(otherColumn.ImmediateRelationQualifiedName ?? otherColumn.TableQualifiedName, functionArguments);
+        if (otherTable is null)
+        {
+            return null;
+        }
+
         var otherColumnName = Bracket(otherColumn.ImmediateColumnName ?? otherColumn.ColumnName);
 
         return $"SELECT 1 FROM {table} AS t1 CROSS JOIN {otherTable} AS t2 WHERE t1.{column} {op} t2.{otherColumnName};";

@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 
@@ -30,11 +31,13 @@ public sealed class CorpusFindingVerifier
 {
     private readonly PlanXmlCapture _planXmlCapture;
     private readonly IndexDeploymentChecker _indexChecker;
+    private readonly FunctionParameterReader _functionParameterReader;
 
     public CorpusFindingVerifier(SqlServerOptions options)
     {
         _planXmlCapture = new PlanXmlCapture(options);
         _indexChecker = new IndexDeploymentChecker(options);
+        _functionParameterReader = new FunctionParameterReader(options);
     }
 
     public async Task<CorpusFindingResult> VerifyAsync(
@@ -50,7 +53,8 @@ public sealed class CorpusFindingVerifier
             return new CorpusFindingResult(finding, CorpusFindingOutcome.NotApplicable, "Verdict is Unknown - makes no claim for the oracle to confirm or refute.");
         }
 
-        var probe = CorpusFindingProbeBuilder.Build(finding);
+        var functionArguments = await ResolveFunctionArgumentsAsync(database, finding, cancellationToken);
+        var probe = CorpusFindingProbeBuilder.Build(finding, functionArguments);
         if (probe is null)
         {
             return new CorpusFindingResult(finding, CorpusFindingOutcome.NotProbeable, NotProbeableReason(finding));
@@ -189,6 +193,41 @@ public sealed class CorpusFindingVerifier
         finding.OtherOperand is PredicateOperand.Value { IsLiteral: true, LiteralText: null }
             ? "Literal operand could not be reconstructed as SQL text; declined to substitute a parameter, which would misrepresent probe fidelity."
             : "Other operand's type could not be rendered as T-SQL syntax.";
+
+    /// <summary>
+    /// Resolves, for each of the finding's own table references, whether it's actually an
+    /// inline/multi-statement table-valued function needing a synthesized dummy argument list
+    /// (<see cref="CorpusFindingProbeBuilder.Build"/>'s own <c>functionArguments</c> parameter) -
+    /// an ordinary table costs one cheap sys.parameters round trip that returns null and changes
+    /// nothing. Both the finding's own table AND the other side's (when it's a column too) are
+    /// checked independently - a column-vs-column comparison can reference a function on either
+    /// side, or both.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<SqlType>>?> ResolveFunctionArgumentsAsync(
+        string database, TypedPredicateFinding finding, CancellationToken cancellationToken)
+    {
+        Dictionary<string, IReadOnlyList<SqlType>>? result = null;
+
+        await TryAddAsync(finding.Column.ImmediateRelationQualifiedName ?? finding.Column.TableQualifiedName);
+        if (finding.OtherOperand is PredicateOperand.Column otherColumn)
+        {
+            await TryAddAsync(otherColumn.ImmediateRelationQualifiedName ?? otherColumn.TableQualifiedName);
+        }
+
+        return result;
+
+        async Task TryAddAsync(string qualifiedName)
+        {
+            var parameterTypes = await _functionParameterReader.TryGetParameterTypesAsync(database, qualifiedName, cancellationToken);
+            if (parameterTypes is null)
+            {
+                return;
+            }
+
+            result ??= new Dictionary<string, IReadOnlyList<SqlType>>(StringComparer.OrdinalIgnoreCase);
+            result[qualifiedName] = parameterTypes;
+        }
+    }
 
     private static bool MatchesPredictedPlanShape(Verdict verdict, bool columnConverts, string planXml)
     {
