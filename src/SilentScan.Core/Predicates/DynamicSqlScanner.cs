@@ -62,15 +62,6 @@ public static class DynamicSqlScanner
     private readonly record struct LiteralSegment(string SourcePath, int StartLine, int StartColumn, int PrefixLength, string Value);
 
     /// <summary>
-    /// The one place an assembly is ever flattened to a plain string - every other flattening
-    /// site in this file must go through here rather than concatenating <see cref="LiteralSegment.Value"/>
-    /// directly, so that a future placeholder segment (an unknown-but-typed value standing in
-    /// for something this scanner could not prove constant) has exactly one choke point to gate:
-    /// today every segment is a real literal, so this always succeeds.
-    /// </summary>
-    private static string TryFlatten(IReadOnlyList<LiteralSegment> assembly) => string.Concat(assembly.Select(s => s.Value));
-
-    /// <summary>
     /// One statically-provable constant value a folded expression could assemble to - a single
     /// concatenation chain of literal segments. Plural assemblies (see <see cref="FoldAttempt"/>/
     /// <see cref="FoldState"/>) exist because a control-flow join point (IF/TRY-CATCH) can leave a
@@ -853,6 +844,15 @@ public static class DynamicSqlScanner
 
             return true;
         }
+
+        /// <summary>
+        /// The one place an assembly is ever flattened to a plain string - every other flattening
+        /// site in this file must go through here rather than concatenating <see cref="LiteralSegment.Value"/>
+        /// directly, so that a future placeholder segment (an unknown-but-typed value standing in
+        /// for something this scanner could not prove constant) has exactly one choke point to gate:
+        /// today every segment is a real literal, so this always succeeds.
+        /// </summary>
+        private static string TryFlatten(IReadOnlyList<LiteralSegment> assembly) => string.Concat(assembly.Select(s => s.Value));
 
         /// <summary>
         /// Deduplicates (by concatenated text) and caps the union of two branches' own assembly
