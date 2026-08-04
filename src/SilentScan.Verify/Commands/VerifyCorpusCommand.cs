@@ -145,9 +145,16 @@ public static class VerifyCorpusCommand
         // A run can silently report "success" (exit 0) while having verified nothing - every
         // probe failed, every DDL file refused to deploy, or the lineage parity gate found the
         // static types disagree with sys.columns outright. CI must not go green on that.
+        // ConfirmedUnindexed counts as real coverage too (an audit finding: it didn't, even
+        // though it IS the oracle confirming CONVERT_IMPLICIT on the column - the same signal
+        // Confirmed/ConfirmedViaScratchIndex represent, just without the RangeSeek-vs-ScanForced
+        // plan-shape distinction an absent index makes untestable) - the overwhelmingly common
+        // real-world outcome for a corpus's own DDL, which rarely indexes every column its own
+        // predicates compare.
         var hasLineageParityFailure = summaries.Values.Any(s => s.LineageParityMismatches.Count > 0);
         var hasZeroEffectiveCoverage = summaries.Values.Any(s =>
-            s.ProbeWorthyFindingCount > 0 && s.Confirmed.Count == 0 && s.NotConfirmed.Count == 0 && s.ConfirmedViaScratchIndex.Count == 0);
+            s.ProbeWorthyFindingCount > 0 && s.Confirmed.Count == 0 && s.NotConfirmed.Count == 0
+            && s.ConfirmedViaScratchIndex.Count == 0 && s.ConfirmedUnindexed.Count == 0);
         var hasDialectSniffingFailure = summaries.Values.Any(s => !s.PassesDialectSniffing);
 
         return hadMissingRepo || hasLineageParityFailure || hasZeroEffectiveCoverage || hasDialectSniffingFailure ? 1 : 0;
