@@ -347,4 +347,47 @@ public sealed record RepoVerificationSummary(
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,
-    int SchemaVersion = ScanReport.CurrentSchemaVersion);
+    int SchemaVersion = ScanReport.CurrentSchemaVersion)
+{
+    // A Medium-confidence finding (one that rested on a dynamic-SQL placeholder assumption -
+    // see FindingConfidence) confirming its own claim against the oracle is real, but it is not
+    // the same evidentiary weight as a High-confidence one, and CLAUDE.md's "one false positive
+    // in the published study is worse than ten missed true positives" means a published
+    // "confirmed" figure must never silently fold the two together. Each computed here, never
+    // stored, so a breakdown can never drift out of sync with the list it summarizes - and the
+    // raw Confirmed/ConfirmedUnindexed/ConfirmedViaScratchIndex lists stay exactly as they were,
+    // so this is additive, never a replacement a consumer has to migrate to.
+    public ConfidenceTally ConfirmedByConfidence => ConfidenceTally.Of(Confirmed, r => r.Finding.Confidence);
+
+    public ConfidenceTally ConfirmedUnindexedByConfidence => ConfidenceTally.Of(ConfirmedUnindexed, r => r.Finding.Confidence);
+
+    public ConfidenceTally ConfirmedViaScratchIndexByConfidence => ConfidenceTally.Of(ConfirmedViaScratchIndex, r => r.Finding.Confidence);
+
+    public ConfidenceTally Tier1ConfirmedByConfidence => ConfidenceTally.Of(Tier1Confirmed, r => r.Finding.Confidence);
+
+    public ConfidenceTally Tier1ConfirmedUnindexedByConfidence => ConfidenceTally.Of(Tier1ConfirmedUnindexed, r => r.Finding.Confidence);
+
+    public ConfidenceTally Tier1ConfirmedViaScratchIndexByConfidence => ConfidenceTally.Of(Tier1ConfirmedViaScratchIndex, r => r.Finding.Confidence);
+
+    public ConfidenceTally ExpressionDerivedConfirmedByConfidence => ConfidenceTally.Of(ExpressionDerivedConfirmed, r => r.Finding.Confidence);
+
+    public ConfidenceTally ExpressionDerivedConfirmedUnindexedByConfidence => ConfidenceTally.Of(ExpressionDerivedConfirmedUnindexed, r => r.Finding.Confidence);
+
+    public ConfidenceTally CollationConflictConfirmedByConfidence => ConfidenceTally.Of(CollationConflictConfirmed, r => r.Finding.Confidence);
+}
+
+/// <summary>
+/// A High/Medium/Low breakdown of a single oracle-confirmed-outcome bucket, computed from the
+/// finding-level <see cref="FindingConfidence"/> already carried on each result - never merged
+/// back into one number by anything downstream (CLAUDE.md precision discipline: a Medium
+/// confirmation and a High confirmation are different claims, not one claim counted twice).
+/// </summary>
+public readonly record struct ConfidenceTally(int High, int Medium, int Low)
+{
+    public int Total => High + Medium + Low;
+
+    public static ConfidenceTally Of<T>(IReadOnlyList<T> results, Func<T, FindingConfidence> confidence) => new(
+        High: results.Count(r => confidence(r) == FindingConfidence.High),
+        Medium: results.Count(r => confidence(r) == FindingConfidence.Medium),
+        Low: results.Count(r => confidence(r) == FindingConfidence.Low));
+}
