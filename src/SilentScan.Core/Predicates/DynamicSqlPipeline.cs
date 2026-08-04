@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
@@ -18,7 +19,7 @@ namespace SilentScan.Core.Predicates;
 /// <see cref="MaxNestingDepth"/> levels deep; beyond that, remaining candidates are reported
 /// unanalyzable with a specific reason rather than silently dropped.
 /// </summary>
-public static class DynamicSqlPipeline
+public static partial class DynamicSqlPipeline
 {
     /// <summary>
     /// Real-world dynamic SQL nesting rarely exceeds one or two levels; this is a backstop
@@ -27,6 +28,18 @@ public static class DynamicSqlPipeline
     private const int MaxNestingDepth = 5;
 
     private static readonly IReadOnlyDictionary<string, SqlType?> NoDeclaredParameters = new Dictionary<string, SqlType?>();
+
+    /// <summary>
+    /// A bare <c>$Name$</c> token, the templating convention this project already recognizes at
+    /// the corpus-preprocessing layer (<see cref="Corpus.CorpusTemplatePreprocessor"/>) for
+    /// whole source files - this is the same convention surviving INSIDE a literal that builds
+    /// dynamic SQL, where no manifest substitution ever reaches it. Deliberately requires at
+    /// least one identifier character between the two <c>$</c> delimiters (an empty <c>$$</c>
+    /// is legal, ordinary T-SQL - the money-column default alias in some dialects - not a
+    /// template artifact).
+    /// </summary>
+    [GeneratedRegex(@"\$[A-Za-z_][A-Za-z0-9_]*\$")]
+    private static partial Regex TemplatePlaceholderRegex();
 
     public static DynamicSqlPipelineResult Analyze(IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage) =>
         Analyze(scripts, catalog, lineage, depth: 1, seeds: null);
@@ -212,6 +225,21 @@ public static class DynamicSqlPipeline
                 accumulator.Findings.Add(new DynamicSqlFinding(
                     script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                     DynamicSqlOutcome.Unanalyzable, "symbolic-value-broke-parse"));
+            }
+            else if (TemplatePlaceholderRegex().IsMatch(script.InnerText))
+            {
+                // A source-level templating convention (e.g. $Signature$) stamped a token into
+                // this literal that was never substituted before it reached this call site -
+                // ScriptDOM's parse error ("Incorrect syntax near '$Signature$'") is real, but
+                // reporting it as InnerParseFailed would blame this scanner for not handling
+                // ordinary T-SQL, when the actual cause is that the script was never fully
+                // instantiated. A distinct, DIFFERENT reason from the placeholder-broke-parse
+                // cases above: those are THIS scanner's own synthesized substitution breaking a
+                // parse that would otherwise succeed; this is the source text itself still
+                // carrying an un-instantiated template token, before this scanner touched it.
+                accumulator.Findings.Add(new DynamicSqlFinding(
+                    script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
+                    DynamicSqlOutcome.Unanalyzable, "template-placeholder-not-instantiated"));
             }
             else
             {

@@ -352,6 +352,32 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public void Analyze_UnsubstitutedTemplatePlaceholderInLiteral_ReportsDistinctReasonNotRawParseError()
+    {
+        // A source-level templating convention (e.g. a build/deploy step that stamps a token
+        // like $Signature$ into a script before it ever reaches SQL Server) can leave a literal
+        // fragment holding a token that was never substituted for this particular call site.
+        // ScriptDOM has no idea this is a template artifact - it just sees invalid syntax - but
+        // reporting the raw parser error ("Incorrect syntax near '$Signature$'") reads as this
+        // scanner failing to parse ordinary T-SQL, when the actual, more useful diagnosis is
+        // "this script was never fully instantiated".
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('UPDATE dbo.Foo SET Col = $Signature$ WHERE Id = 1');");
+        Assert.False(parseResult.HasErrors);
+
+        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("template-placeholder-not-instantiated", finding.Reason);
+        Assert.Empty(result.TypedFindings);
+    }
+
+    [Fact]
     public void Analyze_LiteralWithNoPredicates_ProducesAnalyzedFindingAndNoDownstreamFindings()
     {
         var (catalog, lineage) = BuildCatalog();
