@@ -1,13 +1,12 @@
 using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SilentScan.Core.Catalog;
 using SilentScan.Core.Corpus;
 using SilentScan.Core.Lineage;
-using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Verify.Corpus;
 using SilentScan.Verify.Deployment;
 using SilentScan.Verify.Oracle;
 
@@ -165,89 +164,54 @@ public static class VerifyCorpusCommand
         FindingConfidence minimumConfidence,
         CancellationToken cancellationToken)
     {
-        var allFiles = CorpusFileResolver.ResolveAllFiles(repo, repoRoot);
-        var parseResults = new List<SqlParseResult>(allFiles.Count);
-        foreach (var file in allFiles)
-        {
-            parseResults.Add(await ParseCorpusFileAsync(repo, file, cancellationToken));
-        }
+        var ddlFiles = CorpusFileResolver.ResolveDdlFiles(repo, repoRoot);
 
-        // Built once and reused for both the report (ScanReportBuilder.BuildFromParseResults no
-        // longer builds one internally - roadmap "delete the file-parsed catalog path") and the
-        // environment parity gate below, which needs the resolved view provenance to diff
-        // against sys.columns after deployment - previously two separate CatalogBuilder.Build
-        // calls over the same parse results, wastefully rebuilding the identical catalog twice.
-        var usableParseResults = parseResults.Where(r => r.BatchCount > 0).ToList();
-        var catalog = CatalogBuilder.Build(usableParseResults, repo.DeclaredCollation, repo.TempdbCollation);
-        var lineage = LineageResolver.Resolve(catalog, usableParseResults);
-
-        var report = ScanReportBuilder.BuildFromParseResults(parseResults, catalog, minimumConfidence);
-        var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
-
-        // How many DISTINCT (table, column, operator, other-type) defects probeWorthy actually
-        // represents - a repo that re-issues the same CREATE across many incremental upgrade
-        // scripts (DNN Platform's 291 .SqlDataProvider files) inflates the raw occurrence count
-        // well past the number of real, distinct bugs (CLAUDE.md precision discipline: an
-        // occurrence count reported as a prevalence figure is its own kind of false claim).
-        // Every occurrence is still individually oracle-probed below - this is reported
-        // alongside the raw counts, not used to skip probing any of them.
-        var distinctProbeWorthyFindingCount = TypedFindingDeduplicator.Dedupe(probeWorthy).Count;
-
-        var databaseName = SanitizeDatabaseName(repo.Name);
+        // GUID-suffixed, matching CorpusLiveScanRunner's own concurrency-safety fix
+        // (docs/local-dev.md) - a fixed per-repo name would collide across two concurrent runs
+        // (another session, or verify-corpus/scan-corpus-live invoked simultaneously) on the same
+        // shared Docker instance exactly like those did before that fix.
+        var databaseName = $"{SanitizeDatabaseName(repo.Name)}_{Guid.NewGuid():N}";
         var deploymentErrors = new List<string>();
 
         await context.Provisioner.CreateFreshAsync(databaseName, collationName: repo.DeclaredCollation, cancellationToken: cancellationToken);
         try
         {
-            var ddlFiles = CorpusFileResolver.ResolveDdlFiles(repo, repoRoot);
-            var deployer = new ScriptDeployer(context.SqlOptions);
+            // CLAUDE.md hard scope: "Everything goes via the database — no file-parsed catalog,
+            // no file-only scan... corpus scanning deploys the repo's DDL to the disposable
+            // Docker instance, then reads the catalog (LiveCatalogReader) and module text
+            // (sys.sql_modules) back out." The same deploy-and-read recipe scan-corpus-live uses
+            // (LiveCorpusDeployer, shared with CorpusLiveScanRunner in a different assembly) -
+            // not a separate, lower-fidelity file-parsed catalog that never deploys procedure
+            // bodies at all and therefore can never see a proc's own dynamic SQL.
+            var source = await LiveCorpusDeployer.DeployAndReadAsync(repo, repoRoot, databaseName, context.SqlOptions, cancellationToken);
+            deploymentErrors.AddRange(source.DeploymentMessages);
 
-            // A repo whose manifest keeps views/functions in procPaths, separate from ddlPaths
-            // (WideWorldImporters' own Views/*.sql, Functions/*.sql), never had its views
-            // deployed at all before this - CorpusFindingProbeBuilder now compiles a depth>=1
-            // finding's probe against the view it actually came from, so that view has to exist
-            // for the probe to compile. Deploying view/function DEFINITIONS is not "executing
-            // the repo's own procedural logic" (CLAUDE.md's ddlPaths-only rule was written to
-            // keep DML/procedure BODIES from running, not to leave every view undeployed) - the
-            // same whitelist (CreateViewStatement/CreateOrAlterViewStatement/
-            // CreateFunctionStatement are already allowed, CreateProcedureStatement is not)
-            // still filters out actual procedure bodies at the batch level. Only the files not
-            // already covered by ddlFiles (repos where ddlPaths and procPaths are the identical
-            // glob - DNN, First Responder Kit, Ola Hallengren - would otherwise deploy the same
-            // file twice and fail on "there is already an object named ...").
-            var procOnlyFiles = CorpusFileResolver.ResolveProcFiles(repo, repoRoot).Except(ddlFiles, StringComparer.Ordinal);
+            var catalog = source.Catalog;
 
-            // Real-world corpus DDL routinely contains statements our disposable oracle can't
-            // (or, per CLAUDE.md's "corpus DML is never executed, anywhere" hard scope, must
-            // NOT) execute - permission grants, filegroup references, or an ordinary DML/seed
-            // statement sharing a file with real schema DDL. DeployWhitelistedDdlWithRetryAsync
-            // is the code-level enforcement of that scope (previously resting entirely on
-            // manifest curation): only statement kinds the analysis passes themselves consume
-            // actually run. Every file is handed over TOGETHER, not one at a time, so a batch
-            // whose foreign key or sequence reference only exists in a file that sorts LATER in
-            // glob order (Wide World Importers ships one file per table, each referencing
-            // others) simply succeeds on a later retry pass instead of failing outright -
-            // ordering across files is not assumed to match dependency order.
-            var scripts = new List<(string Label, string Script)>();
-            foreach (var ddlFile in ddlFiles)
-            {
-                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, SqlScriptParser.DecodeFile(ddlFile));
-                scripts.Add((ddlFile, text));
-            }
+            // Lineage needs the same POST-DEPLOYMENT module parse results the report itself is
+            // built from below, since the environment parity gate needs to diff a view's own
+            // resolved provenance against sys.columns for the exact objects sys.sql_modules just
+            // handed back - not a separate, independently re-parsed set.
+            var lineage = LineageResolver.Resolve(catalog, source.ModuleParseResults);
 
-            foreach (var procFile in procOnlyFiles)
-            {
-                var text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, SqlScriptParser.DecodeFile(procFile));
-                scripts.Add((procFile, text));
-            }
+            var report = ScanReportBuilder.BuildFromParseResults(source.ModuleParseResults, catalog, minimumConfidence)
+                with { ParseHealth = ParseHealthReportBuilder.BuildFromParseResults(source.FileParseResults) };
+            var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
 
-            var batchErrors = await deployer.DeployWhitelistedDdlWithRetryAsync(scripts, databaseName, cancellationToken: cancellationToken);
-            deploymentErrors.AddRange(batchErrors);
+            // How many DISTINCT (table, column, operator, other-type) defects probeWorthy
+            // actually represents - sys.sql_modules already collapses a repo that re-issues the
+            // same CREATE across many incremental-upgrade files (DNN Platform's *.SqlDataProvider
+            // pattern) to one row per object, but a repo can still declare the same real defect
+            // more than once across genuinely different objects (CLAUDE.md precision discipline:
+            // an occurrence count reported as a prevalence figure is its own kind of false
+            // claim). Every occurrence is still individually oracle-probed below - this is
+            // reported alongside the raw counts, not used to skip probing any of them.
+            var distinctProbeWorthyFindingCount = TypedFindingDeduplicator.Dedupe(probeWorthy).Count;
 
             // CLAUDE.md Verify workflow: "diff inferred view column types/collations against
-            // sys.columns - any mismatch is a P0 lineage bug." Runs after deployment so views
-            // actually exist to diff against; a mismatch here means the rest of this repo's
-            // findings were reasoned about with wrong column types and cannot be trusted.
+            // sys.columns - any mismatch is a P0 lineage bug." A mismatch here means the rest of
+            // this repo's findings were reasoned about with wrong column types and cannot be
+            // trusted.
             var lineageParityMismatches = await context.ParityChecker.CheckAsync(databaseName, lineage, cancellationToken);
 
             var results = new List<CorpusFindingResult>();
@@ -316,23 +280,12 @@ public static class VerifyCorpusCommand
         }
     }
 
-    private static Task<SqlParseResult> ParseCorpusFileAsync(CorpusRepoEntry repo, string path, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        // Routes through the same BOM-detection/Latin-1 fallback ParseFile uses (an audit
-        // finding: this was bypassing that recovery entirely via a plain File.ReadAllTextAsync).
-        var text = SqlScriptParser.DecodeFile(path);
-        text = CorpusTemplatePreprocessor.Apply(repo.TemplateSubstitutions, text);
-        return Task.FromResult(SqlScriptParser.ParseText(path, text));
-    }
-
     private static string RepoDirectoryName(string url) => url.TrimEnd('/').Split('/')[^1];
 
     private static string SanitizeDatabaseName(string repoName)
     {
         var sanitized = new string([.. repoName.Select(c => char.IsLetterOrDigit(c) ? c : '_')]);
-        return $"SilentScanCorpus_{sanitized}";
+        return $"SilentScanCorpusVerify_{sanitized}";
     }
 }
 
