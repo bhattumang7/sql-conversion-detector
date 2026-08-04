@@ -447,9 +447,28 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableWithNoInitializer_Unanalyzable()
+    public void Scan_ExecOfVariableWithNoInitializer_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
+        // No initializer at all, but the declared type (NVARCHAR(MAX)) resolves with no catalog
+        // needed - folds to a symbolic placeholder rather than a bare taint, at the SCANNER
+        // level. The pipeline's own position classifier (not exercised by this scanner-only
+        // helper) is what actually refuses this particular shape - the whole EXEC argument is
+        // nothing but the one placeholder - see DynamicSqlPipeline's own tests for that.
         var result = Scan("DECLARE @sql NVARCHAR(MAX); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableWithNoInitializer_UnresolvableAliasType_StaysTainted()
+    {
+        // Same shape, but the declared type is a CREATE TYPE ... FROM alias, unresolvable
+        // without a catalog at this point in the pipeline - falls back to the honest taint
+        // reason rather than a placeholder claiming a type this scanner couldn't determine.
+        var result = Scan("DECLARE @sql dbo.SqlTextType; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
@@ -1878,13 +1897,38 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_GuardedSetThenDifferentGuardExec_StaysTainted()
+    public void Scan_GuardedSetThenDifferentGuardExec_UnionsLiteralWithSymbolicPlaceholder()
     {
         // A DIFFERENT (even if a human could prove it implies the first) guard is left unresolved
         // - this scanner matches guard text exactly, never implication, per its soundness-first
-        // policy: no heuristic guessing about what one condition proves about another.
+        // policy: no heuristic guessing about what one condition proves about another. @sql's own
+        // declared type (VARCHAR(MAX)) resolves, so the IF's implicit ELSE (no explicit
+        // assignment, @sql keeps its pre-IF symbolic placeholder) unions cleanly with the THEN
+        // branch's literal 'SELECT 1' - two real possible values, one proven, one not - rather
+        // than the whole branch merge collapsing to a taint the way an unresolvable type would.
         var result = Scan(
             "DECLARE @sql VARCHAR(MAX); " +
+            "IF @mode = 1 SET @sql = 'SELECT 1'; " +
+            "IF @mode = 1 AND @extra = 1 EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        var literalScript = Assert.Single(result.AnalyzableScripts, s => s.InnerText == "SELECT 1");
+        Assert.Equal(FindingConfidence.High, literalScript.Confidence);
+        var symbolicScript = Assert.Single(result.AnalyzableScripts, s => s.InnerText != "SELECT 1");
+        Assert.Equal(FindingConfidence.Medium, symbolicScript.Confidence);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", symbolicScript.InnerText);
+    }
+
+    [Fact]
+    public void Scan_GuardedSetThenDifferentGuardExec_UnresolvableAliasType_StaysTainted()
+    {
+        // Same shape, but the declared type is a CREATE TYPE ... FROM alias, unresolvable
+        // without a catalog - the IF's implicit ELSE branch stays tainted (no-initializer), and
+        // ONE tainted side means the whole branch merge stays tainted too, exactly as before
+        // symbolic placeholders existed.
+        var result = Scan(
+            "DECLARE @sql dbo.SqlTextType; " +
             "IF @mode = 1 SET @sql = 'SELECT 1'; " +
             "IF @mode = 1 AND @extra = 1 EXEC(@sql);");
 

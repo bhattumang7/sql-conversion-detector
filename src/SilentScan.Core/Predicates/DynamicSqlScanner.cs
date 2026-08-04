@@ -337,10 +337,14 @@ public static class DynamicSqlScanner
         /// stay a plain taint, not a placeholder claiming a type this scanner couldn't actually
         /// determine.
         /// </summary>
-        private FoldState SeedSymbolicOrTaint(ProcedureParameter formal, string taintReasonIfUnresolvable)
+        private FoldState SeedSymbolicOrTaint(ProcedureParameter formal, string taintReasonIfUnresolvable) =>
+            SeedSymbolicOrTaint(formal, formal.DataType, taintReasonIfUnresolvable);
+
+        /// <summary>Same policy as the <see cref="ProcedureParameter"/> overload, generalized to any declaring fragment (a DECLARE element has no formal-parameter concept at all, but the same "resolvable type -> placeholder, else taint" rule applies identically).</summary>
+        private FoldState SeedSymbolicOrTaint(TSqlFragment declaringSite, DataTypeReference dataType, string taintReasonIfUnresolvable)
         {
-            var location = Span(formal);
-            var type = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
+            var location = Span(declaringSite);
+            var type = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
             if (type is null)
             {
                 return FoldState.Tainted(taintReasonIfUnresolvable, location);
@@ -551,7 +555,13 @@ public static class DynamicSqlScanner
                 var name = element.VariableName.Value;
                 if (element.Value is null)
                 {
-                    folded[name] = FoldState.Tainted("no-initializer", Span(element));
+                    // No initializer at all - genuinely no value assigned, ever, up to this
+                    // point. When the declared type resolves, this is still a symbolic
+                    // placeholder rather than a bare taint: the variable's declared type is a
+                    // hard T-SQL guarantee regardless of whether it was ever assigned (an
+                    // uninitialized local's type doesn't change), so the same "known shape,
+                    // unknown value" treatment applies.
+                    folded[name] = SeedSymbolicOrTaint(element, element.DataType, "no-initializer");
                     continue;
                 }
 
