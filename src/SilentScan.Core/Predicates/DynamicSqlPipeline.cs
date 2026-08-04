@@ -461,15 +461,25 @@ public static class DynamicSqlPipeline
     }
 
     /// <summary>
-    /// Accepted only for a batch containing EXACTLY one statement of an allow-listed kind that
-    /// has no predicate concept at all (DROP TABLE, TRUNCATE TABLE) - deliberately conservative:
-    /// a SELECT/INSERT/UPDATE/DELETE could always have a WHERE/JOIN/subquery a placeholder in
-    /// object-name position sits alongside, and proving there is none would mean walking the
-    /// whole FROM/WHERE tree per statement type. CREATE INDEX is in the same family but is not
-    /// accepted here either (its own filtered-index predicate and included-columns list add real
-    /// surface this scanner does not yet reason about) - refusing a case that COULD have been
-    /// proven safe is a recall loss, never a precision one, which is the tie-breaker CLAUDE.md
-    /// asks for.
+    /// Accepted for a batch containing EXACTLY one statement (any kind - a real corpus scan
+    /// found the dominant shape is a full INSERT/SELECT with its own WHERE clause, dynamically
+    /// naming the table it reads via QUOTENAME, e.g. First Responder Kit's
+    /// <c>SET @sql = N'INSERT ... SELECT ... FROM ' + QUOTENAME(@Server) + N'.' + QUOTENAME(@Db)
+    /// + N' WHERE ServerName IS NULL OR ...'</c> - the earlier DROP/TRUNCATE-only version of this
+    /// check refused this shape outright even though it's sound: the placeholder occupies ONLY a
+    /// <see cref="NamedTableReference"/>'s own identifier parts, so the reparsed text's table
+    /// name is a synthesized <c>__silentscan_sym_...__</c> token that can never collide with a
+    /// real deployed object - the catalog/lineage layer simply won't resolve it, so nothing
+    /// downstream is extracted against it regardless of how much WHERE/JOIN/subquery surface the
+    /// rest of the statement has. What actually matters is proven per-occurrence below, not
+    /// per-statement-shape: EVERY placeholder occurrence must sit inside a collected identifier
+    /// - one that sits in a VALUE position (a WHERE predicate, a SELECT expression) still refuses
+    /// via the ordinary <c>Unsupported</c> fallback, exactly as before. Restricted to exactly one
+    /// statement (not the whole batch) specifically to avoid suppressing extraction on OTHER,
+    /// unrelated statements in the same script that have nothing to do with the symbolic table -
+    /// this classification's own admission means "run zero extraction, zero findings" for
+    /// whatever it accepts, so admitting a multi-statement batch would be a real recall loss on
+    /// statements that never needed a placeholder-safety exemption in the first place.
     /// </summary>
     private static bool IsObjectIdentifierOnlyStatement(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
     {
@@ -478,14 +488,44 @@ public static class DynamicSqlPipeline
             return false;
         }
 
-        IReadOnlyList<SchemaObjectName> names = statement switch
+        List<SchemaObjectName> names = statement switch
         {
             DropTableStatement drop => [.. drop.Objects],
             TruncateTableStatement truncate => [truncate.TableName],
             _ => [],
         };
 
+        names.AddRange(CollectTableReferenceNames(statement));
+
         return names.Count > 0 && occurrences.All(o => names.Any(name => IsWithinIdentifier(name, o)));
+    }
+
+    /// <summary>
+    /// Every table this <paramref name="statement"/> reads or writes, from wherever a
+    /// <see cref="NamedTableReference"/> appears - FROM, JOIN, an UPDATE/DELETE/MERGE target, or
+    /// an INSERT INTO target all use this same node type, so one visitor covers every statement
+    /// kind uniformly rather than a per-kind extraction. Deliberately NOT a general
+    /// SchemaObjectName collector - a CAST target's UserDataTypeReference or a scalar function
+    /// call's own name also carry a SchemaObjectName, and a placeholder there is a TYPE or
+    /// FUNCTION identity, not a table one; admitting those under this same "unresolvable ⇒ no
+    /// downstream claim" reasoning would be a different (and unverified) argument.
+    /// </summary>
+    private static List<SchemaObjectName> CollectTableReferenceNames(TSqlFragment statement)
+    {
+        var collector = new TableReferenceNameCollector();
+        statement.Accept(collector);
+        return collector.Names;
+    }
+
+    private sealed class TableReferenceNameCollector : TSqlFragmentVisitor
+    {
+        public List<SchemaObjectName> Names { get; } = [];
+
+        public override void ExplicitVisit(NamedTableReference node)
+        {
+            Names.Add(node.SchemaObject);
+            base.ExplicitVisit(node);
+        }
     }
 
     private static bool IsWithinIdentifier(SchemaObjectName name, PlaceholderOccurrence occurrence)

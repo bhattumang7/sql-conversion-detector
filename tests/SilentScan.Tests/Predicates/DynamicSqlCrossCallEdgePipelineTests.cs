@@ -138,6 +138,51 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
+    public async Task NoKnownCaller_ObjectIdentifierPositionInsideFullStatementWithWhereClause_AnalyzedWithZeroFindings()
+    {
+        // Corpus-measured (First Responder Kit's sp_Blitz/sp_BlitzFirst, QUOTENAME-built FROM
+        // targets alongside a real WHERE clause): the dynamically-named table is a full SELECT,
+        // not just DROP/TRUNCATE - IsObjectIdentifierOnlyStatement now admits any single-statement
+        // shape as long as EVERY placeholder occurrence sits inside a NamedTableReference's own
+        // identifier parts, since a synthesized __silentscan_sym_...__ token can never resolve to
+        // a real deployed table regardless of what else the statement's WHERE clause claims.
+        var report = await Scan("""
+            CREATE PROCEDURE dbo.usp_SkipChecks @SchemaName SYSNAME, @TableName SYSNAME AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM ' + QUOTENAME(@SchemaName) + N'.' + QUOTENAME(@TableName) + N' WHERE Col1 IS NULL';
+                EXEC(@sql);
+            END;
+            """);
+
+        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
+        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Tier1Findings);
+    }
+
+    [Fact]
+    public async Task NoKnownCaller_PlaceholderInIdentifierAndValuePosition_StillUnanalyzable()
+    {
+        // Near-miss for the fires-fixture above: @Flag's placeholder sits BARE in a WHERE
+        // predicate's value position, not inside any collected table identifier - so NOT every
+        // occurrence is within a name, and this still refuses via the ordinary Unsupported
+        // fallback exactly as before this change (the identifier-only exemption never widens to
+        // cover a genuine value position, only object identity).
+        var report = await Scan("""
+            CREATE PROCEDURE dbo.usp_SkipChecks @SchemaName SYSNAME, @Flag SYSNAME AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM ' + QUOTENAME(@SchemaName) + N'.T WHERE Col1 = ' + @Flag;
+                EXEC(@sql);
+            END;
+            """);
+
+        var finding = Assert.Single(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        Assert.Equal("symbolic-value-unsupported-position", finding.Reason);
+        Assert.Empty(report.TypedFindings);
+        Assert.Empty(report.Tier1Findings);
+    }
+
+    [Fact]
     public async Task CallerPassesVariableNotLiteral_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
         // @IncomingStatus is a variable, not a literal, so the single known caller can't supply a
