@@ -235,6 +235,31 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecInsideTryBlock_AnalyzesUsingOnlyTrySideState_UnaffectedByLaterCatchReassignment()
+    {
+        // @SQL is built before a TRY block; the TRY's own EXEC must analyze it exactly as the
+        // TRY-side state has it, regardless of what the CATCH block goes on to do with the SAME
+        // variable afterward - the EXEC statement itself always lives on the TRY path, so a
+        // divergent CATCH-side reassignment happening AFTER it in source order is never relevant
+        // to what already executed. HandleTryCatch already walks tryDict to completion (running
+        // every EXEC it contains) before catchDict is even built, so this is a proof this already
+        // holds, not a fix.
+        var result = Scan("""
+            DECLARE @SQL NVARCHAR(MAX) = N'SELECT 1'
+            BEGIN TRY
+                EXEC (@SQL)
+            END TRY
+            BEGIN CATCH
+                SET @SQL = N'SELECT 2'
+            END CATCH
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
     public void Scan_ExecOfLocallyDeclaredLiteralVariable_TierC_ProducesAnalyzableScript()
     {
         // Tier C: a straight-line DECLARE-with-literal-initializer immediately reaching the
