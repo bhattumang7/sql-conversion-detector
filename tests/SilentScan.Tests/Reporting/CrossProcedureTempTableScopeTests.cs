@@ -77,4 +77,30 @@ public sealed class CrossProcedureTempTableScopeTests
         Assert.DoesNotContain(report.TypedFindings, f => f.Column.ColumnName == "Col" && f.Column.TableQualifiedName == "#Results");
         Assert.Contains(report.SkippedConstructs, s => s.ConstructKind == "FROM table reference" && s.Reason.Contains("#Results", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task SubProcedureQueriesCallersTempTable_InsideDynamicSql_SingleKnownCaller_Resolves()
+    {
+        // The same single-known-caller resolution as above, but the predicate against #Results
+        // is built inside dynamic SQL text in the callee, not written directly in its static
+        // body - callerScopeByCalleeScope must reach the reparsed EXEC(@sql) fragment too, not
+        // just the callee's own literal SQL.
+        var report = await Scan("""
+            CREATE PROCEDURE dbo.usp_Sub AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM #Results WHERE Col = N''x''';
+                EXEC(@sql);
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_Driver AS
+            BEGIN
+                CREATE TABLE #Results (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+                EXEC dbo.usp_Sub;
+            END
+            """);
+
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.Equal("#Results", finding.Column.TableQualifiedName);
+    }
 }

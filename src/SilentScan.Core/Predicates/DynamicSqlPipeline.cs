@@ -41,8 +41,9 @@ public static partial class DynamicSqlPipeline
     [GeneratedRegex(@"\$[A-Za-z_][A-Za-z0-9_]*\$")]
     private static partial Regex TemplatePlaceholderRegex();
 
-    public static DynamicSqlPipelineResult Analyze(IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage) =>
-        Analyze(scripts, catalog, lineage, depth: 1, seeds: null);
+    public static DynamicSqlPipelineResult Analyze(
+        IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null) =>
+        Analyze(scripts, catalog, lineage, depth: 1, seeds: null, callerScopeByCalleeScope);
 
     /// <summary>
     /// <paramref name="seeds"/> supplies, for a nested script whose own declared-parameter text
@@ -57,7 +58,8 @@ public static partial class DynamicSqlPipeline
         DatabaseCatalog catalog,
         LineageCatalog lineage,
         int depth,
-        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds)
+        Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
+        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null)
     {
         var accumulator = new ResultAccumulator();
 
@@ -73,7 +75,7 @@ public static partial class DynamicSqlPipeline
             var perCallSite = new ResultAccumulator();
             foreach (var script in group)
             {
-                ProcessScript(script, catalog, lineage, depth, seeds, perCallSite);
+                ProcessScript(script, catalog, lineage, depth, seeds, callerScopeByCalleeScope, perCallSite);
             }
 
             accumulator.Findings.AddRange(perCallSite.Findings);
@@ -278,6 +280,7 @@ public static partial class DynamicSqlPipeline
         LineageCatalog lineage,
         int depth,
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
+        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope,
         ResultAccumulator accumulator)
     {
         var placeholders = script.PlaceholderOccurrences;
@@ -290,7 +293,7 @@ public static partial class DynamicSqlPipeline
             script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
 
         var tier1Ledger = new SkipLedger();
-        foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope, tier1Ledger))
+        foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope, tier1Ledger, callerScopeByCalleeScope))
         {
             accumulator.Tier1.Add(Remap(tier1Finding, script));
         }
@@ -306,7 +309,7 @@ public static partial class DynamicSqlPipeline
         var declaredParameters = seeds is not null && seeds.TryGetValue(script, out var seed)
             ? MergeSeededParameters(ownDeclaredParameters, seed)
             : ownDeclaredParameters;
-        var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope);
+        var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope, callerScopeByCalleeScope);
         foreach (var typedFinding in extraction.TypedFindings)
         {
             accumulator.Typed.Add(Remap(typedFinding, script));
@@ -338,7 +341,7 @@ public static partial class DynamicSqlPipeline
         // trustworthy would launder that same unproven assumption one level deeper.
         var nested = placeholders is { Count: > 0 }
             ? RefuseNestedCandidates(innerParseResult, script)
-            : AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth);
+            : AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth, callerScopeByCalleeScope);
         accumulator.Findings.AddRange(nested.Findings);
         accumulator.Tier1.AddRange(nested.Tier1Findings);
         accumulator.Typed.AddRange(nested.TypedFindings);
@@ -354,7 +357,8 @@ public static partial class DynamicSqlPipeline
         IReadOnlyDictionary<string, SqlType?> outerDeclaredParameters,
         DatabaseCatalog catalog,
         LineageCatalog lineage,
-        int depth)
+        int depth,
+        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope)
     {
         // Propagates the outer script's own scope into the nested scanner - the reparsed inner
         // text has no CREATE PROCEDURE wrapper for it to discover the scope from itself, so
@@ -379,7 +383,7 @@ public static partial class DynamicSqlPipeline
         }
 
         var seeds = BuildArgumentBindingSeeds(nestedExtraction.AnalyzableScripts, outerDeclaredParameters);
-        var nestedResult = Analyze(nestedExtraction.AnalyzableScripts, catalog, lineage, depth + 1, seeds);
+        var nestedResult = Analyze(nestedExtraction.AnalyzableScripts, catalog, lineage, depth + 1, seeds, callerScopeByCalleeScope);
         findings.AddRange(nestedResult.Findings.Select(f => RemapFinding(f, script)));
 
         return new DynamicSqlPipelineResult(

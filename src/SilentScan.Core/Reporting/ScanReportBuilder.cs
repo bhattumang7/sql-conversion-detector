@@ -115,18 +115,6 @@ public static class ScanReportBuilder
         // explicitly not thread-safe), merged back together afterward; final findings are sorted
         // by source path/line below regardless, so the parallel completion order never leaks into
         // the report's own deterministic ordering.
-        var tier1PerFile = usableParseResults
-            .AsParallel()
-            .Select(r =>
-            {
-                var fileLedger = new SkipLedger();
-                var findings = NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: fileLedger).ToList();
-                return (Findings: findings, Skipped: fileLedger.Entries);
-            })
-            .ToList();
-        var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
-        var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
-
         // #temp tables are session-scoped in real SQL Server (visible to a callee EXEC'd from
         // the proc that created them), unlike a table variable (always proc-local, never
         // propagated) - a "driver" proc that creates #Results and EXECs several sub-procs
@@ -134,7 +122,9 @@ public static class ScanReportBuilder
         // caller SCOPE across the whole scan (two calls from the SAME caller still count as one) -
         // with two or more distinct callers there is no single #temp shape to fall back to,
         // mirroring this codebase's other single-caller soundness boundaries (e.g.
-        // ProcCallGraph.SingleCallSiteFor's own literal-seeding restriction).
+        // ProcCallGraph.SingleCallSiteFor's own literal-seeding restriction). Computed once here,
+        // before EITHER Tier-1 or the typed pass runs, so both benefit identically - a #temp
+        // table's own resolvability shouldn't depend on which pass happens to ask.
         var callerScopeByCalleeScope = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in procCallGraph.Edges
                      .Where(e => e.CallerScopeQualifiedName is not null)
@@ -146,6 +136,18 @@ public static class ScanReportBuilder
                 callerScopeByCalleeScope[group.Key] = distinctCallerScopes[0];
             }
         }
+
+        var tier1PerFile = usableParseResults
+            .AsParallel()
+            .Select(r =>
+            {
+                var fileLedger = new SkipLedger();
+                var findings = NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope).ToList();
+                return (Findings: findings, Skipped: fileLedger.Entries);
+            })
+            .ToList();
+        var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
+        var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
 
         var extractionResults = usableParseResults.AsParallel()
             .Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage, callerScopeByCalleeScope: callerScopeByCalleeScope))
@@ -164,7 +166,7 @@ public static class ScanReportBuilder
         // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/
         // sp_executesql arguments through the same pipeline and fold their findings in,
         // remapped back to their true source location.
-        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage);
+        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, callerScopeByCalleeScope);
         dynamicSqlFindings = [.. dynamicSqlFindings, .. dynamicSqlResult.Findings];
         tier1Findings = [.. tier1Findings, .. dynamicSqlResult.Tier1Findings];
         typedFindings = [.. typedFindings, .. dynamicSqlResult.TypedFindings];
