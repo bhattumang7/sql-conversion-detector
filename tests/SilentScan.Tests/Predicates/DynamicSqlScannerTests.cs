@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -2600,5 +2601,234 @@ public sealed class DynamicSqlScannerTests
 
         Assert.Empty(result.Findings);
         Assert.NotEmpty(result.AnalyzableScripts);
+    }
+
+
+    // ------------------------------------------------------------------
+    // Round 2 probes - PROBE-ONLY, temporary, deleted once triaged.
+    // ------------------------------------------------------------------
+
+    private static (DynamicSqlExtractionResult Extraction, DynamicSqlPipelineResult Pipeline) ProbePipeline(string sql)
+    {
+        var parseResult = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+        var extraction = DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([]));
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var lineage = LineageResolver.Resolve(catalog, [parseResult]);
+        var pipeline = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
+        return (extraction, pipeline);
+    }
+
+    private static void PrintProbe(string label, DynamicSqlExtractionResult extraction, DynamicSqlPipelineResult pipeline)
+    {
+        System.Console.WriteLine($"=== {label} ===");
+        System.Console.WriteLine("Scanner findings: " + string.Join(", ", extraction.Findings.Select(f => f.Reason)));
+        System.Console.WriteLine("Scanner scripts: " + extraction.AnalyzableScripts.Count);
+        System.Console.WriteLine("Pipeline findings: " + string.Join(", ", pipeline.Findings.Select(f => $"{f.Outcome}:{f.Reason}")));
+        System.Console.WriteLine("Pipeline typed findings: " + pipeline.TypedFindings.Count);
+    }
+
+    [Fact]
+    public void Probe_ReplaceOfLiteralTemplateWithSymbolicProcParam()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_DropFn @FunctionNamePrefix SYSNAME AS
+            BEGIN
+                DECLARE @Tmp NVARCHAR(MAX) = REPLACE(N'IF OBJECT_ID(''$Fn$'') IS NOT NULL DROP FUNCTION dbo.$Fn$;', N'$Fn$', @FunctionNamePrefix)
+                EXEC(@Tmp)
+            END
+            """);
+        PrintProbe("REPLACE template + symbolic proc param", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Scan_ExecOfConvertVarcharOfProcParamDateSplicedIntoLiteralTemplate_FoldsToTypedPlaceholder()
+    {
+        // CONVERT(VARCHAR(n), @param, style) already has dedicated handling
+        // (TryFoldCastOrConvert) that transfers the target VARCHAR type onto a placeholder -
+        // this is not a new construct, just that handling exercised inside a concatenation chain.
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.T (TripDate VARCHAR(20) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Range @StartDate DATETIME AS
+            BEGIN
+                DECLARE @SQL NVARCHAR(MAX) = N'SELECT 1 FROM dbo.T WHERE TripDate = ''' + CONVERT(VARCHAR(255), @StartDate, 126) + N''''
+                EXEC(@SQL)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Single(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Probe_DdlDropFunctionFromVariable()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Drop @FunctionName SYSNAME AS
+            BEGIN
+                DECLARE @tmp NVARCHAR(MAX) = N'DROP FUNCTION ' + @FunctionName
+                EXEC(@tmp)
+            END
+            """);
+        PrintProbe("DROP FUNCTION + symbolic name", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_OptionalFilterFragmentMidWhere()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE TABLE dbo.tblEvents (v_marker INT NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Events @FilterAttention NVARCHAR(100) AS
+            BEGIN
+                DECLARE @sqlSelect NVARCHAR(MAX) = N'SELECT 1 FROM dbo.tblEvents v ' + @FilterAttention + N' ORDER BY v_marker DESC'
+                EXEC(@sqlSelect)
+            END
+            """);
+        PrintProbe("optional filter fragment mid-WHERE", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Scan_ExecOfSymbolicTableNameConcatenatedIntoFromClause_FoldsToSymbolicPlaceholder()
+    {
+        // A caller-supplied identifier concatenated straight into the FROM clause (no wrapping
+        // template text around it) is already handled by the existing symbolic-placeholder
+        // machinery - the placeholder lands in an identifier position ScriptDom can reparse.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Lookup @LookupTable SYSNAME AS
+            BEGIN
+                DECLARE @SQL NVARCHAR(MAX) = N'SELECT 1 FROM dbo.' + @LookupTable + N' WHERE AgencyID = 1'
+                EXEC(@SQL)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Single(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableSetInsideIfBranchNestedInsideAnotherIfBranch_FoldsEachLeafPathIndependently()
+    {
+        // A SET nested two IF levels deep (outer selects the base query, inner appends a WHERE
+        // fragment) is just two independent applications of the same guarded-alternative
+        // divergence machinery that already handles a single level - no new construct.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Nested @TypeA INT, @SubType NVARCHAR(10) AS
+            BEGIN
+                DECLARE @SQL NVARCHAR(MAX)
+                IF @TypeA = 1
+                BEGIN
+                    SET @SQL = N'SELECT a FROM dbo.tblA'
+                    IF @SubType = N'X'
+                        SET @SQL = @SQL + N' WHERE x = 1'
+                    ELSE
+                        SET @SQL = @SQL + N' WHERE y = 1'
+                END
+                ELSE
+                    SET @SQL = N'SELECT b FROM dbo.tblB'
+                EXEC(@SQL)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(3, result.AnalyzableScripts.Count);
+    }
+
+    [Fact]
+    public void Scan_ExecOfStringConcatenatedWithCaseExpressionOnProcParam_FoldsEachCaseBranch()
+    {
+        // A CASE expression is a StringBuilders whitelisted node whose result is itself folded
+        // per-arm by the existing literal-value folding, so a CASE spliced into a concatenation
+        // chain folds the same way a literal segment would.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_CaseConcat @co_id INT AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Col LIKE '''
+                    + CASE @co_id WHEN 8 THEN '%' ELSE '' END
+                    + N'value'
+                    + CASE @co_id WHEN 8 THEN '%' ELSE '' END
+                    + N''''
+                EXEC(@sql)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(4, result.AnalyzableScripts.Count);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableSetInsideIfNestedInsideBitwiseGatedIf_FoldsToAnalyzableScripts()
+    {
+        // Two IF levels gated on bitwise-AND conditions rather than equality comparisons is not
+        // a distinct construct from ordinary nested IF divergence - the guard expression's shape
+        // doesn't matter to the fold, only which branch a SET lives in.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Bitflags @ColumnControlBits INT AS
+            BEGIN
+                DECLARE @UnionUser01 NVARCHAR(MAX) = N''
+                IF @ColumnControlBits & 1 <> 0
+                BEGIN
+                    IF @ColumnControlBits & 2 <> 0
+                        SET @UnionUser01 = N', User01'
+                END
+                DECLARE @SQL NVARCHAR(MAX) = N'SELECT 1' + @UnionUser01
+                EXEC(@SQL)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableSetAcrossThreeWayIfElseIfElseChain_FoldsAllThreeBranchesWithoutHittingCardinalityCap()
+    {
+        // A plain 3-way IF/ELSE-IF/ELSE chain assigning the same variable is nowhere near the
+        // 32-assembly cardinality cap - it produces exactly one assembly per branch.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Merge @mode INT AS
+            BEGIN
+                DECLARE @SQL NVARCHAR(MAX)
+                IF @mode = 1
+                    SET @SQL = N'SELECT 1'
+                ELSE IF @mode = 2
+                    SET @SQL = N'SELECT 2'
+                ELSE
+                    SET @SQL = N'SELECT 3'
+                EXEC(@SQL)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(3, result.AnalyzableScripts.Count);
+    }
+
+    [Fact]
+    public void Probe_SqlLoadedFromTableSubquery()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE TABLE dbo.tblScheduleAnalysisIssueSolutions (issue_id INT NOT NULL, solution_id INT NOT NULL, solution_sql NVARCHAR(4000) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_LoadSql @issue_id INT, @solution_id INT AS
+            BEGIN
+                DECLARE @sql NVARCHAR(4000) = (SELECT solution_sql FROM dbo.tblScheduleAnalysisIssueSolutions WHERE issue_id = @issue_id AND solution_id = @solution_id)
+                EXEC sp_executesql @sql
+            END
+            """);
+        PrintProbe("SQL loaded from table subquery", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_CursorSoleContentOfStatement()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_CursorQuery @Query NVARCHAR(MAX) AS
+            BEGIN
+                DECLARE @SelectQueryWithCursor NVARCHAR(MAX) = N'DECLARE AbuseCursor CURSOR FOR ' + @Query
+                EXEC(@SelectQueryWithCursor)
+            END
+            """);
+        PrintProbe("cursor body sole content of statement", extraction, pipeline);
     }
 }
