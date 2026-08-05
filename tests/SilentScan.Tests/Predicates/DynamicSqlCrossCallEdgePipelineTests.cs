@@ -60,6 +60,36 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
+    public async Task SingleCallerVariable_WithSingleUnconditionalLiteralAssignment_SeedsCalleeParameter_ScanForced()
+    {
+        // One-level constant propagation (CLAUDE.md roadmap): the caller passes a VARIABLE, not
+        // a literal directly - @v is assigned exactly once, unconditionally, so ProcCallGraphBuilder
+        // traces it back to 'Active' the same way a direct literal argument already seeds the
+        // callee's own parameter. High confidence (an exact traced value), not the Medium a
+        // generic "no known value" placeholder would get.
+        var report = await Scan("""
+            CREATE TABLE dbo.Orders (Status varchar(20) NOT NULL, INDEX IX_Status (Status));
+            GO
+            CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM dbo.Orders WHERE Status = N''' + @Status + N'''';
+                EXEC(@sql);
+            END;
+            GO
+            CREATE PROCEDURE dbo.usp_Caller AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+                EXEC dbo.usp_FindByStatus @v;
+            END;
+            """);
+
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Status");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.True(finding.Column.Indexed);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
     public async Task TwoCallersWithDifferentLiterals_BothAssembliesAnalyzed()
     {
         // Value-seeding across proc-call edges (extended beyond a single caller): every known

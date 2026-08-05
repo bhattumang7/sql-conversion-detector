@@ -38,6 +38,7 @@ public static class ProcCallGraphBuilder
     private sealed class Visitor(DatabaseCatalog catalog, SkipLedger ledger, string sourcePath) : TSqlFragmentVisitor
     {
         private string? _currentScope;
+        private IList<TSqlStatement>? _currentScopeStatements;
 
         public List<ProcCallEdge> Edges { get; } = [];
 
@@ -76,11 +77,22 @@ public static class ProcCallGraphBuilder
         private void VisitScopedBody(SchemaObjectName name, StatementList? statementList)
         {
             var previous = _currentScope;
+            var previousStatements = _currentScopeStatements;
             _currentScope = SchemaObjectNameHelper.Qualify(name);
+
+            // The overwhelmingly common `AS BEGIN ... END` shape wraps the WHOLE body in a
+            // single BeginEndBlockStatement - without unwrapping it, "the scope's own top-level
+            // statements" would be a one-element list containing just that wrapper, and every
+            // DECLARE/SET/EXEC actually in the body (all one level deeper) would look like it
+            // sits inside a nested block, never straight-line, to TryResolveTopLevelLiteral.
+            _currentScopeStatements = statementList?.Statements is [BeginEndBlockStatement singleBlock]
+                ? singleBlock.StatementList.Statements
+                : statementList?.Statements;
 
             // StatementList is null for an EXTERNAL NAME (CLR) body - nothing to walk.
             statementList?.AcceptChildren(this);
             _currentScope = previous;
+            _currentScopeStatements = previousStatements;
         }
 
         private void VisitProcedureCall(ExecuteStatement node, ExecutableProcedureReference procedureReference, SchemaObjectName calleeName)
@@ -94,7 +106,7 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
-            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath);
+            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
@@ -106,7 +118,8 @@ public static class ProcCallGraphBuilder
         /// exact, not an approximation.
         /// </summary>
         private static List<ProcCallArgument> MatchArguments(
-            IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath)
+            IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
+            IList<TSqlStatement>? currentScopeStatements)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -131,7 +144,9 @@ public static class ProcCallGraphBuilder
                 }
 
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
-                var literalArgument = actual.ParameterValue is StringLiteral stringLiteral ? ToLiteralArgument(stringLiteral, sourcePath) : null;
+                var literalArgument = actual.ParameterValue is StringLiteral stringLiteral
+                    ? ToLiteralArgument(stringLiteral, sourcePath)
+                    : ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument));
             }
@@ -139,10 +154,179 @@ public static class ProcCallGraphBuilder
             return matched;
         }
 
+        private static ProcCallLiteralArgument? ResolvePropagatedLiteral(
+            string? callerVariableName, IList<TSqlStatement>? currentScopeStatements, string sourcePath) =>
+            callerVariableName is not null && currentScopeStatements is not null
+                ? TryResolveTopLevelLiteral(currentScopeStatements, callerVariableName, sourcePath)
+                : null;
+
+        /// <summary>
+        /// One-level constant propagation (CLAUDE.md roadmap: trace a caller variable's own
+        /// literal assignment back through a proc-call edge) for a bare variable argument -
+        /// <c>DECLARE @v NVARCHAR(20) = N'Active'; EXEC callee @v;</c> resolves to 'Active' the
+        /// same way passing the literal directly would. Deliberately conservative on two fronts,
+        /// both required for this to be a proven fact rather than a guess: (1) <paramref
+        /// name="variableName"/> must never be written inside ANY nested IF/WHILE/TRY anywhere in
+        /// this scope (<see cref="ConditionallyWrittenVariableCollector"/>) - a conditional write
+        /// means the value at THIS call site depends on which branch ran, which this pass has no
+        /// way to determine relative to where the call itself sits; (2) the variable must have
+        /// EXACTLY ONE top-level literal assignment in the whole scope - two or more (even
+        /// agreeing ones) makes the value position-sensitive relative to the call site, which this
+        /// single linear pass over the scope's own top-level statements (no position tracking)
+        /// cannot resolve, so it declines rather than pick one arbitrarily.
+        /// </summary>
+        private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(IList<TSqlStatement> scopeStatements, string variableName, string sourcePath)
+        {
+            if (IsWrittenInsideConditional(scopeStatements, variableName))
+            {
+                return null;
+            }
+
+            return FindSingleTopLevelLiteralAssignment(scopeStatements, variableName, sourcePath);
+        }
+
+        private static bool IsWrittenInsideConditional(IList<TSqlStatement> scopeStatements, string variableName)
+        {
+            var poisoned = new ConditionallyWrittenVariableCollector();
+            foreach (var statement in scopeStatements)
+            {
+                statement.Accept(poisoned);
+            }
+
+            return poisoned.Names.Contains(variableName);
+        }
+
+        /// <summary>
+        /// One pass over the scope's own top-level statements, counting every DECLARE/SET that
+        /// targets <paramref name="variableName"/> - more than one (even agreeing literals) makes
+        /// the value position-sensitive relative to the call site, which this pass has no way to
+        /// resolve without tracking WHERE the call itself sits, so it declines rather than guess.
+        /// </summary>
+        private static ProcCallLiteralArgument? FindSingleTopLevelLiteralAssignment(
+            IList<TSqlStatement> scopeStatements, string variableName, string sourcePath)
+        {
+            ProcCallLiteralArgument? found = null;
+            var assignmentCount = 0;
+
+            foreach (var statement in scopeStatements)
+            {
+                if (!TryGetAssignmentToVariable(statement, variableName, sourcePath, out var literal))
+                {
+                    continue;
+                }
+
+                assignmentCount++;
+                if (literal is null)
+                {
+                    // A real assignment (DECLARE's own initializer, or a SET) whose RHS this pass
+                    // can't fold to a literal - the variable's value here is genuinely unknown,
+                    // not just unproven, so give up on this variable entirely rather than let a
+                    // LATER assignment's literal masquerade as the whole scope's answer.
+                    return null;
+                }
+
+                found = literal;
+            }
+
+            return assignmentCount == 1 ? found : null;
+        }
+
+        /// <summary>
+        /// True (with <paramref name="literal"/> set, possibly to null) when <paramref
+        /// name="statement"/> is a DECLARE or SET that targets <paramref name="variableName"/> -
+        /// null literal means the assignment exists but isn't a foldable string literal (a
+        /// non-literal RHS, or a <c>+=</c>/other non-plain assignment kind), which the caller
+        /// treats identically to "found a real assignment, but not a literal one".
+        /// </summary>
+        private static bool TryGetAssignmentToVariable(TSqlStatement statement, string variableName, string sourcePath, out ProcCallLiteralArgument? literal)
+        {
+            literal = null;
+            switch (statement)
+            {
+                case DeclareVariableStatement declare:
+                    var element = declare.Declarations.FirstOrDefault(
+                        e => string.Equals(e.VariableName.Value, variableName, StringComparison.OrdinalIgnoreCase));
+                    if (element is null)
+                    {
+                        return false;
+                    }
+
+                    literal = element.Value is StringLiteral stringLiteral ? ToLiteralArgument(stringLiteral, sourcePath) : null;
+                    return true;
+
+                case SetVariableStatement set when string.Equals(set.Variable.Name, variableName, StringComparison.OrdinalIgnoreCase):
+                    literal = set.AssignmentKind == AssignmentKind.Equals && set.Expression is StringLiteral setLiteral
+                        ? ToLiteralArgument(setLiteral, sourcePath)
+                        : null;
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
         private static ProcCallLiteralArgument ToLiteralArgument(StringLiteral stringLiteral, string sourcePath)
         {
             var prefixLength = stringLiteral.IsNational ? 2 : 1;
             return new ProcCallLiteralArgument(stringLiteral.Value, sourcePath, stringLiteral.StartLine, stringLiteral.StartColumn, prefixLength);
+        }
+
+        /// <summary>
+        /// Every variable name written (DECLARE-with-value or SET) anywhere inside an IF/WHILE/
+        /// TRY-CATCH subtree, at any nesting depth - the set <see cref="TryResolveTopLevelLiteral"/>
+        /// refuses to trust, since a write inside a conditional construct means the value at any
+        /// given later point depends on which branch actually ran, something this single-pass
+        /// scan (no fold-state tracking the way DynamicSqlScanner's own reaching-definitions
+        /// analysis has) cannot determine. A bare BEGIN/END block is NOT conditional and does not
+        /// bump depth - only IF/WHILE/TRY genuinely branch.
+        /// </summary>
+        private sealed class ConditionallyWrittenVariableCollector : TSqlFragmentVisitor
+        {
+            private int _conditionalDepth;
+
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public override void ExplicitVisit(IfStatement node)
+            {
+                _conditionalDepth++;
+                node.AcceptChildren(this);
+                _conditionalDepth--;
+            }
+
+            public override void ExplicitVisit(WhileStatement node)
+            {
+                _conditionalDepth++;
+                node.AcceptChildren(this);
+                _conditionalDepth--;
+            }
+
+            public override void ExplicitVisit(TryCatchStatement node)
+            {
+                _conditionalDepth++;
+                node.AcceptChildren(this);
+                _conditionalDepth--;
+            }
+
+            public override void ExplicitVisit(DeclareVariableStatement node)
+            {
+                if (_conditionalDepth == 0)
+                {
+                    return;
+                }
+
+                foreach (var element in node.Declarations)
+                {
+                    Names.Add(element.VariableName.Value);
+                }
+            }
+
+            public override void ExplicitVisit(SetVariableStatement node)
+            {
+                if (_conditionalDepth > 0)
+                {
+                    Names.Add(node.Variable.Name);
+                }
+            }
         }
     }
 }

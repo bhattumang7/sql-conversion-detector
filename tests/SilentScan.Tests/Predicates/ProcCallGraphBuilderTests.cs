@@ -147,4 +147,73 @@ public sealed class ProcCallGraphBuilderTests
         Assert.Equal(2, graph.EdgesCalling("dbo.Callee").Count());
         Assert.Empty(graph.EdgesCalling("dbo.SomeoneElse"));
     }
+
+    [Fact]
+    public void Build_CallerVariableWithSingleUnconditionalLiteralAssignment_PropagatesLiteral()
+    {
+        // One-level constant propagation (CLAUDE.md roadmap): DECLARE @v = 'literal' then EXEC
+        // callee @v resolves the SAME as passing the literal directly would - @v is never
+        // reassigned, so its value at the call site is unambiguous.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+                EXEC dbo.Callee @v;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@v", argument.CallerVariableName);
+        Assert.False(argument.IsLiteral);
+        Assert.NotNull(argument.LiteralArgument);
+        Assert.Equal("Active", argument.LiteralArgument!.Value);
+    }
+
+    [Fact]
+    public void Build_CallerVariableReassignedInsideIf_DoesNotPropagateLiteral()
+    {
+        // @v's value at the call site depends on which IF branch ran - this scan has no way to
+        // determine that relative to the call, so it must not guess either branch's literal.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller @flag INT AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+                IF @flag = 1
+                    SET @v = N'Archived';
+                EXEC dbo.Callee @v;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@v", argument.CallerVariableName);
+        Assert.Null(argument.LiteralArgument);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedTwiceAtTopLevel_DoesNotPropagateLiteral()
+    {
+        // Two top-level assignments make the value position-sensitive relative to the call site -
+        // this single linear pass has no position tracking, so it declines rather than guess
+        // which assignment was still in effect when the call actually ran.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+                SET @v = N'Archived';
+                EXEC dbo.Callee @v;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Null(argument.LiteralArgument);
+    }
 }
