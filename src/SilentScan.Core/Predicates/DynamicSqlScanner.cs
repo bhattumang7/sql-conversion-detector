@@ -1740,12 +1740,28 @@ public static class DynamicSqlScanner
                     when WhitelistedStringBuilders.Contains(functionName):
                     return TryFoldStringBuilder(builderCall, functionName, folded, foldingEnabled);
 
+                case FunctionCall { FunctionName.Value: var functionName, Parameters.Count: 0 } newIdCall
+                    when PlaceholderProducingNonDeterministicFunctions.Contains(functionName):
+                    // NEWID()/NEWSEQUENTIALID()'s VALUE is genuinely unknowable at compile time
+                    // (a fresh GUID per call), but their RETURN TYPE (uniqueidentifier) is a hard
+                    // T-SQL guarantee regardless of which call produced it - the same "known
+                    // shape, unknown value" case an uninitialized DECLARE already gets. Common
+                    // real-world shape: REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '') building a
+                    // unique temp table name - the existing CAST/REPLACE placeholder-type-transfer
+                    // machinery carries this placeholder the rest of the way once it originates
+                    // here, rather than needing its own separate propagation path.
+                    return FoldAttempt.OkSingle([new LiteralSegment(
+                        sourcePath, newIdCall.StartLine, newIdCall.StartColumn, PrefixLength: 0,
+                        PlaceholderToken(newIdCall.StartLine, newIdCall.StartColumn), new SqlType(SqlTypeCategory.UniqueIdentifier))]);
+
                 case FunctionCall { FunctionName.Value: var functionName }
                     when NonDeterministicFunctions.Contains(functionName):
-                    // A distinct reason from the generic ":function-call" below - NEWID()/
-                    // GETDATE()/RAND() aren't unimplemented, they're genuinely unknowable at
-                    // compile time regardless of how much folding this scanner ever grows, so
-                    // the study can state that plainly rather than lumping it with real gaps.
+                    // A distinct reason from the generic ":function-call" below - GETDATE()/
+                    // RAND()/... aren't unimplemented, they're genuinely unknowable at compile
+                    // time regardless of how much folding this scanner ever grows, so the study
+                    // can state that plainly rather than lumping it with real gaps. NEWID/
+                    // NEWSEQUENTIALID are carved out above - the one pair in this set with a
+                    // fixed, corpus-relevant return type worth a placeholder over a bare taint.
                     return FoldAttempt.Fail("non-deterministic-function", Span(expression));
 
                 case FunctionCall { FunctionName.Value: var functionName }
@@ -1895,6 +1911,20 @@ public static class DynamicSqlScanner
         {
             "NEWID", "NEWSEQUENTIALID", "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME",
             "SYSDATETIMEOFFSET", "RAND", "CHECKSUM", "BINARY_CHECKSUM",
+        };
+
+        /// <summary>
+        /// The subset of <see cref="NonDeterministicFunctions"/> worth a symbolic placeholder
+        /// (uniqueidentifier) over a bare taint - corpus-measured as the common real-world shape
+        /// for a unique temp table/object name: REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '').
+        /// GETDATE/RAND/... stay bare taints - each would need its own return-type reasoning
+        /// (RAND's [0,1) float range, GETDATE's implicit precision) with no confirmed corpus
+        /// occurrence justifying the extra surface, per this scanner's "never guess past what's
+        /// actually measured" policy.
+        /// </summary>
+        private static readonly HashSet<string> PlaceholderProducingNonDeterministicFunctions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "NEWID", "NEWSEQUENTIALID",
         };
 
         // SERVERPROPERTY is deterministic PER SERVER (unlike NonDeterministicFunctions above) but

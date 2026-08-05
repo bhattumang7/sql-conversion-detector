@@ -184,6 +184,29 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecOfTableNameBuiltFromNewId_TreatsNewIdAsSymbolicPlaceholder()
+    {
+        // A common real-world pattern for a unique global temp table name:
+        // REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', ''). NEWID()'s VALUE is genuinely
+        // unknowable at compile time (a fresh GUID every call), but its RETURN TYPE
+        // (uniqueidentifier) is a hard guarantee regardless of which call produced it - the same
+        // "known shape, unknown value" case an uninitialized DECLARE already gets. The whole
+        // chain (NEWID -> CAST to varchar(36) -> REPLACE) already has generic placeholder-type-
+        // transfer machinery for every step BUT the innermost NEWID() call itself, which today
+        // refuses outright via the NonDeterministicFunctions taint - this must fold to an
+        // analyzable script instead of tainting the whole call site.
+        var result = Scan("""
+            DECLARE @tableName VARCHAR(50)
+            SET @tableName = 'tbl_RILTemp_' + REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '')
+            EXEC ('DROP TABLE ' + @tableName)
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
     public void Scan_ExecOfLocallyDeclaredLiteralVariable_TierC_ProducesAnalyzableScript()
     {
         // Tier C: a straight-line DECLARE-with-literal-initializer immediately reaching the
@@ -1894,14 +1917,18 @@ public sealed class DynamicSqlScannerTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Scan_ExecOfNewIdCastToString_Declines_NonDeterministicFunction()
+    public void Scan_ExecOfNewIdCastToString_TreatsNewIdAsSymbolicPlaceholder()
     {
+        // Superseded by Scan_ExecOfTableNameBuiltFromNewId_TreatsNewIdAsSymbolicPlaceholder's own
+        // fix: NEWID()'s return TYPE (uniqueidentifier) is a hard guarantee even though its VALUE
+        // isn't, so this now folds to a placeholder rather than declining outright.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'DROP TABLE tbl_' + CAST(NEWID() AS NVARCHAR(36)); " +
             "EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("non-deterministic-function", finding.Reason);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
     }
 
     [Fact]

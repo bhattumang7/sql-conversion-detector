@@ -739,6 +739,35 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_NewIdCastToStringInPredicate_ScanForced_OracleConfirmed()
+    {
+        // Proves NEWID()'s own placeholder-origination (not a value TRANSFERRED through a
+        // function like the proc-param tests above, but one that ORIGINATES from NEWID() itself)
+        // reaches a real oracle-confirmed verdict when it lands in an actual predicate, not just
+        // that a NEWID-built call site becomes analyzable in isolation.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_FindByNewId AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + CAST(NEWID() AS NVARCHAR(36)) + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_ScanForced_OracleConfirmed()
     {
         // Per-occurrence placeholder position proof, not per-statement shape: @LogTableName's
