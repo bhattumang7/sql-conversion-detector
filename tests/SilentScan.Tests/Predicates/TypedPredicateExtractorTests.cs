@@ -2414,6 +2414,42 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task InlineTvfViaCrossApply_PredicateResolvesToBaseColumnWithDepth_OracleConfirmed()
+    {
+        // The realistic real-world shape a hand-rolled string-splitting/per-row utility TVF is
+        // actually called in - CROSS APPLY against a correlated argument, not a bare FROM with a
+        // constant - has no test coverage anywhere in this suite even though the bare-FROM case
+        // right above does. CROSS APPLY parses as ScriptDom's UnqualifiedJoin (a JoinTableReference
+        // subtype), which FromScopeResolver.FlattenJoins already recurses through generically, so
+        // this is expected to resolve identically to the bare-FROM case - this test is the proof.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersTvf (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE FUNCTION dbo.fn_GetOrdersTvf(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.OrdersTvf);",
+            """
+            CREATE PROCEDURE dbo.usp_FindOrdersViaApply @CustomerId NVARCHAR(20)
+            AS
+            BEGIN
+                SELECT f.Id FROM dbo.OrdersTvf o CROSS APPLY dbo.fn_GetOrdersTvf(o.Id) f WHERE f.CustomerId = @CustomerId;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.OrdersTvf", finding.Column.TableQualifiedName);
+        Assert.Equal("CustomerId", finding.Column.ColumnName);
+        Assert.True(finding.Column.Depth >= 1);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        // Same probe-fidelity limitation as the bare-FROM test above - hand-build the equivalent
+        // CROSS APPLY probe with a real correlated left side instead of the generic prober.
+        var probe = "DECLARE @p NVARCHAR(20); SELECT 1 FROM dbo.OrdersTvf o CROSS APPLY dbo.fn_GetOrdersTvf(o.Id) f WHERE f.CustomerId = @p;";
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
+        var conversions = ConvertImplicitDetector.FindColumnConversions(planXml);
+        Assert.Contains(conversions, c =>
+            string.Equals(c.Table, "OrdersTvf", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.Column, "CustomerId", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task MultiStatementTvfInFromClause_UsesDeclaredReturnColumnType_OracleConfirmed()
     {
         // A multi-statement TVF's columns are Declared provenance (its RETURNS @t TABLE(...)
