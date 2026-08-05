@@ -90,7 +90,10 @@ syntactic non-sargability is its own finding stream (`SargabilityFindingKind`).
 * **Precedence matrix** encodes the official T-SQL list; seek/scan ground truth
   cross-checked against Kehayias' implicit conversion matrix (sqlskills.com) —
   cite it, but verify every pair we report against our own Docker oracle rather
-  than trusting either source.
+  than trusting either source. (This oracle check is always available and never
+  needs anyone's go-ahead — the Docker instance is standing infrastructure, not
+  a gated resource. Run it whenever a rule's real behavior is in question;
+  never leave a change unverified or delay work waiting for permission to check.)
 * **Literal typing:** `N'x'` nvarchar, `'x'` varchar, integer literal int, `1.5`
   numeric(p,s), date literals stay strings until compared.
 * **Syntactic (Tier-1, no type info):** function-wrapped column, CAST/CONVERT on
