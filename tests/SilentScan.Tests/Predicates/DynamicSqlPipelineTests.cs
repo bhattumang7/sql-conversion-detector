@@ -127,6 +127,45 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_ExecBuiltFromSelectAssignmentSourceColumn_UsedInPredicate_ScanForced_OracleConfirmed()
+    {
+        // Proves the SELECT @var = expr FROM table placeholder machinery (already unit-tested in
+        // DynamicSqlScannerTests for the "known shape, unknown value" case) reaches a real,
+        // oracle-confirmed verdict when the source column's own placeholder is spliced into an
+        // actual predicate, not just that the SELECT-assignment call site becomes analyzable in
+        // isolation. Deliberately reuses dbo.T as its own source table (varchar(10)) rather than
+        // introducing a second table this class's shared schema doesn't deploy.
+        var (catalog, lineage) = BuildCatalog();
+
+        var appSql = """
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX)
+                SELECT @sql = N'SELECT Col FROM dbo.T WHERE Col = N''' + Col + N''''
+                FROM dbo.T
+                EXEC(@sql)
+            END
+            """;
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var extraction = DynamicSqlScanner.Scan(parseResult, catalog: catalog);
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
     public async Task Analyze_ExecBuiltFromCursorFetchedNvarcharVariable_UsedInPredicate_ScanForced_OracleConfirmed()
     {
         // Proves the cursor/FETCH placeholder machinery doesn't just make a call site
