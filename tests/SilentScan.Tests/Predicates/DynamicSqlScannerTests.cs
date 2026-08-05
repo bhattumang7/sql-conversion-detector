@@ -2622,6 +2622,36 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecOfStrOfChecksumPlaceholder_TransfersPlaceholderTypeAsFixedLengthChar()
+    {
+        // STR(float_expr [, length [, decimal]]) always returns a CHAR(length) value (length 10
+        // by default) regardless of what the input actually is - the same "target type pinned by
+        // the call site's own syntax, not the input's" reasoning CAST/CONVERT already use, so a
+        // numeric placeholder (CHECKSUM here) should transfer through it the same way.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + STR(CHECKSUM('a', 'b'), 10); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfCastOfChecksumPlaceholderToChar_TransfersPlaceholderTypeAsFixedLengthChar()
+    {
+        // CAST/CONVERT's blank-padding rendering algorithm for a CHAR/NCHAR target isn't modeled
+        // (declines rather than guessing the padded VALUE, same as before) - but that's a value-
+        // rendering concern, not a type one: CAST(@x AS CHAR(10)) unambiguously produces a
+        // CHAR(10)-typed result regardless of what @x actually is, so the placeholder-transfer
+        // path (which only needs the TYPE, never the rendered content) should still work for a
+        // CHAR/NCHAR target exactly as it already does for VARCHAR/NVARCHAR.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + CAST(CHECKSUM('a', 'b') AS CHAR(10)); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
     public void Scan_ExecOfReplaceOfLiteralTemplateWithSymbolicProcParam_SplicesPlaceholderIntoTemplate()
     {
         // REPLACE(literalTemplate, literalToken, @symbolicValue) has a literal SOURCE and a

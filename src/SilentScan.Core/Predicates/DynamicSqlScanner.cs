@@ -1746,6 +1746,10 @@ public static class DynamicSqlScanner
                         || string.Equals(functionName, FnNChar, StringComparison.OrdinalIgnoreCase):
                     return TryFoldCharOrNChar(charCall, functionName, folded, foldingEnabled);
 
+                case FunctionCall { FunctionName.Value: var functionName } strCall
+                    when string.Equals(functionName, FnStr, StringComparison.OrdinalIgnoreCase):
+                    return TryFoldStr(strCall, folded, foldingEnabled);
+
                 // ISNULL(a, b): whenever this scanner successfully folds `a` at all, that value is
                 // PROVABLY non-NULL - a variable folds to Constant assemblies only by tracing a
                 // real literal/DECLARE/SET chain, and a bare `SET @x = NULL` fails to fold (no
@@ -1928,6 +1932,7 @@ public static class DynamicSqlScanner
         private const string FnQuoteName = "QUOTENAME";
         private const string FnChar = "CHAR";
         private const string FnNChar = "NCHAR";
+        private const string FnStr = "STR";
         private const string FnIsNull = "ISNULL";
 
         /// <summary>
@@ -2379,20 +2384,27 @@ public static class DynamicSqlScanner
         }
 
         /// <summary>
-        /// CAST/CONVERT folds only onto a VARCHAR(n)/NVARCHAR(n) (or MAX) target - the one target
-        /// family whose rendering of an already-string source is pinned down (oracle-verified:
-        /// silently truncates an over-length value, no error). CHAR/NCHAR (blank-padding,
-        /// oracle-verified: <c>CAST('ab' AS char(5))</c> is <c>'ab   '</c>) and every non-string
-        /// target (int/date/decimal/...) each have their own rendering algorithm this scanner has
-        /// no verified implementation of - declined rather than guessing a format, per CLAUDE.md.
-        /// CONVERT's optional style argument is therefore irrelevant here too: style only affects
-        /// non-string-family renderings this fold never attempts.
+        /// CAST/CONVERT's VALUE-rendering fold (the second half of this method, computing an
+        /// actual truncated string) works only for a VARCHAR(n)/NVARCHAR(n) (or MAX) target - the
+        /// one target family whose rendering of an already-string source is pinned down
+        /// (oracle-verified: silently truncates an over-length value, no error). CHAR/NCHAR
+        /// (blank-padding, oracle-verified: <c>CAST('ab' AS char(5))</c> is <c>'ab   '</c>) and
+        /// every non-string target (int/date/decimal/...) each have their own rendering algorithm
+        /// this scanner has no verified implementation of - declined rather than guessing a
+        /// format, per CLAUDE.md. CONVERT's optional style argument is therefore irrelevant here
+        /// too: style only affects non-string-family renderings this fold never attempts.
+        ///
+        /// The PLACEHOLDER-TRANSFER fold (the first half) is a different question entirely - it
+        /// only needs the source's resulting TYPE, never a rendered value, and CAST(@x AS
+        /// CHAR(10))'s result type is exactly as unambiguously CHAR(10) as CAST(@x AS
+        /// VARCHAR(10))'s is VARCHAR(10), blank-padding notwithstanding - so CHAR/NCHAR targets
+        /// are accepted there even though the value-rendering fold below still can't use them.
         /// </summary>
         private FoldAttempt TryFoldCastOrConvert(
             ScalarExpression source, DataTypeReference dataType, TSqlFragment site, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
             var targetType = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
-            if (targetType is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar })
+            if (targetType is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.Char or SqlTypeCategory.NChar })
             {
                 return FoldAttempt.Fail("non-literal-expression:cast-target-not-pinned", Span(site));
             }
@@ -2403,6 +2415,14 @@ public static class DynamicSqlScanner
             if (TryTransferPlaceholderThroughFunction(source, functionKey: string.Empty, site, folded, foldingEnabled, explicitTargetType: targetType) is { } transferred)
             {
                 return transferred;
+            }
+
+            if (targetType.Category is SqlTypeCategory.Char or SqlTypeCategory.NChar)
+            {
+                // Source resolved to a real, non-placeholder value (or failed outright) - CHAR/
+                // NCHAR's blank-padding rendering isn't modeled, so there is no value to compute
+                // here; declines rather than guessing a padded result.
+                return FoldAttempt.Fail("non-literal-expression:cast-target-not-pinned", Span(site));
             }
 
             return TryFoldOverArgumentCombinations([source], folded, foldingEnabled, site, values =>
@@ -2617,6 +2637,45 @@ public static class DynamicSqlScanner
 
             var value = ((char)codePoint).ToString();
             return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, value)]);
+        }
+
+        /// <summary>
+        /// <c>STR(float_expr [, length [, decimal]])</c> always returns a fixed-length CHAR value
+        /// (CHAR(10) when length/decimal are omitted, oracle-verified) regardless of what
+        /// float_expr actually evaluates to - the same "target type pinned by the call site's own
+        /// syntax, not the input's runtime value" reasoning CAST/CONVERT already use for their own
+        /// target type. This scanner never models STR's actual numeric-to-string rendering
+        /// algorithm (rounding/padding/overflow-to-'*' behavior) - the only fold this ever
+        /// produces is the placeholder-type transfer; a literal, non-placeholder float_expr still
+        /// declines rather than guessing a rendered value. length/decimal must themselves be
+        /// literal integers, for the same reason as <see cref="TryFoldLeftOrRight"/>'s length
+        /// argument - this scanner tracks only string variable values, never numeric ones.
+        /// </summary>
+        private FoldAttempt TryFoldStr(FunctionCall functionCall, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            if (functionCall.Parameters.Count is < 1 or > 3)
+            {
+                return FailNonLiteralExpression(functionCall);
+            }
+
+            var length = 10;
+            if (functionCall.Parameters.Count >= 2 && !TryFoldIntegerLiteral(functionCall.Parameters[1], folded, foldingEnabled, out length))
+            {
+                return FoldAttempt.Fail("non-literal-expression:function-call-argument-diverges", Span(functionCall));
+            }
+
+            if (length < 1)
+            {
+                return FoldAttempt.Fail("non-literal-expression:str-length-out-of-range", Span(functionCall));
+            }
+
+            var targetType = new SqlType(SqlTypeCategory.Char, Length: length);
+            if (TryTransferPlaceholderThroughFunction(functionCall.Parameters[0], functionKey: string.Empty, functionCall, folded, foldingEnabled, explicitTargetType: targetType) is { } transferred)
+            {
+                return transferred;
+            }
+
+            return FailNonLiteralExpression(functionCall);
         }
 
         /// <summary>
