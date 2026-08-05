@@ -1451,19 +1451,36 @@ public static class TypedPredicateExtractor
             {
                 RecordExpressionDerivedFinding(columnName, columnRef, provenance, scopeChain);
             }
-            else if (provenance is ColumnProvenance.Union)
+            else if (provenance is ColumnProvenance.Union union)
             {
-                // A UNION-view column (the common partitioned-view pattern) is genuinely not
-                // eligible for a verdict here - branches can resolve to different base columns
-                // entirely, so there is no single "the column" to classify. Ledgering this
-                // (unlike the Cast/Expression case above, whose non-eligibility is already
-                // reported as its own ExpressionDerivedFinding) closes a silent-clean gap:
-                // before this, a predicate against a union-backed column produced no finding
-                // AND no ledger entry at all, contradicting the "never silently counted as
-                // clean" contract every other unresolvable path in this file honors.
+                // A UNION-view column (the common partitioned-view pattern) usually can't get a
+                // single verdict - branches can resolve to entirely different base columns - but
+                // when EVERY branch independently agrees on type (and, for the string family,
+                // collation - AllBranchesAgree, reused from Pass 2's own TryGetScalarType so this
+                // can never drift from what Pass 2 already proved), the comparison's OWN type
+                // behavior is fully determined regardless of which branch actually produced the
+                // row: T-SQL doesn't narrow a UNION's output type per-row, so one agreed type
+                // is not a guess, it's the column's real, single runtime type. No single branch's
+                // TableQualifiedName is picked (that WOULD be a guess when branches differ), so
+                // this stays Indexed=false and reports "?" the same way a Declared column (also
+                // not traceable to one real catalog table) already does - it can still classify
+                // ScanForced/SeekPreserved/RangeSeek, just never "this seeks via an index".
+                var agreedType = ColumnProvenanceAnalysis.TryGetScalarType(union);
+                if (agreedType is not null)
+                {
+                    return new PredicateOperand.Column("?", columnName, agreedType, Indexed: false, Depth: 0, union);
+                }
+
+                // Branches disagree (or one of them is itself unresolved) - genuinely not
+                // eligible for a verdict. Ledgering this (unlike the Cast/Expression case above,
+                // whose non-eligibility is already reported as its own ExpressionDerivedFinding)
+                // closes a silent-clean gap: before this, a predicate against a union-backed
+                // column produced no finding AND no ledger entry at all, contradicting the
+                // "never silently counted as clean" contract every other unresolvable path in
+                // this file honors.
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, columnRef.StartLine, columnRef.StartColumn,
-                    PredicateOperandConstructKind, $"column '{columnName}' resolves through a UNION view - branches are not eligible for a single verdict, never guessed");
+                    PredicateOperandConstructKind, $"column '{columnName}' resolves through a UNION view whose branches disagree on type - not eligible for a single verdict, never guessed");
             }
 
             // Cast/Expression (reported above)/Union (reported above)/Unknown/Declared - not

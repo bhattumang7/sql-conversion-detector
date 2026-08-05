@@ -472,6 +472,31 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_UnionViewWithAllPassthroughBranchesAgreeingOnType_ReachesRealVerdict()
+    {
+        // The gap the passthrough test above never actually closed: no ExpressionDerivedFinding
+        // firing does NOT mean a TYPED verdict was reached - before this, EVERY UNION-view
+        // column, even one where every branch independently agrees on type, was routed straight
+        // to Unknown (PredicateOperand.Value(Type: null)), so no ScanForced/SeekPreserved
+        // verdict was ever produced either. T-SQL doesn't narrow a UNION's output type per row -
+        // when every branch agrees, the merged column's own runtime type is fully determined
+        // regardless of which branch a given row came from, so this is a real (non-guessed)
+        // verdict, not a "pick the first branch" shortcut.
+        var findings = Extract(
+            "CREATE TABLE dbo.Recent (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Recent_Code (Code));",
+            "CREATE TABLE dbo.Archive (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Archive_Code (Code));",
+            "CREATE VIEW dbo.vw_Combined AS SELECT Code FROM dbo.Recent UNION ALL SELECT Code FROM dbo.Archive;",
+            "SELECT Code FROM dbo.vw_Combined WHERE Code = N'x';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        // Never claims a real index - no single branch's own index is "the" index for a merged,
+        // multi-table column.
+        Assert.False(finding.Column.Indexed);
+    }
+
+    [Fact]
     public void Extract_QualifierNotInScope_NoFinding_NeverFallsBackToNameOnlyMatch()
     {
         // docs/audit-remediation-plan.md Phase 2.1: 'x' is not a declared alias in this FROM
@@ -1670,7 +1695,12 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         """
         CREATE TABLE dbo.TCastInt (Id INT NOT NULL);
         CREATE TABLE dbo.RawCastInt (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
-        """);
+        """,
+        """
+        CREATE TABLE dbo.RecentUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.ArchiveUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        """,
+        "CREATE VIEW dbo.vw_CombinedUnion AS SELECT Code FROM dbo.RecentUnion UNION ALL SELECT Code FROM dbo.ArchiveUnion;");
 
     /// <summary>
     /// <see cref="PipelineOracleVerification.VerifyAsync"/>/<c>AssertAllConfirmed</c> only
@@ -1825,6 +1855,33 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
         PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task UnionViewWithAllPassthroughBranchesAgreeingOnType_ColumnConverts_ScanForced_OracleConfirmed()
+    {
+        // Oracle proof for the UNION-view type-agreement fix: every branch is a clean varchar
+        // passthrough, so the merged column's own runtime type is fully determined regardless of
+        // which branch a given row came from - a genuine, non-guessed column-side conversion.
+        var findings = Extract(
+            "CREATE TABLE dbo.RecentUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.ArchiveUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE VIEW dbo.vw_CombinedUnion AS SELECT Code FROM dbo.RecentUnion UNION ALL SELECT Code FROM dbo.ArchiveUnion;",
+            "SELECT Code FROM dbo.vw_CombinedUnion WHERE Code = N'x';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Code", finding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.False(finding.Column.Indexed);
+
+        // PipelineOracleVerification's generic prober queries finding.Column.TableQualifiedName
+        // directly, but a UNION-merged column deliberately has no single real table ("?") - same
+        // probe-fidelity limitation the TVF/CROSS APPLY tests hit. Hand-build the equivalent
+        // probe against the VIEW itself instead.
+        var probe = "DECLARE @p NVARCHAR(20); SELECT 1 FROM dbo.vw_CombinedUnion WHERE Code = @p;";
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
+        var conversions = ConvertImplicitDetector.FindColumnConversions(planXml);
+        Assert.Contains(conversions, c => string.Equals(c.Column, "Code", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
