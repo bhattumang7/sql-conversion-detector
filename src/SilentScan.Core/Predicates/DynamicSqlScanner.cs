@@ -2855,6 +2855,14 @@ public static class DynamicSqlScanner
         {
             FunctionCall => FoldAttempt.Fail("non-literal-expression:function-call", Span(expression)),
             ColumnReferenceExpression => FoldAttempt.Fail("non-literal-expression:column-reference", Span(expression)),
+            // A subquery reading a real FROM clause is a recognizable, common shape (SQL text
+            // stored in a lookup table and read back into a variable) - its VALUE genuinely lives
+            // in a database row, not anywhere in the source file, so this can never fold without
+            // reading real table data (forbidden for corpus code, CLAUDE.md). Distinct from the
+            // generic subquery bucket so the study's own reason breakdown says WHY, not just that
+            // a subquery was involved - DynamicSqlSummary already groups by this exact string.
+            ScalarSubquery { QueryExpression: QuerySpecification { FromClause: not null } } =>
+                FoldAttempt.Fail("non-literal-expression:sql-loaded-from-table", Span(expression)),
             ScalarSubquery => FoldAttempt.Fail("non-literal-expression:subquery", Span(expression)),
             // Reaches here only for a BinaryExpressionType other than Add (Subtract, Multiply,
             // BitwiseAnd, ...) - Add is folded in TryFoldExpression itself; every other operator

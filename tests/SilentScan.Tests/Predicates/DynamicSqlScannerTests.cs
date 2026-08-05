@@ -318,13 +318,18 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableAssignedFromScalarSubquery_ReasonNamesSubquery()
+    public void Scan_ExecOfVariableAssignedFromScalarSubquery_ReasonNamesSqlLoadedFromTable()
     {
+        // A subquery with its own FROM clause is the recognizable "SQL text stored in a table"
+        // shape - see Scan_ExecOfSqlTextLoadedViaSubqueryFromRealTable_ReportsDistinctReason for
+        // the full rationale. The generic "non-literal-expression:subquery" reason still applies
+        // to a FROM-less scalar subquery (e.g. a correlated EXISTS-style expression), untested
+        // here but unaffected by this split.
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = (SELECT TOP 1 SomeColumn FROM dbo.T); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("non-literal-expression:subquery", finding.Reason);
+        Assert.Equal("non-literal-expression:sql-loaded-from-table", finding.Reason);
     }
 
     // CASE/IIF and CAST/CONVERT are no longer unconditional declines - see the "CASE/IIF folding"
@@ -2883,18 +2888,27 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Probe_SqlLoadedFromTableSubquery()
+    public void Scan_ExecOfSqlTextLoadedViaSubqueryFromRealTable_ReportsDistinctReason()
     {
-        var (extraction, pipeline) = ProbePipeline("""
-            CREATE TABLE dbo.tblScheduleAnalysisIssueSolutions (issue_id INT NOT NULL, solution_id INT NOT NULL, solution_sql NVARCHAR(4000) NOT NULL);
-            GO
+        // The SQL text's own content lives in a database ROW, not anywhere in the source file -
+        // genuinely unknowable without reading real table data, which CLAUDE.md forbids for
+        // corpus code (no execution of corpus DML/procs). This must stay Unanalyzable - the
+        // point of this test is only that it gets a SPECIFIC, honest reason distinguishing "the
+        // value lives in a table" from an ordinary uncorrelated scalar subquery, rather than the
+        // generic non-literal-expression:subquery bucket.
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.tblScheduleAnalysisIssueSolutions (issue_id INT NOT NULL, solution_id INT NOT NULL, solution_sql NVARCHAR(4000) NOT NULL);",
+            """
             CREATE PROCEDURE dbo.usp_LoadSql @issue_id INT, @solution_id INT AS
             BEGIN
                 DECLARE @sql NVARCHAR(4000) = (SELECT solution_sql FROM dbo.tblScheduleAnalysisIssueSolutions WHERE issue_id = @issue_id AND solution_id = @solution_id)
                 EXEC sp_executesql @sql
             END
             """);
-        PrintProbe("SQL loaded from table subquery", extraction, pipeline);
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:sql-loaded-from-table", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
     }
 
     [Fact]
