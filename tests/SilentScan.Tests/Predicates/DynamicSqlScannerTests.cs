@@ -207,6 +207,34 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecOfVariableDeclaredOnlyInsideTryBlock_ReferencedInsideCatchBlock_FoldsToSymbolicPlaceholder()
+    {
+        // T-SQL locals are batch/proc scoped, not block-scoped - a variable DECLARE'd only
+        // inside a TRY block is still perfectly legal to reference inside its own CATCH block
+        // (the classic "log the dynamic SQL that just failed" pattern), because ScriptDOM/SQL
+        // Server allocate every local's storage for the whole batch at PARSE time regardless of
+        // whether the DECLARE statement itself ever executes. HandleTryCatch's own CATCH walk
+        // starts from a clone of the PRE-TRY state (correctly - CATCH only runs if TRY throws
+        // mid-way, so how far TRY got is unknowable) - but a variable that never existed in that
+        // pre-TRY state at all is looked up DURING the catch walk itself, before the outer
+        // TryMergeFreshlyDeclaredInOneBranchOnly placeholder logic (which only fires AFTER both
+        // branches finish, at the join point) ever gets a chance to run, so it still floors to
+        // the generic "variable-not-in-scope" taint today.
+        var result = Scan("""
+            BEGIN TRY
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'
+                EXEC (@sql)
+            END TRY
+            BEGIN CATCH
+                EXEC (@sql)
+            END CATCH
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+    }
+
+    [Fact]
     public void Scan_ExecOfLocallyDeclaredLiteralVariable_TierC_ProducesAnalyzableScript()
     {
         // Tier C: a straight-line DECLARE-with-literal-initializer immediately reaching the

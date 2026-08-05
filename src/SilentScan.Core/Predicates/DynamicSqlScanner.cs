@@ -1031,9 +1031,40 @@ public static class DynamicSqlScanner
             // CATCH only runs if TRY throws mid-way, so how far TRY got is unknowable - CATCH
             // starts from the pre-TRY state, not tryDict, however far WalkStatements got.
             var catchDict = new Dictionary<string, FoldState>(ClearGuardedAlternatives(folded), StringComparer.OrdinalIgnoreCase);
+            SeedCatchWithTryOnlyDeclarations(catchDict, tryDict, folded, Span(tryCatch));
             WalkStatements(tryCatch.CatchStatements.Statements, catchDict, foldingEnabled);
 
             MergeUnioningDivergent(folded, tryDict, catchDict, tryCatch, "diverges-across-try-catch");
+        }
+
+        /// <summary>
+        /// T-SQL locals are batch/proc scoped, not block-scoped - a variable DECLARE'd only
+        /// inside TRY (never present in the state BEFORE the TRY/CATCH at all) is still legal to
+        /// reference inside CATCH itself, the classic "log the dynamic SQL that just failed"
+        /// pattern, because storage for every local in the batch is allocated at PARSE time
+        /// regardless of whether the DECLARE statement's own line ever executes. Without this,
+        /// a lookup DURING the catch walk fails outright as "variable-not-in-scope" before
+        /// <see cref="MergeUnioningDivergent"/>'s own <see
+        /// cref="TryMergeFreshlyDeclaredInOneBranchOnly"/> placeholder logic - which only runs
+        /// AFTER both branches finish, at the join point - ever gets a chance to help. Only seeds
+        /// a variable whose TRY-side outcome carries a <see cref="FoldState.DeclaredType"/> (set
+        /// at DECLARE time) - without a type to synthesize a placeholder from, the catch-side
+        /// lookup is left to fail exactly as it always has.
+        /// </summary>
+        private static void SeedCatchWithTryOnlyDeclarations(
+            Dictionary<string, FoldState> catchDict, Dictionary<string, FoldState> tryDict, Dictionary<string, FoldState> preTryFolded, SourceSpan location)
+        {
+            foreach (var (key, state) in tryDict)
+            {
+                if (preTryFolded.ContainsKey(key) || state.DeclaredType is not { } type)
+                {
+                    continue;
+                }
+
+                var token = PlaceholderToken(location.Line, location.Column);
+                catchDict[key] = FoldState.ConstantSingle([new LiteralSegment(location.SourcePath, location.Line, location.Column, PrefixLength: 0, token, type)])
+                    .WithDeclaredType(type);
+            }
         }
 
         /// <summary>

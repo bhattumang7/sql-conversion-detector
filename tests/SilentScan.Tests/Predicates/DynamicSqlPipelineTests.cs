@@ -768,6 +768,56 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_CatchBlockReferencesVariableDeclaredOnlyInTry_ScanForced_OracleConfirmed()
+    {
+        // Proves the TRY-only-declaration placeholder (seeded into the CATCH walk itself, not
+        // just at the join point afterward) reaches a real, oracle-confirmed verdict when spliced
+        // into an actual predicate - the classic "retry/log using the same filter value" pattern -
+        // not just that the CATCH block's own call site becomes analyzable in isolation.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            """
+            CREATE PROCEDURE dbo.usp_FindWithRetry AS
+            BEGIN
+                BEGIN TRY
+                    DECLARE @filterValue NVARCHAR(20) = N'x'
+                    EXEC('SELECT Col FROM dbo.T WHERE Col = N''' + @filterValue + '''')
+                END TRY
+                BEGIN CATCH
+                    EXEC('SELECT Col FROM dbo.T WHERE Col = N''' + @filterValue + '''')
+                END CATCH
+            END
+            """);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var extraction = DynamicSqlScanner.Scan(parseResult);
+        Assert.Empty(extraction.Findings);
+        Assert.Equal(2, extraction.AnalyzableScripts.Count);
+
+        var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
+
+        // Two genuinely distinct call sites (the TRY's own EXEC and the CATCH's own EXEC are
+        // different statements at different lines) - PreferBestConfidencePerKey's dedup is
+        // scoped PER call site, so both survive as their own findings rather than collapsing:
+        // the TRY-side script is a full literal (High confidence); the CATCH-side script carries
+        // the seeded placeholder (Medium) - both must independently reach ScanForced for the
+        // SAME underlying defect.
+        Assert.Equal(2, result.TypedFindings.Count);
+        Assert.All(result.TypedFindings, f =>
+        {
+            Assert.Equal("Col", f.Column.ColumnName);
+            Assert.Equal(Verdict.ScanForced, f.Verdict);
+        });
+        Assert.Contains(result.TypedFindings, f => f.Confidence == FindingConfidence.High);
+        Assert.Contains(result.TypedFindings, f => f.Confidence == FindingConfidence.Medium);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, result.TypedFindings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_ScanForced_OracleConfirmed()
     {
         // Per-occurrence placeholder position proof, not per-statement shape: @LogTableName's
