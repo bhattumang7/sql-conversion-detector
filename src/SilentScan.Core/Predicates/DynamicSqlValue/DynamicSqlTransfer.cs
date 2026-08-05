@@ -20,7 +20,8 @@ public sealed record TransferContext(
     int Cap,
     DynamicSqlScope Scope,
     List<DynamicSqlFinding> Findings,
-    List<DynamicSqlScript> Scripts)
+    List<DynamicSqlScript> Scripts,
+    List<ProcedureOutputSummary> OutputSummaries)
 {
     public SourceSpan Span(TSqlFragment fragment) => new(SourcePath, fragment.StartLine, fragment.StartColumn);
 }
@@ -45,8 +46,114 @@ public static class DynamicSqlTransfer
         SetVariableStatement set => (state, _) => CompileAssignment(set.Variable.Name, set.AssignmentKind, set.Expression, set.FunctionCallExists, set, context, state),
         SelectStatement select => (state, _) => CompileSelectAssignment(select, context, state),
         ExecuteStatement exec => (state, emit) => CompileExecute(exec, context, state, emit),
+        ProcedureStatementBodyBase { StatementList: not null } procOrFunc => (_, emit) => CompileScopedBody(procOrFunc, context, emit),
+        ProcedureStatementBodyBase => static (_, _) => { }, // a body-less declaration (CLR proc/function via EXTERNAL NAME, or an inline TVF whose body is a single RETURN expression) - nothing to walk
+        TriggerStatementBody { StatementList: not null } trigger => (_, emit) => CompileTriggerBody(trigger, context, emit),
+        TriggerStatementBody => static (_, _) => { },
         _ => CompileHavocDefault(statement, context),
     };
+
+    /// <summary>
+    /// A nested CREATE/ALTER PROCEDURE or FUNCTION body found INSIDE the scope currently being
+    /// walked (matching on the shared <see cref="ProcedureStatementBodyBase"/> base, not the
+    /// concrete CREATE-only statement type, catches the real-world "stub CREATE PROCEDURE ... AS
+    /// RETURN 0, then ALTER PROCEDURE for the real body" pattern) - a fresh variable scope with
+    /// its own qualified name recorded as the enclosing scope for any dynamic SQL call site found
+    /// inside, mirroring <see cref="Catalog.CatalogBuilder"/>'s identical save/restore. Runs only
+    /// in the CFG's dedicated final pass: it recurses into a WHOLE NESTED
+    /// <see cref="DynamicSqlCfg.Solve"/>, which handles its own suppression internally, so running
+    /// it during the OUTER scope's suppressed fixpoint rounds would do the nested scope's own
+    /// work needlessly (and could double-report its findings/scripts once real emission runs).
+    /// Formal-parameter seeding from a caller's own call-graph edge (the old scanner's
+    /// <c>BuildParameterSeed</c>) is deferred - unseeded, a parameter reference simply reports
+    /// "variable-not-in-scope" exactly like today's behavior whenever no call graph is supplied.
+    /// </summary>
+    private static void CompileScopedBody(ProcedureStatementBodyBase procOrFunc, TransferContext context, bool emit)
+    {
+        if (!emit)
+        {
+            return;
+        }
+
+        var name = ProcedureOrFunctionName(procOrFunc);
+        var qualifiedName = name is null ? null : SchemaObjectNameHelper.Qualify(name);
+        var formalParameters = ProcedureOrFunctionParameters(procOrFunc);
+        var nestedScope = qualifiedName is null ? context.Scope : new DynamicSqlScope(qualifiedName, context.Scope.TriggerTarget);
+        var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
+
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, s => CompileLeaf(s, nestedContext));
+        var folded = cfg.Solve(procOrFunc.StatementList!.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        if (qualifiedName is not null && formalParameters is { Count: > 0 })
+        {
+            RecordOutputParameterSummaries(qualifiedName, formalParameters, folded, nestedContext);
+        }
+    }
+
+    private static void CompileTriggerBody(TriggerStatementBody trigger, TransferContext context, bool emit)
+    {
+        if (!emit)
+        {
+            return;
+        }
+
+        var nestedScope = new DynamicSqlScope(SchemaObjectNameHelper.Qualify(trigger.Name), trigger.TriggerObject.Name);
+        var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, s => CompileLeaf(s, nestedContext));
+        cfg.Solve(trigger.StatementList!.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    // Only ProcedureStatementBody's parameters are ever reachable from a call graph (built from
+    // EXEC ... call sites, never from a function invocation) - a function's own parameters are
+    // returned as null here, not [], matching the old scanner's identical distinction.
+    private static SchemaObjectName? ProcedureOrFunctionName(ProcedureStatementBodyBase procOrFunc) => procOrFunc switch
+    {
+        ProcedureStatementBody proc => proc.ProcedureReference.Name,
+        FunctionStatementBody func => func.Name,
+        _ => null,
+    };
+
+    private static IList<ProcedureParameter>? ProcedureOrFunctionParameters(ProcedureStatementBodyBase procOrFunc) =>
+        procOrFunc is ProcedureStatementBody proc ? proc.Parameters : null;
+
+    /// <summary>
+    /// An OUTPUT-declared formal parameter is just an ordinary local variable inside the body -
+    /// whatever this scan proved it holds by the end of the body (via the exact same SET/SELECT-
+    /// assignment/branch-merge machinery every other tracked variable goes through) IS the value
+    /// the procedure returns through it. An assembly resting on a hole is not a proven value, so
+    /// it is excluded rather than publishing a fabricated string; if EVERY assembly rests on a
+    /// hole, no summary is published at all - this scanner's standing "no entry at all, never a
+    /// guessed one" contract for every seed/summary it produces.
+    /// </summary>
+    private static void RecordOutputParameterSummaries(string qualifiedName, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> folded, TransferContext context)
+    {
+        foreach (var formal in formalParameters)
+        {
+            if (formal.Modifier != ParameterModifier.Output
+                || !folded.TryGetValue(formal.VariableName.Value, out var value)
+                || value is not SqlTextValue.Template template)
+            {
+                continue;
+            }
+
+            var widened = SqlTextValue.Widen(template, context.Cap, context.Span(formal));
+            if (widened is not SqlTextValue.Template widenedTemplate)
+            {
+                continue;
+            }
+
+            var values = SqlTextValue.Expand(widenedTemplate, context.Cap)
+                .Where(assembly => !SqlTextValue.ContainsHole(assembly))
+                .Select(assembly => string.Concat(assembly.OfType<FlatPiece.Lit>().Select(l => l.Text)))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (values.Count > 0)
+            {
+                context.OutputSummaries.Add(new ProcedureOutputSummary(qualifiedName, formal.VariableName.Value, values));
+            }
+        }
+    }
 
     private static void CompileDeclare(DeclareVariableStatement declare, TransferContext context, Dictionary<string, SqlTextValue> state)
     {

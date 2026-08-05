@@ -31,7 +31,7 @@ public sealed class DynamicSqlTransferTests
         scripts = [];
         var context = new TransferContext(
             new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase), SourcePath, Cap,
-            DynamicSqlScope.None, findings, scripts);
+            DynamicSqlScope.None, findings, scripts, []);
         var cfg = new DynamicSqlCfg(SourcePath, Cap, s => DynamicSqlTransfer.CompileLeaf(s, context));
         return cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
     }
