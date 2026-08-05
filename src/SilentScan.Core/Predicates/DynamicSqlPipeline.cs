@@ -516,6 +516,41 @@ public static partial class DynamicSqlPipeline
             Names.Add(node.TableName);
             base.ExplicitVisit(node);
         }
+
+        // DROP FUNCTION/PROCEDURE/VIEW/TRIGGER/SYNONYM all share DropObjectsStatement's own
+        // Objects shape, but ScriptDOM's visitor dispatches on each leaf type individually (there
+        // is no single ExplicitVisit(DropObjectsStatement) hook) - a symbolic identifier here is
+        // just as unresolvable against the real catalog as one in a FROM clause, for the same
+        // reason: nothing downstream ever looks it up as a TABLE reference.
+        public override void ExplicitVisit(DropFunctionStatement node)
+        {
+            Names.AddRange(node.Objects);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DropProcedureStatement node)
+        {
+            Names.AddRange(node.Objects);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DropViewStatement node)
+        {
+            Names.AddRange(node.Objects);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DropTriggerStatement node)
+        {
+            Names.AddRange(node.Objects);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DropSynonymStatement node)
+        {
+            Names.AddRange(node.Objects);
+            base.ExplicitVisit(node);
+        }
     }
 
     private static bool IsWithinIdentifier(SchemaObjectName name, PlaceholderOccurrence occurrence)

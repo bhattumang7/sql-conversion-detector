@@ -2641,6 +2641,29 @@ public sealed class DynamicSqlScannerTests
         Assert.Single(result.AnalyzableScripts);
     }
 
+    [Fact]
+    public void Analyze_ExecOfDropFunctionNamedFromSymbolicProcParam_TreatsIdentifierPositionAsSafe()
+    {
+        // DROP FUNCTION dbo.@symbolicName already folds fine (the symbolic identifier substitutes
+        // cleanly, same as a FROM-clause table name), and the reparse of the substituted text
+        // succeeds too - the placeholder just wasn't recognized as sitting in a safe IDENTIFIER
+        // position by AllPlaceholdersInSafePosition, which only checked NamedTableReference/
+        // DropTableStatement/TruncateTableStatement, not the DropObjectsStatement-derived DDL
+        // family (DROP FUNCTION/PROCEDURE/VIEW/TRIGGER/SYNONYM all share that same shape).
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Drop @FunctionName SYSNAME AS
+            BEGIN
+                DECLARE @tmp NVARCHAR(MAX) = N'DROP FUNCTION ' + @FunctionName
+                EXEC(@tmp)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Single(extraction.AnalyzableScripts);
+        var finding = Assert.Single(pipeline.Findings);
+        Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, finding.Outcome);
+    }
+
 
     // ------------------------------------------------------------------
     // Round 2 probes - PROBE-ONLY, temporary, deleted once triaged.
@@ -2686,18 +2709,6 @@ public sealed class DynamicSqlScannerTests
         Assert.Single(result.AnalyzableScripts);
     }
 
-    [Fact]
-    public void Probe_DdlDropFunctionFromVariable()
-    {
-        var (extraction, pipeline) = ProbePipeline("""
-            CREATE PROCEDURE dbo.usp_Drop @FunctionName SYSNAME AS
-            BEGIN
-                DECLARE @tmp NVARCHAR(MAX) = N'DROP FUNCTION ' + @FunctionName
-                EXEC(@tmp)
-            END
-            """);
-        PrintProbe("DROP FUNCTION + symbolic name", extraction, pipeline);
-    }
 
     [Fact]
     public void Probe_OptionalFilterFragmentMidWhere()
