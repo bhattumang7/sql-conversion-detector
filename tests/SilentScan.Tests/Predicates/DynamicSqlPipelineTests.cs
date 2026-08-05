@@ -127,6 +127,57 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_ExecBuiltFromCursorFetchedNvarcharVariable_UsedInPredicate_ScanForced_OracleConfirmed()
+    {
+        // Proves the cursor/FETCH placeholder machinery doesn't just make a call site
+        // ANALYZABLE (the shape asserted by DynamicSqlScannerTests) but that a real
+        // implicit-conversion defect built from a FETCH-sourced value actually reaches a
+        // verdict: @Value is FETCHed into an nvarchar local every loop iteration (a genuinely
+        // unknown, row-dependent value, but a HARD-typed one per its own DECLARE), then folded
+        // into the SAME nvarchar-literal-wrapped-placeholder shape the proc-param-no-caller
+        // tests above already prove sound - Col (VARCHAR/SQL_*) vs an NVARCHAR value is a
+        // genuine column-side conversion regardless of which mechanism supplied the placeholder.
+        var (catalog, lineage) = BuildCatalog();
+
+        var appSql = """
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @Value NVARCHAR(10) = NULL
+                DECLARE @sql NVARCHAR(MAX)
+                DECLARE cur CURSOR FOR SELECT SomeCol FROM dbo.SomeOtherTable
+                OPEN cur
+                FETCH NEXT FROM cur INTO @Value
+                WHILE (@@FETCH_STATUS = 0)
+                BEGIN
+                    SET @sql = N'SELECT Col FROM dbo.T WHERE Col = N''' + @Value + N''''
+                    EXEC(@sql)
+                    FETCH NEXT FROM cur INTO @Value
+                END
+                CLOSE cur
+                DEALLOCATE cur
+            END
+            """;
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var extraction = DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([]));
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.True(typedFinding.Column.Indexed);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
     public void Analyze_LiteralWithTier1AndExpressionDerivedPredicates_RemapsBothToSourceLine()
     {
         var (catalog, lineage) = BuildCatalog();
