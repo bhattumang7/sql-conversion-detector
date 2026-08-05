@@ -2603,6 +2603,44 @@ public sealed class DynamicSqlScannerTests
         Assert.NotEmpty(result.AnalyzableScripts);
     }
 
+    [Fact]
+    public void Scan_ExecOfStringBuiltFromCharOfLiteralCodePoint_FoldsToLiteralValue()
+    {
+        // CHAR(N)/NCHAR(N) with a literal integer code point already folds to the actual
+        // character via TryFoldCharOrNChar - this locks that existing behavior in as a
+        // permanent regression test rather than leaving it proven only by code reading.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + CHAR(13) + CHAR(10) + N'FROM dbo.T'
+                EXEC(@sql)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Single(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfReplaceOfLiteralTemplateWithSymbolicProcParam_SplicesPlaceholderIntoTemplate()
+    {
+        // REPLACE(literalTemplate, literalToken, @symbolicValue) has a literal SOURCE and a
+        // literal PATTERN - only the REPLACEMENT is symbolic. The template's shape (everything
+        // around each occurrence of the token) is still fully known, so this should splice the
+        // placeholder into the template at each occurrence rather than declining the whole fold
+        // just because one of REPLACE's three arguments isn't itself a literal.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_DropFn @FunctionNamePrefix SYSNAME AS
+            BEGIN
+                DECLARE @Tmp NVARCHAR(MAX) = REPLACE(N'IF OBJECT_ID(''$Fn$'') IS NOT NULL DROP FUNCTION dbo.$Fn$;', N'$Fn$', @FunctionNamePrefix)
+                EXEC(@Tmp)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Single(result.AnalyzableScripts);
+    }
+
 
     // ------------------------------------------------------------------
     // Round 2 probes - PROBE-ONLY, temporary, deleted once triaged.
@@ -2626,19 +2664,6 @@ public sealed class DynamicSqlScannerTests
         System.Console.WriteLine("Scanner scripts: " + extraction.AnalyzableScripts.Count);
         System.Console.WriteLine("Pipeline findings: " + string.Join(", ", pipeline.Findings.Select(f => $"{f.Outcome}:{f.Reason}")));
         System.Console.WriteLine("Pipeline typed findings: " + pipeline.TypedFindings.Count);
-    }
-
-    [Fact]
-    public void Probe_ReplaceOfLiteralTemplateWithSymbolicProcParam()
-    {
-        var (extraction, pipeline) = ProbePipeline("""
-            CREATE PROCEDURE dbo.usp_DropFn @FunctionNamePrefix SYSNAME AS
-            BEGIN
-                DECLARE @Tmp NVARCHAR(MAX) = REPLACE(N'IF OBJECT_ID(''$Fn$'') IS NOT NULL DROP FUNCTION dbo.$Fn$;', N'$Fn$', @FunctionNamePrefix)
-                EXEC(@Tmp)
-            END
-            """);
-        PrintProbe("REPLACE template + symbolic proc param", extraction, pipeline);
     }
 
     [Fact]

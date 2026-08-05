@@ -2267,6 +2267,11 @@ public static class DynamicSqlScanner
                 return transferred;
             }
 
+            if (TryFoldReplaceWithSymbolicReplacementValue(functionCall, folded, foldingEnabled) is { } spliced)
+            {
+                return spliced;
+            }
+
             return TryFoldOverArgumentCombinations(
                 [functionCall.Parameters[0], functionCall.Parameters[1], functionCall.Parameters[2]], folded, foldingEnabled, functionCall,
                 values =>
@@ -2289,6 +2294,88 @@ public static class DynamicSqlScanner
 
                     return FoldAttempt.OkSingle([new LiteralSegment(sourcePath, functionCall.StartLine, functionCall.StartColumn, PrefixLength: 0, ordinalResult)]);
                 });
+        }
+
+        /// <summary>
+        /// Handles <c>REPLACE(literalSource, literalPattern, @symbolicValue)</c> - a literal
+        /// SOURCE and PATTERN mean every occurrence of the pattern within the source is known at
+        /// analysis time even though the replacement text is not, so the template's SHAPE (the
+        /// literal fragments around each occurrence) is still fully known. Splits the source on
+        /// the pattern and splices the replacement's own placeholder segment between the pieces,
+        /// producing a multi-segment assembly the same way a literal-plus-variable concatenation
+        /// already does - not a new representation, just a new way to arrive at one. Returns null
+        /// (not a <see cref="FoldAttempt"/>) whenever the replacement argument isn't itself a pure
+        /// placeholder (source is a real fold or an outright failure, or replacement is a real
+        /// value or a mixed/multi-assembly fold), signalling "handle this the normal way" to
+        /// <see cref="TryFoldReplace"/>.
+        /// </summary>
+        private FoldAttempt? TryFoldReplaceWithSymbolicReplacementValue(FunctionCall functionCall, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            var replacementAttempt = TryFoldExpression(functionCall.Parameters[2], folded, foldingEnabled);
+            if (!replacementAttempt.Success
+                || replacementAttempt.Assemblies!.Count != 1
+                || replacementAttempt.Assemblies[0].Count != 1
+                || replacementAttempt.Assemblies[0][0].PlaceholderType is null)
+            {
+                return null;
+            }
+
+            var placeholderSegment = replacementAttempt.Assemblies[0][0];
+
+            if (!TryFlattenArgumentValues(functionCall.Parameters[0], folded, foldingEnabled, out var sourceValues, out var sourceFailure))
+            {
+                return sourceFailure;
+            }
+
+            if (!TryFlattenArgumentValues(functionCall.Parameters[1], folded, foldingEnabled, out var patternValues, out var patternFailure))
+            {
+                return patternFailure;
+            }
+
+            var assemblies = new List<IReadOnlyList<LiteralSegment>>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var source in sourceValues)
+            {
+                foreach (var pattern in patternValues)
+                {
+                    if (pattern.Length == 0)
+                    {
+                        return FoldAttempt.Fail("non-literal-expression:replace-empty-pattern", Span(functionCall));
+                    }
+
+                    var parts = source.Split(pattern, StringSplitOptions.None);
+                    if (seen.Add(string.Join('', parts)))
+                    {
+                        assemblies.Add(SpliceReplacementIntoTemplateParts(parts, placeholderSegment, functionCall));
+                    }
+                }
+            }
+
+            return FoldAttempt.Ok(assemblies);
+        }
+
+        private List<LiteralSegment> SpliceReplacementIntoTemplateParts(string[] parts, LiteralSegment placeholderSegment, TSqlFragment site)
+        {
+            var segments = new List<LiteralSegment>();
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (parts[i].Length > 0)
+                {
+                    segments.Add(new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, parts[i]));
+                }
+
+                if (i < parts.Length - 1)
+                {
+                    segments.Add(placeholderSegment);
+                }
+            }
+
+            if (segments.Count == 0)
+            {
+                segments.Add(new LiteralSegment(sourcePath, site.StartLine, site.StartColumn, PrefixLength: 0, string.Empty));
+            }
+
+            return segments;
         }
 
         /// <summary>
