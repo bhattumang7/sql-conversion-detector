@@ -18,14 +18,20 @@ public sealed class DynamicSqlTransferTests
     private const int Cap = 32;
     private const string SourcePath = "test.sql";
 
-    private static Dictionary<string, SqlTextValue> Run(string sql)
+    private static Dictionary<string, SqlTextValue> Run(string sql) => Run(sql, out _, out _);
+
+    private static Dictionary<string, SqlTextValue> Run(string sql, out List<DynamicSqlFinding> findings, out List<DynamicSqlScript> scripts)
     {
         var result = SqlScriptParser.ParseText(SourcePath, sql);
         Assert.False(result.HasErrors, string.Join(';', result.Errors.Select(e => e.Message)));
         var script = Assert.IsType<TSqlScript>(result.Fragment);
         var statements = script.Batches[0].Statements;
 
-        var context = new TransferContext(new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase), SourcePath, Cap);
+        findings = [];
+        scripts = [];
+        var context = new TransferContext(
+            new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase), SourcePath, Cap,
+            DynamicSqlScope.None, findings, scripts);
         var cfg = new DynamicSqlCfg(SourcePath, Cap, s => DynamicSqlTransfer.CompileLeaf(s, context));
         return cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
     }
@@ -149,5 +155,108 @@ public sealed class DynamicSqlTransferTests
         var result = Run("DECLARE @x NVARCHAR(50) = 'unchanged'; PRINT 'hello';");
 
         Assert.Equal("unchanged", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void Exec_LiteralString_EmitsOneHighConfidenceScript()
+    {
+        Run("EXEC('SELECT * FROM Users');", out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("SELECT * FROM Users", script.InnerText);
+        Assert.Equal(FindingConfidence.High, script.Confidence);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Exec_ConcatenatedLiteralAndVariable_FoldsIntoOneScript()
+    {
+        Run("DECLARE @tbl NVARCHAR(50) = 'Users'; EXEC('SELECT * FROM ' + @tbl);", out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("SELECT * FROM Users", script.InnerText);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Exec_UnresolvedVariable_EmitsUnanalyzableFinding()
+    {
+        Run("EXEC(@sql);", out var findings, out var scripts);
+
+        Assert.Empty(scripts);
+        var finding = Assert.Single(findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
+    }
+
+    [Fact]
+    public void Exec_BranchDivergentAssembly_EmitsOneScriptPerAlternative()
+    {
+        Run(
+            "DECLARE @sql NVARCHAR(MAX) = 'SELECT 1'; " +
+            "IF 1 = 1 SET @sql = 'SELECT 2'; " +
+            "EXEC(@sql);",
+            out var findings, out var scripts);
+
+        Assert.Empty(findings);
+        var texts = scripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT 1", "SELECT 2"], texts);
+    }
+
+    [Fact]
+    public void Exec_HoleInAssembly_EmitsMediumConfidenceScriptWithPlaceholder()
+    {
+        Run("DECLARE @sql NVARCHAR(MAX); EXEC(@sql);", out var findings, out var scripts);
+
+        Assert.Empty(findings);
+        var script = Assert.Single(scripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.NotNull(script.PlaceholderOccurrences);
+        Assert.Single(script.PlaceholderOccurrences!);
+    }
+
+    [Fact]
+    public void SpExecuteSql_PositionalStatementArgument_EmitsScript()
+    {
+        Run("EXEC sp_executesql N'SELECT * FROM Users';", out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("SELECT * FROM Users", script.InnerText);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SpExecuteSql_WithParameterDeclarationText_CapturesItVerbatim()
+    {
+        Run(
+            "EXEC sp_executesql N'SELECT * FROM Users WHERE Id = @Id', N'@Id INT', @Id = 5;",
+            out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("@Id INT", script.ParameterDeclarationText);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SpExecuteSql_NoArguments_EmitsUnanalyzableFinding()
+    {
+        Run("EXEC sp_executesql;", out var findings, out var scripts);
+
+        Assert.Empty(scripts);
+        Assert.Equal("non-literal-argument", Assert.Single(findings).Reason);
+    }
+
+    [Fact]
+    public void OrdinaryProcedureCall_TaintsReferencedTrackedVariables()
+    {
+        var result = Run(
+            "DECLARE @rc INT = 1; DECLARE @unrelated NVARCHAR(50) = 'kept'; " +
+            "EXEC @rc = dbo.SomeProc @rc OUTPUT;",
+            out var findings, out var scripts);
+
+        Assert.Empty(scripts);
+        Assert.Empty(findings); // the ordinary-call path taints state; it never emits a finding/script itself
+        Assert.Equal("unsupported-execute-form", TaintReason(result["@rc"]));
+        Assert.Equal("kept", LitText(result["@unrelated"])); // never mentioned by this call, so untouched
     }
 }

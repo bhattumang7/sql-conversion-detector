@@ -106,24 +106,38 @@ public sealed class DynamicSqlPlaceholderConfidenceInvariantTests
         Assert.All(report.WriteLossFindings, f => Assert.NotEqual(FindingConfidence.High, f.Confidence));
     }
 
+    /// <summary>
+    /// The old scanner's own choke point. <see cref="DynamicSqlTransfer"/> (docs/dynamic-sql-
+    /// rebuild-plan.md Phase 3) is a SECOND, deliberate construction site for the DURATION of the
+    /// rebuild - the new engine's EXEC/sp_executesql emission has to build the same record type,
+    /// and it derives Confidence via the identical "does this assembly contain a Hole" rule
+    /// (<see cref="Predicates.DynamicSqlValue.SqlTextValue.ContainsHole"/>), not a copy-pasted-
+    /// and-forgotten one. Once Phase 4 cuts <c>DynamicSqlScanner.Scan</c> over to the new engine
+    /// and deletes the old constructor call, remove "DynamicSqlTransfer.cs" from this set and
+    /// this test again enforces exactly one site, same as before the rebuild.
+    /// </summary>
+    private static readonly string[] AuthorizedConstructionSites = ["DynamicSqlScanner.cs", "DynamicSqlTransfer.cs"];
+
     [Fact]
     public void EveryDynamicSqlScriptConstructor_ComputesConfidenceSolelyFromPlaceholderPresence()
     {
-        // Guards the SINGLE choke point this whole invariant rests on: DynamicSqlScanner is the
-        // only producer of DynamicSqlScript instances repo-wide. If a second construction site is
-        // ever added and forgets to derive Confidence from PlaceholderOccurrences the same way,
-        // this test starts failing the moment it does - a compile-time-cheap tripwire against the
-        // exact mistake this whole task exists to rule out.
-        var scannerSource = File.ReadAllText(FindSourceFile("DynamicSqlScanner.cs"));
-        var constructorCallCount = CountOccurrences(scannerSource, "new DynamicSqlScript(");
-        Assert.Equal(1, constructorCallCount);
+        // Guards the choke point this whole invariant rests on: only the authorized site(s) above
+        // may construct a DynamicSqlScript. If a THIRD construction site is ever added and forgets
+        // to derive Confidence from placeholder/hole presence the same way, this test starts
+        // failing the moment it does - a compile-time-cheap tripwire against the exact mistake
+        // this whole task exists to rule out.
+        foreach (var fileName in AuthorizedConstructionSites)
+        {
+            var source = File.ReadAllText(FindSourceFile(fileName));
+            Assert.Equal(1, CountOccurrences(source, "new DynamicSqlScript("));
+        }
 
         var repoRoot = FindRepoRoot();
         var otherConstructionSites = Directory
             .GetFiles(Path.Combine(repoRoot, "src"), "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                 && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            .Where(f => !f.EndsWith("DynamicSqlScanner.cs", StringComparison.Ordinal))
+            .Where(f => !AuthorizedConstructionSites.Any(name => f.EndsWith(name, StringComparison.Ordinal)))
             .Where(f => File.ReadAllText(f).Contains("new DynamicSqlScript(", StringComparison.Ordinal))
             .ToList();
         Assert.Empty(otherConstructionSites);
