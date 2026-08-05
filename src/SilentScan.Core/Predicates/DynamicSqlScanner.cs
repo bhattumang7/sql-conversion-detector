@@ -1771,28 +1771,28 @@ public static class DynamicSqlScanner
                     when WhitelistedStringBuilders.Contains(functionName):
                     return TryFoldStringBuilder(builderCall, functionName, folded, foldingEnabled);
 
-                case FunctionCall { FunctionName.Value: var functionName, Parameters.Count: 0 } newIdCall
-                    when PlaceholderProducingNonDeterministicFunctions.Contains(functionName):
-                    // NEWID()/NEWSEQUENTIALID()'s VALUE is genuinely unknowable at compile time
-                    // (a fresh GUID per call), but their RETURN TYPE (uniqueidentifier) is a hard
-                    // T-SQL guarantee regardless of which call produced it - the same "known
+                case FunctionCall { FunctionName.Value: var functionName } placeholderCall
+                    when PlaceholderProducingNonDeterministicFunctions.TryGetValue(functionName, out var placeholderType):
+                    // The VALUE is genuinely unknowable at compile time, but the RETURN TYPE is a
+                    // hard T-SQL guarantee regardless of which call produced it - the same "known
                     // shape, unknown value" case an uninitialized DECLARE already gets. Common
                     // real-world shape: REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '') building a
                     // unique temp table name - the existing CAST/REPLACE placeholder-type-transfer
                     // machinery carries this placeholder the rest of the way once it originates
                     // here, rather than needing its own separate propagation path.
                     return FoldAttempt.OkSingle([new LiteralSegment(
-                        sourcePath, newIdCall.StartLine, newIdCall.StartColumn, PrefixLength: 0,
-                        PlaceholderToken(newIdCall.StartLine, newIdCall.StartColumn), new SqlType(SqlTypeCategory.UniqueIdentifier))]);
+                        sourcePath, placeholderCall.StartLine, placeholderCall.StartColumn, PrefixLength: 0,
+                        PlaceholderToken(placeholderCall.StartLine, placeholderCall.StartColumn), placeholderType)]);
 
                 case FunctionCall { FunctionName.Value: var functionName }
                     when NonDeterministicFunctions.Contains(functionName):
-                    // A distinct reason from the generic ":function-call" below - GETDATE()/
-                    // RAND()/... aren't unimplemented, they're genuinely unknowable at compile
-                    // time regardless of how much folding this scanner ever grows, so the study
-                    // can state that plainly rather than lumping it with real gaps. NEWID/
-                    // NEWSEQUENTIALID are carved out above - the one pair in this set with a
-                    // fixed, corpus-relevant return type worth a placeholder over a bare taint.
+                    // A distinct reason from the generic ":function-call" below - the remaining
+                    // functions in this set aren't unimplemented, they're genuinely unknowable at
+                    // compile time regardless of how much folding this scanner ever grows, so the
+                    // study can state that plainly rather than lumping it with real gaps.
+                    // PlaceholderProducingNonDeterministicFunctions is carved out above - the
+                    // subset of this set with a fixed, corpus-relevant return type worth a
+                    // placeholder over a bare taint.
                     return FoldAttempt.Fail("non-deterministic-function", Span(expression));
 
                 case FunctionCall { FunctionName.Value: var functionName }
@@ -1945,17 +1945,27 @@ public static class DynamicSqlScanner
         };
 
         /// <summary>
-        /// The subset of <see cref="NonDeterministicFunctions"/> worth a symbolic placeholder
-        /// (uniqueidentifier) over a bare taint - corpus-measured as the common real-world shape
-        /// for a unique temp table/object name: REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '').
-        /// GETDATE/RAND/... stay bare taints - each would need its own return-type reasoning
-        /// (RAND's [0,1) float range, GETDATE's implicit precision) with no confirmed corpus
-        /// occurrence justifying the extra surface, per this scanner's "never guess past what's
-        /// actually measured" policy.
+        /// The subset of <see cref="NonDeterministicFunctions"/> worth a symbolic placeholder of
+        /// their own fixed return type, rather than a bare taint - each has a genuinely unknowable
+        /// VALUE at compile time, but a hard, unconditional T-SQL guarantee on its RETURN TYPE
+        /// regardless of which call produced it, the same "known shape, unknown value" case an
+        /// uninitialized DECLARE already gets. NEWID/NEWSEQUENTIALID were the original,
+        /// corpus-measured case (REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '') building a unique
+        /// temp table name); GETDATE/GETUTCDATE (datetime), RAND (float), and CHECKSUM/
+        /// BINARY_CHECKSUM (int) follow the identical reasoning, oracle-verified the same way.
+        /// SYSDATETIME/SYSUTCDATETIME/SYSDATETIMEOFFSET stay bare taints - DATETIME2/
+        /// DATETIMEOFFSET's own scale/precision arguments would need their own resolution this
+        /// scanner doesn't have, unlike GETDATE's fixed datetime with no such parameter.
         /// </summary>
-        private static readonly HashSet<string> PlaceholderProducingNonDeterministicFunctions = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, SqlType> PlaceholderProducingNonDeterministicFunctions = new(StringComparer.OrdinalIgnoreCase)
         {
-            "NEWID", "NEWSEQUENTIALID",
+            ["NEWID"] = new SqlType(SqlTypeCategory.UniqueIdentifier),
+            ["NEWSEQUENTIALID"] = new SqlType(SqlTypeCategory.UniqueIdentifier),
+            ["GETDATE"] = new SqlType(SqlTypeCategory.DateTime),
+            ["GETUTCDATE"] = new SqlType(SqlTypeCategory.DateTime),
+            ["RAND"] = new SqlType(SqlTypeCategory.Float),
+            ["CHECKSUM"] = new SqlType(SqlTypeCategory.Int),
+            ["BINARY_CHECKSUM"] = new SqlType(SqlTypeCategory.Int),
         };
 
         // SERVERPROPERTY is deterministic PER SERVER (unlike NonDeterministicFunctions above) but

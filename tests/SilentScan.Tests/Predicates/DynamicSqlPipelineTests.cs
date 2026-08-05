@@ -807,6 +807,33 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_GetDateConvertedToStringInPredicate_ScanForced_OracleConfirmed()
+    {
+        // Same placeholder-origination proof as NEWID above, extended to GETDATE() - its
+        // datetime return type is a hard guarantee even though the actual timestamp isn't.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_FindByGetDate AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + CONVERT(VARCHAR(30), GETDATE()) + N''''; EXEC(@sql); END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results2 = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results2);
+    }
+
+    [Fact]
     public async Task Analyze_CatchBlockReferencesVariableDeclaredOnlyInTry_ScanForced_OracleConfirmed()
     {
         // Proves the TRY-only-declaration placeholder (seeded into the CATCH walk itself, not

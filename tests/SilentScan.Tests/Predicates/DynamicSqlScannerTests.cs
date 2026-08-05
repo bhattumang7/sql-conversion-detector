@@ -1985,12 +1985,29 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfGetDate_Declines_NonDeterministicFunction()
+    public void Scan_ExecOfGetDate_TreatsGetDateAsSymbolicPlaceholder()
     {
+        // Superseded by Scan_ExecOfTableNameBuiltFromNewId_TreatsNewIdAsSymbolicPlaceholder's own
+        // reasoning, extended to GETDATE(): its return type (datetime) is a hard guarantee even
+        // though its VALUE isn't, so this now folds to a placeholder rather than declining.
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = CONVERT(VARCHAR(30), GETDATE()); EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("non-deterministic-function", finding.Reason);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_ExecOfChecksumBuiltFromColumns_TreatsChecksumAsSymbolicPlaceholder()
+    {
+        // CHECKSUM/BINARY_CHECKSUM are variadic (one or more arguments), unlike NEWID's own
+        // zero-argument shape - proves the placeholder case isn't accidentally scoped to
+        // zero-parameter calls only.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + CAST(CHECKSUM('a', 'b') AS VARCHAR(20)); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
     }
 
     // ------------------------------------------------------------------
@@ -2038,8 +2055,11 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_CaseWithOneUnfoldableBranch_Declines()
     {
+        // SYSDATETIME() (unlike GETDATE()) stays a genuinely unfoldable branch - its DATETIME2
+        // return type carries its own scale/precision this scanner doesn't resolve, so it's
+        // deliberately excluded from the placeholder-producing set.
         var result = Scan(
-            "DECLARE @sql NVARCHAR(MAX) = CASE WHEN @flags = 1 THEN N'SELECT A' ELSE CONVERT(VARCHAR(30), GETDATE()) END; " +
+            "DECLARE @sql NVARCHAR(MAX) = CASE WHEN @flags = 1 THEN N'SELECT A' ELSE CONVERT(VARCHAR(30), SYSDATETIME()) END; " +
             "EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
