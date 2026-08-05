@@ -157,6 +157,8 @@ public static class SarifReportWriter
                 "Dynamic SQL call with a provably-constant argument; its contents were reparsed and analyzed like static SQL.",
             DynamicSqlOutcome.InnerParseFailed =>
                 $"Dynamic SQL call's argument was provably constant but did not parse as T-SQL ({finding.Reason}).",
+            DynamicSqlOutcome.PartiallyAnalyzed =>
+                "Dynamic SQL call's argument contained a whole optional clause/fragment of unknown content; the surrounding query structure was analyzed, but that fragment was not.",
             _ => $"Dynamic SQL call's argument could not be statically analyzed ({finding.Reason}).",
         };
 

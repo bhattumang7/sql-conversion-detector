@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
@@ -196,9 +197,11 @@ public static partial class DynamicSqlPipeline
     /// </summary>
     private static bool TryParseAndClassify(
         DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence>? placeholders, ResultAccumulator accumulator,
-        [NotNullWhen(true)] out SqlParseResult? innerParseResult)
+        [NotNullWhen(true)] out SqlParseResult? innerParseResult,
+        out Func<int, int, SourceSpan>? elisionMap)
     {
         innerParseResult = null;
+        elisionMap = null;
 
         if (placeholders is { Count: > 0 } && IsEntirelyPlaceholder(script.InnerText, placeholders))
         {
@@ -224,6 +227,16 @@ public static partial class DynamicSqlPipeline
                 // text wouldn't (e.g. sitting where only a keyword is legal) - reporting this as
                 // InnerParseFailed would read as "the user's own SQL doesn't parse", which isn't
                 // what happened: an ASSUMPTION this scanner made broke the parse, not the source.
+                // Before giving up outright: a symbolic value standing for a whole optional
+                // clause/fragment (rather than one scalar) can never fit an identifier-shaped
+                // token, but a single space might - see TryReparseWithNeutralElision.
+                if (TryReparseWithNeutralElision(script, placeholders, out var elidedParseResult, out var map))
+                {
+                    innerParseResult = elidedParseResult;
+                    elisionMap = map;
+                    return true;
+                }
+
                 accumulator.Findings.Add(new DynamicSqlFinding(
                     script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                     DynamicSqlOutcome.Unanalyzable, "symbolic-value-broke-parse"));
@@ -274,6 +287,162 @@ public static partial class DynamicSqlPipeline
         return true;
     }
 
+    /// <summary>
+    /// The one fallback for a symbolic value that broke the parse outright: it may not stand for
+    /// a single scalar at all, but for a whole optional clause/fragment (an appended filter, a
+    /// cursor body) - no identifier-shaped token can ever sit legally in that position. Replacing
+    /// every occurrence with a single space instead of its usual token either still fails to
+    /// parse (the fragment wasn't actually optional in a "may be entirely absent" sense - e.g. a
+    /// cursor's <c>DECLARE ... CURSOR FOR</c> body, which needs a real SELECT no matter what;
+    /// declines exactly as before, no change) or reveals a valid statement missing only the part
+    /// this scanner could never see anyway. A space, unlike deleting the span outright, can never
+    /// fuse two adjacent literal fragments into a token that wasn't there in either the real
+    /// runtime query OR the elided one (T-SQL treats whitespace as a pure token separator
+    /// everywhere outside a quoted literal/identifier, and a placeholder inside one of those
+    /// would already have classified as a SAFE position long before this ever runs) - so
+    /// extraction against the result can only ever under-report relative to the true runtime
+    /// query (the elided fragment's own content stays genuinely unknown), never fabricate a
+    /// finding that depends on it.
+    /// </summary>
+    private static bool TryReparseWithNeutralElision(
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders,
+        [NotNullWhen(true)] out SqlParseResult? elidedParseResult,
+        [NotNullWhen(true)] out Func<int, int, SourceSpan>? map)
+    {
+        var variant = NeutralElisionVariant.Build(script.InnerText, placeholders);
+        var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}::elided";
+        var parseResult = SqlScriptParser.ParseText(virtualPath, variant.Text);
+        if (parseResult.HasErrors)
+        {
+            elidedParseResult = null;
+            map = null;
+            return false;
+        }
+
+        elidedParseResult = parseResult;
+        map = (line, column) => variant.Map(line, column, script.SegmentMap);
+        return true;
+    }
+
+    /// <summary>
+    /// Rebuilds a dynamic SQL script's own inner text with every symbolic placeholder occurrence
+    /// replaced by a single space instead of its usual identifier-shaped token, plus the position
+    /// translation <see cref="Map"/> needs to resolve a finding inside the REBUILT text back to
+    /// real source coordinates: convert the rebuilt text's own (line, column) to a flat offset,
+    /// translate that back to the corresponding offset in the ORIGINAL <see
+    /// cref="DynamicSqlScript.InnerText"/> (a position landing inside the inserted filler itself
+    /// has no such original offset at all - it collapses to that placeholder occurrence's own
+    /// <see cref="PlaceholderOccurrence.Origin"/>, mirroring <see cref="DynamicSqlSegmentMap"/>'s
+    /// identical treatment of its own token-substitution case), then hand the translated position
+    /// to the script's OWN already-correct <see cref="DynamicSqlSegmentMap.Map"/> for the final
+    /// hop to real source coordinates - reusing it rather than re-deriving its quote-escaping/
+    /// multi-line arithmetic here, which only stays correct when applied to the exact segment
+    /// boundaries it was built from.
+    /// </summary>
+    private sealed class NeutralElisionVariant
+    {
+        private readonly string _innerText;
+        private readonly int[] _neutralOffsetToInnerOffset;
+        private readonly Dictionary<int, SourceSpan> _fillerOriginByNeutralOffset;
+
+        private NeutralElisionVariant(string text, string innerText, int[] neutralOffsetToInnerOffset, Dictionary<int, SourceSpan> fillerOriginByNeutralOffset)
+        {
+            Text = text;
+            _innerText = innerText;
+            _neutralOffsetToInnerOffset = neutralOffsetToInnerOffset;
+            _fillerOriginByNeutralOffset = fillerOriginByNeutralOffset;
+        }
+
+        public string Text { get; }
+
+        public static NeutralElisionVariant Build(string innerText, IReadOnlyList<PlaceholderOccurrence> occurrences)
+        {
+            var sorted = occurrences.OrderBy(o => o.InnerStartOffset).ToList();
+            var text = new StringBuilder();
+            var innerOffsets = new List<int>();
+            var fillerOrigins = new Dictionary<int, SourceSpan>();
+            var cursor = 0;
+
+            foreach (var occurrence in sorted)
+            {
+                for (var i = cursor; i < occurrence.InnerStartOffset; i++)
+                {
+                    innerOffsets.Add(i);
+                    text.Append(innerText[i]);
+                }
+
+                fillerOrigins[text.Length] = occurrence.Origin;
+                innerOffsets.Add(occurrence.InnerStartOffset);
+                text.Append(' ');
+
+                cursor = occurrence.InnerStartOffset + occurrence.Length;
+            }
+
+            for (var i = cursor; i < innerText.Length; i++)
+            {
+                innerOffsets.Add(i);
+                text.Append(innerText[i]);
+            }
+
+            // One extra sentinel entry so a position exactly at end-of-text (offset ==
+            // Text.Length, the count of positions ScriptDOM can legally report is one more than
+            // the count of characters) still has a valid original-offset lookup.
+            innerOffsets.Add(innerText.Length);
+
+            return new NeutralElisionVariant(text.ToString(), innerText, [.. innerOffsets], fillerOrigins);
+        }
+
+        public SourceSpan Map(int neutralLine, int neutralColumn, DynamicSqlSegmentMap originalMap)
+        {
+            var neutralOffset = LineColToOffset(Text, neutralLine, neutralColumn);
+
+            if (_fillerOriginByNeutralOffset.TryGetValue(neutralOffset, out var fillerOrigin))
+            {
+                return fillerOrigin;
+            }
+
+            var boundedOffset = Math.Clamp(neutralOffset, 0, _neutralOffsetToInnerOffset.Length - 1);
+            var innerOffset = _neutralOffsetToInnerOffset[boundedOffset];
+            var (innerLine, innerColumn) = OffsetToLineCol(_innerText, innerOffset);
+            return originalMap.Map(innerLine, innerColumn);
+        }
+
+        private static int LineColToOffset(string text, int line, int column)
+        {
+            var offset = 0;
+            var currentLine = 1;
+            while (currentLine < line)
+            {
+                var newlineIndex = text.IndexOf('\n', offset);
+                if (newlineIndex < 0)
+                {
+                    return text.Length;
+                }
+
+                offset = newlineIndex + 1;
+                currentLine++;
+            }
+
+            return Math.Min(offset + column - 1, text.Length);
+        }
+
+        private static (int Line, int Column) OffsetToLineCol(string text, int offset)
+        {
+            var line = 1;
+            var lastNewline = -1;
+            for (var i = 0; i < offset; i++)
+            {
+                if (text[i] == '\n')
+                {
+                    line++;
+                    lastNewline = i;
+                }
+            }
+
+            return (line, offset - lastNewline);
+        }
+    }
+
     private static void ProcessScript(
         DynamicSqlScript script,
         DatabaseCatalog catalog,
@@ -284,23 +453,26 @@ public static partial class DynamicSqlPipeline
         ResultAccumulator accumulator)
     {
         var placeholders = script.PlaceholderOccurrences;
-        if (!TryParseAndClassify(script, placeholders, accumulator, out var innerParseResult))
+        if (!TryParseAndClassify(script, placeholders, accumulator, out var innerParseResult, out var elisionMap))
         {
             return;
         }
 
+        var map = elisionMap ?? script.SegmentMap.Map;
+        var outcome = elisionMap is null ? DynamicSqlOutcome.AnalyzedLiteral : DynamicSqlOutcome.PartiallyAnalyzed;
+        var reason = elisionMap is null ? null : "optional-fragment-elided";
         accumulator.Findings.Add(new DynamicSqlFinding(
-            script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, DynamicSqlOutcome.AnalyzedLiteral, Reason: null));
+            script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column, outcome, reason));
 
         var tier1Ledger = new SkipLedger();
         foreach (var tier1Finding in NonSargablePredicateScanner.Scan(innerParseResult, catalog, lineage, script.Scope, tier1Ledger, callerScopeByCalleeScope))
         {
-            accumulator.Tier1.Add(Remap(tier1Finding, script));
+            accumulator.Tier1.Add(Remap(tier1Finding, script, map));
         }
 
         foreach (var tier1Skipped in tier1Ledger.Entries)
         {
-            accumulator.Skipped.Add(Remap(tier1Skipped, script));
+            accumulator.Skipped.Add(Remap(tier1Skipped, map));
         }
 
         var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
@@ -312,35 +484,38 @@ public static partial class DynamicSqlPipeline
         var extraction = TypedPredicateExtractor.Extract(innerParseResult, catalog, lineage, declaredParameters, script.Scope, callerScopeByCalleeScope);
         foreach (var typedFinding in extraction.TypedFindings)
         {
-            accumulator.Typed.Add(Remap(typedFinding, script));
+            accumulator.Typed.Add(Remap(typedFinding, script, map));
         }
 
         foreach (var expressionFinding in extraction.ExpressionDerivedFindings)
         {
-            accumulator.ExpressionDerived.Add(Remap(expressionFinding, script));
+            accumulator.ExpressionDerived.Add(Remap(expressionFinding, script, map));
         }
 
         foreach (var collationConflict in extraction.CollationConflictFindings)
         {
-            accumulator.CollationConflicts.Add(Remap(collationConflict, script));
+            accumulator.CollationConflicts.Add(Remap(collationConflict, script, map));
         }
 
         foreach (var writeLoss in extraction.WriteLossFindings)
         {
-            accumulator.WriteLoss.Add(Remap(writeLoss, script));
+            accumulator.WriteLoss.Add(Remap(writeLoss, script, map));
         }
 
         foreach (var skippedConstruct in extraction.SkippedConstructs)
         {
-            accumulator.Skipped.Add(Remap(skippedConstruct, script));
+            accumulator.Skipped.Add(Remap(skippedConstruct, map));
         }
 
         // A script whose OWN identity rests on a placeholder never recurses into further
         // nested dynamic SQL - a real runtime value could reshape the surrounding text in ways
         // this scanner never modeled, so treating a nested candidate's findings as independently
-        // trustworthy would launder that same unproven assumption one level deeper.
+        // trustworthy would launder that same unproven assumption one level deeper. A partially-
+        // analyzed script (elisionMap non-null) always has placeholders too, so it already routes
+        // through the same refusal - never AnalyzeNested, which assumes innerParseResult's
+        // coordinates are the script's own untranslated InnerText.
         var nested = placeholders is { Count: > 0 }
-            ? RefuseNestedCandidates(innerParseResult, script)
+            ? RefuseNestedCandidates(innerParseResult, script, map)
             : AnalyzeNested(innerParseResult, script, declaredParameters, catalog, lineage, depth, callerScopeByCalleeScope);
         accumulator.Findings.AddRange(nested.Findings);
         accumulator.Tier1.AddRange(nested.Tier1Findings);
@@ -404,12 +579,12 @@ public static partial class DynamicSqlPipeline
     /// produced (an unrelated Unanalyzable reason from ITS OWN folding) is remapped and kept too -
     /// never silently dropped, CLAUDE.md.
     /// </summary>
-    private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult innerParseResult, DynamicSqlScript script)
+    private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult innerParseResult, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
         var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope);
-        var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, script)).ToList();
+        var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, map)).ToList();
         findings.AddRange(nestedExtraction.AnalyzableScripts
-            .Select(nestedScript => script.SegmentMap.Map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
+            .Select(nestedScript => map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
             .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "nested-dynamic-sql-inside-symbolic-value")));
 
         return new DynamicSqlPipelineResult(findings, [], [], [], [], [], []);
@@ -616,9 +791,12 @@ public static partial class DynamicSqlPipeline
         return merged;
     }
 
-    private static DynamicSqlFinding RemapFinding(DynamicSqlFinding finding, DynamicSqlScript outerScript)
+    private static DynamicSqlFinding RemapFinding(DynamicSqlFinding finding, DynamicSqlScript outerScript) =>
+        RemapFinding(finding, outerScript.SegmentMap.Map);
+
+    private static DynamicSqlFinding RemapFinding(DynamicSqlFinding finding, Func<int, int, SourceSpan> map)
     {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
+        var span = map(finding.Line, finding.Column);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column };
     }
 
@@ -628,39 +806,42 @@ public static partial class DynamicSqlPipeline
     /// <summary>The worse (numerically higher) of two <see cref="FindingConfidence"/> values - a finding nested inside a script that itself rested on an assumption is never MORE trustworthy than that assumption.</summary>
     private static FindingConfidence Worse(FindingConfidence a, FindingConfidence b) => (FindingConfidence)Math.Max((int)a, (int)b);
 
-    private static SargabilityFinding Remap(SargabilityFinding finding, DynamicSqlScript script)
+    private static SargabilityFinding Remap(SargabilityFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
-        var span = script.SegmentMap.Map(finding.Line, finding.Column);
+        var span = map(finding.Line, finding.Column);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
-    private static TypedPredicateFinding Remap(TypedPredicateFinding finding, DynamicSqlScript script)
+    private static TypedPredicateFinding Remap(TypedPredicateFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
-        var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
+        var span = map(finding.Line, finding.ColumnPosition);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
-    private static ExpressionDerivedFinding Remap(ExpressionDerivedFinding finding, DynamicSqlScript script)
+    private static ExpressionDerivedFinding Remap(ExpressionDerivedFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
-        var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
+        var span = map(finding.Line, finding.ColumnPosition);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
-    private static CollationConflictFinding Remap(CollationConflictFinding finding, DynamicSqlScript script)
+    private static CollationConflictFinding Remap(CollationConflictFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
-        var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
+        var span = map(finding.Line, finding.ColumnPosition);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
-    private static WriteLossFinding Remap(WriteLossFinding finding, DynamicSqlScript script)
+    private static WriteLossFinding Remap(WriteLossFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
-        var span = script.SegmentMap.Map(finding.Line, finding.ColumnPosition);
+        var span = map(finding.Line, finding.ColumnPosition);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
-    private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script)
+    private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script) =>
+        Remap(entry, script.SegmentMap.Map);
+
+    private static SkippedConstruct Remap(SkippedConstruct entry, Func<int, int, SourceSpan> map)
     {
-        var span = script.SegmentMap.Map(entry.Line, entry.Column);
+        var span = map(entry.Line, entry.Column);
         return entry with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column };
     }
 

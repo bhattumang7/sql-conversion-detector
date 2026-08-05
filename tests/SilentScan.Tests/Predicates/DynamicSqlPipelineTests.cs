@@ -78,6 +78,49 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_ExecOfLiteralPredicateWithOptionalFilterFragmentAppended_PartiallyAnalyzesAndRemapsTheKnownPredicate_OracleConfirmed()
+    {
+        // @Extra stands for a whole optional trailing clause (empty at the defensive-coding
+        // baseline, or " AND ..." when a caller opts in) spliced in AFTER a complete, real
+        // predicate - eliding it to a single space still leaves a valid, fully-known statement,
+        // so the real predicate ahead of it must still be found, typed, and correctly remapped,
+        // not silently dropped just because something AFTER it was unknowable.
+        var (catalog, lineage) = BuildCatalog();
+
+        var appSql =
+            "CREATE PROCEDURE dbo.usp_Find @Extra NVARCHAR(100)\n" +
+            "AS\n" +
+            "BEGIN\n" +
+            "    DECLARE @sql NVARCHAR(MAX) = 'SELECT Col FROM dbo.T\n" +
+            "WHERE Col = N''x''' + @Extra\n" +
+            "    EXEC(@sql)\n" +
+            "END\n";
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var extraction = DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([]));
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var dynamicFinding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.PartiallyAnalyzed, dynamicFinding.Outcome);
+        Assert.Equal("optional-fragment-elided", dynamicFinding.Reason);
+        Assert.Equal(6, dynamicFinding.Line); // the EXEC( call site itself
+
+        var typedFinding2 = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, typedFinding2.Verdict);
+        Assert.Equal("app.sql", typedFinding2.SourcePath);
+        Assert.Equal(5, typedFinding2.Line); // "WHERE Col = ..." is on the second source line
+        Assert.NotNull(typedFinding2.DynamicSqlCallSite);
+        Assert.Equal(6, typedFinding2.DynamicSqlCallSite!.Value.Line);
+
+        var results2 = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding2]);
+        PipelineOracleVerification.AssertAllConfirmed(results2);
+    }
+
+    [Fact]
     public async Task Analyze_ExecOfVariableDivergingAcrossIfElseIfBranches_BothBranchesScanForced_OracleConfirmed()
     {
         // The dispatch shape a real proc uses: @sql is set to a DIFFERENT literal predicate in

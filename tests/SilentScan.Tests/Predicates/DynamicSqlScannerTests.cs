@@ -2711,8 +2711,15 @@ public sealed class DynamicSqlScannerTests
 
 
     [Fact]
-    public void Probe_OptionalFilterFragmentMidWhere()
+    public void Analyze_ExecOfOptionalFilterFragmentAppendedMidStatement_PartiallyAnalyzesTheKnownStructure()
     {
+        // @FilterAttention stands for a whole optional clause fragment (empty, or " AND x = y",
+        // spliced in between the FROM clause and ORDER BY) - a single symbolic identifier token
+        // can never legally sit there, so the ordinary token-substituted reparse breaks outright.
+        // Replacing the placeholder with a single space instead (never a token that can fuse two
+        // adjacent literal fragments together) still yields valid SQL missing only the part this
+        // scanner could never see anyway - the surrounding, unaffected structure should still be
+        // analyzed rather than declining the whole call site.
         var (extraction, pipeline) = ProbePipeline("""
             CREATE TABLE dbo.tblEvents (v_marker INT NOT NULL);
             GO
@@ -2722,7 +2729,12 @@ public sealed class DynamicSqlScannerTests
                 EXEC(@sqlSelect)
             END
             """);
-        PrintProbe("optional filter fragment mid-WHERE", extraction, pipeline);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Single(extraction.AnalyzableScripts);
+        var finding = Assert.Single(pipeline.Findings);
+        Assert.Equal(DynamicSqlOutcome.PartiallyAnalyzed, finding.Outcome);
+        Assert.Equal("optional-fragment-elided", finding.Reason);
     }
 
     [Fact]
@@ -2856,8 +2868,13 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Probe_CursorSoleContentOfStatement()
+    public void Analyze_ExecOfCursorBodyEntirelyFromSymbolicVariable_StaysUnanalyzable_NeutralElisionAlsoFailsToParse()
     {
+        // @Query stands for the ENTIRE cursor SELECT, not an optional trailing fragment -
+        // DECLARE ... CURSOR FOR needs a real SELECT no matter what, so eliding to a single
+        // space fails to parse too (nothing static survives). This must stay Unanalyzable, not
+        // be misclassified as PartiallyAnalyzed - the neutral-elision fallback only ever helps
+        // when SOMETHING valid survives the elision; it must never invent one when it doesn't.
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_CursorQuery @Query NVARCHAR(MAX) AS
             BEGIN
@@ -2865,6 +2882,11 @@ public sealed class DynamicSqlScannerTests
                 EXEC(@SelectQueryWithCursor)
             END
             """);
-        PrintProbe("cursor body sole content of statement", extraction, pipeline);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Single(extraction.AnalyzableScripts);
+        var finding = Assert.Single(pipeline.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("symbolic-value-broke-parse", finding.Reason);
     }
 }

@@ -9,6 +9,7 @@ public static class SarifRuleCatalog
     public const string DynamicSqlAnalyzedRuleId = "silentscan/dynamic-sql/analyzed";
     public const string DynamicSqlUnanalyzableRuleId = "silentscan/dynamic-sql/unanalyzable";
     public const string DynamicSqlInnerParseFailedRuleId = "silentscan/dynamic-sql/inner-parse-failed";
+    public const string DynamicSqlPartiallyAnalyzedRuleId = "silentscan/dynamic-sql/partially-analyzed";
     public const string ExpressionDerivedRuleId = "silentscan/lineage/expression-derived-column";
     public const string CollationConflictRuleId = "silentscan/verdict/collation-conflict";
     public const string WriteLossUnicodeReplacementRuleId = "silentscan/write-loss/unicode-to-non-unicode";
@@ -30,6 +31,7 @@ public static class SarifRuleCatalog
         DynamicSqlOutcome.AnalyzedLiteral => DynamicSqlAnalyzedRuleId,
         DynamicSqlOutcome.Unanalyzable => DynamicSqlUnanalyzableRuleId,
         DynamicSqlOutcome.InnerParseFailed => DynamicSqlInnerParseFailedRuleId,
+        DynamicSqlOutcome.PartiallyAnalyzed => DynamicSqlPartiallyAnalyzedRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unhandled DynamicSqlOutcome."),
     };
 
@@ -64,6 +66,7 @@ public static class SarifRuleCatalog
         DynamicSqlAnalyzedRuleId,
         DynamicSqlUnanalyzableRuleId,
         DynamicSqlInnerParseFailedRuleId,
+        DynamicSqlPartiallyAnalyzedRuleId,
     };
 
     /// <summary>
@@ -102,6 +105,7 @@ public static class SarifRuleCatalog
             Rule(DynamicSqlAnalyzedRuleId, "A dynamic SQL call site with a provably-constant argument; its contents were reparsed and analyzed like static SQL."),
             Rule(DynamicSqlUnanalyzableRuleId, "A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed."),
             Rule(DynamicSqlInnerParseFailedRuleId, "A dynamic SQL call site's argument was provably constant but its reassembled text did not parse as T-SQL."),
+            Rule(DynamicSqlPartiallyAnalyzedRuleId, "A dynamic SQL call site's argument contained a value standing for a whole optional clause/fragment, not a single scalar; the surrounding, unaffected query structure was analyzed, but the elided fragment's own content was never examined."),
             Rule(ExpressionDerivedRuleId, "A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement's own derived table, or upstream in a view/TVF's SELECT list) - no index seek is possible regardless of the comparison's types."),
             Rule(CollationConflictRuleId, "Two columns with genuinely different, incompatible collations are compared directly - this does not compile (SQL Server error 468, \"Cannot resolve the collation conflict\"), not a seek/scan question."),
             Rule(WriteLossUnicodeReplacementRuleId, "An INSERT/UPDATE assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target - any character outside the target collation's codepage is silently replaced with '?', with no error."),

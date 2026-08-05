@@ -12,7 +12,8 @@ public sealed record DynamicSqlSummary(
     int AnalyzedCount,
     int UnanalyzableCount,
     int InnerParseFailedCount,
-    IReadOnlyDictionary<string, int> UnanalyzableReasonCounts)
+    IReadOnlyDictionary<string, int> UnanalyzableReasonCounts,
+    int PartiallyAnalyzedCount = 0)
 {
     /// <summary>Fraction of call sites proved constant and fully analyzed (Tiers A/B/C) - 0 for an empty corpus, never a division-by-zero surprise.</summary>
     public double AnalyzedFraction => TotalCallSites == 0 ? 0d : (double)AnalyzedCount / TotalCallSites;
@@ -27,6 +28,7 @@ public sealed record DynamicSqlSummary(
         var analyzedSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var unanalyzableSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var innerParseFailedSites = new HashSet<(string SourcePath, int Line, int Column)>();
+        var partiallyAnalyzedSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var reasonCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var finding in findings)
@@ -50,10 +52,14 @@ public sealed record DynamicSqlSummary(
                 case DynamicSqlOutcome.InnerParseFailed:
                     innerParseFailedSites.Add(site);
                     break;
+
+                case DynamicSqlOutcome.PartiallyAnalyzed:
+                    partiallyAnalyzedSites.Add(site);
+                    break;
             }
         }
 
-        var totalSites = analyzedSites.Count + unanalyzableSites.Count + innerParseFailedSites.Count;
-        return new DynamicSqlSummary(totalSites, analyzedSites.Count, unanalyzableSites.Count, innerParseFailedSites.Count, reasonCounts);
+        var totalSites = analyzedSites.Count + unanalyzableSites.Count + innerParseFailedSites.Count + partiallyAnalyzedSites.Count;
+        return new DynamicSqlSummary(totalSites, analyzedSites.Count, unanalyzableSites.Count, innerParseFailedSites.Count, reasonCounts, partiallyAnalyzedSites.Count);
     }
 }

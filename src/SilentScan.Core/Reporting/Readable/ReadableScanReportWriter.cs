@@ -97,6 +97,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
+        AddCount(counts, "Dynamic SQL call sites partially analyzed (a fragment was elided)", report.DynamicSqlSummary.PartiallyAnalyzedCount);
         AddCount(counts, "Files that failed to parse", health.FilesWithErrors);
         AddCount(counts, "Constructs skipped as out of scope", report.SkippedConstructSummary.TotalCount);
 
@@ -314,19 +315,26 @@ public static class ReadableScanReportWriter
         }
 
         var summary = report.DynamicSqlSummary;
-        yield return new ReadableBlock.Heading(level, $"Dynamic SQL that could not be analyzed ({unresolved.Count})");
+        yield return new ReadableBlock.Heading(level, $"Dynamic SQL not fully analyzed ({unresolved.Count})");
         yield return new ReadableBlock.Paragraph(
             $"{summary.AnalyzedCount} of {Count(summary.TotalCallSites, "dynamic SQL call site")} had a provably-constant argument and were analyzed like ordinary SQL. " +
-            "The rest are listed here rather than counted as clean: whatever they execute was never examined, so no statement above covers them.");
+            "The rest are listed here rather than counted as clean: whatever wasn't examined - the whole argument, or (for a partially-analyzed site) just the elided fragment - is never silently assumed safe.");
         yield return new ReadableBlock.Table(
             [WhereHeader, "Outcome", "Reason"],
             [.. unresolved.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, null, pathBase),
-                f.Outcome == DynamicSqlOutcome.InnerParseFailed ? "constant, but did not parse as T-SQL" : "not provably constant",
+                DynamicSqlOutcomeLabel(f.Outcome),
                 f.Reason ?? "-",
             })]);
     }
+
+    private static string DynamicSqlOutcomeLabel(DynamicSqlOutcome outcome) => outcome switch
+    {
+        DynamicSqlOutcome.InnerParseFailed => "constant, but did not parse as T-SQL",
+        DynamicSqlOutcome.PartiallyAnalyzed => "partially analyzed - an unresolvable fragment was elided",
+        _ => "not provably constant",
+    };
 
     private static IEnumerable<ReadableBlock> ParseFailures(ScanReport report, int level, string? pathBase)
     {
