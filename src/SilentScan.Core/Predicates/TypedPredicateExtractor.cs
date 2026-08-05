@@ -24,7 +24,7 @@ public static class TypedPredicateExtractor
     // wrapper of its own to discover either from.
     public static PredicateExtractionResult Extract(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null,
-        DynamicSqlScope? enclosingScope = null, IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null)
+        DynamicSqlScope? enclosingScope = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
         var resolvedViews = lineage.AllRelations;
         var ledger = new SkipLedger();
@@ -41,7 +41,7 @@ public static class TypedPredicateExtractor
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
         SkipLedger ledger,
         DynamicSqlScope? enclosingScope = null,
-        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
     {
         /// <summary>Skip-ledger construct kind shared by every "this operand has no type resolution" entry below - one label for the whole family of unresolved-operand reasons.</summary>
         private const string PredicateOperandConstructKind = "predicate operand";
@@ -608,13 +608,13 @@ public static class TypedPredicateExtractor
             var table = catalog.Find(qualifiedName, _currentProcScope);
 
             // Same "#temp is session-scoped, not proc-scoped" fallback ResolveNamedTableReference
-            // uses for a SELECT's own FROM clause - an INSERT into a #temp table created by this
-            // proc's single known caller is exactly as common a pattern as querying one.
+            // uses for a SELECT's own FROM clause - an INSERT into a #temp table created by one
+            // of this proc's known callers is exactly as common a pattern as querying one.
             if (table is null && _currentProcScope is not null
                 && callerScopeByCalleeScope is not null
-                && callerScopeByCalleeScope.TryGetValue(_currentProcScope, out var callerScope))
+                && callerScopeByCalleeScope.TryGetValue(_currentProcScope, out var callerScopes))
             {
-                table = catalog.Find(qualifiedName, callerScope);
+                table = FromScopeResolver.TryResolveFromCallerScopes(catalog, qualifiedName, callerScopes);
             }
 
             return table;

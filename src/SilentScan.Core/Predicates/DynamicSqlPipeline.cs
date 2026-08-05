@@ -42,7 +42,7 @@ public static partial class DynamicSqlPipeline
     private static partial Regex TemplatePlaceholderRegex();
 
     public static DynamicSqlPipelineResult Analyze(
-        IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null) =>
+        IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
         Analyze(scripts, catalog, lineage, depth: 1, seeds: null, callerScopeByCalleeScope);
 
     /// <summary>
@@ -59,7 +59,7 @@ public static partial class DynamicSqlPipeline
         LineageCatalog lineage,
         int depth,
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
-        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
         var accumulator = new ResultAccumulator();
 
@@ -280,7 +280,7 @@ public static partial class DynamicSqlPipeline
         LineageCatalog lineage,
         int depth,
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds,
-        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope,
         ResultAccumulator accumulator)
     {
         var placeholders = script.PlaceholderOccurrences;
@@ -358,7 +358,7 @@ public static partial class DynamicSqlPipeline
         DatabaseCatalog catalog,
         LineageCatalog lineage,
         int depth,
-        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope)
     {
         // Propagates the outer script's own scope into the nested scanner - the reparsed inner
         // text has no CREATE PROCEDURE wrapper for it to discover the scope from itself, so

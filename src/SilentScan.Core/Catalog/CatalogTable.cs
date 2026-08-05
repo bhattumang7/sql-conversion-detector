@@ -44,4 +44,22 @@ public sealed record CatalogTable(
     public CatalogIndex? FindIndexedColumn(string columnName) =>
         Indexes.FirstOrDefault(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && i.KeyColumns.Count > 0
             && string.Equals(i.KeyColumns[0], columnName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Column-for-column shape equality (name, type, nullability, identity/computed/persisted -
+    /// everything a predicate's own type resolution or a write-loss check could depend on),
+    /// order-sensitive since two callers building the SAME #temp table would naturally declare
+    /// its columns in the same order. Deliberately NOT the record's own auto-generated Equals -
+    /// <see cref="Columns"/>/<see cref="Indexes"/> are <c>IReadOnlyList</c>, whose default
+    /// equality is reference identity, so two structurally-identical-but-separately-parsed
+    /// CatalogTable instances (the ordinary case for two different callers' own DECLAREs) would
+    /// never compare equal without this. SourcePath/SourceLine/Indexes are deliberately excluded -
+    /// two callers legitimately create the SAME logical #temp shape from different source
+    /// locations, and per-caller physical indexes don't change what a predicate against the
+    /// MERGED, caller-agnostic resolution can safely claim (still never "this seeks via an
+    /// index" - <see cref="Predicates.TypedPredicateExtractor"/>'s own multi-caller resolution
+    /// path reports Indexed=false regardless, the same way a UNION-merged column does).
+    /// </summary>
+    public bool HasSameShapeAs(CatalogTable other) =>
+        Kind == other.Kind && Columns.SequenceEqual(other.Columns);
 }

@@ -18,12 +18,14 @@ public static class FromScopeResolver
     /// resolving a bare "#t"/"@t" reference needs the same scope to find them; a real persistent
     /// table was never stored with a scope, so passing one here is always safe (DatabaseCatalog
     /// falls back to the unscoped lookup automatically). <paramref name="CallerScopeByCalleeScope"/>
-    /// maps a procedure scope to the ONE OTHER scope that calls it, when the whole scan saw
-    /// exactly one - a #temp table is session-scoped in real SQL Server (visible to a callee
-    /// EXEC'd from the proc that created it), unlike a table variable (always proc-local, never
-    /// propagated). Built once, corpus-wide, from <see cref="Predicates.ProcCallGraph"/> - kept as
-    /// a plain name-to-name map here rather than threading the graph type itself into Lineage, to
-    /// avoid this layer depending on Predicates.
+    /// maps a procedure scope to every OTHER scope known to call it - a #temp table is
+    /// session-scoped in real SQL Server (visible to a callee EXEC'd from the proc that created
+    /// it), unlike a table variable (always proc-local, never propagated). A specific name is
+    /// only ever resolved through more than one caller when every caller that has an entry for
+    /// it agrees on its exact shape (<see cref="CatalogTable.HasSameShapeAs"/>) - see
+    /// <see cref="ResolveNamedTableReference"/>. Built once, corpus-wide, from
+    /// <see cref="Predicates.ProcCallGraph"/> - kept as a plain name-to-names map here rather than
+    /// threading the graph type itself into Lineage, to avoid this layer depending on Predicates.
     /// </summary>
     internal readonly record struct ResolutionContext(
         DatabaseCatalog Catalog,
@@ -32,7 +34,7 @@ public static class FromScopeResolver
         SkipLedger? Ledger,
         IReadOnlyDictionary<string, ResolvedRelation>? CteRelations,
         string? ProcScope,
-        IReadOnlyDictionary<string, string>? CallerScopeByCalleeScope = null);
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? CallerScopeByCalleeScope = null);
 
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
         FromClause? fromClause,
@@ -230,19 +232,13 @@ public static class FromScopeResolver
         // #temp tables are session-scoped in real SQL Server, not proc-scoped - a "driver" proc
         // that creates #Results and then EXECs several sub-procs against it is common, real
         // corpus code, not an edge case. Own-scope resolution above already covers the
-        // overwhelmingly common same-proc case; this only fires when it found nothing AND this
-        // scope has exactly ONE known caller scope (built once, corpus-wide, in
-        // ScanReportBuilder - see CallerScopeByCalleeScope's own doc comment for why "single
-        // caller" is the soundness boundary, mirroring DynamicSqlScanner's own single-call-site
-        // literal seeding). A real persistent table was never stored with a scope at all, so
-        // this retry is a harmless no-op for one - never a guess, just a second, still-exact
-        // scoped lookup.
+        // overwhelmingly common same-proc case; this only fires when it found nothing there.
         if (catalogTable is null
             && procScope is not null
             && callerScopeByCalleeScope is not null
-            && callerScopeByCalleeScope.TryGetValue(procScope, out var callerScope))
+            && callerScopeByCalleeScope.TryGetValue(procScope, out var callerScopes))
         {
-            catalogTable = catalog.Find(qualifiedName, callerScope);
+            catalogTable = TryResolveFromCallerScopes(catalog, qualifiedName, callerScopes);
         }
 
         // A well-known built-in system catalog view (sys.objects, sysobjects, ...) -
@@ -280,6 +276,45 @@ public static class FromScopeResolver
 
         var alias = named.Alias?.Value ?? aliasOverride ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
         return (alias, new ScopeEntry(relation, isViewLayer));
+    }
+
+    /// <summary>
+    /// Tries every known caller scope's own entry for <paramref name="qualifiedName"/> (a #temp
+    /// table is session-scoped in real SQL Server, so any of several sub-procedure callers could
+    /// legitimately be the one that created it) and returns a result only when every caller that
+    /// actually HAS an entry agrees on its exact shape (<see cref="CatalogTable.HasSameShapeAs"/>) -
+    /// a caller with no entry for this name at all is simply skipped (it never created this
+    /// particular #temp table, which says nothing about whether the ones that did agree). Two
+    /// callers building genuinely DIFFERENT shapes under the same name is exactly the
+    /// same-name-different-shape pattern <c>CatalogBuilderTests</c> already covers for the
+    /// same-proc case - resolving to either one here would be a guess, so this returns null
+    /// instead, same as if no caller had an entry at all. Shared by <see
+    /// cref="ResolveNamedTableReference"/> and <see
+    /// cref="Predicates.TypedPredicateExtractor"/>'s own write-target resolution, so a SELECT and
+    /// an INSERT against the same cross-proc #temp table apply the identical rule.
+    /// </summary>
+    internal static CatalogTable? TryResolveFromCallerScopes(DatabaseCatalog catalog, string qualifiedName, IReadOnlyList<string> callerScopes)
+    {
+        CatalogTable? resolved = null;
+        foreach (var callerScope in callerScopes)
+        {
+            var candidate = catalog.Find(qualifiedName, callerScope);
+            if (candidate is null)
+            {
+                continue;
+            }
+
+            if (resolved is null)
+            {
+                resolved = candidate;
+            }
+            else if (!resolved.HasSameShapeAs(candidate))
+            {
+                return null;
+            }
+        }
+
+        return resolved;
     }
 
     private static (string? Alias, ScopeEntry Entry) ResolveDerivedTableReference(QueryDerivedTable derived, ResolutionContext context)

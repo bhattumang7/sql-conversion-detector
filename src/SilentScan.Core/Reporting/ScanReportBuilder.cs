@@ -118,23 +118,20 @@ public static class ScanReportBuilder
         // #temp tables are session-scoped in real SQL Server (visible to a callee EXEC'd from
         // the proc that created them), unlike a table variable (always proc-local, never
         // propagated) - a "driver" proc that creates #Results and EXECs several sub-procs
-        // against it is common, real corpus code. Restricted to a callee with exactly ONE known
-        // caller SCOPE across the whole scan (two calls from the SAME caller still count as one) -
-        // with two or more distinct callers there is no single #temp shape to fall back to,
-        // mirroring this codebase's other single-caller soundness boundaries (e.g.
-        // ProcCallGraph.SingleCallSiteFor's own literal-seeding restriction). Computed once here,
-        // before EITHER Tier-1 or the typed pass runs, so both benefit identically - a #temp
-        // table's own resolvability shouldn't depend on which pass happens to ask.
-        var callerScopeByCalleeScope = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // against it is common, real corpus code. Every distinct caller scope is carried here,
+        // not just a single one - the consumer (FromScopeResolver/TypedPredicateExtractor) tries
+        // each caller's own scoped catalog entry for the SPECIFIC name being resolved and only
+        // uses the result when every caller that has one agrees on its exact shape
+        // (CatalogTable.HasSameShapeAs); when they disagree, or when this is the only caller
+        // known for one #temp name but not another, resolution still declines rather than guess.
+        // Computed once here, before EITHER Tier-1 or the typed pass runs, so both benefit
+        // identically - a #temp table's own resolvability shouldn't depend on which pass asks.
+        var callerScopeByCalleeScope = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in procCallGraph.Edges
                      .Where(e => e.CallerScopeQualifiedName is not null)
                      .GroupBy(e => e.CalleeQualifiedName, StringComparer.OrdinalIgnoreCase))
         {
-            var distinctCallerScopes = group.Select(e => e.CallerScopeQualifiedName!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            if (distinctCallerScopes.Count == 1)
-            {
-                callerScopeByCalleeScope[group.Key] = distinctCallerScopes[0];
-            }
+            callerScopeByCalleeScope[group.Key] = group.Select(e => e.CallerScopeQualifiedName!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         var tier1PerFile = usableParseResults

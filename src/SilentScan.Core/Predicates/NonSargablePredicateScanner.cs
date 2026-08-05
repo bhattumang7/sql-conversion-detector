@@ -58,7 +58,7 @@ public static class NonSargablePredicateScanner
     /// </summary>
     public static IReadOnlyList<SargabilityFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null,
-        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope, ledger, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope();
@@ -68,7 +68,7 @@ public static class NonSargablePredicateScanner
 
     private sealed class Visitor(
         string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, DynamicSqlScope? enclosingScope = null,
-        SkipLedger? ledger = null, IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
+        SkipLedger? ledger = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
     {
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();

@@ -48,13 +48,11 @@ public sealed class CrossProcedureTempTableScopeTests
     }
 
     [Fact]
-    public async Task SubProcedureQueriesTempTable_TwoDifferentCallers_StaysUnresolved()
+    public async Task SubProcedureQueriesTempTable_TwoCallersAgreeingOnShape_Resolves()
     {
-        // Two callers create #Results with the SAME shape here, but this scan can't assume that
-        // in general (a genuinely different shape per caller is exactly the same-name-different-
-        // shape pattern CatalogBuilderTests already covers for the same-proc case) - with more
-        // than one known caller there is no single #temp shape to fall back to, so this must stay
-        // unresolved rather than guess which caller's shape applies.
+        // Two DIFFERENT known callers, but both create #Results with the exact same column
+        // shape - resolving here isn't a guess about WHICH caller's #Results applies, since
+        // either one produces an identical, verifiable answer regardless of which actually ran.
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_Sub AS
             BEGIN
@@ -70,6 +68,40 @@ public sealed class CrossProcedureTempTableScopeTests
             CREATE PROCEDURE dbo.usp_DriverB AS
             BEGIN
                 CREATE TABLE #Results (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+                EXEC dbo.usp_Sub;
+            END
+            """);
+
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.Equal("#Results", finding.Column.TableQualifiedName);
+        // Never claims a real index - no single caller's own #Results is "the" source when two
+        // legitimately different physical temp tables (just an identical shape) could be it.
+        Assert.False(finding.Column.Indexed);
+    }
+
+    [Fact]
+    public async Task SubProcedureQueriesTempTable_TwoCallersWithDifferentShapes_StaysUnresolved()
+    {
+        // The genuine same-name-different-shape case (the pattern CatalogBuilderTests already
+        // covers for the same-proc case, here across two different callers instead) - with two
+        // callers disagreeing on #Results' own column type, there is no single shape to resolve
+        // to, so this must stay unresolved rather than guess which caller's shape applies.
+        var report = await Scan("""
+            CREATE PROCEDURE dbo.usp_Sub AS
+            BEGIN
+                SELECT Col FROM #Results WHERE Col = N'x';
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_DriverA AS
+            BEGIN
+                CREATE TABLE #Results (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+                EXEC dbo.usp_Sub;
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_DriverB AS
+            BEGIN
+                CREATE TABLE #Results (Col INT NOT NULL);
                 EXEC dbo.usp_Sub;
             END
             """);
