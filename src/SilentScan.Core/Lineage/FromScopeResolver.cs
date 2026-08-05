@@ -17,7 +17,13 @@ public static class FromScopeResolver
     /// tables and table variables declared inside one are cataloged under a key scoped to it, so
     /// resolving a bare "#t"/"@t" reference needs the same scope to find them; a real persistent
     /// table was never stored with a scope, so passing one here is always safe (DatabaseCatalog
-    /// falls back to the unscoped lookup automatically).
+    /// falls back to the unscoped lookup automatically). <paramref name="CallerScopeByCalleeScope"/>
+    /// maps a procedure scope to the ONE OTHER scope that calls it, when the whole scan saw
+    /// exactly one - a #temp table is session-scoped in real SQL Server (visible to a callee
+    /// EXEC'd from the proc that created it), unlike a table variable (always proc-local, never
+    /// propagated). Built once, corpus-wide, from <see cref="Predicates.ProcCallGraph"/> - kept as
+    /// a plain name-to-name map here rather than threading the graph type itself into Lineage, to
+    /// avoid this layer depending on Predicates.
     /// </summary>
     internal readonly record struct ResolutionContext(
         DatabaseCatalog Catalog,
@@ -25,7 +31,8 @@ public static class FromScopeResolver
         string SourcePath,
         SkipLedger? Ledger,
         IReadOnlyDictionary<string, ResolvedRelation>? CteRelations,
-        string? ProcScope);
+        string? ProcScope,
+        IReadOnlyDictionary<string, string>? CallerScopeByCalleeScope = null);
 
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
         FromClause? fromClause,
@@ -34,9 +41,18 @@ public static class FromScopeResolver
         string sourcePath,
         SkipLedger? ledger = null,
         IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null,
-        string? procScope = null)
+        string? procScope = null) =>
+        Resolve(fromClause, new ResolutionContext(catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope));
+
+    /// <summary>
+    /// Same as the flat-parameter overload above, taking an already-built <see
+    /// cref="ResolutionContext"/> directly - the only way to also supply <see
+    /// cref="ResolutionContext.CallerScopeByCalleeScope"/>, since the flat overload already sits
+    /// at the S107 parameter-count ceiling and that field is needed by only one caller
+    /// (<c>TypedPredicateExtractor</c>'s own top-level FROM-clause resolution).
+    /// </summary>
+    internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(FromClause? fromClause, ResolutionContext context)
     {
-        var context = new ResolutionContext(catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<ScopeEntry>();
 
@@ -66,7 +82,7 @@ public static class FromScopeResolver
     {
         if (extraFromClause is not null)
         {
-            return Resolve(extraFromClause, context.Catalog, context.ResolvedViews, context.SourcePath, context.Ledger, context.CteRelations, context.ProcScope);
+            return Resolve(extraFromClause, context);
         }
 
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
@@ -189,7 +205,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveNamedTableReference(NamedTableReference named, ResolutionContext context, string? aliasOverride)
     {
-        var (catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope) = context;
+        var (catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope, callerScopeByCalleeScope) = context;
 
         // CTE names shadow catalog tables/views of the same name (docs/audit-
         // remediation-plan.md Phase 2.4) - a CTE is never schema-qualified, so a
@@ -210,6 +226,24 @@ public static class FromScopeResolver
         var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
         var isViewLayer = resolvedViews.TryGetValue(qualifiedName, out var view);
         var catalogTable = catalog.Find(qualifiedName, procScope);
+
+        // #temp tables are session-scoped in real SQL Server, not proc-scoped - a "driver" proc
+        // that creates #Results and then EXECs several sub-procs against it is common, real
+        // corpus code, not an edge case. Own-scope resolution above already covers the
+        // overwhelmingly common same-proc case; this only fires when it found nothing AND this
+        // scope has exactly ONE known caller scope (built once, corpus-wide, in
+        // ScanReportBuilder - see CallerScopeByCalleeScope's own doc comment for why "single
+        // caller" is the soundness boundary, mirroring DynamicSqlScanner's own single-call-site
+        // literal seeding). A real persistent table was never stored with a scope at all, so
+        // this retry is a harmless no-op for one - never a guess, just a second, still-exact
+        // scoped lookup.
+        if (catalogTable is null
+            && procScope is not null
+            && callerScopeByCalleeScope is not null
+            && callerScopeByCalleeScope.TryGetValue(procScope, out var callerScope))
+        {
+            catalogTable = catalog.Find(qualifiedName, callerScope);
+        }
 
         // A well-known built-in system catalog view (sys.objects, sysobjects, ...) -
         // never appears in a repo's own DDL (there's nothing to CREATE), so it always
@@ -250,7 +284,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveDerivedTableReference(QueryDerivedTable derived, ResolutionContext context)
     {
-        var (catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope) = context;
+        var (catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope, _) = context;
 
         // A derived-table subquery is inline, local to this statement - not a
         // persisted view/TVF, so it does not add view-layer depth. The enclosing
@@ -279,7 +313,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveTvfTableReference(SchemaObjectFunctionTableReference tvf, ResolutionContext context)
     {
-        var (catalog, resolvedViews, sourcePath, ledger, _, _) = context;
+        var (catalog, resolvedViews, sourcePath, ledger, _, _, _) = context;
 
         // A table-valued function invoked in a FROM clause (docs/audit-remediation-
         // plan.md Phase 4.2, audit finding B2). LineageResolver already resolves both
@@ -305,7 +339,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveVariableTableReference(VariableTableReference variableTable, ResolutionContext context)
     {
-        var (catalog, _, sourcePath, ledger, _, procScope) = context;
+        var (catalog, _, sourcePath, ledger, _, procScope, _) = context;
 
         // FROM @t - a table variable, declared either by an ordinary DECLARE @t TABLE(...)
         // in the enclosing body or by a multi-statement TVF's own RETURNS @t TABLE(...)
@@ -329,7 +363,7 @@ public static class FromScopeResolver
 
     private static (string? Alias, ScopeEntry Entry) ResolveUnsupportedTableReference(TableReference tableReference, ResolutionContext context)
     {
-        var (_, _, sourcePath, ledger, _, _) = context;
+        var (_, _, sourcePath, ledger, _, _, _) = context;
 
         // OPENQUERY/OPENROWSET/PIVOT/table-valued function calls etc: not yet resolved.
         // Empty columns means any reference against this alias falls through to "not found".

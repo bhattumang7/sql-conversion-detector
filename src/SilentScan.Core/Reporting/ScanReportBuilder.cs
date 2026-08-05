@@ -126,7 +126,30 @@ public static class ScanReportBuilder
             .ToList();
         var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
         var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
-        var extractionResults = usableParseResults.AsParallel().Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage)).ToList();
+
+        // #temp tables are session-scoped in real SQL Server (visible to a callee EXEC'd from
+        // the proc that created them), unlike a table variable (always proc-local, never
+        // propagated) - a "driver" proc that creates #Results and EXECs several sub-procs
+        // against it is common, real corpus code. Restricted to a callee with exactly ONE known
+        // caller SCOPE across the whole scan (two calls from the SAME caller still count as one) -
+        // with two or more distinct callers there is no single #temp shape to fall back to,
+        // mirroring this codebase's other single-caller soundness boundaries (e.g.
+        // ProcCallGraph.SingleCallSiteFor's own literal-seeding restriction).
+        var callerScopeByCalleeScope = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in procCallGraph.Edges
+                     .Where(e => e.CallerScopeQualifiedName is not null)
+                     .GroupBy(e => e.CalleeQualifiedName, StringComparer.OrdinalIgnoreCase))
+        {
+            var distinctCallerScopes = group.Select(e => e.CallerScopeQualifiedName!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (distinctCallerScopes.Count == 1)
+            {
+                callerScopeByCalleeScope[group.Key] = distinctCallerScopes[0];
+            }
+        }
+
+        var extractionResults = usableParseResults.AsParallel()
+            .Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage, callerScopeByCalleeScope: callerScopeByCalleeScope))
+            .ToList();
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
         var collationConflictFindings = extractionResults.SelectMany(r => r.CollationConflictFindings).ToList();

@@ -23,11 +23,12 @@ public static class TypedPredicateExtractor
     // resolve inside the dynamic text too, since the reparsed fragment has no CREATE PROCEDURE
     // wrapper of its own to discover either from.
     public static PredicateExtractionResult Extract(
-        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null, DynamicSqlScope? enclosingScope = null)
+        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null,
+        DynamicSqlScope? enclosingScope = null, IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null)
     {
         var resolvedViews = lineage.AllRelations;
         var ledger = new SkipLedger();
-        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
         return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries);
@@ -39,7 +40,8 @@ public static class TypedPredicateExtractor
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
         SkipLedger ledger,
-        DynamicSqlScope? enclosingScope = null) : TSqlFragmentVisitor
+        DynamicSqlScope? enclosingScope = null,
+        IReadOnlyDictionary<string, string>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
     {
         /// <summary>Skip-ledger construct kind shared by every "this operand has no type resolution" entry below - one label for the whole family of unresolved-operand reasons.</summary>
         private const string PredicateOperandConstructKind = "predicate operand";
@@ -167,7 +169,7 @@ public static class TypedPredicateExtractor
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope));
+            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
 
             // Consumed here, before any recursion at all (a derived-table subquery inside this
             // SELECT's own FROM/select list is itself a QuerySpecification, and must never see
@@ -531,7 +533,7 @@ public static class TypedPredicateExtractor
             _cteStack.Count > 0 ? _cteStack.Peek() : EmptyCteRelations;
 
         private FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
-            new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope);
+            new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope, callerScopeByCalleeScope);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
 
@@ -603,7 +605,19 @@ public static class TypedPredicateExtractor
             }
 
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName, _currentProcScope);
+            var table = catalog.Find(qualifiedName, _currentProcScope);
+
+            // Same "#temp is session-scoped, not proc-scoped" fallback ResolveNamedTableReference
+            // uses for a SELECT's own FROM clause - an INSERT into a #temp table created by this
+            // proc's single known caller is exactly as common a pattern as querying one.
+            if (table is null && _currentProcScope is not null
+                && callerScopeByCalleeScope is not null
+                && callerScopeByCalleeScope.TryGetValue(_currentProcScope, out var callerScope))
+            {
+                table = catalog.Find(qualifiedName, callerScope);
+            }
+
+            return table;
         }
 
         /// <summary>
