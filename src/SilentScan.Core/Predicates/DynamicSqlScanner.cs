@@ -163,6 +163,23 @@ public static class DynamicSqlScanner
             declaredType is null
                 ? this
                 : new FoldState { Assemblies = Assemblies, TaintReason = TaintReason, TaintLocation = TaintLocation, GuardedAlternatives = GuardedAlternatives, DeclaredType = declaredType };
+
+        /// <summary>
+        /// Strips a recorded <see cref="GuardedAlternatives"/> list rather than resolving it -
+        /// used exactly once, by <see cref="Visitor.ClearGuardedAlternatives"/>, on entry to a
+        /// NESTED conditional/exception scope whose own guard did not match. A recorded
+        /// alternative is only sound to trust for as long as the code walked afterward is
+        /// straight-line (the guard that proved it is still in force); stepping into any further
+        /// IF/TRY/WHILE without an exact guard match means this scan can no longer prove which
+        /// path is being walked, so the alternative must not survive into it - see the
+        /// <c>Scan_GuardedSetThenDifferentGuardExec_UnresolvableAliasType_StaysTainted</c> fixture
+        /// this guards against (a compound guard that happens to IMPLY the recorded one is still
+        /// declined, per this scanner's exact-text-match-only soundness policy).
+        /// </summary>
+        public FoldState WithoutGuardedAlternatives() =>
+            GuardedAlternatives is null
+                ? this
+                : new FoldState { Assemblies = Assemblies, TaintReason = TaintReason, TaintLocation = TaintLocation, GuardedAlternatives = null, DeclaredType = DeclaredType };
     }
 
     private sealed class Visitor(
@@ -760,7 +777,9 @@ public static class DynamicSqlScanner
             {
                 if (!folded.TryGetValue(name, out var existing) || existing.Assemblies is null)
                 {
-                    folded[name] = FoldState.Tainted(existing?.TaintReason ?? "variable-not-in-scope", existing?.TaintLocation ?? Span(site)).WithDeclaredType(declaredType);
+                    folded[name] = FoldState.Tainted(existing?.TaintReason ?? "variable-not-in-scope", existing?.TaintLocation ?? Span(site))
+                        .WithDeclaredType(declaredType)
+                        .WithGuardedAlternatives(ConcatAlternativesWithAddend(existing?.GuardedAlternatives, rhs));
                     return;
                 }
 
@@ -778,24 +797,135 @@ public static class DynamicSqlScanner
 
             folded[name] = (rhs.Success
                 ? FoldState.Constant(rhs.Assemblies!)
-                : FoldState.Tainted(rhs.Reason!, rhs.Location!.Value)).WithDeclaredType(declaredType);
+                : FoldState.Tainted(rhs.Reason!, rhs.Location!.Value)
+                    .WithGuardedAlternatives(TryPropagateGuardedAlternatives(expression, folded, foldingEnabled)))
+                .WithDeclaredType(declaredType);
+        }
+
+        /// <summary>
+        /// Concatenates a variable's own accumulated <see cref="GuardedAlternative"/>s onto a
+        /// <c>+=</c> addend's fold result - <c>SET @sql += ' WHERE id = ' + @id</c> where @sql
+        /// itself diverged across an earlier IF/ELSE-IF chain (some branches known, others not).
+        /// Each alternative's own known text gets the SAME addend appended, so a later EXEC can
+        /// still recover the covered branches even though @sql as a whole stays tainted. Returns
+        /// null (no alternatives to carry forward) whenever there is nothing to combine - no
+        /// prior alternatives, an addend that itself didn't fold, or every combination blew the
+        /// cardinality cap - the caller's <see cref="FoldState.WithGuardedAlternatives"/> then
+        /// leaves the tainted state exactly as it always was.
+        /// </summary>
+        private static List<GuardedAlternative>? ConcatAlternativesWithAddend(IReadOnlyList<GuardedAlternative>? alternatives, FoldAttempt addend)
+        {
+            if (alternatives is null || !addend.Success)
+            {
+                return null;
+            }
+
+            List<GuardedAlternative> result = [];
+            foreach (var alternative in alternatives)
+            {
+                if (alternative.State.Assemblies is { } baseAssemblies
+                    && TryCartesianConcat(baseAssemblies, addend.Assemblies!, out var combined))
+                {
+                    result.Add(new GuardedAlternative(alternative.GuardText, FoldState.Constant(combined)));
+                }
+            }
+
+            return result.Count > 0 ? result : null;
+        }
+
+        /// <summary>
+        /// The general form of <see cref="ConcatAlternativesWithAddend"/> for a plain <c>SET @sql
+        /// = @sql + ' WHERE id = ' + @id</c> - not a dedicated <c>+=</c> node, just an ordinary
+        /// assignment whose own RHS expression happens to self-reference the variable being
+        /// assigned. Re-folds the WHOLE expression once per alternative, with that one variable's
+        /// folded state swapped for the alternative's own known outcome, so any shape of
+        /// surrounding concatenation/function-call is handled the same way a direct fold would be
+        /// - not just simple addition. Deliberately conservative: only fires when EXACTLY ONE
+        /// variable referenced anywhere in the expression both is currently tainted AND carries
+        /// alternatives - two such variables in the same expression would require combining each
+        /// one's alternatives against every OTHER one's (a cross product this scanner doesn't
+        /// attempt), so it bails out to the ordinary taint instead of guessing which pairing is
+        /// real.
+        /// </summary>
+        private List<GuardedAlternative>? TryPropagateGuardedAlternatives(ScalarExpression expression, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
+            var collector = new ReferencedVariableCollector();
+            expression.Accept(collector);
+
+            var candidates = collector.Names
+                .Where(candidateName => folded.TryGetValue(candidateName, out var candidateState)
+                    && candidateState.Assemblies is null
+                    && candidateState.GuardedAlternatives is { Count: > 0 })
+                .ToList();
+
+            if (candidates.Count != 1)
+            {
+                return null;
+            }
+
+            var name = candidates[0];
+            var alternatives = folded[name].GuardedAlternatives!;
+            List<GuardedAlternative> result = [];
+            foreach (var alternative in alternatives)
+            {
+                var overrideFolded = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase) { [name] = alternative.State };
+                var attempt = TryFoldExpression(expression, overrideFolded, foldingEnabled);
+                if (attempt.Success)
+                {
+                    result.Add(new GuardedAlternative(alternative.GuardText, FoldState.Constant(attempt.Assemblies!)));
+                }
+            }
+
+            return result.Count > 0 ? result : null;
         }
 
         private void HandleIf(IfStatement ifStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
             var guardText = FragmentTextRenderer.Render(ifStatement.Predicate);
 
-            var thenSeed = ResolveGuardedAlternatives(folded, guardText);
+            var thenSeed = ClearGuardedAlternatives(ResolveGuardedAlternatives(folded, guardText));
             var thenDict = new Dictionary<string, FoldState>(thenSeed, StringComparer.OrdinalIgnoreCase);
             WalkStatements(NormalizeToStatementList(ifStatement.ThenStatement), thenDict, foldingEnabled);
 
-            var elseDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+            var elseDict = new Dictionary<string, FoldState>(ClearGuardedAlternatives(folded), StringComparer.OrdinalIgnoreCase);
             if (ifStatement.ElseStatement is not null)
             {
                 WalkStatements(NormalizeToStatementList(ifStatement.ElseStatement), elseDict, foldingEnabled);
             }
 
             MergeUnioningDivergent(folded, thenDict, elseDict, ifStatement, "diverges-across-if-branches", guardText);
+        }
+
+        /// <summary>
+        /// Strips every variable's own <see cref="GuardedAlternative"/>s on entry to a NESTED
+        /// conditional/exception/loop scope - <see cref="HandleIf"/> (the ELSE branch and any THEN
+        /// branch left unresolved by <see cref="ResolveGuardedAlternatives"/>), <see
+        /// cref="HandleTryCatch"/>, and <see cref="HandleWhile"/> all call this on their own entry
+        /// dictionaries before walking. An alternative recorded higher up is only sound to trust
+        /// for as long as the guard that proved it remains in force across nothing but
+        /// straight-line code; the instant the walk steps into a FURTHER branch point whose own
+        /// guard doesn't exactly match, this scan can no longer prove which path is executing, so
+        /// carrying the alternative forward would let a later EXEC assume a value that isn't
+        /// actually guaranteed on that path (even a compound guard that happens to IMPLY the
+        /// recorded one stays declined, per this scanner's exact-text-match-only policy - see
+        /// <see cref="ResolveGuardedAlternatives"/>). Same defensive "return the input unchanged
+        /// when nothing needs stripping" shape as every other merge helper here.
+        /// </summary>
+        private static Dictionary<string, FoldState> ClearGuardedAlternatives(Dictionary<string, FoldState> folded)
+        {
+            Dictionary<string, FoldState>? cleared = null;
+            foreach (var (key, state) in folded)
+            {
+                if (state.GuardedAlternatives is null)
+                {
+                    continue;
+                }
+
+                cleared ??= new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+                cleared[key] = state.WithoutGuardedAlternatives();
+            }
+
+            return cleared ?? folded;
         }
 
         /// <summary>
@@ -855,7 +985,7 @@ public static class DynamicSqlScanner
         private void HandleWhile(WhileStatement whileStatement, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
             var bodyStatements = NormalizeToStatementList(whileStatement.Statement);
-            var loopEntry = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+            var loopEntry = new Dictionary<string, FoldState>(ClearGuardedAlternatives(folded), StringComparer.OrdinalIgnoreCase);
 
             var wasSuppressed = _suppressEmission;
             _suppressEmission = true;
@@ -893,12 +1023,12 @@ public static class DynamicSqlScanner
 
         private void HandleTryCatch(TryCatchStatement tryCatch, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
-            var tryDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+            var tryDict = new Dictionary<string, FoldState>(ClearGuardedAlternatives(folded), StringComparer.OrdinalIgnoreCase);
             WalkStatements(tryCatch.TryStatements.Statements, tryDict, foldingEnabled);
 
             // CATCH only runs if TRY throws mid-way, so how far TRY got is unknowable - CATCH
             // starts from the pre-TRY state, not tryDict, however far WalkStatements got.
-            var catchDict = new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase);
+            var catchDict = new Dictionary<string, FoldState>(ClearGuardedAlternatives(folded), StringComparer.OrdinalIgnoreCase);
             WalkStatements(tryCatch.CatchStatements.Statements, catchDict, foldingEnabled);
 
             MergeUnioningDivergent(folded, tryDict, catchDict, tryCatch, "diverges-across-try-catch");
@@ -938,7 +1068,16 @@ public static class DynamicSqlScanner
                 var merged = before is null && TryMergeFreshlyDeclaredInOneBranchOnly(a, b, location) is { } freshMerge
                     ? freshMerge
                     : MergeOne(a, b, reason, location);
-                folded[key] = guardText is not null && a is not null
+
+                // A cap hit here means even the KNOWN side(s) alone are too numerous to trust -
+                // recording an alternative from `a` would just reintroduce the same combinatorial
+                // blowup one level up (through AssignVariable's GuardedAlternatives propagation),
+                // defeating the cap's entire purpose. Dropping any GuardedAlternatives already
+                // accumulated on `before` here is deliberate too: they die with this merge rather
+                // than resurrecting past the point this scan gave up.
+                var isCardinalityCap = merged.TaintReason is { } mergedReason
+                    && mergedReason.EndsWith(":cardinality-cap", StringComparison.Ordinal);
+                folded[key] = guardText is not null && a is not null && !isCardinalityCap
                     ? merged.WithGuardedAlternatives(CombineGuardedAlternatives(guardText, before, a, b))
                     : merged;
             }
@@ -1281,34 +1420,99 @@ public static class DynamicSqlScanner
 
         private void HandleStringList(ExecutableStringList stringList, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)
         {
-            // ExecutableStringList.Strings is never empty for a successfully parsed
-            // ExecuteStatement - EXEC() with no argument is a syntax error, not a valid
-            // zero-element call. Starts from the single empty assembly and cross-concatenates
-            // each argument's own assembly set in turn - EXEC('a', @x, 'b') concatenates all
-            // three pieces in order regardless of how many possible values @x itself carries.
+            var result = TryFoldStringElements(stringList.Strings, folded, foldingEnabled);
+            if (result.Success)
+            {
+                foreach (var assembly in result.Assemblies!)
+                {
+                    AddScript(BuildScript(node, assembly, parameterDeclarationText: null, argumentBindings: null));
+                }
+
+                return;
+            }
+
+            if (TryEmitGuardedAlternativeScripts(stringList.Strings, node, folded, foldingEnabled, result.FailedElement))
+            {
+                return;
+            }
+
+            AddFinding(Unanalyzable(node, result.Reason!));
+        }
+
+        private readonly record struct StringListFoldResult(IReadOnlyList<IReadOnlyList<LiteralSegment>>? Assemblies, string? Reason, ValueExpression? FailedElement)
+        {
+            public bool Success => Assemblies is not null;
+        }
+
+        /// <summary>
+        /// ExecutableStringList.Strings is never empty for a successfully parsed
+        /// ExecuteStatement - EXEC() with no argument is a syntax error, not a valid zero-element
+        /// call. Starts from the single empty assembly and cross-concatenates each argument's own
+        /// assembly set in turn - EXEC('a', @x, 'b') concatenates all three pieces in order
+        /// regardless of how many possible values @x itself carries. Extracted from
+        /// <see cref="HandleStringList"/> so <see cref="TryEmitGuardedAlternativeScripts"/> can
+        /// replay the exact same fold under an overridden variable state, and so the caller knows
+        /// WHICH element failed - needed to look up that element's own GuardedAlternatives.
+        /// </summary>
+        private StringListFoldResult TryFoldStringElements(IList<ValueExpression> elements, Dictionary<string, FoldState> folded, bool foldingEnabled)
+        {
             IReadOnlyList<IReadOnlyList<LiteralSegment>> assemblies = [[]];
-            foreach (var element in stringList.Strings)
+            foreach (var element in elements)
             {
                 var attempt = TryFoldExpression(element, folded, foldingEnabled);
                 if (!attempt.Success)
                 {
-                    AddFinding(Unanalyzable(node, attempt.Reason!));
-                    return;
+                    return new StringListFoldResult(null, attempt.Reason, element);
                 }
 
                 if (!TryCartesianConcat(assemblies, attempt.Assemblies!, out var next))
                 {
-                    AddFinding(Unanalyzable(node, CardinalityCapReason));
-                    return;
+                    return new StringListFoldResult(null, CardinalityCapReason, element);
                 }
 
                 assemblies = next;
             }
 
-            foreach (var assembly in assemblies)
+            return new StringListFoldResult(assemblies, null, null);
+        }
+
+        /// <summary>
+        /// When <see cref="TryFoldStringElements"/> fails on an element that is a plain variable
+        /// reference carrying its own <see cref="GuardedAlternative"/>s (a variable whose value
+        /// diverged across an earlier IF/ELSE-IF chain where at least one branch's own outcome is
+        /// fully known even though the chain as a whole never converged to a single value) -
+        /// re-folds the WHOLE string list once per alternative, with that one variable's state
+        /// overridden to the alternative's own known outcome, emitting a script for every
+        /// alternative that folds cleanly. The uncovered/unresolved remainder is silently
+        /// dropped rather than reported as a second Unanalyzable finding for the SAME call site -
+        /// <see cref="Reporting.DynamicSqlSummary.From"/> counts a site once per distinct
+        /// (path,line,column) bucket, so a site already counted as analyzed here must never also
+        /// land in the unanalyzable bucket.
+        /// </summary>
+        private bool TryEmitGuardedAlternativeScripts(
+            IList<ValueExpression> elements, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled, ValueExpression? failedElement)
+        {
+            if (failedElement is not VariableReference variableRef
+                || !folded.TryGetValue(variableRef.Name, out var state)
+                || state.GuardedAlternatives is not { Count: > 0 } alternatives)
+            {
+                return false;
+            }
+
+            var assembliesToEmit = alternatives
+                .Where(alternative => alternative.State.Assemblies is not null)
+                .Select(alternative => TryFoldStringElements(
+                    elements, new Dictionary<string, FoldState>(folded, StringComparer.OrdinalIgnoreCase) { [variableRef.Name] = alternative.State }, foldingEnabled))
+                .Where(altResult => altResult.Success)
+                .SelectMany(altResult => altResult.Assemblies!)
+                .ToList();
+
+            foreach (var assembly in assembliesToEmit)
             {
                 AddScript(BuildScript(node, assembly, parameterDeclarationText: null, argumentBindings: null));
             }
+
+            return assembliesToEmit.Count > 0;
         }
 
         private void HandleSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, Dictionary<string, FoldState> folded, bool foldingEnabled)

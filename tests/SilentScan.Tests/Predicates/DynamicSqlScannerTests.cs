@@ -58,6 +58,39 @@ public sealed class DynamicSqlScannerTests
         Assert.Single(result.AnalyzableScripts);
     }
 
+    [Fact]
+    public void Scan_ExecOfVariableDivergingAcrossIfElseIfBranches_AnalyzesEachBranchIndependently()
+    {
+        // A common dispatch pattern: @SQL is set to a DIFFERENT literal fragment in each of an
+        // IF/ELSE-IF chain's branches (no final ELSE - a third, uncovered path leaves @SQL at its
+        // prior, genuinely unknown state), then a common suffix is appended before one EXEC that
+        // always runs. Each covered branch's own resulting SQL text is fully known even though
+        // the variable as a whole never folds to one single value - this must analyze the two
+        // known branches rather than declining the whole call site as an undifferentiated
+        // cross-branch divergence.
+        var result = Scan("""
+            DECLARE @action VARCHAR(10) = 'X'
+            DECLARE @table VARCHAR(50) = 'dbo.Foo'
+            DECLARE @id VARCHAR(10) = '1'
+            DECLARE @SQL NVARCHAR(MAX)
+
+            EXEC dbo.SomeUnknownProc @SQL OUTPUT
+
+            IF @action = 'X'
+                SET @SQL = 'DELETE ' + @table
+            ELSE IF @action = 'Y'
+                SET @SQL = 'UPDATE ' + @table + ' SET col = val'
+
+            SET @SQL = @SQL + ' WHERE id = ' + @id
+            EXEC (@SQL)
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText.Contains("DELETE dbo.Foo WHERE id = 1", StringComparison.Ordinal));
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText.Contains("UPDATE dbo.Foo SET col = val WHERE id = 1", StringComparison.Ordinal));
+    }
+
     private static DynamicSqlExtractionResult Scan(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

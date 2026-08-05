@@ -78,6 +78,55 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task Analyze_ExecOfVariableDivergingAcrossIfElseIfBranches_BothBranchesScanForced_OracleConfirmed()
+    {
+        // The dispatch shape a real proc uses: @sql is set to a DIFFERENT literal predicate in
+        // each of an IF/ELSE-IF chain's branches (no final ELSE - a third, uncovered @mode value
+        // leaves @sql at its genuinely unknown prior state), then one unconditional EXEC runs
+        // after the chain. Both covered branches carry their own real implicit-conversion defect
+        // (varchar column vs an nvarchar literal) - this must reach ScanForced for BOTH, oracle
+        // confirmed, not decline the whole call site as an undifferentiated divergence.
+        var (catalog, lineage) = BuildCatalog();
+
+        var appSql = """
+            CREATE PROCEDURE dbo.usp_Find @mode INT AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX)
+                EXEC dbo.usp_Unknown @sql OUTPUT
+
+                IF @mode = 1
+                    SET @sql = N'SELECT Col FROM dbo.T WHERE Col = N''x'''
+                ELSE IF @mode = 2
+                    SET @sql = N'SELECT Col FROM dbo.T WHERE Col = N''y'''
+
+                EXEC(@sql)
+            END
+            """;
+        var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var extraction = DynamicSqlScanner.Scan(parseResult);
+        Assert.Empty(extraction.Findings);
+        Assert.Equal(2, extraction.AnalyzableScripts.Count);
+
+        var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
+
+        // Both branches carry the SAME shape of defect (Col vs an nvarchar literal) - dedup
+        // collapses them to one TypedPredicateFinding, exactly like two Tier1 findings from
+        // different assemblies of the same call site already collapse (DedupeTier1 above). The
+        // proof that BOTH branches were actually analyzed, rather than the call site declining
+        // outright, is extraction.AnalyzableScripts.Count == 2 and extraction.Findings being
+        // empty, both asserted above.
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.True(typedFinding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, result.TypedFindings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
     public void Analyze_LiteralWithTier1AndExpressionDerivedPredicates_RemapsBothToSourceLine()
     {
         var (catalog, lineage) = BuildCatalog();
