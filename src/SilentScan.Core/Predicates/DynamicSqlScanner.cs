@@ -659,14 +659,16 @@ public static class DynamicSqlScanner
             foreach (var element in declare.Declarations)
             {
                 var name = element.VariableName.Value;
-                if (element.Value is null)
+                if (element.Value is null or NullLiteral)
                 {
-                    // No initializer at all - genuinely no value assigned, ever, up to this
+                    // No initializer at all, OR an explicit `= NULL` (the far more common
+                    // defensive-coding real-world spelling, e.g. before a cursor loop's own FETCH
+                    // INTO overwrites it) - either way, genuinely no VALUE is known up to this
                     // point. When the declared type resolves, this is still a symbolic
                     // placeholder rather than a bare taint: the variable's declared type is a
-                    // hard T-SQL guarantee regardless of whether it was ever assigned (an
-                    // uninitialized local's type doesn't change), so the same "known shape,
-                    // unknown value" treatment applies.
+                    // hard T-SQL guarantee regardless of whether it was ever assigned a non-NULL
+                    // value (an uninitialized local's type doesn't change), so the same "known
+                    // shape, unknown value" treatment applies.
                     folded[name] = SeedSymbolicOrTaint(element, element.DataType, "no-initializer");
                     continue;
                 }

@@ -149,6 +149,41 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecBuiltFromCursorFetchedVariablesDeclaredWithExplicitNullInitializer_TreatsFetchTargetsAsSymbolicPlaceholders()
+    {
+        // The overwhelmingly common real-world variant of the cursor-loop pattern above: the
+        // FETCH targets are declared with an EXPLICIT `= NULL` initializer (a defensive habit,
+        // not a bare `DECLARE @x TYPE` with none at all). NULL carries no more information than
+        // no initializer does - the variable's declared type is still a hard T-SQL guarantee -
+        // but HandleDeclare's placeholder seeding only special-cases the "Value is null" (no
+        // initializer syntax at all) case; an explicit NullLiteral value instead falls through
+        // to TryFoldExpression, which has no NullLiteral case, so it taints as a bare, type-less
+        // "non-literal-expression:other" - and HandleFetch's own placeholder recovery then has
+        // no PlaceholderType to work from, degrading the whole cursor loop to
+        // "unsupported-statement-in-scope" indistinguishably from a genuinely unmodeled shape.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @ObjectName VARCHAR(128) = NULL, @ColName VARCHAR(128) = NULL, @SQL VARCHAR(500)
+                DECLARE cur CURSOR FOR SELECT TableName, ColumnName FROM dbo.SomeCatalog
+                OPEN cur
+                FETCH NEXT FROM cur INTO @ObjectName, @ColName
+                WHILE (@@FETCH_STATUS = 0)
+                BEGIN
+                    SET @SQL = 'UPDATE ' + @ObjectName + ' SET ' + @ColName + ' = NULL'
+                    EXEC (@SQL)
+                    FETCH NEXT FROM cur INTO @ObjectName, @ColName
+                END
+                CLOSE cur
+                DEALLOCATE cur
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.NotEmpty(result.AnalyzableScripts);
+    }
+
+    [Fact]
     public void Scan_ExecOfLocallyDeclaredLiteralVariable_TierC_ProducesAnalyzableScript()
     {
         // Tier C: a straight-line DECLARE-with-literal-initializer immediately reaching the
