@@ -2525,4 +2525,60 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("non-literal-expression:function-call", finding.Reason);
         Assert.Empty(result.AnalyzableScripts);
     }
+
+    [Fact]
+    public void Scan_ExecDropDatabaseBuiltFromLiteralPlusParameter_InsideIfExists_ProducesAnalyzableScript()
+    {
+        // A cross-database admin proc's own dispatch pattern: EXEC('DROP DATABASE ' + @DbName),
+        // wrapped in an IF EXISTS guard against sys.databases. Structurally this is nothing but
+        // the ordinary "literal + variable" EXEC() shape HandleStringList already handles - the
+        // guard and the DROP DATABASE keyword itself introduce no new construct this scanner
+        // doesn't already model.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_DropDatabase @DbName SYSNAME AS
+            BEGIN
+                IF EXISTS (SELECT 1 FROM sys.databases WHERE name = @DbName)
+                BEGIN
+                    EXEC ('DROP DATABASE ' + @DbName)
+                END
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_SpExecuteSqlOfVariableAssignedInsideCursorLoopViaIfElseBranching_ProducesAnalyzableScripts()
+    {
+        // sp_executesql @sql where @sql's own value comes from an IF/ELSE branch INSIDE a
+        // cursor's WHILE loop body - nothing here is a new construct beyond what the cursor
+        // placeholder fix and the ordinary IF/ELSE branch-union machinery already handle
+        // independently; this proves the two compose correctly together.
+        var result = ScanWithEmptyCallGraph("""
+            CREATE PROCEDURE dbo.usp_Scratch AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX)
+                DECLARE @flag INT
+                DECLARE cur CURSOR FOR SELECT flag_col FROM dbo.SomeFlags
+                OPEN cur
+                FETCH NEXT FROM cur INTO @flag
+                WHILE (@@FETCH_STATUS = 0)
+                BEGIN
+                    IF @flag = 1
+                        SET @sql = N'SELECT 1'
+                    ELSE
+                        SET @sql = N'SELECT 2'
+                    EXEC sp_executesql @sql
+                    FETCH NEXT FROM cur INTO @flag
+                END
+                CLOSE cur
+                DEALLOCATE cur
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.NotEmpty(result.AnalyzableScripts);
+    }
 }
