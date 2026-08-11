@@ -76,6 +76,19 @@ public abstract record SqlTextValue
         if (a is Template aTemplate && b is Template bTemplate)
         {
             var declaredType = a.DeclaredType ?? b.DeclaredType;
+
+            // Two holes of the SAME type but different origin (e.g. two separate FETCH sites
+            // feeding the same loop-carried variable) carry no more information as a Choice than
+            // as one hole - both mean "unknown value of this type" identically, so collapsing
+            // immediately avoids manufacturing a Choice piece a caller expecting a bare Hole
+            // (BuiltinArgument/ExpressionEvaluator's own pattern match) would fail to recognize,
+            // silently declining a fold that should have transferred cleanly. This must run
+            // BEFORE MergeAsChoice - a Choice-of-holes is never useful, only ever a liability.
+            if (aTemplate.Pieces is [TemplatePiece.Hole aHole] && bTemplate.Pieces is [TemplatePiece.Hole bHole] && aHole.Type == bHole.Type)
+            {
+                return new Template([new TemplatePiece.Hole(aHole.Type, at, HoleKind.WidenedChoice)]) { DeclaredType = declaredType };
+            }
+
             var merged = MergeAsChoice(aTemplate, bTemplate, guardText);
             return Widen(merged with { DeclaredType = declaredType }, cap, at);
         }
