@@ -6,12 +6,11 @@ using SilentScan.Core.Predicates;
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
 /// <summary>
-/// The new engine's entry point - same signature and contract as the old
-/// <see cref="DynamicSqlScanner.Scan"/>, so the two can run side by side against the same input
-/// during the rebuild (docs/dynamic-sql-rebuild-plan.md Phase 3 exit gate: a parity harness
-/// comparing both before any cutover). Walks every batch's top-level statements through
-/// <see cref="DynamicSqlCfg"/>/<see cref="DynamicSqlTransfer"/>, which recurses into any nested
-/// CREATE/ALTER PROCEDURE, FUNCTION, or TRIGGER body as its own fresh scope.
+/// The dynamic-SQL engine's entry point - the sole production implementation (the earlier
+/// engine this one replaced during the V1-to-V2 rebuild has since been deleted). Walks every
+/// batch's top-level statements through <see cref="DynamicSqlCfg"/>/<see cref="DynamicSqlTransfer"/>,
+/// which recurses into any nested CREATE/ALTER PROCEDURE, FUNCTION, or TRIGGER body as its own
+/// fresh scope.
 /// </summary>
 public static class DynamicSqlScannerV2
 {
@@ -23,10 +22,9 @@ public static class DynamicSqlScannerV2
     /// <paramref name="outputSummaryIndex"/> seeds an ordinary EXEC's own OUTPUT arguments from a
     /// callee's already-proven-constant OUTPUT parameter. Both null (the common case in isolated/
     /// unit-tested scans) leaves every formal parameter unseeded, reporting
-    /// "variable-not-in-scope" if referenced - exactly the old scanner's own behavior whenever no
-    /// call graph is supplied at all, so this is purely additive precision, never a soundness
-    /// requirement. <paramref name="catalog"/> is accepted for signature compatibility with
-    /// <see cref="DynamicSqlScanner.Scan"/> but not yet consulted - single-table SELECT-assignment
+    /// "variable-not-in-scope" if referenced - a call graph is purely additive precision, never a
+    /// soundness requirement. <paramref name="catalog"/> is accepted for call sites that need
+    /// catalog-aware resolution but not yet consulted everywhere - single-table SELECT-assignment
     /// column resolution remains a deferred precision improvement.
     /// </summary>
     public static DynamicSqlExtractionResult Scan(

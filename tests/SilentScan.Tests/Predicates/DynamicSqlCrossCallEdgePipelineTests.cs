@@ -8,11 +8,11 @@ namespace SilentScan.Tests.Predicates;
 /// <summary>
 /// End-to-end coverage for the roadmap item "trace provably-constant dynamic SQL across
 /// proc-call edges": a caller passes a string literal into a callee procedure's parameter, and
-/// the callee's OWN body builds dynamic SQL from that parameter. Before this, DynamicSqlScanner
+/// the callee's OWN body builds dynamic SQL from that parameter. Before this, the dynamic SQL engine
 /// never seeded a proc's own formal parameters at all - any reference to one inside dynamic SQL
 /// failed as "variable-not-in-scope" regardless of what any caller passed. Runs through
-/// ScanReportBuilder (ProcCallGraphBuilder -> DynamicSqlScanner -> DynamicSqlPipeline), the same
-/// entry point production uses, not DynamicSqlScanner in isolation.
+/// ScanReportBuilder (ProcCallGraphBuilder -> DynamicSqlScannerV2 -> DynamicSqlPipeline), the same
+/// entry point production uses, not DynamicSqlScannerV2 in isolation.
 /// </summary>
 public sealed class DynamicSqlCrossCallEdgePipelineTests
 {

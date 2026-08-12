@@ -7,7 +7,7 @@ namespace SilentScan.Tests.Predicates;
 /// <summary>
 /// Regression coverage for sp_executesql @params type-alias resolution (formerly pinned in
 /// KnownGapCharacterizationTests.DynamicSql_AliasTypedDeclaredParameter_ResolvesToNullType_Unknown):
-/// DynamicSqlScanner runs before CatalogBuilder in ScanReportBuilder's pipeline, so parsing
+/// the dynamic SQL engine runs before CatalogBuilder in ScanReportBuilder's pipeline, so parsing
 /// sp_executesql's @params declaration at scan time - the original design - could never resolve
 /// a user CREATE TYPE ... FROM alias, since no DatabaseCatalog existed yet. DynamicSqlScript now
 /// carries the raw declaration text (ParameterDeclarationText) forward, and DynamicSqlPipeline

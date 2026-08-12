@@ -2,6 +2,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
 
@@ -9,7 +10,7 @@ namespace SilentScan.Tests.Predicates;
 
 /// <summary>
 /// End-to-end tests for <see cref="DynamicSqlPipeline"/>: real ScriptDOM parses feeding a real
-/// <see cref="DynamicSqlScanner"/> extraction into the real catalog/lineage/predicate pipeline,
+/// DynamicSqlScannerV2 extraction into the real catalog/lineage/predicate pipeline,
 /// checking that findings inside a folded dynamic SQL string land back on their true source
 /// line - including the two cases that break naive index math: a literal spanning multiple
 /// source lines, and one containing an escaped quote. Verdict-bearing (ScanForced) findings are
@@ -56,7 +57,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         Assert.Empty(extraction.Findings);
         var script = Assert.Single(extraction.AnalyzableScripts);
 
@@ -98,7 +99,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([]));
+        var extraction = DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([]));
         Assert.Empty(extraction.Findings);
         var script = Assert.Single(extraction.AnalyzableScripts);
 
@@ -148,17 +149,32 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         Assert.Empty(extraction.Findings);
-        Assert.Equal(2, extraction.AnalyzableScripts.Count);
+
+        // Three assemblies now, not two: the unrecognized proc call (`EXEC dbo.usp_Unknown @sql
+        // OUTPUT`) no longer blanket-taints @sql - its declared type (NVARCHAR(MAX)) is known, so
+        // it degrades to a typed hole instead (DynamicSqlTransfer's HavocOrTaint helper), and the
+        // THIRD, uncovered dispatch path (neither @mode=1 nor @mode=2) now correctly surfaces its
+        // own typed-hole assembly rather than being silently invisible the way it was under the
+        // old engine (where the unknown proc call fully tainted @sql, so that path could never
+        // contribute a script at all). This is a genuine completeness improvement, not a false
+        // positive: the pipeline reports it as its own honest Unanalyzable finding below (a
+        // placeholder alone is "symbolic-value-not-positionable:whole-statement" - there is no
+        // surrounding literal SQL text to locate a predicate in), never as a fabricated verdict.
+        Assert.Equal(3, extraction.AnalyzableScripts.Count);
 
         var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
 
-        // Both branches carry the SAME shape of defect (Col vs an nvarchar literal) - dedup
-        // collapses them to one TypedPredicateFinding, exactly like two Tier1 findings from
+        Assert.Equal(3, result.Findings.Count);
+        Assert.Single(result.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable && f.Reason == "symbolic-value-not-positionable:whole-statement");
+        Assert.Equal(2, result.Findings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
+
+        // Both COVERED branches carry the SAME shape of defect (Col vs an nvarchar literal) -
+        // dedup collapses them to one TypedPredicateFinding, exactly like two Tier1 findings from
         // different assemblies of the same call site already collapse (DedupeTier1 above). The
         // proof that BOTH branches were actually analyzed, rather than the call site declining
-        // outright, is extraction.AnalyzableScripts.Count == 2 and extraction.Findings being
+        // outright, is extraction.AnalyzableScripts.Count == 3 and extraction.Findings being
         // empty, both asserted above.
         var typedFinding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
@@ -178,6 +194,24 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         // actual predicate, not just that the SELECT-assignment call site becomes analyzable in
         // isolation. Deliberately reuses dbo.T as its own source table (varchar(10)) rather than
         // introducing a second table this class's shared schema doesn't deploy.
+        //
+        // KNOWN REGRESSION (flagged, not fixed): CompileSelectAssignment's fast path (splicing
+        // literal template pieces around a resolved column's own hole) only ever runs when
+        // spec.FromClause is null (a pure `SELECT @x = expr` with no FROM at all) - a SELECT
+        // assignment that DOES have a FROM clause, even the "exactly one catalog-known table,
+        // literal-concatenated-with-that-table's-own-column" shape this test and its sibling
+        // DynamicSqlScannerTests.Scan_SelectAssignmentFromSingleKnownTableColumn_
+        // FoldsToSymbolicPlaceholder both document, falls straight into the generic
+        // HavocOrTaint("select-assignment-not-pure", ...) branch, discarding every literal piece
+        // and producing ONE opaque untyped placeholder for the whole @sql value instead of
+        // splicing Col's own hole into the surrounding known SQL text. The scanner-level sibling
+        // test only asserts "analyzable, not empty" so this gap didn't show there; here, where the
+        // placeholder actually needs to be positioned inside a real predicate, the pipeline
+        // correctly refuses it as "symbolic-value-not-positionable:whole-statement" (there is no
+        // surrounding literal text left to locate a WHERE clause in) rather than fabricating a
+        // verdict - a real, not-quick-fix feature gap (catalog-aware literal splicing for a
+        // single-known-table FROM clause was never actually wired into CompileSelectAssignment),
+        // left failing rather than accepting the lost predicate.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -192,7 +226,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult, catalog: catalog);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult, catalog: catalog);
         Assert.Empty(extraction.Findings);
         var script = Assert.Single(extraction.AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
@@ -242,7 +276,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([]));
+        var extraction = DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([]));
         Assert.Empty(extraction.Findings);
         var script = Assert.Single(extraction.AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
@@ -270,7 +304,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "EXEC('SELECT ColAsInt FROM dbo.vw_T WHERE ColAsInt = 1');");
         Assert.False(parseResult.HasErrors);
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         Assert.Equal(2, extraction.AnalyzableScripts.Count);
 
         var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
@@ -302,7 +336,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "N'@DisplayName nvarchar(40)', @DisplayName = N'x';");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         Assert.Contains("@DisplayName", script.ParameterDeclarationText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -328,7 +362,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "app.sql", "EXEC sp_executesql N'SELECT Col FROM dbo.T WHERE Col = @DisplayName';");
         Assert.False(parseResult.HasErrors);
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         Assert.Null(script.ParameterDeclarationText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -352,7 +386,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         Assert.Null(script.ParameterDeclarationText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -380,7 +414,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         Assert.Empty(extraction.Findings);
         var script = Assert.Single(extraction.AnalyzableScripts);
         Assert.Equal("SELECT Col FROM dbo.T WHERE Col = N'x'", script.InnerText);
@@ -434,7 +468,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var topLevelScript = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var topLevelScript = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         var result = DynamicSqlPipeline.Analyze([topLevelScript], catalog, lineage);
 
         // One AnalyzedLiteral DynamicSqlFinding per EXEC level in the chain.
@@ -467,7 +501,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var appSqlTier1 = NestExecChain(innermostTier1, 2) + ";";
         var tier1ParseResult = SqlScriptParser.ParseText("app.sql", appSqlTier1);
         Assert.False(tier1ParseResult.HasErrors);
-        var tier1Script = Assert.Single(DynamicSqlScanner.Scan(tier1ParseResult).AnalyzableScripts);
+        var tier1Script = Assert.Single(DynamicSqlScannerV2.Scan(tier1ParseResult).AnalyzableScripts);
         var tier1Result = DynamicSqlPipeline.Analyze([tier1Script], catalog, lineage);
 
         var tier1Finding = Assert.Single(tier1Result.Tier1Findings);
@@ -480,7 +514,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var appSqlExpr = NestExecChain(innermostExpressionDerived, 2) + ";";
         var exprParseResult = SqlScriptParser.ParseText("app.sql", appSqlExpr);
         Assert.False(exprParseResult.HasErrors);
-        var exprScript = Assert.Single(DynamicSqlScanner.Scan(exprParseResult).AnalyzableScripts);
+        var exprScript = Assert.Single(DynamicSqlScannerV2.Scan(exprParseResult).AnalyzableScripts);
         var exprResult = DynamicSqlPipeline.Analyze([exprScript], catalog, lineage);
 
         var expressionFinding = Assert.Single(exprResult.ExpressionDerivedFindings);
@@ -501,7 +535,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", appSql);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var topLevelScript = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var topLevelScript = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         var result = DynamicSqlPipeline.Analyze([topLevelScript], catalog, lineage);
 
         var depthExceeded = Assert.Single(result.Findings, f => f.Reason == "max-nesting-depth-exceeded");
@@ -522,7 +556,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('THIS IS NOT $$$ valid T-SQL (((');");
         Assert.False(parseResult.HasErrors);
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         var script = Assert.Single(extraction.AnalyzableScripts);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -548,7 +582,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('UPDATE dbo.Foo SET Col = $Signature$ WHERE Id = 1');");
         Assert.False(parseResult.HasErrors);
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         var script = Assert.Single(extraction.AnalyzableScripts);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -565,7 +599,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('SELECT 1');");
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
@@ -591,7 +625,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "EXEC('WITH cte AS (SELECT Col FROM dbo.T) SELECT Col FROM cte WHERE Col = N''x''');");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
         var typedFinding = Assert.Single(result.TypedFindings);
@@ -617,7 +651,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "EXEC('WITH T AS (SELECT CAST(Col AS INT) AS Col FROM dbo.T) SELECT Col FROM T WHERE Col = 1');");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
         // The CTE's Col is an expression (CAST), not the base dbo.T.Col - so it must not resolve
@@ -627,7 +661,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     }
 
     /// <summary>
-    /// A proc parameter with no known caller (see <see cref="DynamicSqlScanner"/>'s
+    /// A proc parameter with no known caller (see DynamicSqlScannerV2's
     /// BuildParameterSeed) folds to a symbolic placeholder rather than tainting - these three
     /// tests are the oracle proof that the resulting Medium-confidence finding is sound, not
     /// merely plausible. Each parses/scans with an explicitly empty <see cref="ProcCallGraph"/>
@@ -650,7 +684,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + @Value + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -682,7 +716,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = ''' + @Value + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -714,7 +748,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + @Value + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
 
@@ -746,7 +780,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = ''' + UPPER(@Value) + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -774,7 +808,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + CAST(@Value AS VARCHAR(10)) + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -806,7 +840,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "EXEC(@sql);");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         Assert.Equal("SELECT Col FROM dbo.T\r\nWHERE Col = N'x'", script.InnerText);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -835,7 +869,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + CAST(NEWID() AS NVARCHAR(36)) + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -862,7 +896,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''' + CONVERT(VARCHAR(30), GETDATE()) + N''''; EXEC(@sql); END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -901,7 +935,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             """);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var extraction = DynamicSqlScanner.Scan(parseResult);
+        var extraction = DynamicSqlScannerV2.Scan(parseResult);
         Assert.Empty(extraction.Findings);
         Assert.Equal(2, extraction.AnalyzableScripts.Count);
 
@@ -946,7 +980,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
@@ -982,7 +1016,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
             "END;");
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
 
-        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
 
         var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);

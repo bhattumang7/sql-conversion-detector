@@ -10,7 +10,7 @@ namespace SilentScan.Core.Predicates;
 /// whose target resolved to a procedure this scan actually saw a <c>CREATE/ALTER PROCEDURE</c>
 /// for (<see cref="DatabaseCatalog.TryGetProcedureParameters"/>), with each actual argument
 /// matched to the callee's own declared formal parameter. <c>sp_executesql</c> is deliberately
-/// excluded - that's <see cref="DynamicSqlScanner"/>'s own concern, with its own argument-binding
+/// excluded - that's the dynamic SQL engine's own concern, with its own argument-binding
 /// mechanism (<see cref="DynamicSqlScript.ArgumentBindings"/>). A call site whose target can't be
 /// resolved to a known procedure (a system proc, a synonym pointing nowhere cataloged, or a name
 /// this scan never saw declared) is ledgered rather than silently producing no edge - CLAUDE.md's
@@ -276,7 +276,7 @@ public static class ProcCallGraphBuilder
         /// TRY-CATCH subtree, at any nesting depth - the set <see cref="TryResolveTopLevelLiteral"/>
         /// refuses to trust, since a write inside a conditional construct means the value at any
         /// given later point depends on which branch actually ran, something this single-pass
-        /// scan (no fold-state tracking the way DynamicSqlScanner's own reaching-definitions
+        /// scan (no fold-state tracking the way the dynamic SQL engine's own reaching-definitions
         /// analysis has) cannot determine. A bare BEGIN/END block is NOT conditional and does not
         /// bump depth - only IF/WHILE/TRY genuinely branch.
         /// </summary>

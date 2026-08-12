@@ -11,7 +11,7 @@ namespace SilentScan.Tests.Predicates;
 /// a reparsed EXEC/sp_executesql fragment has no CREATE PROCEDURE wrapper of its own, so a
 /// #temp table or trigger inserted/deleted pseudo-table that resolves fine in the surrounding
 /// STATIC body previously failed to resolve inside the dynamic text, even though it's the exact
-/// same object. DynamicSqlScanner now records the enclosing scope
+/// same object. The dynamic SQL engine now records the enclosing scope
 /// (<see cref="Core.Predicates.DynamicSqlScope"/>) and DynamicSqlPipeline threads it into both
 /// NonSargablePredicateScanner and TypedPredicateExtractor. Runs through
 /// <see cref="ScanReportBuilder"/>, the same entry point production uses.
@@ -79,7 +79,7 @@ public sealed class DynamicSqlScopePropagationTests
     {
         // The outer EXEC's own text contains a further EXEC - scope must survive the recursive
         // re-scan (DynamicSqlPipeline.AnalyzeNested passes the outer script's own Scope into
-        // the nested DynamicSqlScanner.Scan call), not just the first level of reparsing.
+        // the nested DynamicSqlScannerV2.Scan call), not just the first level of reparsing.
         var report = await Scan("""
             CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
             GO

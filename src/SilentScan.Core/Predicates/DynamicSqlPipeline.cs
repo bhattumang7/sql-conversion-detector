@@ -13,7 +13,7 @@ namespace SilentScan.Core.Predicates;
 
 /// <summary>
 /// CLAUDE.md's dynamic SQL policy: reparses the provably-constant inner SQL of
-/// EXEC('...')/sp_executesql N'...' call sites (see <see cref="DynamicSqlScanner"/>) through the
+/// EXEC('...')/sp_executesql N'...' call sites (see the dynamic SQL engine) through the
 /// normal catalog/lineage/predicate pipeline, then remaps every finding it produces back to
 /// where that piece of text actually lives in the original source file - not the call site's
 /// line, which for a multi-line folded string would make the finding's location useless.
@@ -68,7 +68,7 @@ public static partial class DynamicSqlPipeline
         // Branch-fold coverage (roadmap "trace dynamic SQL across IF/ELSE/TRY-CATCH branches")
         // can turn ONE call site into several DynamicSqlScripts, one per possible constant
         // assembly - grouping by CallSite (already identical across every assembly of the same
-        // site, and scripts already arrive call-site-contiguous from DynamicSqlScanner's own
+        // site, and scripts already arrive call-site-contiguous from the dynamic SQL engine's own
         // visitation order, so this never reorders anything observably) lets each call site's
         // own substantive findings dedupe against EACH OTHER before joining the overall result,
         // without ever merging two genuinely different call sites' findings together.
@@ -721,7 +721,7 @@ public static partial class DynamicSqlPipeline
     /// <summary>
     /// A finding produced from a nested script already has its own SourcePath/Line/Column and
     /// DynamicSqlCallSite - but expressed in the coordinates of the *outer* script's reparsed
-    /// text (that's what the nested <see cref="DynamicSqlScanner"/> was actually parsing).
+    /// text (that's what the nested dynamic SQL engine pass was actually parsing).
     /// One more hop through <paramref name="outerScript"/>'s segment map resolves both to real
     /// source coordinates, chaining however many nesting levels deep this finding came from.
     /// </summary>

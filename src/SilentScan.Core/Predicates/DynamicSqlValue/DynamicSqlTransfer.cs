@@ -589,9 +589,24 @@ public static class DynamicSqlTransfer
         }
 
         var assemblies = SqlTextValue.Expand((SqlTextValue.Template)widened, context.Cap);
+
+        // Two independent branches (or two proc-call-graph callers, two loop unrollings, ...)
+        // frequently agree on the exact same rendered SQL text even though their own Template
+        // pieces carry different source positions and so are never StructurallyEqual - a
+        // duplicate-position record identity that means nothing to a report reader, who only
+        // ever sees rendered InnerText. Deduping HERE (at the one place text is actually
+        // rendered), rather than teaching every Join/Choice site to also compare rendered output,
+        // keeps every upstream provenance-preserving comparison exact while still guaranteeing
+        // the SAME defect is never reported twice under one EXEC just because two paths agreed.
+        var seenText = new HashSet<string>(StringComparer.Ordinal);
         foreach (var assembly in assemblies)
         {
             var rendered = TemplateRenderer.Render(assembly);
+            if (!seenText.Add(rendered.InnerText))
+            {
+                continue;
+            }
+
             var confidence = SqlTextValue.ContainsHole(assembly) ? FindingConfidence.Medium : FindingConfidence.High;
             context.Scripts.Add(new DynamicSqlScript(
                 CallSite(node, context), rendered.InnerText, rendered.SegmentMap, parameterDeclarationText,

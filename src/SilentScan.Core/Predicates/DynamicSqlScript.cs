@@ -25,7 +25,7 @@ public sealed record DynamicSqlScope(string? ProcScope, SchemaObjectName? Trigge
 /// One symbolic placeholder token inside a <see cref="DynamicSqlScript.InnerText"/> - where it
 /// sits (<paramref name="InnerStartOffset"/>/<paramref name="Length"/>), what type it stands in
 /// for, and where in the original source the unfoldable value actually came from. Built once, in
-/// <see cref="DynamicSqlScanner"/>'s own <c>BuildScript</c>, straight from the segment list that
+/// the dynamic SQL engine's own <c>BuildScript</c>, straight from the segment list that
 /// produced <see cref="DynamicSqlScript.InnerText"/> - never re-derived later by searching the
 /// assembled text for the token, which would be fragile the moment two placeholders of the same
 /// type ever produced identical-looking (but differently-positioned) tokens.
@@ -39,7 +39,7 @@ public sealed record PlaceholderOccurrence(int InnerStartOffset, int Length, Sql
 /// original file. <see cref="ParameterDeclarationText"/> is sp_executesql's own raw, provably-
 /// constant @params argument text when present (Tier B) - null for a plain EXEC('...') call,
 /// which has no parameter concept, or when @params itself couldn't be folded to a constant.
-/// Kept as raw text rather than pre-parsed here: <see cref="DynamicSqlScanner"/> runs before
+/// Kept as raw text rather than pre-parsed here: the dynamic SQL engine runs before
 /// <see cref="Catalog.CatalogBuilder"/> in <see cref="Reporting.ScanReportBuilder"/>'s pipeline
 /// (it needs no catalog for its own straight-line constant-folding job), so a user type alias
 /// (<c>CREATE TYPE ... FROM</c>) declared on a parameter couldn't resolve if parsed here - the
@@ -57,7 +57,7 @@ public sealed record PlaceholderOccurrence(int InnerStartOffset, int Length, Sql
 /// <see cref="FindingConfidence.Medium"/> once any segment is an unknown-but-typed placeholder
 /// standing in for a value this scanner could not prove constant (proc-parameter seeding with no
 /// known caller, an uninitialized DECLARE, ...) - computed exactly once, in
-/// <see cref="DynamicSqlScanner"/>'s own <c>BuildScript</c>, from whether any segment carries a
+/// the dynamic SQL engine's own <c>BuildScript</c>, from whether any segment carries a
 /// placeholder, and never set directly anywhere else; <see cref="DynamicSqlPipeline"/>'s Remap/
 /// RemapNested propagate it onto every finding kind uniformly, so a High-confidence finding can
 /// never have passed through a placeholder-bearing script. One EXEC/sp_executesql call site can

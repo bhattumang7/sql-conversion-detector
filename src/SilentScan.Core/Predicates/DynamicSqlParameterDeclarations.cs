@@ -20,7 +20,7 @@ public static class DynamicSqlParameterDeclarations
     /// <c>CREATE TYPE ... FROM</c> alias (e.g. <c>@Code dbo.CodeType</c>) resolve to that
     /// alias's real underlying type instead of null - this is called from
     /// <see cref="DynamicSqlPipeline"/>, where <c>DatabaseCatalog</c> (and therefore
-    /// <c>TypeAliases</c>) already exists, unlike <see cref="DynamicSqlScanner"/> (this
+    /// <c>TypeAliases</c>) already exists, unlike the dynamic SQL engine (this
     /// method's ORIGINAL caller, back when the catalog didn't exist yet at scan time - see
     /// <see cref="DynamicSqlScript.ParameterDeclarationText"/>'s own doc comment for why the
     /// parsing moved). Null (the default) still resolves only <c>sysname</c>, same as before.

@@ -295,46 +295,62 @@ public static class BuiltinRegistry
     /// </summary>
     private static BuiltinSpec Replace() => new(
         "REPLACE",
-        Evaluate: call =>
+        Evaluate: ReplaceEvaluate,
+        HoleTransfer: ReplaceHoleTransfer,
+        ReturnType: null,
+        ReturnKind: default,
+        UnconditionalFailReason: null);
+
+    /// <summary>Extracted from <see cref="Replace"/>'s <c>Evaluate</c> delegate solely to keep the enclosing factory method's own Cognitive Complexity (Sonar S3776) under the two nested-lambda bodies it previously carried.</summary>
+    private static BuiltinFoldResult ReplaceEvaluate(BuiltinCall call)
+    {
+        if (call.Arguments.Count != 3)
         {
-            var source = ((BuiltinArgument.Text)call.Arguments[0]).Value;
-            var pattern = ((BuiltinArgument.Text)call.Arguments[1]).Value;
-            var replacement = ((BuiltinArgument.Text)call.Arguments[2]).Value;
-            if (pattern.Length == 0)
+            return new BuiltinFoldResult.Fail(NonLiteralFunctionCall);
+        }
+
+        var source = ((BuiltinArgument.Text)call.Arguments[0]).Value;
+        var pattern = ((BuiltinArgument.Text)call.Arguments[1]).Value;
+        var replacement = ((BuiltinArgument.Text)call.Arguments[2]).Value;
+        if (pattern.Length == 0)
+        {
+            return new BuiltinFoldResult.Fail("non-literal-expression:replace-empty-pattern");
+        }
+
+        var ordinal = source.Replace(pattern, replacement, StringComparison.Ordinal);
+        var ordinalIgnoreCase = source.Replace(pattern, replacement, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(ordinal, ordinalIgnoreCase, StringComparison.Ordinal)
+            ? BuiltinFoldResult.OkText(ordinal, call.Site)
+            : new BuiltinFoldResult.Fail("non-literal-expression:replace-collation-sensitive");
+    }
+
+    /// <summary>Extracted from <see cref="Replace"/>'s <c>HoleTransfer</c> delegate for the same Cognitive Complexity reason as <see cref="ReplaceEvaluate"/>.</summary>
+    private static BuiltinFoldResult ReplaceHoleTransfer(BuiltinCall call)
+    {
+        if (call.Arguments.Count != 3)
+        {
+            return new BuiltinFoldResult.Fail(NonLiteralFunctionCall);
+        }
+
+        if (call.Arguments[0] is BuiltinArgument.Hole sourceHole)
+        {
+            return BuiltinFoldResult.OkHole(sourceHole.Type, call.Site, sourceHole.Kind);
+        }
+
+        if (call.Arguments[0] is BuiltinArgument.Text source
+            && call.Arguments[1] is BuiltinArgument.Text pattern
+            && call.Arguments[2] is BuiltinArgument.Hole replacementHole)
+        {
+            if (pattern.Value.Length == 0)
             {
                 return new BuiltinFoldResult.Fail("non-literal-expression:replace-empty-pattern");
             }
 
-            var ordinal = source.Replace(pattern, replacement, StringComparison.Ordinal);
-            var ordinalIgnoreCase = source.Replace(pattern, replacement, StringComparison.OrdinalIgnoreCase);
-            return string.Equals(ordinal, ordinalIgnoreCase, StringComparison.Ordinal)
-                ? BuiltinFoldResult.OkText(ordinal, call.Site)
-                : new BuiltinFoldResult.Fail("non-literal-expression:replace-collation-sensitive");
-        },
-        HoleTransfer: call =>
-        {
-            if (call.Arguments[0] is BuiltinArgument.Hole sourceHole)
-            {
-                return BuiltinFoldResult.OkHole(sourceHole.Type, call.Site, sourceHole.Kind);
-            }
+            return SpliceHoleIntoTemplate(source.Value, pattern.Value, replacementHole, call.Site);
+        }
 
-            if (call.Arguments[0] is BuiltinArgument.Text source
-                && call.Arguments[1] is BuiltinArgument.Text pattern
-                && call.Arguments[2] is BuiltinArgument.Hole replacementHole)
-            {
-                if (pattern.Value.Length == 0)
-                {
-                    return new BuiltinFoldResult.Fail("non-literal-expression:replace-empty-pattern");
-                }
-
-                return SpliceHoleIntoTemplate(source.Value, pattern.Value, replacementHole, call.Site);
-            }
-
-            return UnresolvedOrGeneric(call.Arguments);
-        },
-        ReturnType: null,
-        ReturnKind: default,
-        UnconditionalFailReason: null);
+        return UnresolvedOrGeneric(call.Arguments);
+    }
 
     private static BuiltinFoldResult.Ok SpliceHoleIntoTemplate(string source, string pattern, BuiltinArgument.Hole replacement, SourceSpan site)
     {
@@ -366,6 +382,11 @@ public static class BuiltinRegistry
         "QUOTENAME",
         Evaluate: call =>
         {
+            if (call.Arguments.Count is not (1 or 2))
+            {
+                return new BuiltinFoldResult.Fail(NonLiteralFunctionCall);
+            }
+
             var input = ((BuiltinArgument.Text)call.Arguments[0]).Value;
             var delimiter = call.Arguments.Count == 2 ? ((BuiltinArgument.Text)call.Arguments[1]).Value : null;
             var quoted = QuoteNameValue(input, delimiter);
@@ -384,13 +405,24 @@ public static class BuiltinRegistry
         // argument's own Kind when it IS a Hole (so provenance survives, matching every other
         // passthrough here); falls back to ArgumentIndependentReturnType when it's Unresolved,
         // since there is no argument-derived Kind left to propagate in that case.
-        HoleTransfer: call => BuiltinFoldResult.OkHole(
-            new SqlType(SqlTypeCategory.NVarChar, Length: 258),
-            call.Site,
-            call.Arguments[0] is BuiltinArgument.Hole quoteNameHole ? quoteNameHole.Kind : HoleKind.ArgumentIndependentReturnType),
+        HoleTransfer: call => QuoteNameHoleTransfer(call),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
+
+    /// <summary>Extracted from QUOTENAME's <c>HoleTransfer</c> delegate solely to turn its nested ternary (Sonar S3358) into a named, independently-readable statement.</summary>
+    private static BuiltinFoldResult QuoteNameHoleTransfer(BuiltinCall call)
+    {
+        if (call.Arguments.Count is not (1 or 2))
+        {
+            return new BuiltinFoldResult.Fail(NonLiteralFunctionCall);
+        }
+
+        var kind = call.Arguments[0] is BuiltinArgument.Hole quoteNameHole
+            ? quoteNameHole.Kind
+            : HoleKind.ArgumentIndependentReturnType;
+        return BuiltinFoldResult.OkHole(new SqlType(SqlTypeCategory.NVarChar, Length: 258), call.Site, kind);
+    }
 
     private static string? QuoteNameValue(string input, string? delimiter)
     {
@@ -401,7 +433,10 @@ public static class BuiltinRegistry
 
         var (open, close) = delimiter switch
         {
-            null or "[" or "]" => ('[', ']'),
+            null or "" or "[" or "]" => ('[', ']'),
+            "(" or ")" => ('(', ')'),
+            "<" or ">" => ('<', '>'),
+            "{" or "}" => ('{', '}'),
             "'" => ('\'', '\''),
             "\"" => ('"', '"'),
             _ => (default(char), default(char)),
@@ -412,7 +447,7 @@ public static class BuiltinRegistry
             return null;
         }
 
-        var escaped = close == ']' ? input.Replace("]", "]]", StringComparison.Ordinal) : input.Replace(close.ToString(), $"{close}{close}", StringComparison.Ordinal);
+        var escaped = input.Replace(close.ToString(), $"{close}{close}", StringComparison.Ordinal);
         return $"{open}{escaped}{close}";
     }
 

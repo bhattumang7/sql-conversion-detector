@@ -5,10 +5,10 @@ namespace SilentScan.Core.Predicates;
 /// <summary>
 /// A string literal argument's exact source provenance - kept alongside its raw value so a
 /// finding produced from analyzing dynamic SQL built from a SEEDED callee parameter (see
-/// <see cref="DynamicSqlScanner"/>) still points at the literal's real location in the CALLER's
+/// the dynamic SQL engine) still points at the literal's real location in the CALLER's
 /// own source, not the callee's EXEC site or its own parameter declaration - neither of which is
-/// where the string actually came from. Mirrors DynamicSqlScanner's own private LiteralSegment
-/// shape, duplicated here (rather than shared) because this pass sits below DynamicSqlScanner in
+/// where the string actually came from. Mirrors the dynamic SQL engine's own private LiteralSegment
+/// shape, duplicated here (rather than shared) because this pass sits below the dynamic SQL engine in
 /// the dependency order and must not depend on that scanner's internals.
 /// </summary>
 public sealed record ProcCallLiteralArgument(string Value, string SourcePath, int StartLine, int StartColumn, int PrefixLength);
@@ -53,7 +53,7 @@ public sealed class ProcCallGraph(IReadOnlyList<ProcCallEdge> edges)
     /// The edge THIS exact <c>EXEC</c> call site produced, if its target resolved to a known
     /// procedure - a call site's own <see cref="SourceSpan"/> (source path/line/column) is
     /// unique within a scan, so this is an exact match, never a heuristic one. Used by
-    /// <see cref="DynamicSqlScanner"/> to find an ordinary procedure call's own OUTPUT-argument
+    /// the dynamic SQL engine to find an ordinary procedure call's own OUTPUT-argument
     /// bindings without re-deriving the argument-to-formal-parameter matching this pass already
     /// did.
     /// </summary>

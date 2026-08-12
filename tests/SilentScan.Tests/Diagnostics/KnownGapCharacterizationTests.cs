@@ -168,7 +168,7 @@ public sealed class KnownGapCharacterizationTests
     // ------------------------------------------------------------------
 
     // DynamicSql_TempTableFromEnclosingProcScope was pinned here and is now CLOSED -
-    // DynamicSqlScanner records the enclosing proc/function/trigger's own qualified name as a
+    // the dynamic SQL engine records the enclosing proc/function/trigger's own qualified name as a
     // DynamicSqlScope threaded through DynamicSqlPipeline into both NonSargablePredicateScanner
     // and TypedPredicateExtractor (and recursively into nested dynamic SQL), so a #temp table
     // declared in the surrounding static body now resolves inside the reparsed text too. Moved

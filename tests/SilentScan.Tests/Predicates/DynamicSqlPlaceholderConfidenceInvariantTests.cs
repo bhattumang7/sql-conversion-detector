@@ -16,7 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// future change to any ONE of those producers, or a brand new producer, is caught here rather
 /// than surfacing as a silently-wrong High-confidence number in a published study. The structural
 /// guarantee this protects (<see cref="Predicates.DynamicSqlScript"/>'s own doc comment) is that
-/// <c>DynamicSqlScanner.BuildScript</c> is the ONE place a script's <c>Confidence</c> is computed,
+/// <c>the dynamic SQL engine's own script-building logic</c> is the ONE place a script's <c>Confidence</c> is computed,
 /// and <c>DynamicSqlPipeline</c>'s Remap/RemapNested are the ONLY places that stamp it onto a
 /// finding - this test exercises that path end-to-end via the real production entry point
 /// (<see cref="EngineAuthoritativeScan"/>), not by re-deriving the invariant from the internals.
@@ -107,16 +107,14 @@ public sealed class DynamicSqlPlaceholderConfidenceInvariantTests
     }
 
     /// <summary>
-    /// The old scanner's own choke point. <see cref="DynamicSqlTransfer"/> (docs/dynamic-sql-
-    /// rebuild-plan.md Phase 3) is a SECOND, deliberate construction site for the DURATION of the
-    /// rebuild - the new engine's EXEC/sp_executesql emission has to build the same record type,
-    /// and it derives Confidence via the identical "does this assembly contain a Hole" rule
-    /// (<see cref="Predicates.DynamicSqlValue.SqlTextValue.ContainsHole"/>), not a copy-pasted-
-    /// and-forgotten one. Once Phase 4 cuts <c>DynamicSqlScanner.Scan</c> over to the new engine
-    /// and deletes the old constructor call, remove "DynamicSqlTransfer.cs" from this set and
-    /// this test again enforces exactly one site, same as before the rebuild.
+    /// <see cref="DynamicSqlTransfer"/> is the dynamic-SQL engine's sole EXEC/sp_executesql
+    /// emission choke point - it derives Confidence via the "does this assembly contain a Hole"
+    /// rule (<see cref="Predicates.DynamicSqlValue.SqlTextValue.ContainsHole"/>), not a
+    /// copy-pasted-and-forgotten one. The old scanner (a second, temporary construction site kept
+    /// alive only for the duration of the V1-to-V2 rebuild) is deleted, so this set is back down
+    /// to exactly the one legitimate site.
     /// </summary>
-    private static readonly string[] AuthorizedConstructionSites = ["DynamicSqlScanner.cs", "DynamicSqlTransfer.cs"];
+    private static readonly string[] AuthorizedConstructionSites = ["DynamicSqlTransfer.cs"];
 
     [Fact]
     public void EveryDynamicSqlScriptConstructor_ComputesConfidenceSolelyFromPlaceholderPresence()

@@ -109,7 +109,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_SpExecuteSqlCall_ProducesNoEdge()
     {
-        // sp_executesql is DynamicSqlScanner's own concern (a system proc, never itself
+        // sp_executesql is the dynamic SQL engine's own concern (a system proc, never itself
         // catalogued as a CREATE PROCEDURE) - it must never appear as a call graph edge, and
         // must not be reported as an unresolvable callee either, since it was never meant to
         // resolve against this graph in the first place.

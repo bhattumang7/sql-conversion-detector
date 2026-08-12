@@ -381,7 +381,7 @@ public static class TypedPredicateExtractor
         // exists - so overriding only the common ProcedureStatementBodyBase base type would
         // never fire for e.g. an AlterProcedureStatement node. Real-world corpora routinely ship
         // a body-less "CREATE PROCEDURE ... AS RETURN 0" stub followed by the real body via
-        // ALTER PROCEDURE (DynamicSqlScanner already had to handle this same pattern for the
+        // ALTER PROCEDURE (the dynamic SQL engine already had to handle this same pattern for the
         // First Responder Kit corpus repo) - without these overrides, an ALTER PROCEDURE body
         // was walked with the PREVIOUS procedure's stale _variables still in scope, and its own
         // parameters were never recorded at all (docs/audit-remediation-plan.md Phase 2.3). The

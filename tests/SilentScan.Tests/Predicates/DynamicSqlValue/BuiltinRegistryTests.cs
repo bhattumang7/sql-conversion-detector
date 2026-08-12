@@ -243,6 +243,31 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(258, hole.Type.Length);
     }
 
+    /// <summary>Oracle-verified (SQL Server accepts parenthesis/angle-bracket/brace pairs as QUOTENAME delimiters beyond the bracket/quote pairs, and treats an empty-string delimiter the same as omitting it entirely - defaults to brackets).</summary>
+    [Theory]
+    [InlineData("(", "(abc)")]
+    [InlineData("<", "<abc>")]
+    [InlineData("{", "{abc}")]
+    [InlineData("", "[abc]")]
+    public void QuoteName_NonBracketDelimiters_WrapsCorrectly(string delimiter, string expected)
+    {
+        var result = BuiltinRegistry.Fold(Call("QUOTENAME", new BuiltinArgument.Text("abc"), new BuiltinArgument.Text(delimiter)));
+
+        Assert.Equal(expected, OkText(result));
+    }
+
+    /// <summary>Oracle-verified: an occurrence of the delimiter's own CLOSING character inside the input doubles, for every delimiter pair - not just the default brackets.</summary>
+    [Theory]
+    [InlineData("(", "a)b", "(a))b)")]
+    [InlineData("<", "a>b", "<a>>b>")]
+    [InlineData("{", "a}b", "{a}}b}")]
+    public void QuoteName_NonBracketDelimiters_DoublesEmbeddedClosingCharacter(string delimiter, string input, string expected)
+    {
+        var result = BuiltinRegistry.Fold(Call("QUOTENAME", new BuiltinArgument.Text(input), new BuiltinArgument.Text(delimiter)));
+
+        Assert.Equal(expected, OkText(result));
+    }
+
     [Theory]
     [InlineData("CHAR", 65, "A")]
     [InlineData("CHAR", 0, "\0")]
