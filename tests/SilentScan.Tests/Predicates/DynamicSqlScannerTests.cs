@@ -300,12 +300,14 @@ public sealed class DynamicSqlScannerTests
     {
         // The assignment itself isn't a bare literal/concatenation - CLAUDE.md's known hard
         // case (an ordinary function call not on the whitelisted string-builder list is not
-        // reimplemented, just declined honestly). REVERSE is deliberately NOT one of the
-        // whitelisted builders (DynamicSqlScannerV2's own whitelisted string builders), unlike UPPER/LOWER/
-        // LTRIM/RTRIM/LEFT/RIGHT/SUBSTRING/QUOTENAME which now fold - see
+        // reimplemented, just declined honestly). FORMAT is deliberately NOT one of the
+        // whitelisted builders (unlike UPPER/LOWER/LTRIM/RTRIM/LEFT/RIGHT/SUBSTRING/QUOTENAME/
+        // REPLICATE/REVERSE which now fold) - its locale/format-string-driven rendering algorithm
+        // is never modeled, the same "never guess a rendering" reasoning STR's own concrete-input
+        // decline uses (BuiltinRegistryTests.Str_ConcreteFloatExpr_StillDeclines) - see
         // Scan_ExecOfVariableAssignedFromUpperOnAsciiLiteral_TierC_ProducesAnalyzableScript below
-        // for that behavior.
-        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REVERSE(N'select 1'); EXEC(@sql);");
+        // for the whitelisted-builder behavior.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = FORMAT(1, N'N'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
@@ -1698,6 +1700,16 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecOfVariableAssignedFromReverseOnLiteral_ProducesAnalyzableScript()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = REVERSE(N'1 TCELES'); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
     public void Scan_ExecOfVariableAssignedFromLowerOnAsciiLiteral_TierC_ProducesAnalyzableScript()
     {
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = LOWER(N'SELECT 1'); EXEC(@sql);");
@@ -2120,12 +2132,25 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_CastToCharTarget_DeclinesBlankPaddingNotPinned()
+    public void Scan_CastToCharTargetWithExplicitLength_BlankPadsToTheTargetLength()
     {
-        // CHAR(n) blank-pads (oracle-verified: CAST('ab' AS char(5)) is 'ab   ') - a different,
-        // unverified-here rendering from VARCHAR(n)'s plain truncation, so this declines rather
-        // than guessing the padding.
-        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'ab' AS CHAR(5)); EXEC(@sql);");
+        // Oracle-verified: CAST('ab' AS CHAR(5)) is 'ab   ' (blank-padded to exactly 5) - a
+        // different rendering from VARCHAR(n)'s plain truncation, but a fully deterministic,
+        // length-driven one this scanner now folds rather than declines.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'[' + CAST(N'ab' AS CHAR(5)) + N']'; EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("[ab   ]", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_CastToCharTargetWithNoExplicitLength_DeclinesRatherThanGuessingTheDefaultLength()
+    {
+        // A bare CAST(x AS CHAR) with no explicit length uses T-SQL's own default length (30),
+        // which this scanner's type resolver does not independently pin - declines rather than
+        // guessing that default, distinct from the explicit-length case above which now folds.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'ab' AS CHAR); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal("non-literal-expression:cast-target-not-pinned", finding.Reason);
@@ -2363,16 +2388,17 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_IfBranchOwnFoldFails_ElseBranchFine_RecoversTheKnownBranchAsAGuardedAlternative()
     {
-        // The THEN branch's own assignment can't fold (REVERSE is not a whitelisted builtin), so
-        // the merged value stays Tainted with THAT reason - but SqlTextValue.Join now attaches the
-        // ELSE branch's own known text as a GuardedAlternative rather than discarding it, and
-        // EmitScriptsOrFinding recovers any such alternative into a real script. A genuine
-        // improvement (generalizing DynamicSqlCfg's own IF-only guarded-alternative recovery to
-        // every join site): the ELSE branch really did fold, so reporting nothing at all here
-        // would throw away real, provably-constant structure for no reason.
+        // The THEN branch's own assignment can't fold (FORMAT is not a whitelisted builtin - its
+        // locale/format-string-driven rendering is never modeled), so the merged value stays
+        // Tainted with THAT reason - but SqlTextValue.Join now attaches the ELSE branch's own
+        // known text as a GuardedAlternative rather than discarding it, and EmitScriptsOrFinding
+        // recovers any such alternative into a real script. A genuine improvement (generalizing
+        // DynamicSqlCfg's own IF-only guarded-alternative recovery to every join site): the ELSE
+        // branch really did fold, so reporting nothing at all here would throw away real,
+        // provably-constant structure for no reason.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
-            "IF 1 = 1 BEGIN SET @sql = REVERSE(N'SELECT 2'); END " +
+            "IF 1 = 1 BEGIN SET @sql = FORMAT(2, N'N'); END " +
             "ELSE BEGIN SET @sql = N'SELECT 3'; END " +
             "EXEC(@sql);");
 

@@ -106,7 +106,21 @@ public static class BuiltinRegistry
 
         if (targetType.Category is SqlTypeCategory.Char or SqlTypeCategory.NChar)
         {
-            return new BuiltinFoldResult.Fail("non-literal-expression:cast-target-not-pinned");
+            // Oracle-verified: CAST(x AS CHAR(n))/NCHAR(n) blank-pads a shorter input with
+            // trailing spaces to exactly n characters, and truncates a longer one - the SAME
+            // truncation rule VARCHAR/NVARCHAR already fold below, plus padding CHAR/NCHAR's own
+            // fixed-length semantics VARCHAR/NVARCHAR don't have. Only when the target's own
+            // length is actually pinned (an explicit CHAR(n)/NCHAR(n), not a bare unqualified
+            // CHAR whose default length this resolver doesn't independently pin) - unpinned stays
+            // declined exactly as before, never guessing the T-SQL default length.
+            if (targetType.Length is not { } charLength)
+            {
+                return new BuiltinFoldResult.Fail("non-literal-expression:cast-target-not-pinned");
+            }
+
+            var charInput = ((BuiltinArgument.Text)source).Value;
+            var charResult = charInput.Length > charLength ? charInput[..charLength] : charInput.PadRight(charLength);
+            return BuiltinFoldResult.OkText(charResult, site);
         }
 
         var input = ((BuiltinArgument.Text)source).Value;
@@ -125,6 +139,7 @@ public static class BuiltinRegistry
         yield return Substring();
         yield return Replace();
         yield return Replicate();
+        yield return Reverse();
         yield return QuoteName();
         yield return CharOrNChar("CHAR", maxCodePoint: 255);
         yield return CharOrNChar("NCHAR", maxCodePoint: 65535);
@@ -235,6 +250,22 @@ public static class BuiltinRegistry
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
+
+    /// <summary>Oracle-verified: REVERSE reverses a whole string with no length/collation sensitivity of its own (unlike CaseConversionSpec's Turkish-I concern - reversing character order never depends on how two characters COMPARE). Reverses UTF-16 code units, matching how SQL Server's own nvarchar storage operates - consistent for the ASCII/BMP text this scanner ever sees in a dynamic-SQL-building context.</summary>
+    private static BuiltinSpec Reverse() => new(
+        "REVERSE",
+        Evaluate: call => BuiltinFoldResult.OkText(ReverseText(((BuiltinArgument.Text)call.Arguments[0]).Value), call.Site),
+        HoleTransfer: PassThroughSingleArgumentType,
+        ReturnType: null,
+        ReturnKind: default,
+        UnconditionalFailReason: null);
+
+    private static string ReverseText(string input)
+    {
+        var chars = input.ToCharArray();
+        Array.Reverse(chars);
+        return new string(chars);
+    }
 
     private static BuiltinSpec LeftOrRight(string name, Func<string, int, string> slice) => new(
         name,

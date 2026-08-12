@@ -262,6 +262,31 @@ public sealed class BuiltinRegistryTests
     }
 
     [Fact]
+    public void Reverse_AllLiteral_ReversesCharacterOrder()
+    {
+        // Oracle-verified: REVERSE('abc') = 'cba'.
+        var result = BuiltinRegistry.Fold(Call("REVERSE", new BuiltinArgument.Text("abc")));
+
+        Assert.Equal("cba", OkText(result));
+    }
+
+    [Fact]
+    public void Reverse_EmptyString_StaysEmpty()
+    {
+        var result = BuiltinRegistry.Fold(Call("REVERSE", new BuiltinArgument.Text(string.Empty)));
+
+        Assert.Equal(string.Empty, OkText(result));
+    }
+
+    [Fact]
+    public void Reverse_HoleSource_PassesThroughType()
+    {
+        var result = BuiltinRegistry.Fold(Call("REVERSE", new BuiltinArgument.Hole(NVarChar50, HoleKind.UntypedParameter)));
+
+        Assert.Equal(NVarChar50, OkHole(result).Type);
+    }
+
+    [Fact]
     public void QuoteName_DefaultDelimiter_WrapsInBrackets()
     {
         var result = BuiltinRegistry.Fold(Call("QUOTENAME", new BuiltinArgument.Text("Users")));
@@ -431,9 +456,43 @@ public sealed class BuiltinRegistryTests
     }
 
     [Fact]
-    public void FoldCastOrConvert_CharTarget_ConcreteSource_DeclinesBlankPaddingNotModeled()
+    public void FoldCastOrConvert_CharTarget_ConcreteSource_ShorterThanLength_BlankPadsToTarget()
     {
+        // Oracle-verified: CAST('ab' AS CHAR(5)) = 'ab   ' (padded to exactly 5 with trailing spaces).
         var target = new SqlType(SqlTypeCategory.Char, Length: 5);
+
+        var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("ab"), Site);
+
+        Assert.Equal("ab   ", OkText(result));
+    }
+
+    [Fact]
+    public void FoldCastOrConvert_CharTarget_ConcreteSource_LongerThanLength_Truncates()
+    {
+        // Oracle-verified: CAST('abcdef' AS CHAR(5)) = 'abcde' (truncated, no padding needed).
+        var target = new SqlType(SqlTypeCategory.Char, Length: 5);
+
+        var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("abcdef"), Site);
+
+        Assert.Equal("abcde", OkText(result));
+    }
+
+    [Fact]
+    public void FoldCastOrConvert_NCharTarget_ConcreteSource_BlankPadsToTarget()
+    {
+        var target = new SqlType(SqlTypeCategory.NChar, Length: 5);
+
+        var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("abc"), Site);
+
+        Assert.Equal("abc  ", OkText(result));
+    }
+
+    [Fact]
+    public void FoldCastOrConvert_CharTarget_ConcreteSource_NoExplicitLength_DeclinesRatherThanGuessingDefault()
+    {
+        // A bare CHAR (no explicit length) resolves with Length: null - this scanner does not
+        // independently pin T-SQL's own default length (30), so it declines rather than guess it.
+        var target = new SqlType(SqlTypeCategory.Char);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("ab"), Site);
 

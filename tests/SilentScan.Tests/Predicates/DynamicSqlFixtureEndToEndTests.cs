@@ -91,9 +91,10 @@ public sealed class DynamicSqlFixtureEndToEndTests
     [Fact]
     public void IfElseGuardedAlternativeRecovery_RecoversKnownSiblingBranch_ScanForced()
     {
-        // The THEN branch calls REVERSE (deliberately not folded), but the ELSE branch's own
-        // complete, known predicate must still be recovered as a GuardedAlternative rather than
-        // discarded just because its sibling branch didn't fold.
+        // The THEN branch calls FORMAT (deliberately not folded - its locale/format-string
+        // rendering is never modeled), but the ELSE branch's own complete, known predicate must
+        // still be recovered as a GuardedAlternative rather than discarded just because its
+        // sibling branch didn't fold.
         var finding = RunFixtureToSingleTypedFinding("if_else_guarded_alternative_recovery.sql");
 
         Assert.Equal("DisplayName", finding.Column.ColumnName);

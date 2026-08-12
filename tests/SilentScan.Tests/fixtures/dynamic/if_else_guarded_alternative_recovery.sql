@@ -1,5 +1,5 @@
 -- An IF/ELSE where only ONE branch's own assignment actually folds: the THEN branch calls
--- REVERSE, a builtin this scanner deliberately does not whitelist for value-folding (its result
+-- FORMAT, a builtin this scanner deliberately does not whitelist for value-folding (its result
 -- is not representable as a literal segment the same way UPPER/LOWER/QUOTENAME's known-shape
 -- results are), so that branch stays genuinely unfoldable - not "known shape, unknown value" the
 -- way an uninitialized DECLARE or havoc-typed write is, but truly unmodeled. The ELSE branch's
@@ -16,12 +16,12 @@ GO
 CREATE INDEX IX_Customers_DisplayName ON dbo.Customers(DisplayName);
 GO
 
-CREATE PROCEDURE dbo.usp_FindCustomer @UseReversedLabel BIT AS
+CREATE PROCEDURE dbo.usp_FindCustomer @UseUnfoldableLabel BIT AS
 BEGIN
     DECLARE @sql NVARCHAR(MAX) = N'SELECT CustomerId FROM dbo.Customers WHERE DisplayName = N''Ada''';
 
-    IF @UseReversedLabel = 1
-        SET @sql = REVERSE(N'a label this scanner never folds the value of');
+    IF @UseUnfoldableLabel = 1
+        SET @sql = FORMAT(1, N'a format string this scanner never folds the value of');
 
     EXEC(@sql);
 END;
