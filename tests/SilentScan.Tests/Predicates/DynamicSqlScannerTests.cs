@@ -1980,6 +1980,39 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal(FindingConfidence.High, script.Confidence);
     }
 
+    [Fact]
+    public void Scan_FunctionArgumentWithChoiceEmbeddedAmongLiteralPieces_CrossProductsAcrossBothBranches()
+    {
+        // Real corpus pattern (SQL-Server-First-Responder-Kit's sp_DatabaseRestore.sql):
+        // @FileListParamSQL is built as `SET @x = N'INSERT INTO t (a, b';` then diverges across
+        // an IF with no ELSE (`IF @v >= 13 SET @x += N', SnapshotUrl';` - a genuine 2-alternative
+        // Choice, both purely literal), THEN gets MORE straight-line concatenation appended
+        // (`SET @x += N')' + ...;`) - Concat deliberately never distributes over a Choice, so the
+        // Choice ends up as ONE piece among several literal ones by the time @x reaches
+        // REPLACE(@x, ...). Both ToBuiltinArgument (unchanged - correctly still declines a bare
+        // "mix of literal and Choice pieces" it can't itself disentangle) and the OLD
+        // TryFoldCrossProduct (which only recognized a Choice as an argument's SOLE piece) missed
+        // this shape entirely, declining the whole REPLACE with the generic
+        // "symbolic-value-in-function-argument". Each alternative is now spliced back into its
+        // own original surrounding literal text before folding REPLACE once per alternative.
+        var result = Scan(
+            "DECLARE @FileListParamSQL NVARCHAR(4000) = N'INSERT INTO t (a, b'; " +
+            "IF @MajorVersion >= 13 BEGIN SET @FileListParamSQL += N', SnapshotUrl'; END; " +
+            "SET @FileListParamSQL += N')' + NCHAR(13) + NCHAR(10); " +
+            "SET @FileListParamSQL += N'EXEC (''RESTORE {Path}'')'; " +
+            "DECLARE @sql NVARCHAR(MAX) = REPLACE(@FileListParamSQL, N'{Path}', N'known'); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(
+            [
+                "INSERT INTO t (a, b)\r\nEXEC ('RESTORE known')",
+                "INSERT INTO t (a, b, SnapshotUrl)\r\nEXEC ('RESTORE known')",
+            ],
+            texts);
+    }
+
     // ------------------------------------------------------------------
     // CAST/CONVERT folding onto a VARCHAR(n)/NVARCHAR(n) target only - every non-string target
     // and CHAR/NCHAR's blank-padding declines rather than guessing a rendering.

@@ -316,70 +316,117 @@ public static class ExpressionEvaluator
         return ToSqlTextValue(BuiltinRegistry.Fold(call), foldContext.Site);
     }
 
+    /// <summary>An argument position resolving to a Template carrying exactly one <see cref="TemplatePiece.Choice"/> among otherwise-all-literal pieces - see <see cref="TryFoldCrossProduct"/>'s own doc comment for why this needs to be recognized even when the Choice isn't the argument's ONLY piece.</summary>
+    private sealed record EmbeddedChoice(int Index, IReadOnlyList<TemplatePiece> Prefix, TemplatePiece.Choice Choice, IReadOnlyList<TemplatePiece> Suffix);
+
     /// <summary>
-    /// When exactly one non-integer argument position resolves to a genuine multi-alternative
-    /// <see cref="TemplatePiece.Choice"/> (a variable that diverged across IF branches BEFORE
-    /// reaching this call - e.g. <c>REPLACE(@sql, ...)</c> where @sql itself is a Choice), the
-    /// whole builtin call is folded once per alternative - substituting just that one argument
-    /// each time - and the results re-joined under the SAME guard text as a fresh Choice,
-    /// instead of <see cref="ToBuiltinArgument"/> collapsing the whole argument straight to the
-    /// generic "symbolic-value-in-function-argument" the moment it sees more than one possible
-    /// value. If ANY alternative's own fold taints, the WHOLE result taints with that specific
-    /// reason - a Choice means "one of these really happens", so a defect on even one path is a
-    /// real defect, not something a partial union may silently drop. More than one diverging
-    /// argument at once is a real, deliberately-left-declining feature gap (composing two
-    /// independently-guarded choices into a cross product risks reporting combinations that can
-    /// never actually co-occur together) - returns false so the ordinary single-fold path runs
-    /// and reports its own generic reason instead.
+    /// When exactly one non-integer argument position resolves to a value carrying a genuine
+    /// multi-alternative <see cref="TemplatePiece.Choice"/> (a variable that diverged across IF
+    /// branches BEFORE reaching this call - e.g. <c>REPLACE(@sql, ...)</c> where @sql itself is a
+    /// Choice), the whole builtin call is folded once per alternative - substituting just that
+    /// one argument each time - and the results re-joined under the SAME guard text as a fresh
+    /// Choice, instead of <see cref="ToBuiltinArgument"/> collapsing the whole argument straight
+    /// to the generic "symbolic-value-in-function-argument" the moment it sees more than one
+    /// possible value. The Choice does NOT need to be the argument's only piece - a real corpus
+    /// shape (SQL-Server-First-Responder-Kit's sp_DatabaseRestore.sql) builds @FileListParamSQL
+    /// via <c>IF @MajorVersion >= 13 SET @x += N', SnapshotUrl';</c> (no ELSE - a genuine
+    /// 2-alternative Choice, both purely literal) followed by MORE straight-line concatenation
+    /// (<c>SET @x += N')' + NCHAR(13) + NCHAR(10);</c>), which <see cref="SqlTextValue.Concat"/>
+    /// deliberately never distributes over a Choice (that would risk a cartesian explosion at
+    /// every intermediate concatenation instead of once, here, at the one place it's actually
+    /// needed) - so the Choice ends up as ONE piece among several literal ones. Each alternative
+    /// is spliced back into its own original surrounding literal pieces before folding, so what
+    /// reaches the builtin is either fully literal or a genuine single Hole, never the "MIX of
+    /// literal and Choice pieces" shape <see cref="ToBuiltinArgument"/> itself still declines
+    /// (unchanged - it has no notion of which OTHER pieces came from which branch, so it must
+    /// never guess; only this cross-product, which processes ONE Choice's alternatives exactly
+    /// once against their own known surrounding text, can do this soundly). If ANY alternative's
+    /// own fold taints, the WHOLE result taints with that specific reason - a Choice means "one
+    /// of these really happens", so a defect on even one path is a real defect, not something a
+    /// partial union may silently drop. More than one diverging argument at once is a real,
+    /// deliberately-left-declining feature gap (composing two independently-guarded choices into
+    /// a cross product risks reporting combinations that can never actually co-occur together) -
+    /// returns false so the ordinary single-fold path runs and reports its own generic reason.
     /// </summary>
     private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
         result = null!;
-        var (choiceIndex, choice) = FindSoleChoiceArgument(foldedArguments);
-        if (choiceIndex < 0)
+        var embedded = FindSoleChoiceArgument(foldedArguments);
+        if (embedded is null)
         {
             return false;
         }
 
-        result = FoldOverChoiceAlternatives(context, choiceIndex, choice!, foldedArguments);
+        result = FoldOverChoiceAlternatives(context, embedded, foldedArguments);
         return true;
     }
 
-    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> solely to keep that method's own Cognitive Complexity (Sonar S3776) under the two nested-loop bodies it previously carried. Returns (-1, null) when no argument diverges, or when MORE than one does (the deliberately-declined multi-choice case - see <see cref="TryFoldCrossProduct"/>'s own doc comment).</summary>
-    private static (int Index, TemplatePiece.Choice? Choice) FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
+    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> solely to keep that method's own Cognitive Complexity (Sonar S3776) under the two nested-loop bodies it previously carried. Returns null when no argument diverges, or when MORE than one does (the deliberately-declined multi-choice case - see <see cref="TryFoldCrossProduct"/>'s own doc comment).</summary>
+    private static EmbeddedChoice? FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
     {
-        var choiceIndex = -1;
-        TemplatePiece.Choice? choice = null;
-
+        EmbeddedChoice? found = null;
         for (var i = 0; i < foldedArguments.Length; i++)
         {
-            if (foldedArguments[i] is not SqlTextValue.Template { Pieces: [TemplatePiece.Choice c] })
+            if (foldedArguments[i] is not SqlTextValue.Template template || !TryExtractSoleEmbeddedChoice(template, i, out var embedded))
             {
                 continue;
             }
 
-            if (choiceIndex >= 0)
+            if (found is not null)
             {
-                return (-1, null);
+                return null;
             }
 
-            choiceIndex = i;
-            choice = c;
+            found = embedded;
         }
 
-        return (choiceIndex, choice);
+        return found;
     }
 
-    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> for the same Cognitive Complexity reason as <see cref="FindSoleChoiceArgument"/>. Folds the whole call once per alternative in <paramref name="choice"/>, substituting it at <paramref name="choiceIndex"/> each time (every OTHER argument reuses <paramref name="foldedArguments"/>'s already-computed value rather than re-folding), and re-unions the results - or returns the first Tainted alternative's own value outright, per the "one bad path taints the whole Choice" policy documented on <see cref="TryFoldCrossProduct"/>.</summary>
-    private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, int choiceIndex, TemplatePiece.Choice choice, SqlTextValue?[] foldedArguments)
+    /// <summary>True only when <paramref name="template"/> carries EXACTLY one <see cref="TemplatePiece.Choice"/> piece and every other piece is a plain <see cref="TemplatePiece.Lit"/> - a <see cref="TemplatePiece.Hole"/> alongside a Choice is a genuinely different (and rarer) shape this cross-product doesn't attempt, since splicing a Choice's own alternative next to an UNRELATED hole gives no more information than declining does.</summary>
+    private static bool TryExtractSoleEmbeddedChoice(SqlTextValue.Template template, int index, out EmbeddedChoice embedded)
+    {
+        embedded = null!;
+        var choiceAt = -1;
+        for (var i = 0; i < template.Pieces.Count; i++)
+        {
+            switch (template.Pieces[i])
+            {
+                case TemplatePiece.Choice when choiceAt >= 0:
+                    return false;
+                case TemplatePiece.Choice:
+                    choiceAt = i;
+                    break;
+                case TemplatePiece.Lit:
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        if (choiceAt < 0)
+        {
+            return false;
+        }
+
+        embedded = new EmbeddedChoice(index, template.Pieces.Take(choiceAt).ToList(), (TemplatePiece.Choice)template.Pieces[choiceAt], template.Pieces.Skip(choiceAt + 1).ToList());
+        return true;
+    }
+
+    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> for the same Cognitive Complexity reason as <see cref="FindSoleChoiceArgument"/>. Folds the whole call once per alternative in <paramref name="embedded"/>'s own Choice, splicing it back into its own original surrounding literal pieces each time (every OTHER argument reuses <paramref name="foldedArguments"/>'s already-computed value rather than re-folding), and re-unions the results - or returns the first Tainted alternative's own value outright, per the "one bad path taints the whole Choice" policy documented on <see cref="TryFoldCrossProduct"/>.</summary>
+    private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, EmbeddedChoice embedded, SqlTextValue?[] foldedArguments)
     {
         SqlTextValue? union = null;
-        foreach (var alternative in choice.Alternatives)
+        foreach (var alternative in embedded.Choice.Alternatives)
         {
+            var spliced = embedded.Prefix.Count == 0 && embedded.Suffix.Count == 0
+                ? alternative
+                : new SqlTextValue.Template([.. embedded.Prefix, .. alternative.Pieces, .. embedded.Suffix]);
+
             var arguments = new List<BuiltinArgument>(context.Parameters.Count);
             for (var i = 0; i < context.Parameters.Count; i++)
             {
-                arguments.Add(ResolveArgumentAt(context, i, choiceIndex, alternative, foldedArguments));
+                arguments.Add(ResolveArgumentAt(context, i, embedded.Index, spliced, foldedArguments));
             }
 
             var foldedCall = ToSqlTextValue(BuiltinRegistry.Fold(new BuiltinCall(context.FunctionName, arguments, context.Site)), context.Site);
@@ -388,18 +435,18 @@ public static class ExpressionEvaluator
                 return foldedCall;
             }
 
-            union = union is null ? foldedCall : SqlTextValue.Join(union, foldedCall, choice.GuardText, context.Cap, context.Site);
+            union = union is null ? foldedCall : SqlTextValue.Join(union, foldedCall, embedded.Choice.GuardText, context.Cap, context.Site);
         }
 
         return union!;
     }
 
-    /// <summary>The per-position argument resolution <see cref="FoldOverChoiceAlternatives"/>'s own loop needs, extracted to turn its nested ternary (Sonar S3358) into a named, independently-readable statement: the diverging position gets this alternative's own value, every other position reuses its already-cached fold (or, for an integer position never cached up front, folds it now).</summary>
-    private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template alternative, SqlTextValue?[] foldedArguments)
+    /// <summary>The per-position argument resolution <see cref="FoldOverChoiceAlternatives"/>'s own loop needs, extracted to turn its nested ternary (Sonar S3358) into a named, independently-readable statement: the diverging position gets this alternative's own (already-spliced-back-into-its-surroundings) value, every other position reuses its already-cached fold (or, for an integer position never cached up front, folds it now).</summary>
+    private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template splicedAlternative, SqlTextValue?[] foldedArguments)
     {
         if (index == choiceIndex)
         {
-            return ToBuiltinArgument(alternative);
+            return ToBuiltinArgument(splicedAlternative);
         }
 
         return foldedArguments[index] is { } cachedArgument
