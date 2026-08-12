@@ -6,6 +6,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.Reporting;
 
 namespace SilentScan.Core.Predicates;
@@ -539,8 +540,10 @@ public static partial class DynamicSqlPipeline
     {
         // Propagates the outer script's own scope into the nested scanner - the reparsed inner
         // text has no CREATE PROCEDURE wrapper for it to discover the scope from itself, so
-        // without this, propagation would silently die at nesting depth 2.
-        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope, catalog: catalog);
+        // without this, propagation would silently die at nesting depth 2. No callGraph/
+        // outputSummaryIndex here, matching the old scanner's own behavior for a NESTED
+        // reparse - only the top-level scan (ScanReportBuilder) threads those through.
+        var nestedExtraction = DynamicSqlScannerV2.Scan(innerParseResult, script.Scope, catalog: catalog);
         var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, script)).ToList();
 
         if (nestedExtraction.AnalyzableScripts.Count == 0)
@@ -583,7 +586,7 @@ public static partial class DynamicSqlPipeline
     /// </summary>
     private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult innerParseResult, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
-        var nestedExtraction = DynamicSqlScanner.Scan(innerParseResult, script.Scope);
+        var nestedExtraction = DynamicSqlScannerV2.Scan(innerParseResult, script.Scope);
         var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, map)).ToList();
         findings.AddRange(nestedExtraction.AnalyzableScripts
             .Select(nestedScript => map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))

@@ -3,6 +3,7 @@ using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Reporting;
@@ -82,7 +83,7 @@ public static class ScanReportBuilder
         for (var round = 0; round < maxOutputSummaryRounds; round++)
         {
             dynamicSqlExtractions = usableParseResults
-                .Select(r => DynamicSqlScanner.Scan(r, callGraph: procCallGraph, outputSummaries: outputSummaryIndex, catalog: catalog))
+                .Select(r => DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog))
                 .ToList();
 
             var discoveredCount = outputSummaryIndex.Count;
