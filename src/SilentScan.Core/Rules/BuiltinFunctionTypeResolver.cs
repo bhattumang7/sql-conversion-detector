@@ -71,6 +71,15 @@ public static class BuiltinFunctionTypeResolver
         ["@@TRANCOUNT"] = new SqlType(SqlTypeCategory.Int),
         ["@@NESTLEVEL"] = new SqlType(SqlTypeCategory.Int),
         ["@@FETCH_STATUS"] = new SqlType(SqlTypeCategory.Int),
+
+        // Oracle-verified via sys.dm_exec_describe_first_result_set, same method as every entry
+        // above - added after a corpus/test audit flagged @@CURSOR_ROWS specifically as an
+        // "unavoidable" Unknown example that turned out to just be missing from this table.
+        ["@@CURSOR_ROWS"] = new SqlType(SqlTypeCategory.Int),
+        ["@@MAX_CONNECTIONS"] = new SqlType(SqlTypeCategory.Int),
+        ["@@LANGID"] = new SqlType(SqlTypeCategory.SmallInt),
+        ["@@PACK_RECEIVED"] = new SqlType(SqlTypeCategory.Int),
+        ["@@CPU_BUSY"] = new SqlType(SqlTypeCategory.Int),
     };
 
     /// <summary>

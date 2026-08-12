@@ -1507,13 +1507,16 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToUnknownGlobalVariable_ResolvesUnknownAndLedgers()
     {
+        // @@REMSERVER is a genuinely obscure global variable this curated table doesn't cover -
+        // @@CURSOR_ROWS used to be this test's own example until it turned out to just be a
+        // missing table entry (oracle-verified and added to BuiltinFunctionTypeResolver).
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Total INT NOT NULL);",
-            "SELECT 1 FROM dbo.T WHERE Total = @@CURSOR_ROWS;");
+            "SELECT 1 FROM dbo.T WHERE Total = @@REMSERVER;");
 
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.Unknown, finding.Verdict);
-        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("@@CURSOR_ROWS", StringComparison.Ordinal));
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("@@REMSERVER", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -2743,6 +2746,24 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         var result = ExtractAll(
             "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
             "SELECT 1 FROM dbo.TRowcount WHERE Total = @@ROWCOUNT;");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
+        await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToCursorRowsGlobalVariable_ResolvesFixedType_OracleConfirmed()
+    {
+        // @@CURSOR_ROWS types as INT (oracle-verified via sys.dm_exec_describe_first_result_set,
+        // same method as every GlobalVariableTypes entry) - previously missing from the curated
+        // table despite sibling globals like @@ROWCOUNT already being covered. Reuses
+        // dbo.TRowcount (already deployed for the @@ROWCOUNT test above) rather than declaring a
+        // new table this class's shared Ddl doesn't create.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
+            "SELECT 1 FROM dbo.TRowcount WHERE Total = @@CURSOR_ROWS;");
 
         var finding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
