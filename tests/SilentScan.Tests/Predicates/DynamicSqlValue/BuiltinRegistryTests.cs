@@ -218,6 +218,50 @@ public sealed class BuiltinRegistryTests
     }
 
     [Fact]
+    public void Replicate_AllLiteral_RepeatsInputCountTimes()
+    {
+        // Oracle-verified: REPLICATE('ab', 3) = 'ababab'.
+        var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(3)));
+
+        Assert.Equal("ababab", OkText(result));
+    }
+
+    [Fact]
+    public void Replicate_ZeroCount_ProducesEmptyString()
+    {
+        // Oracle-verified: REPLICATE('ab', 0) = '' (not NULL, not an error).
+        var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(0)));
+
+        Assert.Equal(string.Empty, OkText(result));
+    }
+
+    [Fact]
+    public void Replicate_NegativeCount_Declines()
+    {
+        // Oracle-verified: REPLICATE('ab', -1) = SQL NULL, which this domain has no representation for.
+        var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(-1)));
+
+        Assert.Equal("non-literal-expression:replicate-negative-count", FailReason(result));
+    }
+
+    [Fact]
+    public void Replicate_HoleSource_PassesThroughType()
+    {
+        var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Hole(NVarChar50, HoleKind.UntypedParameter), new BuiltinArgument.Number(4)));
+
+        Assert.Equal(NVarChar50, OkHole(result).Type);
+    }
+
+    [Fact]
+    public void Replicate_UnresolvedCount_DeclinesWithCountsOwnReason()
+    {
+        var result = BuiltinRegistry.Fold(Call(
+            "REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Unresolved("variable-not-in-scope", default)));
+
+        Assert.Equal("variable-not-in-scope", FailReason(result));
+    }
+
+    [Fact]
     public void QuoteName_DefaultDelimiter_WrapsInBrackets()
     {
         var result = BuiltinRegistry.Fold(Call("QUOTENAME", new BuiltinArgument.Text("Users")));

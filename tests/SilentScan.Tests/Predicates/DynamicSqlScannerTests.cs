@@ -1961,6 +1961,25 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("non-literal-expression:replace-collation-sensitive", finding.Reason);
     }
 
+    [Fact]
+    public void Scan_ReplaceWithReplicateAsReplacementArgument_FoldsCompletely()
+    {
+        // Real corpus pattern (SQL-Server-First-Responder-Kit's sp_DatabaseRestore.sql):
+        // REPLACE(text, N'''', REPLICATE(N'''', 4)) quadruples an embedded single quote when
+        // splicing a literal path into dynamic SQL. REPLICATE was entirely unmodeled, so this
+        // whole REPLACE call used to decline with "symbolic-value-in-function-argument" the
+        // moment it saw an unrecognized function name for its own replacement argument.
+        var result = Scan(
+            "DECLARE @Path NVARCHAR(MAX) = N'C:\\Backup''s\\file.bak'; " +
+            "DECLARE @sql NVARCHAR(MAX) = REPLACE(@Path, N'''', REPLICATE(N'''', 2)); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("C:\\Backup''s\\file.bak", script.InnerText);
+        Assert.Equal(FindingConfidence.High, script.Confidence);
+    }
+
     // ------------------------------------------------------------------
     // CAST/CONVERT folding onto a VARCHAR(n)/NVARCHAR(n) target only - every non-string target
     // and CHAR/NCHAR's blank-padding declines rather than guessing a rendering.

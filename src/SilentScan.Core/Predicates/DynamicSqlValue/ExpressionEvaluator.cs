@@ -414,6 +414,7 @@ public static class ExpressionEvaluator
         ("SUBSTRING", 1), ("SUBSTRING", 2),
         ("STR", 1), ("STR", 2),
         ("CHAR", 0), ("NCHAR", 0),
+        ("REPLICATE", 1),
     ];
 
     /// <summary>

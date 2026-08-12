@@ -124,6 +124,7 @@ public static class BuiltinRegistry
         yield return Right();
         yield return Substring();
         yield return Replace();
+        yield return Replicate();
         yield return QuoteName();
         yield return CharOrNChar("CHAR", maxCodePoint: 255);
         yield return CharOrNChar("NCHAR", maxCodePoint: 65535);
@@ -198,6 +199,42 @@ public static class BuiltinRegistry
     private static BuiltinSpec Left() => LeftOrRight("LEFT", (input, length) => input[..length]);
 
     private static BuiltinSpec Right() => LeftOrRight("RIGHT", (input, length) => input[^length..]);
+
+    /// <summary>
+    /// Oracle-verified: REPLICATE(string, count) repeats the string exactly <c>count</c> times -
+    /// count=0 returns an empty string (not NULL), a NEGATIVE count returns SQL NULL, which this
+    /// domain has no representation for, so it declines rather than guessing. A real corpus
+    /// pattern (SQL-Server-First-Responder-Kit's sp_DatabaseRestore.sql) uses
+    /// <c>REPLACE(text, N'''', REPLICATE(N'''', 4))</c> to quadruple an embedded quote when
+    /// splicing a literal into dynamic SQL - REPLICATE was entirely unmodeled, so that whole
+    /// REPLACE call declined with the generic "symbolic-value-in-function-argument" the moment
+    /// it saw an unrecognized function name for its own replacement argument.
+    /// </summary>
+    private static BuiltinSpec Replicate() => new(
+        "REPLICATE",
+        Evaluate: call =>
+        {
+            var count = ((BuiltinArgument.Number)call.Arguments[1]).Value;
+            if (count < 0)
+            {
+                return new BuiltinFoldResult.Fail("non-literal-expression:replicate-negative-count");
+            }
+
+            var input = ((BuiltinArgument.Text)call.Arguments[0]).Value;
+            return BuiltinFoldResult.OkText(string.Concat(Enumerable.Repeat(input, count)), call.Site);
+        },
+        HoleTransfer: call =>
+        {
+            if (call.Arguments[1] is not BuiltinArgument.Number countArgument)
+            {
+                return UnresolvedOrGeneric([call.Arguments[1]]);
+            }
+
+            return countArgument.Value < 0 ? new BuiltinFoldResult.Fail("non-literal-expression:replicate-negative-count") : PassThroughSingleArgumentType(call);
+        },
+        ReturnType: null,
+        ReturnKind: default,
+        UnconditionalFailReason: null);
 
     private static BuiltinSpec LeftOrRight(string name, Func<string, int, string> slice) => new(
         name,
