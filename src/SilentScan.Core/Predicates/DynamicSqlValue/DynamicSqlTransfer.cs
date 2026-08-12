@@ -21,7 +21,9 @@ public sealed record TransferContext(
     DynamicSqlScope Scope,
     List<DynamicSqlFinding> Findings,
     List<DynamicSqlScript> Scripts,
-    List<ProcedureOutputSummary> OutputSummaries)
+    List<ProcedureOutputSummary> OutputSummaries,
+    ProcCallGraph? CallGraph = null,
+    IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? OutputSummaryIndex = null)
 {
     public SourceSpan Span(TSqlFragment fragment) => new(SourcePath, fragment.StartLine, fragment.StartColumn);
 }
@@ -81,13 +83,131 @@ public static class DynamicSqlTransfer
         var nestedScope = qualifiedName is null ? context.Scope : new DynamicSqlScope(qualifiedName, context.Scope.TriggerTarget);
         var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
 
+        var seed = qualifiedName is not null && formalParameters is { Count: > 0 }
+            ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext)
+            : new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+
         var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, s => CompileLeaf(s, nestedContext));
-        var folded = cfg.Solve(procOrFunc.StatementList!.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+        var folded = cfg.Solve(procOrFunc.StatementList!.Statements, seed);
 
         if (qualifiedName is not null && formalParameters is { Count: > 0 })
         {
             RecordOutputParameterSummaries(qualifiedName, formalParameters, folded, nestedContext);
         }
+    }
+
+    /// <summary>
+    /// Seeds a proc body's own formal parameters as constant-foldable when the call graph saw
+    /// exactly one caller passing a string literal for that parameter - see
+    /// <see cref="ProcCallGraph.SingleCallSiteFor"/> for why "exactly one call site THIS SCAN
+    /// saw" is the only case a single value can be trusted at all. No <see cref="TransferContext.CallGraph"/>
+    /// at all (the common case in isolated/unit-tested scans) seeds nothing - every parameter
+    /// simply reports "variable-not-in-scope" if referenced, same as today. A parameter with
+    /// ZERO call sites this scan saw is still seeded as a typed hole (its declared type is a
+    /// real T-SQL guarantee regardless of who calls it) rather than left fully untracked - the
+    /// old scanner's <c>SeedSymbolicOrTaint</c>. Every branch here mirrors the old scanner's
+    /// <c>BuildParameterSeed</c>/<c>SeedFromSingleEdge</c>/<c>SeedFromMultipleEdges</c> exactly.
+    /// </summary>
+    private static Dictionary<string, SqlTextValue> BuildParameterSeed(string qualifiedName, IList<ProcedureParameter> formalParameters, TransferContext context)
+    {
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+        if (context.CallGraph is null)
+        {
+            return seed;
+        }
+
+        var edges = context.CallGraph.EdgesCalling(qualifiedName).ToList();
+        if (edges.Count == 0)
+        {
+            foreach (var formal in formalParameters)
+            {
+                seed[formal.VariableName.Value] = SeedSymbolicOrTaint(formal, "procedure-parameter:no-known-call-site", context);
+            }
+
+            return seed;
+        }
+
+        if (edges.Count == 1)
+        {
+            SeedFromSingleEdge(edges[0], formalParameters, seed, context);
+            return seed;
+        }
+
+        foreach (var formal in formalParameters)
+        {
+            seed[formal.VariableName.Value] = SeedFromMultipleEdges(edges, formal, context);
+        }
+
+        return seed;
+    }
+
+    private static SqlTextValue SeedSymbolicOrTaint(ProcedureParameter formal, string taintReasonIfUnresolvable, TransferContext context)
+    {
+        var location = context.Span(formal);
+        var type = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
+        return type is null
+            ? new SqlTextValue.Tainted(taintReasonIfUnresolvable, location)
+            : new SqlTextValue.Template([new TemplatePiece.Hole(type, location, HoleKind.UntypedParameter)]) { DeclaredType = type };
+    }
+
+    private static void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> seed, TransferContext context)
+    {
+        foreach (var formal in formalParameters)
+        {
+            var paramName = formal.VariableName.Value;
+            var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
+            if (argument is null || argument.FormalParameterIsOutput)
+            {
+                // No matching actual argument (a default value applies) or an OUTPUT parameter
+                // (flows the other direction) - nothing to seed, left unseeded.
+                continue;
+            }
+
+            seed[paramName] = argument.LiteralArgument is { } literalArgument
+                ? new SqlTextValue.Template([new TemplatePiece.Lit(
+                    literalArgument.Value, new SourceSpan(literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn), literalArgument.PrefixLength)])
+                : SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller", context);
+        }
+    }
+
+    /// <summary>
+    /// When EVERY edge calling this proc supplies a literal argument for a given formal
+    /// parameter, the parameter's true runtime value is provably one of those literals - a
+    /// <see cref="TemplatePiece.Choice"/> under an empty guard (no single predicate governs
+    /// "which caller"), composing with the same <see cref="SqlTextValue.Widen"/> cap every other
+    /// divergence uses. If even ONE caller can't supply a literal, the whole parameter falls back
+    /// to <see cref="SeedSymbolicOrTaint"/> rather than partially seeding from a subset - a taint
+    /// at even one call site means the true value set is unknown, not merely wider than what the
+    /// literals show.
+    /// </summary>
+    private static SqlTextValue SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, ProcedureParameter formal, TransferContext context)
+    {
+        var paramName = formal.VariableName.Value;
+        var declaredType = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
+        var at = context.Span(formal);
+        SqlTextValue combined = new SqlTextValue.Tainted("parameter-not-seeded:cardinality-cap", at) { DeclaredType = declaredType };
+        var first = true;
+
+        foreach (var edge in edges)
+        {
+            var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
+            if (argument is null || argument.FormalParameterIsOutput || argument.LiteralArgument is not { } literalArgument)
+            {
+                return SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller", context);
+            }
+
+            var literalValue = new SqlTextValue.Template([new TemplatePiece.Lit(
+                literalArgument.Value, new SourceSpan(literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn), literalArgument.PrefixLength)])
+            { DeclaredType = declaredType };
+            combined = first ? literalValue : SqlTextValue.Join(combined, literalValue, guardText: string.Empty, context.Cap, at);
+            first = false;
+        }
+
+        // Reached only when every edge supplied a genuine literal argument - the loop above
+        // returns early the moment any edge lacks one, so `combined` is a real seeded value here,
+        // never the placeholder Tainted this method started with (unless Join's own cardinality
+        // cap collapsed it, whose reason string is deliberately identical to that placeholder).
+        return combined;
     }
 
     private static void CompileTriggerBody(TriggerStatementBody trigger, TransferContext context, bool emit)
@@ -476,13 +596,61 @@ public static class DynamicSqlTransfer
     /// </summary>
     private static void TaintReferencedVariables(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
+        var seeded = SeedKnownOutputArguments(node, context, state);
         var span = context.Span(node);
         var collector = new ReferencedVariableCollector();
         node.Accept(collector);
-        foreach (var name in collector.Names.Where(state.ContainsKey))
+        foreach (var name in collector.Names.Where(n => state.ContainsKey(n) && !seeded.Contains(n)))
         {
             state[name] = new SqlTextValue.Tainted("unsupported-execute-form", span) { DeclaredType = context.DeclaredTypes.GetValueOrDefault(name) };
         }
+    }
+
+    /// <summary>
+    /// Matches this exact EXEC call site to its own <see cref="ProcCallGraph"/> edge and seeds
+    /// any OUTPUT argument whose callee formal parameter has a known
+    /// <see cref="ProcedureOutputSummary"/> (see <see cref="TransferContext.OutputSummaryIndex"/>'s
+    /// own doc comment - the caller's fixed-point loop across the whole scan feeds this forward)
+    /// instead of leaving it for the blanket taint every other OUTPUT/return-value argument on
+    /// this same call still needs. Returns the set of caller variable names seeded, so
+    /// <see cref="TaintReferencedVariables"/> can exclude them - the one case this scanner CAN see
+    /// through what an arbitrary called procedure does internally.
+    /// </summary>
+    private static HashSet<string> SeedKnownOutputArguments(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
+    {
+        var seeded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (context.CallGraph is null || context.OutputSummaryIndex is null)
+        {
+            return seeded;
+        }
+
+        var edge = context.CallGraph.EdgeAt(context.Span(node));
+        if (edge is null)
+        {
+            return seeded;
+        }
+
+        var span = context.Span(node);
+        foreach (var argument in edge.Arguments)
+        {
+            if (!argument.FormalParameterIsOutput
+                || argument.CallerVariableName is not { } callerVariable
+                || !context.OutputSummaryIndex.TryGetValue((edge.CalleeQualifiedName, argument.FormalParameterName), out var values))
+            {
+                continue;
+            }
+
+            SqlTextValue combined = new SqlTextValue.Template([new TemplatePiece.Lit(values[0], span, PrefixLength: 0)]);
+            foreach (var value in values.Skip(1))
+            {
+                combined = SqlTextValue.Join(combined, new SqlTextValue.Template([new TemplatePiece.Lit(value, span, PrefixLength: 0)]), guardText: string.Empty, context.Cap, span);
+            }
+
+            state[callerVariable] = combined;
+            seeded.Add(callerVariable);
+        }
+
+        return seeded;
     }
 
     private sealed class ReferencedVariableCollector : TSqlFragmentVisitor

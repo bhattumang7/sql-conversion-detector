@@ -18,14 +18,16 @@ public static class DynamicSqlScannerV2
     private const int Cap = 32;
 
     /// <summary>
-    /// <paramref name="callGraph"/>/<paramref name="outputSummaryIndex"/>/<paramref name="catalog"/>
-    /// are accepted for signature compatibility with <see cref="DynamicSqlScanner.Scan"/> but not
-    /// yet consulted - the old scanner's cross-procedure call-graph parameter seeding, OUTPUT-
-    /// summary caller seeding, and single-table SELECT-assignment column resolution are each a
-    /// precision improvement for a later increment (docs/dynamic-sql-rebuild-plan.md Phase 3 §4),
-    /// never a soundness requirement: an unseeded formal parameter simply reports
-    /// "variable-not-in-scope" if referenced, exactly like the old scanner's own behavior
-    /// whenever no call graph is supplied at all.
+    /// <paramref name="callGraph"/> seeds a proc body's own formal parameters from what its known
+    /// callers pass (<see cref="DynamicSqlTransfer.CompileLeaf"/>'s own <c>CompileScopedBody</c>);
+    /// <paramref name="outputSummaryIndex"/> seeds an ordinary EXEC's own OUTPUT arguments from a
+    /// callee's already-proven-constant OUTPUT parameter. Both null (the common case in isolated/
+    /// unit-tested scans) leaves every formal parameter unseeded, reporting
+    /// "variable-not-in-scope" if referenced - exactly the old scanner's own behavior whenever no
+    /// call graph is supplied at all, so this is purely additive precision, never a soundness
+    /// requirement. <paramref name="catalog"/> is accepted for signature compatibility with
+    /// <see cref="DynamicSqlScanner.Scan"/> but not yet consulted - single-table SELECT-assignment
+    /// column resolution remains a deferred precision improvement.
     /// </summary>
     public static DynamicSqlExtractionResult Scan(
         SqlParseResult parseResult,
@@ -45,7 +47,7 @@ public static class DynamicSqlScannerV2
                 var context = new TransferContext(
                     new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase),
                     parseResult.SourcePath, Cap, enclosingScope ?? DynamicSqlScope.None,
-                    findings, scripts, outputSummaries);
+                    findings, scripts, outputSummaries, callGraph, outputSummaryIndex);
 
                 var cfg = new DynamicSqlCfg(parseResult.SourcePath, Cap, s => DynamicSqlTransfer.CompileLeaf(s, context));
                 cfg.Solve(batch.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));

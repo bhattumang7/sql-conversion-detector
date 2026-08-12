@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Predicates.DynamicSqlValue;
@@ -77,7 +78,7 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void UnseededFormalParameter_ReportsVariableNotInScope()
     {
-        // No call-graph wiring yet (deferred - see DynamicSqlScannerV2's own doc comment) - a
+        // No call graph passed at all (the common case for an isolated/unit-tested scan) - a
         // formal parameter reference behaves exactly like the old scanner's own "no call graph
         // supplied" fallback: unseeded, reported as an ordinary unresolved variable.
         var result = DynamicSqlScannerV2.Scan(Parse(
@@ -136,5 +137,104 @@ public sealed class DynamicSqlScannerV2Tests
 
         var script = Assert.Single(result.AnalyzableScripts);
         Assert.Equal("SELECT inner", script.InnerText);
+    }
+
+    [Fact]
+    public void FormalParameter_SingleKnownCallerWithLiteralArgument_SeedsItsValue()
+    {
+        var callGraph = new ProcCallGraph([
+            new ProcCallEdge(
+                CallerScopeQualifiedName: null, CalleeQualifiedName: "dbo.usp_Test", CallSite: new SourceSpan("caller.sql", 1, 1),
+                Arguments: [new ProcCallArgument(
+                    "@Status", new SqlType(SqlTypeCategory.NVarChar, Length: 20), FormalParameterIsOutput: false,
+                    CallerVariableName: null, IsLiteral: true,
+                    LiteralArgument: new ProcCallLiteralArgument("Active", "caller.sql", 1, 1, PrefixLength: 1))]),
+        ]);
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
+            callGraph: callGraph);
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT Active", script.InnerText);
+        Assert.Equal(FindingConfidence.High, script.Confidence);
+    }
+
+    [Fact]
+    public void FormalParameter_NoKnownCaller_SeedsTypedPlaceholderNotBareUnresolved()
+    {
+        var callGraph = new ProcCallGraph([]);
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
+            callGraph: callGraph);
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.NotNull(script.PlaceholderOccurrences);
+    }
+
+    [Fact]
+    public void FormalParameter_MultipleCallersAllLiteral_SeedsTheAgreedSetAsChoice()
+    {
+        var callGraph = new ProcCallGraph([
+            new ProcCallEdge(null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
+                [new ProcCallArgument("@Status", new SqlType(SqlTypeCategory.NVarChar, Length: 20), false, null, true,
+                    new ProcCallLiteralArgument("Active", "caller.sql", 1, 1, 1))]),
+            new ProcCallEdge(null, "dbo.usp_Test", new SourceSpan("caller.sql", 2, 1),
+                [new ProcCallArgument("@Status", new SqlType(SqlTypeCategory.NVarChar, Length: 20), false, null, true,
+                    new ProcCallLiteralArgument("Inactive", "caller.sql", 2, 1, 1))]),
+        ]);
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
+            callGraph: callGraph);
+
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT Active", "SELECT Inactive"], texts);
+    }
+
+    [Fact]
+    public void FormalParameter_OneOfMultipleCallersNonLiteral_FallsBackToTypedPlaceholder()
+    {
+        var callGraph = new ProcCallGraph([
+            new ProcCallEdge(null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
+                [new ProcCallArgument("@Status", new SqlType(SqlTypeCategory.NVarChar, Length: 20), false, null, true,
+                    new ProcCallLiteralArgument("Active", "caller.sql", 1, 1, 1))]),
+            new ProcCallEdge(null, "dbo.usp_Test", new SourceSpan("caller.sql", 2, 1),
+                [new ProcCallArgument("@Status", new SqlType(SqlTypeCategory.NVarChar, Length: 20), false, "@SomeVariable", false, null)]),
+        ]);
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
+            callGraph: callGraph);
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+    }
+
+    [Fact]
+    public void OrdinaryCall_OutputArgument_SeededFromKnownCalleeSummary_InsteadOfTainted()
+    {
+        // Line 1 = DECLARE, line 2 = the EXEC ... OUTPUT call site, line 3 = the final EXEC(...) -
+        // the call graph's own SourceSpan must match line 2 exactly (DynamicSqlCfg.CompileExecute
+        // looks up ProcCallGraph.EdgeAt by this call site's own real position).
+        var callSite = new SourceSpan(SourcePath, 2, 1);
+        var callGraph = new ProcCallGraph([
+            new ProcCallEdge(null, "dbo.usp_Helper", callSite,
+                [new ProcCallArgument("@Out", new SqlType(SqlTypeCategory.NVarChar, Length: 50), FormalParameterIsOutput: true, CallerVariableName: "@rc", IsLiteral: false)]),
+        ]);
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>
+        {
+            [("dbo.usp_Helper", "@Out")] = ["fixed-output"],
+        };
+
+        var result = DynamicSqlScannerV2.Scan(
+            Parse("DECLARE @rc NVARCHAR(50);\nEXEC dbo.usp_Helper @Out = @rc OUTPUT;\nEXEC('SELECT ' + @rc);"),
+            callGraph: callGraph, outputSummaryIndex: outputSummaryIndex);
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT fixed-output", script.InnerText);
+        Assert.Equal(FindingConfidence.High, script.Confidence);
     }
 }
