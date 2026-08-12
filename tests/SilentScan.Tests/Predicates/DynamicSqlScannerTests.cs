@@ -2120,6 +2120,78 @@ public sealed class DynamicSqlScannerTests
     }
 
     // ------------------------------------------------------------------
+    // CASE/IIF predicate evaluation (real corpus bug: wide-world-importers'
+    // DeactivateTemporalTablesBeforeDataLoad.sql built a CREATE TRIGGER body guarding
+    // QUOTENAME(@col) behind CASE WHEN COALESCE(@col, N'') <> N'' THEN ... ELSE N'' END - since
+    // FoldConditional used to union BOTH branches unconditionally, its "fully known" assembly
+    // included the QUOTENAME branch even though @col provably folded to the SAME empty literal
+    // the guard checks against, producing an invalid empty-bracket [] column name that failed to
+    // re-parse as T-SQL. TryEvaluatePredicate now proves a WHEN/IIF condition true or false
+    // outright whenever both comparison sides fold to known literal text, picking exactly the
+    // branch T-SQL's own short-circuit semantics would take.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_SearchedCaseWithProvablyFalseGuard_TakesOnlyTheElseBranch()
+    {
+        var result = Scan(
+            "DECLARE @LastEditedByColumnName NVARCHAR(50) = N''; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + " +
+            "CASE WHEN COALESCE(@LastEditedByColumnName, N'') <> N'' THEN QUOTENAME(@LastEditedByColumnName) + N', ' ELSE N'' END + N'Col1'; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT Col1", script.InnerText);
+        Assert.Equal(FindingConfidence.High, script.Confidence);
+    }
+
+    [Fact]
+    public void Scan_SearchedCaseWithProvablyTrueGuard_TakesOnlyTheThenBranch()
+    {
+        var result = Scan(
+            "DECLARE @LastEditedByColumnName NVARCHAR(50) = N'Updated'; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + " +
+            "CASE WHEN COALESCE(@LastEditedByColumnName, N'') <> N'' THEN QUOTENAME(@LastEditedByColumnName) + N', ' ELSE N'' END + N'Col1'; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT [Updated], Col1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SearchedCaseWithUndeterminedGuard_StillUnionsBothBranches()
+    {
+        // The declared type resolves but there is no initializer, so @LastEditedByColumnName
+        // folds to a typed Hole - the guard's own truth value is genuinely unknowable at compile
+        // time, so this must still union both branches (the existing, safe fallback), never
+        // guess which one a real run would take.
+        var result = Scan(
+            "DECLARE @LastEditedByColumnName NVARCHAR(50); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + " +
+            "CASE WHEN COALESCE(@LastEditedByColumnName, N'') <> N'' THEN N'X' ELSE N'Y' END; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT X", "SELECT Y"], texts);
+    }
+
+    [Fact]
+    public void Scan_IifWithProvablyFalseCondition_TakesOnlyTheElseBranch()
+    {
+        var result = Scan(
+            "DECLARE @Mode NVARCHAR(10) = N'prod'; " +
+            "DECLARE @sql NVARCHAR(MAX) = IIF(@Mode = N'debug', N'SELECT DebugInfo', N'SELECT 1'); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    // ------------------------------------------------------------------
     // Branch-fold coverage (roadmap "trace provably-constant dynamic SQL across IF/ELSE/TRY-
     // CATCH branches") - the optional-filter accumulation pattern this scanner previously declined
     // outright is now analyzed as the union of every branch's own provably-constant assembly.

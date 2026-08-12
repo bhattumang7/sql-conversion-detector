@@ -110,13 +110,33 @@ public static class ExpressionEvaluator
 
     private static SqlTextValue FoldConditional(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
     {
-        var (branches, elseExpression) = expression switch
+        // SearchedCaseExpression/IIfCall each have a real BooleanExpression condition this
+        // evaluator CAN sometimes prove true or false outright (see TryEvaluatePredicate) -
+        // when it can, the whole conditional folds to exactly the branch T-SQL's own
+        // short-circuit semantics would take, instead of unioning every branch as if all were
+        // reachable. SimpleCaseExpression compares an input expression against several VALUES
+        // (a different shape - no single boolean predicate to evaluate per branch) and keeps the
+        // existing union-every-branch behavior below unconditionally (whenClauses stays null).
+        IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)>? whenClauses = null;
+        IEnumerable<ScalarExpression> thenExpressions = [];
+        ScalarExpression? elseExpression = null;
+        switch (expression)
         {
-            SimpleCaseExpression simpleCase => (simpleCase.WhenClauses.Select(w => w.ThenExpression), simpleCase.ElseExpression),
-            SearchedCaseExpression searchedCase => (searchedCase.WhenClauses.Select(w => w.ThenExpression), searchedCase.ElseExpression),
-            IIfCall iif => (new[] { iif.ThenExpression }.AsEnumerable(), iif.ElseExpression),
-            _ => (Enumerable.Empty<ScalarExpression>(), null),
-        };
+            case SimpleCaseExpression simpleCase:
+                thenExpressions = simpleCase.WhenClauses.Select(w => w.ThenExpression);
+                elseExpression = simpleCase.ElseExpression;
+                break;
+
+            case SearchedCaseExpression searchedCase:
+                whenClauses = searchedCase.WhenClauses.Select(w => (w.WhenExpression, w.ThenExpression)).ToList();
+                elseExpression = searchedCase.ElseExpression;
+                break;
+
+            case IIfCall iif:
+                whenClauses = [(iif.Predicate, iif.ThenExpression)];
+                elseExpression = iif.ElseExpression;
+                break;
+        }
 
         // A bare CASE with no matching WHEN and no ELSE returns SQL NULL, which this domain has
         // no representation for - silently omitting that outcome from the union would be
@@ -127,8 +147,18 @@ public static class ExpressionEvaluator
         }
 
         var at = Span(sourcePath, expression);
+        var remainingBranches = thenExpressions;
+        if (whenClauses is not null)
+        {
+            remainingBranches = ResolveDeterminableBranches(whenClauses, state, sourcePath, cap, out var decided);
+            if (decided is { } decidedBranch)
+            {
+                return Fold(decidedBranch, state, sourcePath, cap);
+            }
+        }
+
         SqlTextValue? union = null;
-        foreach (var branch in branches.Append(elseExpression))
+        foreach (var branch in remainingBranches.Append(elseExpression))
         {
             var folded = Fold(branch, state, sourcePath, cap);
             if (folded is SqlTextValue.Tainted)
@@ -140,6 +170,93 @@ public static class ExpressionEvaluator
         }
 
         return union!;
+    }
+
+    /// <summary>
+    /// Walks <paramref name="whenClauses"/> in T-SQL's own short-circuit order: a WHEN whose
+    /// condition provably evaluates FALSE is excluded entirely (never a real possibility, so
+    /// including it in the union would be needless imprecision - the bug this method fixes: a
+    /// corpus CASE guarding <c>QUOTENAME(@col)</c> behind <c>COALESCE(@col, N'') &lt;&gt; N''</c>
+    /// was including the QUOTENAME branch even when @col provably folded to the SAME empty
+    /// literal the guard checks against, producing an invalid empty-bracket <c>[]</c> in the
+    /// "fully known" reconstructed SQL); a WHEN provably TRUE means every EARLIER WHEN was
+    /// provably false (or this loop would have already returned) and no LATER WHEN/ELSE can ever
+    /// run - <paramref name="decided"/> carries that THEN expression out for the caller to fold
+    /// as the whole conditional's own answer, short-circuiting immediately. The first WHEN whose
+    /// condition can't be determined either way stops the walk: from there on, everything
+    /// (that WHEN's own THEN, every later WHEN's THEN, and ELSE) is genuinely still reachable and
+    /// returned for the caller's existing union-every-remaining-branch fallback.
+    /// </summary>
+    private static List<ScalarExpression> ResolveDeterminableBranches(
+        IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)> whenClauses, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out ScalarExpression? decided)
+    {
+        decided = null;
+        var remaining = new List<ScalarExpression>();
+        foreach (var (condition, then) in whenClauses)
+        {
+            var determined = TryEvaluatePredicate(condition, state, sourcePath, cap);
+            if (determined == true)
+            {
+                decided = then;
+                return [];
+            }
+
+            if (determined == false)
+            {
+                continue;
+            }
+
+            remaining.Add(then);
+        }
+
+        return remaining;
+    }
+
+    /// <summary>
+    /// Proves a WHEN condition true/false only for the one shape this corpus actually needs:
+    /// an equality/inequality comparison where BOTH sides fold to a fully-known literal string
+    /// (via <see cref="TryFoldToKnownLiteralText"/>). Anything else - a comparison this evaluator
+    /// doesn't model, or either side resolving to a Hole/Choice/Tainted value - returns null
+    /// (undetermined), never a guess: the caller's own fallback (union every still-reachable
+    /// branch) stays sound for every predicate shape this doesn't recognize.
+    /// </summary>
+    private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    {
+        if (predicate is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals or BooleanComparisonType.NotEqualToExclamation or BooleanComparisonType.NotEqualToBrackets } comparison)
+        {
+            return null;
+        }
+
+        var left = TryFoldToKnownLiteralText(comparison.FirstExpression, state, sourcePath, cap);
+        var right = TryFoldToKnownLiteralText(comparison.SecondExpression, state, sourcePath, cap);
+        if (left is null || right is null)
+        {
+            return null;
+        }
+
+        var equal = string.Equals(left, right, StringComparison.Ordinal);
+        return comparison.ComparisonType == BooleanComparisonType.Equals ? equal : !equal;
+    }
+
+    /// <summary>
+    /// COALESCE's own definite value, for predicate-evaluation purposes, is its FIRST argument's
+    /// own value whenever that argument is a KNOWN literal (a literal is provably non-NULL, so
+    /// COALESCE never even reaches its later arguments) - matching <see cref="Fold"/>'s own
+    /// identical COALESCE handling elsewhere. Any other first argument (a Hole/Choice/Tainted -
+    /// genuinely unknown whether it's NULL at runtime) makes COALESCE's own result unknowable
+    /// too, so this returns null rather than guessing which argument wins.
+    /// </summary>
+    private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    {
+        if (expression is CoalesceExpression { Expressions.Count: > 0 } coalesce)
+        {
+            return TryFoldToKnownLiteralText(coalesce.Expressions[0], state, sourcePath, cap);
+        }
+
+        var folded = Fold(expression, state, sourcePath, cap);
+        return folded is SqlTextValue.Template template && template.Pieces.All(p => p is TemplatePiece.Lit)
+            ? string.Concat(template.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text))
+            : null;
     }
 
     private static SqlTextValue FoldCastOrConvert(
