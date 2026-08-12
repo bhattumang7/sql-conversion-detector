@@ -2013,6 +2013,49 @@ public sealed class DynamicSqlScannerTests
             texts);
     }
 
+    [Fact]
+    public void Scan_ChainedReplaceCallsEachSplicingAHole_SubsequentReplaceStillFoldsAroundExistingHoles()
+    {
+        // Real corpus pattern (SQL-Server-First-Responder-Kit's sp_BlitzIndex.sql and others):
+        // several sequential SET @sql = REPLACE(@sql, '@@@Marker@@@', @CallerValue) calls, each
+        // substituting one placeholder marker for a proc parameter this scanner can't prove
+        // constant. Once the FIRST REPLACE splices a hole in, @sql is no longer pure Text nor a
+        // single Hole - it MIXES literal text with an already-opaque hole - a shape
+        // ToBuiltinArgument correctly declines (it has no per-piece splicing notion), so every
+        // REPLACE call downstream of the first used to decline too, cascading into
+        // "symbolic-value-in-function-argument" for the whole chain.
+        var result = Scan(
+            "DECLARE @DatabaseName NVARCHAR(128); " + // unresolved proc parameter -> typed Hole
+            "DECLARE @SchemaName NVARCHAR(128); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT * FROM @@@Database@@@.@@@Schema@@@.T'; " +
+            "SET @sql = REPLACE(@sql, N'@@@Database@@@', @DatabaseName); " +
+            "SET @sql = REPLACE(@sql, N'@@@Schema@@@', @SchemaName); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.Matches(@"^SELECT \* FROM __silentscan_sym_L\d+C\d+__\.__silentscan_sym_L\d+C\d+__\.T$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ChainedReplaceCalls_CollationSensitiveSegmentStillDeclinesWithSpecificReason()
+    {
+        // The per-literal-segment splicing still runs REPLACE's own collation-sensitivity check
+        // (unchanged, reused verbatim from BuiltinRegistry) on each literal segment independently -
+        // a segment that hits the ordinal-vs-case-insensitive divergence still declines with the
+        // specific reason, never silently dropped from the chain.
+        var result = Scan(
+            "DECLARE @Value NVARCHAR(128); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT AbcABC FROM @@@Marker@@@ WHERE x = 1'; " +
+            "SET @sql = REPLACE(@sql, N'@@@Marker@@@', @Value); " +
+            "SET @sql = REPLACE(@sql, N'abc', N'X'); " +
+            "EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:replace-collation-sensitive", finding.Reason);
+    }
+
     // ------------------------------------------------------------------
     // CAST/CONVERT folding onto a VARCHAR(n)/NVARCHAR(n) target only - every non-string target
     // and CHAR/NCHAR's blank-padding declines rather than guessing a rendering.

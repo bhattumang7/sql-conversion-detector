@@ -17,6 +17,7 @@ public static class ExpressionEvaluator
     private const string FnLeft = "LEFT";
     private const string FnRight = "RIGHT";
     private const string FnIsNull = "ISNULL";
+    private const string NonLiteralOther = "non-literal-expression:other";
 
     /// <summary>Folds a scalar expression to its <see cref="SqlTextValue"/> - a <see cref="SqlTextValue.Template"/> (possibly with holes/choices) or <see cref="SqlTextValue.Tainted"/> with a machine-readable reason, never a guess.</summary>
     public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
@@ -89,7 +90,7 @@ public static class ExpressionEvaluator
                 return new SqlTextValue.Tainted("non-literal-expression:subquery", Span(sourcePath, expression));
 
             default:
-                return new SqlTextValue.Tainted("non-literal-expression:other", Span(sourcePath, expression));
+                return new SqlTextValue.Tainted(NonLiteralOther, Span(sourcePath, expression));
         }
     }
 
@@ -299,6 +300,11 @@ public static class ExpressionEvaluator
             }
         }
 
+        if (TryFoldReplaceWithMixedSource(foldContext, foldedArguments, out var mixedSourceResult))
+        {
+            return mixedSourceResult;
+        }
+
         if (TryFoldCrossProduct(foldContext, foldedArguments, out var crossProduct))
         {
             return crossProduct;
@@ -314,6 +320,67 @@ public static class ExpressionEvaluator
 
         var call = new BuiltinCall(functionName, arguments, foldContext.Site);
         return ToSqlTextValue(BuiltinRegistry.Fold(call), foldContext.Site);
+    }
+
+    /// <summary>
+    /// REPLACE's own source argument, unlike every other builtin's arguments, is common to
+    /// receive as a MULTI-piece Template mixing literal text with an already-opaque
+    /// <see cref="TemplatePiece.Hole"/> - typically from an EARLIER REPLACE's own hole-splice in
+    /// the same chain, a real corpus pattern (SQL-Server-First-Responder-Kit's sp_BlitzIndex.sql
+    /// and others): several sequential
+    /// <c>SET @sql = REPLACE(@sql, '@@@Marker@@@', @CallerSuppliedValue)</c> calls, each
+    /// substituting one placeholder marker for a value this scanner can't prove constant. Once
+    /// the FIRST REPLACE splices a hole in, the source for the SECOND is neither pure Text nor a
+    /// single Hole - <see cref="ToBuiltinArgument"/> (correctly) declines that shape, since it has
+    /// no notion of per-piece splicing. This reuses <see cref="BuiltinRegistry.Fold"/>'s existing,
+    /// already-tested REPLACE logic (empty-pattern decline, collation-sensitivity check, hole
+    /// splicing) per LITERAL segment of the source, leaving every existing Hole piece completely
+    /// untouched and in place (opaque - REPLACE never searches inside an already-unknown value,
+    /// the same treatment a Hole gets everywhere else in this scanner). Only engages when the
+    /// source genuinely mixes Lit and Hole pieces; a Choice-bearing source is
+    /// <see cref="TryFoldCrossProduct"/>'s own job, and a single-piece source is already handled
+    /// by the ordinary <see cref="BuiltinRegistry.Fold"/> path below.
+    /// </summary>
+    private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
+    {
+        result = null!;
+        if (!string.Equals(context.FunctionName, "REPLACE", StringComparison.OrdinalIgnoreCase) || context.Parameters.Count != 3)
+        {
+            return false;
+        }
+
+        if (foldedArguments[0] is not SqlTextValue.Template { Pieces.Count: > 1 } sourceTemplate
+            || !sourceTemplate.Pieces.All(p => p is TemplatePiece.Lit or TemplatePiece.Hole)
+            || !sourceTemplate.Pieces.Any(p => p is TemplatePiece.Hole))
+        {
+            return false;
+        }
+
+        var patternArgument = ToBuiltinArgument(foldedArguments[1] ?? new SqlTextValue.Tainted(NonLiteralOther, context.Site));
+        var replacementArgument = ToBuiltinArgument(foldedArguments[2] ?? new SqlTextValue.Tainted(NonLiteralOther, context.Site));
+
+        var newPieces = new List<TemplatePiece>();
+        foreach (var piece in sourceTemplate.Pieces)
+        {
+            if (piece is not TemplatePiece.Lit lit)
+            {
+                newPieces.Add(piece);
+                continue;
+            }
+
+            var segmentCall = new BuiltinCall("REPLACE", [new BuiltinArgument.Text(lit.Text), patternArgument, replacementArgument], context.Site);
+            var segmentResult = BuiltinRegistry.Fold(segmentCall);
+            if (segmentResult is BuiltinFoldResult.Fail fail)
+            {
+                result = new SqlTextValue.Tainted(fail.Reason, context.Site);
+                return true;
+            }
+
+            newPieces.AddRange(((BuiltinFoldResult.Ok)segmentResult).Pieces);
+        }
+
+        result = new SqlTextValue.Template(newPieces);
+        return true;
     }
 
     /// <summary>An argument position resolving to a Template carrying exactly one <see cref="TemplatePiece.Choice"/> among otherwise-all-literal pieces - see <see cref="TryFoldCrossProduct"/>'s own doc comment for why this needs to be recognized even when the Choice isn't the argument's ONLY piece.</summary>
@@ -508,7 +575,7 @@ public static class ExpressionEvaluator
     {
         BuiltinFoldResult.Ok ok => new SqlTextValue.Template(ok.Pieces),
         BuiltinFoldResult.Fail fail => new SqlTextValue.Tainted(fail.Reason, site),
-        _ => new SqlTextValue.Tainted("non-literal-expression:other", site),
+        _ => new SqlTextValue.Tainted(NonLiteralOther, site),
     };
 
     /// <summary>
