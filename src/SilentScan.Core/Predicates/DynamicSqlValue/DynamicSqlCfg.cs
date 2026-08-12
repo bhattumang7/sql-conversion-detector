@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 
@@ -532,6 +533,14 @@ public sealed class DynamicSqlCfg
         // straight from the PRE-TRY block, never from any point inside TRY itself.
         _blocks[current].Successors.Add(catchEntry);
 
+        // T-SQL locals are batch/proc scoped, not block-scoped: a variable DECLAREd only inside
+        // TRY (the classic "log the dynamic SQL that just failed" pattern) is still legal to
+        // reference from CATCH, since storage for every local is allocated at parse time
+        // regardless of whether the DECLARE line itself ever ran. Seeded as its own step on
+        // catchEntry - prepended before BuildSequence appends CATCH's own statements below, so it
+        // runs before anything that might reference the name.
+        _blocks[catchEntry].Steps.Add(SeedTryOnlyDeclarations(tryCatch));
+
         var tryExit = BuildSequence(tryCatch.TryStatements.Statements, tryEntry, exitBlocks, loopStack);
         var catchExit = BuildSequence(tryCatch.CatchStatements.Statements, catchEntry, exitBlocks, loopStack);
 
@@ -549,5 +558,59 @@ public sealed class DynamicSqlCfg
         }
 
         return join;
+    }
+
+    /// <summary>
+    /// Every DECLARE anywhere inside the TRY block (at any nesting depth - a batch-scoped local
+    /// declared inside a nested IF/WHILE within TRY is still visible from CATCH) whose type
+    /// resolves, seeded as a typed <see cref="HoleKind.TryOnlyDeclaration"/> placeholder the
+    /// moment CATCH's own state doesn't already have an entry for that name - i.e. only when
+    /// nothing outside TRY (a pre-TRY DECLARE, or an outer-scope formal parameter) already
+    /// provides one. An untyped DECLARE (its <see cref="Catalog.SqlType"/> didn't resolve) is left
+    /// exactly as unseeded as it always was; this only recovers the case the old scanner recovered.
+    /// </summary>
+    private Action<Dictionary<string, SqlTextValue>, bool> SeedTryOnlyDeclarations(TryCatchStatement tryCatch)
+    {
+        var collector = new DeclareVariableCollector();
+        foreach (var statement in tryCatch.TryStatements.Statements)
+        {
+            statement.Accept(collector);
+        }
+
+        if (collector.Declarations.Count == 0)
+        {
+            return static (_, _) => { };
+        }
+
+        var span = Span(tryCatch);
+        return (state, _) =>
+        {
+            foreach (var (name, type) in collector.Declarations)
+            {
+                if (!state.ContainsKey(name))
+                {
+                    state[name] = new SqlTextValue.Template([new TemplatePiece.Hole(type, span, HoleKind.TryOnlyDeclaration)]) { DeclaredType = type };
+                }
+            }
+        };
+    }
+
+    private sealed class DeclareVariableCollector : TSqlFragmentVisitor
+    {
+        public List<(string Name, Catalog.SqlType Type)> Declarations { get; } = [];
+
+        public override void ExplicitVisit(DeclareVariableStatement node)
+        {
+            foreach (var element in node.Declarations)
+            {
+                var type = SqlTypeReferenceResolver.Resolve(element.DataType, columnCollation: null);
+                if (type is not null)
+                {
+                    Declarations.Add((element.VariableName.Value, type));
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
     }
 }

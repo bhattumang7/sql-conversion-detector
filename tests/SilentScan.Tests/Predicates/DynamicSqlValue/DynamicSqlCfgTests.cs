@@ -163,6 +163,36 @@ public sealed class DynamicSqlCfgTests
     }
 
     [Fact]
+    public void TryCatch_VariableDeclaredOnlyInTry_IsVisibleInCatchAsTypedHole()
+    {
+        // T-SQL locals are batch/proc scoped, not block-scoped - @errorContext, declared only
+        // inside TRY, is still legal to reference from CATCH (the classic "log the dynamic SQL
+        // that just failed" pattern). Without the TryOnlyDeclaration seeding, this reference would
+        // fail lookup entirely rather than resolve to a typed placeholder.
+        // @errorContext is declared but never assigned inside TRY - TRY's own exit state never
+        // touches the key at all, so the join at TRY/CATCH's end takes CATCH's seeded Hole
+        // unmerged (DynamicSqlCfg.MergeStateInto: a key present on only one path passes straight
+        // through), keeping this test focused purely on the seeding step under test.
+        var statements = ParseStatements(
+            "BEGIN TRY " +
+            "DECLARE @errorContext NVARCHAR(200); " +
+            "END TRY " +
+            "BEGIN CATCH " +
+            "SET @y = @errorContext; " +
+            "END CATCH");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        // Only @errorContext's DECLAREd type survives into CATCH, as a Hole - not a
+        // "variable-not-in-scope" failure.
+        Assert.True(result.ContainsKey("@errorContext"));
+        var template = Assert.IsType<SqlTextValue.Template>(result["@errorContext"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.TryOnlyDeclaration, hole.Kind);
+    }
+
+    [Fact]
     public void Goto_SkipsInterveningStatement()
     {
         var statements = ParseStatements(

@@ -29,4 +29,7 @@ public enum HoleKind
 
     /// <summary>Stands for a whole optional clause/fragment, not a single scalar - renders as a single space rather than an identifier-shaped token, since no identifier could ever sit legally in that grammar position.</summary>
     OptionalFragment,
+
+    /// <summary>A variable DECLAREd only inside a TRY block, referenced from its CATCH block - legal T-SQL (batch-wide storage exists regardless of whether the DECLARE line ever executed), but CATCH starts from the pre-TRY state, so how far TRY got before throwing is unknowable.</summary>
+    TryOnlyDeclaration,
 }
