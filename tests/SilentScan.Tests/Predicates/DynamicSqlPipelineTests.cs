@@ -195,23 +195,12 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         // isolation. Deliberately reuses dbo.T as its own source table (varchar(10)) rather than
         // introducing a second table this class's shared schema doesn't deploy.
         //
-        // KNOWN REGRESSION (flagged, not fixed): CompileSelectAssignment's fast path (splicing
-        // literal template pieces around a resolved column's own hole) only ever runs when
-        // spec.FromClause is null (a pure `SELECT @x = expr` with no FROM at all) - a SELECT
-        // assignment that DOES have a FROM clause, even the "exactly one catalog-known table,
-        // literal-concatenated-with-that-table's-own-column" shape this test and its sibling
-        // DynamicSqlScannerTests.Scan_SelectAssignmentFromSingleKnownTableColumn_
-        // FoldsToSymbolicPlaceholder both document, falls straight into the generic
-        // HavocOrTaint("select-assignment-not-pure", ...) branch, discarding every literal piece
-        // and producing ONE opaque untyped placeholder for the whole @sql value instead of
-        // splicing Col's own hole into the surrounding known SQL text. The scanner-level sibling
-        // test only asserts "analyzable, not empty" so this gap didn't show there; here, where the
-        // placeholder actually needs to be positioned inside a real predicate, the pipeline
-        // correctly refuses it as "symbolic-value-not-positionable:whole-statement" (there is no
-        // surrounding literal text left to locate a WHERE clause in) rather than fabricating a
-        // verdict - a real, not-quick-fix feature gap (catalog-aware literal splicing for a
-        // single-known-table FROM clause was never actually wired into CompileSelectAssignment),
-        // left failing rather than accepting the lost predicate.
+        // DynamicSqlTransfer.TryCompileSelectAssignmentFromSingleKnownTable (fed the catalog
+        // DynamicSqlScannerV2.Scan now threads into TransferContext) recognizes the "exactly one
+        // catalog-known table, literal-concatenated-with-that-table's-own-column" shape and
+        // splices Col's own catalog type in as a typed RowDependentColumn hole positioned exactly
+        // where it appears in the surrounding known SQL text, instead of collapsing the whole
+        // @sql value to one opaque untyped placeholder.
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """

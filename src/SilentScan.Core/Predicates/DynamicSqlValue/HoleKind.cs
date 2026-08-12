@@ -35,4 +35,7 @@ public enum HoleKind
 
     /// <summary>A builtin whose return type is fixed by the T-SQL spec regardless of its own argument's value (QUOTENAME's nvarchar(258), STR's CHAR(n)) - used when that argument itself could not be resolved to a real value OR a typed hole (so there is no argument-derived <see cref="HoleKind"/> to propagate), yet the builtin's own return type is still a hard guarantee.</summary>
     ArgumentIndependentReturnType,
+
+    /// <summary>A column reference inside a `SELECT @var = expr FROM &lt;single catalog-known table&gt;` assignment - the column's own catalog type is a hard fact, but which ROW's value it holds is data-dependent (CLAUDE.md: corpus DML never executes), so only the type transfers.</summary>
+    RowDependentColumn,
 }

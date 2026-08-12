@@ -54,7 +54,7 @@ public sealed class DynamicSqlCfgTests
     {
         var statements = ParseStatements("SET @x = 'a'; SET @x = 'b'; SET @x = 'c';");
         var emitted = new List<string>();
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, emitted));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, emitted));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -67,7 +67,7 @@ public sealed class DynamicSqlCfgTests
     {
         var statements = ParseStatements("SET @x = 'a';");
         var emitted = new List<string>();
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, emitted));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, emitted));
 
         cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -81,7 +81,7 @@ public sealed class DynamicSqlCfgTests
     public void IfWithoutElse_JoinsToOriginalValueOnFalseBranch()
     {
         var statements = ParseStatements("SET @x = 'a'; IF 1 = 1 BEGIN SET @x = 'b'; END SET @y = 'after';");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -97,7 +97,7 @@ public sealed class DynamicSqlCfgTests
     public void IfStatement_VariableUntouchedByEitherBranch_MergesToItsOwnUnchangedValue()
     {
         var statements = ParseStatements("SET @x = 'unchanged'; IF 1 = 1 BEGIN SET @y = 'then-only'; END ELSE BEGIN SET @z = 'else-only'; END");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -114,7 +114,7 @@ public sealed class DynamicSqlCfgTests
             "SET @x = 'base'; " +
             "IF @flag = 1 SET @x = 'first'; " +
             "IF @flag = 1 SET @x = 'second';");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -131,7 +131,7 @@ public sealed class DynamicSqlCfgTests
     public void WhileLoop_FixpointConverges_WithoutHittingMaxRounds()
     {
         var statements = ParseStatements("SET @x = 'start'; WHILE @i < 10 BEGIN SET @x = 'looped'; SET @i = @i + 1; END SET @y = 'after';");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -150,7 +150,7 @@ public sealed class DynamicSqlCfgTests
             "SET @x = 'before'; " +
             "BEGIN TRY SET @x = 'in-try'; END TRY " +
             "BEGIN CATCH SET @y = 'in-catch'; END CATCH");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -180,7 +180,7 @@ public sealed class DynamicSqlCfgTests
             "BEGIN CATCH " +
             "SET @y = @errorContext; " +
             "END CATCH");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -201,7 +201,7 @@ public sealed class DynamicSqlCfgTests
             "SET @x = 'skipped-over'; " +
             "skip: " +
             "SET @y = 'reached';");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
@@ -218,7 +218,7 @@ public sealed class DynamicSqlCfgTests
         // OWN state still contributes to the scope's overall final result, alongside the natural
         // end-of-body fallthrough. Both are genuinely possible, so both survive as a Choice.
         var statements = ParseStatements("SET @x = 'a'; IF 1 = 1 BEGIN SET @x = 'returned'; RETURN; END SET @x = 'fallthrough';");
-        var cfg = new DynamicSqlCfg("test.sql", Cap, s => CompileLeaf(s, []));
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 

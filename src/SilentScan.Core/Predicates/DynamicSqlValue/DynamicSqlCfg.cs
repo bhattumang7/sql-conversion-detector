@@ -41,7 +41,8 @@ public sealed class DynamicSqlCfg
 
     private readonly string _sourcePath;
     private readonly int _cap;
-    private readonly Func<TSqlStatement, Action<Dictionary<string, SqlTextValue>, bool>> _compileLeaf;
+    private readonly Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> _compileLeaf;
+    private static readonly string[] NoActiveGuards = [];
     private readonly List<Block> _blocks = [];
     private readonly Dictionary<string, int> _labelBlocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, string> _guardTextByJoinBlock = [];
@@ -53,7 +54,7 @@ public sealed class DynamicSqlCfg
     /// <param name="sourcePath">The file this scope's statements came from - used to build a <see cref="SourceSpan"/> for a block whose own triggering statement isn't otherwise available.</param>
     /// <param name="cap">The per-join assembly cap forwarded to every <see cref="SqlTextValue.Join"/> call - the same <c>MaxAssembliesPerVariable</c> the old scanner used.</param>
     /// <param name="compileLeaf">Compiles one non-control-flow statement into a step - invoked with <c>emit: false</c> during the fixpoint (side effects like EXEC emission suppressed) and once more with <c>emit: true</c> once state has stabilized.</param>
-    public DynamicSqlCfg(string sourcePath, int cap, Func<TSqlStatement, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf)
+    public DynamicSqlCfg(string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf)
     {
         _sourcePath = sourcePath;
         _cap = cap;
@@ -79,7 +80,7 @@ public sealed class DynamicSqlCfg
         // call (a THEN/ELSE/TRY/CATCH/loop body's own fallthrough is not a scope-level exit; it
         // is only ever consumed via BuildSequence's return value, by BuildIf/BuildWhile/
         // BuildTryCatch wiring it into their own join block).
-        if (BuildSequence(statements, entryBlock, exitBlocks, new Stack<(int Header, int After)>()) is { } scopeFallthrough)
+        if (BuildSequence(statements, entryBlock, exitBlocks, new Stack<(int Header, int After)>(), NoActiveGuards) is { } scopeFallthrough)
         {
             exitBlocks.Add(scopeFallthrough);
         }
@@ -155,22 +156,30 @@ public sealed class DynamicSqlCfg
     }
 
     /// <summary>
-    /// Restores the old scanner's guarded-alternatives capability for the one case
-    /// <see cref="SqlTextValue.Join"/> cannot handle itself (see this class's own doc comment):
-    /// an IF where EXACTLY one branch resolves a variable to a real value and the other does not.
-    /// Reads both predecessors' OWN raw values directly - never <paramref name="working"/>'s
-    /// already-merged result for the key, which can ALREADY be a generic typed
-    /// <see cref="HoleKind.WidenedChoice"/> hole rather than <see cref="SqlTextValue.Tainted"/>
-    /// (<see cref="SqlTextValue.Join"/>'s own uniform-declared-type recovery fires whenever both
-    /// branches happen to share a <see cref="SqlTextValue.DeclaredType"/> - the overwhelmingly
-    /// common case for one variable reassigned on both sides of the SAME IF - which would
-    /// otherwise pre-empt this fixup entirely, silently downgrading a fully known literal value
-    /// to an opaque hole). When the asymmetric shape is found, this OVERRIDES whatever
-    /// <see cref="SqlTextValue.Join"/> produced with a fresh <see cref="SqlTextValue.Tainted"/>
-    /// carrying the known branch as a <see cref="GuardedAlternative"/> - strictly more
-    /// information either way: an EXEC fed this value can now recover the exact known text
-    /// instead of rendering an unresolvable placeholder, and if recovery fails too, the ORIGINAL
-    /// unresolved branch's own reason still reports honestly.
+    /// Restores the old scanner's guarded-alternatives capability, generalized beyond its
+    /// original single case. Reads both predecessors' OWN raw values directly - never
+    /// <paramref name="working"/>'s already-merged result for the key, which can ALREADY be a
+    /// generic typed <see cref="HoleKind.WidenedChoice"/> hole or a live
+    /// <see cref="TemplatePiece.Choice"/> rather than <see cref="SqlTextValue.Tainted"/>
+    /// (<see cref="SqlTextValue.Join"/>'s own uniform-declared-type/Choice-merge recovery fires
+    /// whenever both branches resolve to real Templates - the overwhelmingly common case for one
+    /// variable reassigned on both sides of the SAME IF - which would otherwise pre-empt this
+    /// fixup entirely). Three cases: (1) exactly one branch resolves and the other is
+    /// <see cref="SqlTextValue.Tainted"/> - OVERRIDES <paramref name="working"/> with a fresh
+    /// Tainted carrying the known branch as a <see cref="GuardedAlternative"/>, so an EXEC fed
+    /// this value can recover the exact known text instead of an unresolvable placeholder; (2)
+    /// the THEN branch resolves (regardless of what the ELSE branch or the general Join produced)
+    /// - its own value is ALSO attached as a GuardedAlternative directly onto whatever
+    /// <paramref name="working"/> already is (a live Choice, a widened Hole, ...), so a LATER
+    /// EXEC guarded by the EXACT SAME predicate text can narrow straight to it even when the
+    /// overall merged value is perfectly usable on its own; (3) either branch's OWN value already
+    /// carries GuardedAlternatives from a NESTED join (an "ELSE IF" chain's own inner guard) -
+    /// Join never carries these forward on its own (a freshly merged value starts with none), so
+    /// they are re-attached here, letting a later EXEC narrow against a guard several IF/ELSE-IF
+    /// arms back. All three are additive, side-channel-only (see <see cref="SqlTextValue.GuardedAlternatives"/>) -
+    /// see <see cref="DynamicSqlTransfer"/>'s own EmitScriptsOrFinding for the consuming side:
+    /// narrowing only actually happens when a LATER EXEC's own active guard stack exactly matches
+    /// one of these tags (soundness-first exact-text matching, never implication).
     /// </summary>
     private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
     {
@@ -188,21 +197,36 @@ public sealed class DynamicSqlCfg
         {
             var thenValue = thenState.GetValueOrDefault(key);
             var elseValue = elseState.GetValueOrDefault(key);
+            var current = working[key];
 
             if (thenValue is SqlTextValue.Template thenTemplate && elseValue is SqlTextValue.Tainted elseTainted)
             {
                 var declaredType = thenValue.DeclaredType ?? elseValue.DeclaredType;
                 var tainted = new SqlTextValue.Tainted(elseTainted.Reason, elseTainted.Location) { DeclaredType = declaredType };
-                working[key] = SqlTextValue.WithGuardedAlternative(tainted, guardText, thenTemplate);
+                current = SqlTextValue.WithGuardedAlternative(tainted, guardText, thenTemplate);
             }
             else if (elseValue is SqlTextValue.Template elseTemplate && thenValue is SqlTextValue.Tainted thenTainted)
             {
                 var declaredType = thenValue.DeclaredType ?? elseValue.DeclaredType;
                 var tainted = new SqlTextValue.Tainted(thenTainted.Reason, thenTainted.Location) { DeclaredType = declaredType };
-                working[key] = SqlTextValue.WithGuardedAlternative(tainted, guardText, elseTemplate);
+                current = SqlTextValue.WithGuardedAlternative(tainted, guardText, elseTemplate);
             }
+            else if (thenValue is SqlTextValue.Template thenTemplateBothResolved)
+            {
+                current = SqlTextValue.WithGuardedAlternative(current, guardText, thenTemplateBothResolved);
+            }
+
+            current = PropagateNestedGuardedAlternatives(current, thenValue);
+            current = PropagateNestedGuardedAlternatives(current, elseValue);
+            working[key] = current;
         }
     }
+
+    /// <summary>Re-attaches any GuardedAlternatives <paramref name="branchValue"/> already carries (from a NESTED join further up an "ELSE IF" chain) onto <paramref name="current"/> - see <see cref="ApplyGuardedAlternativeFixup"/>'s own doc comment, case 3.</summary>
+    private static SqlTextValue PropagateNestedGuardedAlternatives(SqlTextValue current, SqlTextValue? branchValue) =>
+        branchValue?.GuardedAlternatives is { Count: > 0 } nested
+            ? nested.Aggregate(current, (value, alt) => SqlTextValue.WithGuardedAlternative(value, alt.GuardText, alt.Value))
+            : current;
 
     private void RunFixpoint(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates)
     {
@@ -384,7 +408,7 @@ public sealed class DynamicSqlCfg
     /// already-superseded intermediate states once the branch's value has moved on past its own
     /// join point.
     /// </summary>
-    private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+    private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         var reachable = true;
         foreach (var statement in statements)
@@ -418,7 +442,7 @@ public sealed class DynamicSqlCfg
                     break;
 
                 case BeginEndBlockStatement block:
-                    var afterBlock = BuildSequence(block.StatementList.Statements, current, exitBlocks, loopStack);
+                    var afterBlock = BuildSequence(block.StatementList.Statements, current, exitBlocks, loopStack, activeGuards);
                     if (afterBlock is null)
                     {
                         reachable = false;
@@ -431,15 +455,15 @@ public sealed class DynamicSqlCfg
                     break;
 
                 case IfStatement ifStatement:
-                    current = BuildIf(ifStatement, current, exitBlocks, loopStack);
+                    current = BuildIf(ifStatement, current, exitBlocks, loopStack, activeGuards);
                     break;
 
                 case WhileStatement whileStatement:
-                    current = BuildWhile(whileStatement, current, exitBlocks, loopStack);
+                    current = BuildWhile(whileStatement, current, exitBlocks, loopStack, activeGuards);
                     break;
 
                 case TryCatchStatement tryCatch:
-                    current = BuildTryCatch(tryCatch, current, exitBlocks, loopStack);
+                    current = BuildTryCatch(tryCatch, current, exitBlocks, loopStack, activeGuards);
                     break;
 
                 case BreakStatement when loopStack.Count > 0:
@@ -454,7 +478,7 @@ public sealed class DynamicSqlCfg
 
                 default:
                     var captured = statement;
-                    _blocks[current].Steps.Add(_compileLeaf(captured));
+                    _blocks[current].Steps.Add(_compileLeaf(captured, activeGuards));
                     break;
             }
         }
@@ -462,18 +486,19 @@ public sealed class DynamicSqlCfg
         return reachable ? current : null;
     }
 
-    private int BuildIf(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+    private int BuildIf(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
+        var guardText = FragmentTextRenderer.Render(ifStatement.Predicate);
         var thenEntry = NewBlock();
         _blocks[current].Successors.Add(thenEntry);
-        var thenExit = BuildSequence(NormalizeToStatementList(ifStatement.ThenStatement), thenEntry, exitBlocks, loopStack);
+        var thenExit = BuildSequence(NormalizeToStatementList(ifStatement.ThenStatement), thenEntry, exitBlocks, loopStack, [.. activeGuards, guardText]);
 
         int? elseExit;
         if (ifStatement.ElseStatement is not null)
         {
             var elseEntry = NewBlock();
             _blocks[current].Successors.Add(elseEntry);
-            elseExit = BuildSequence(NormalizeToStatementList(ifStatement.ElseStatement), elseEntry, exitBlocks, loopStack);
+            elseExit = BuildSequence(NormalizeToStatementList(ifStatement.ElseStatement), elseEntry, exitBlocks, loopStack, activeGuards);
         }
         else
         {
@@ -483,7 +508,7 @@ public sealed class DynamicSqlCfg
 
         var join = NewBlock();
         _blockSpan[join] = Span(ifStatement);
-        _guardTextByJoinBlock[join] = FragmentTextRenderer.Render(ifStatement.Predicate);
+        _guardTextByJoinBlock[join] = guardText;
 
         if (thenExit is { } te)
         {
@@ -500,7 +525,7 @@ public sealed class DynamicSqlCfg
         return join;
     }
 
-    private int BuildWhile(WhileStatement whileStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+    private int BuildWhile(WhileStatement whileStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         var header = NewBlock();
         _blockSpan[header] = Span(whileStatement);
@@ -511,8 +536,14 @@ public sealed class DynamicSqlCfg
         _blocks[header].Successors.Add(bodyEntry);
         _blocks[header].Successors.Add(after);
 
+        var unboundedAccumulators = FindUnboundedAccumulators(whileStatement);
+        if (unboundedAccumulators.Count > 0)
+        {
+            _blocks[bodyEntry].Steps.Add(SeedUnboundedAccumulatorTaint(unboundedAccumulators, whileStatement));
+        }
+
         loopStack.Push((header, after));
-        var bodyExit = BuildSequence(NormalizeToStatementList(whileStatement.Statement), bodyEntry, exitBlocks, loopStack);
+        var bodyExit = BuildSequence(NormalizeToStatementList(whileStatement.Statement), bodyEntry, exitBlocks, loopStack, activeGuards);
         loopStack.Pop();
 
         if (bodyExit is { } be)
@@ -523,7 +554,114 @@ public sealed class DynamicSqlCfg
         return after;
     }
 
-    private int BuildTryCatch(TryCatchStatement tryCatch, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack)
+    /// <summary>
+    /// A variable both (1) self-referentially reassigned somewhere inside this loop's own body
+    /// (<c>SET @x += ...</c> or <c>SET @x = @x + ...</c>) and (2) read by an EXEC/sp_executesql
+    /// call somewhere inside the SAME body is a genuine unbounded accumulator this scanner
+    /// cannot enumerate: this dataflow engine tracks per-round STATE, never trip counts, so
+    /// nothing here bounds how many times the loop actually runs - each additional run appends
+    /// more text, and a fixpoint over that shape either never converges or converges to an
+    /// arbitrary intermediate snapshot purely as an artifact of how many rounds
+    /// <see cref="RunFixpoint"/> happens to take, neither of which is a sound answer for what the
+    /// variable could ever actually hold. Detected structurally (self-reference + a same-body
+    /// EXEC), not by inspecting string content - consistent with CLAUDE.md's "no heuristic
+    /// string guessing": this looks at program STRUCTURE, the same way every other shape in this
+    /// class (IF/TRY-CATCH/GOTO) is recognized syntactically rather than guessed.
+    /// </summary>
+    private static HashSet<string> FindUnboundedAccumulators(WhileStatement whileStatement)
+    {
+        var selfAccumulating = new SelfAccumulatingVariableCollector();
+        whileStatement.Statement.Accept(selfAccumulating);
+        if (selfAccumulating.Names.Count == 0)
+        {
+            return [];
+        }
+
+        var executed = new ExecutedVariableCollector();
+        whileStatement.Statement.Accept(executed);
+
+        selfAccumulating.Names.IntersectWith(executed.Names);
+        return selfAccumulating.Names;
+    }
+
+    /// <summary>
+    /// Forces every name in <paramref name="names"/> to a fresh <see cref="SqlTextValue.Tainted"/>
+    /// carrying the "while-loop-body:cardinality-cap" reason as the FIRST step of the loop body's
+    /// own entry block, on every fixpoint round (both suppressed and the final emitting pass) -
+    /// this both makes the loop's own EXEC read decline with the correct, specific reason and
+    /// keeps the value stable across rounds (a repeated identical Tainted trivially satisfies
+    /// <see cref="StatesEqual"/>, so this cannot itself prevent the surrounding fixpoint from
+    /// converging), rather than letting the ordinary Join/Widen machinery either race to
+    /// <see cref="MaxFixpointRounds"/> or accidentally stabilize on an arbitrary
+    /// under-cap intermediate snapshot.
+    /// </summary>
+    private Action<Dictionary<string, SqlTextValue>, bool> SeedUnboundedAccumulatorTaint(IReadOnlyCollection<string> names, WhileStatement whileStatement)
+    {
+        var span = Span(whileStatement);
+        var captured = names.ToArray();
+        return (state, _) =>
+        {
+            foreach (var name in captured)
+            {
+                var declaredType = state.TryGetValue(name, out var existing) ? existing.DeclaredType : null;
+                state[name] = new SqlTextValue.Tainted("while-loop-body:cardinality-cap", span) { DeclaredType = declaredType };
+            }
+        };
+    }
+
+    private sealed class SelfAccumulatingVariableCollector : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void ExplicitVisit(SetVariableStatement node)
+        {
+            var name = node.Variable.Name;
+            if (node.AssignmentKind == AssignmentKind.AddEquals || (node.AssignmentKind == AssignmentKind.Equals && ReferencesVariable(node.Expression, name)))
+            {
+                Names.Add(name);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private static bool ReferencesVariable(ScalarExpression? expression, string name)
+        {
+            if (expression is null)
+            {
+                return false;
+            }
+
+            var visitor = new VariableReferenceCollector();
+            expression.Accept(visitor);
+            return visitor.Names.Contains(name);
+        }
+    }
+
+    private sealed class ExecutedVariableCollector : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void ExplicitVisit(ExecuteStatement node)
+        {
+            var visitor = new VariableReferenceCollector();
+            node.Accept(visitor);
+            foreach (var name in visitor.Names)
+            {
+                Names.Add(name);
+            }
+
+            base.ExplicitVisit(node);
+        }
+    }
+
+    private sealed class VariableReferenceCollector : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void Visit(VariableReference node) => Names.Add(node.Name);
+    }
+
+    private int BuildTryCatch(TryCatchStatement tryCatch, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         var tryEntry = NewBlock();
         var catchEntry = NewBlock();
@@ -541,8 +679,8 @@ public sealed class DynamicSqlCfg
         // runs before anything that might reference the name.
         _blocks[catchEntry].Steps.Add(SeedTryOnlyDeclarations(tryCatch));
 
-        var tryExit = BuildSequence(tryCatch.TryStatements.Statements, tryEntry, exitBlocks, loopStack);
-        var catchExit = BuildSequence(tryCatch.CatchStatements.Statements, catchEntry, exitBlocks, loopStack);
+        var tryExit = BuildSequence(tryCatch.TryStatements.Statements, tryEntry, exitBlocks, loopStack, activeGuards);
+        var catchExit = BuildSequence(tryCatch.CatchStatements.Statements, catchEntry, exitBlocks, loopStack, activeGuards);
 
         var join = NewBlock();
         _blockSpan[join] = Span(tryCatch);

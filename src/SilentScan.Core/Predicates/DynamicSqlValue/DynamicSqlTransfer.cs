@@ -23,7 +23,8 @@ public sealed record TransferContext(
     List<DynamicSqlScript> Scripts,
     List<ProcedureOutputSummary> OutputSummaries,
     ProcCallGraph? CallGraph = null,
-    IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? OutputSummaryIndex = null)
+    IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? OutputSummaryIndex = null,
+    DatabaseCatalog? Catalog = null)
 {
     public SourceSpan Span(TSqlFragment fragment) => new(SourcePath, fragment.StartLine, fragment.StartColumn);
 }
@@ -41,13 +42,22 @@ public sealed record TransferContext(
 /// </summary>
 public static class DynamicSqlTransfer
 {
-    /// <summary>Compiles one statement into a <see cref="DynamicSqlCfg"/> leaf step. <paramref name="context"/>.DeclaredTypes tracks a variable's own declared type separately from its current fold state, so a later havoc/taint can still recover it.</summary>
-    public static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, TransferContext context) => statement switch
+    /// <summary>
+    /// Compiles one statement into a <see cref="DynamicSqlCfg"/> leaf step. <paramref name="context"/>.DeclaredTypes
+    /// tracks a variable's own declared type separately from its current fold state, so a later
+    /// havoc/taint can still recover it. <paramref name="activeGuards"/> is the STATIC list of
+    /// enclosing IF predicate texts this statement is reached under (the THEN side only - see
+    /// <see cref="DynamicSqlCfg.BuildIf"/>), forwarded only to <see cref="CompileExecute"/>, the
+    /// one leaf kind that needs to know whether IT ITSELF is guarded when deciding how far to
+    /// narrow a <see cref="SqlTextValue.GuardedAlternatives"/>-bearing value (see
+    /// <see cref="EmitScriptsOrFinding"/>'s own doc comment).
+    /// </summary>
+    public static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, IReadOnlyList<string> activeGuards, TransferContext context) => statement switch
     {
         DeclareVariableStatement declare => (state, _) => CompileDeclare(declare, context, state),
         SetVariableStatement set => (state, _) => CompileAssignment(set.Variable.Name, set.AssignmentKind, set.Expression, set.FunctionCallExists, set, context, state),
         SelectStatement select => (state, _) => CompileSelectAssignment(select, context, state),
-        ExecuteStatement exec => (state, emit) => CompileExecute(exec, context, state, emit),
+        ExecuteStatement exec => (state, emit) => CompileExecute(exec, activeGuards, context, state, emit),
         ProcedureStatementBodyBase { StatementList: not null } procOrFunc => (_, emit) => CompileScopedBody(procOrFunc, context, emit),
         ProcedureStatementBodyBase => static (_, _) => { }, // a body-less declaration (CLR proc/function via EXTERNAL NAME, or an inline TVF whose body is a single RETURN expression) - nothing to walk
         TriggerStatementBody { StatementList: not null } trigger => (_, emit) => CompileTriggerBody(trigger, context, emit),
@@ -87,7 +97,7 @@ public static class DynamicSqlTransfer
             ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext)
             : new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
 
-        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, s => CompileLeaf(s, nestedContext));
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext));
         var folded = cfg.Solve(procOrFunc.StatementList!.Statements, seed);
 
         if (qualifiedName is not null && formalParameters is { Count: > 0 })
@@ -219,7 +229,7 @@ public static class DynamicSqlTransfer
 
         var nestedScope = new DynamicSqlScope(SchemaObjectNameHelper.Qualify(trigger.Name), trigger.TriggerObject.Name);
         var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
-        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, s => CompileLeaf(s, nestedContext));
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext));
         cfg.Solve(trigger.StatementList!.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
     }
 
@@ -375,9 +385,12 @@ public static class DynamicSqlTransfer
             || spec.SelectElements.Count == 0
             || !spec.SelectElements.All(e => e is SelectSetVariable))
         {
-            foreach (var name in assignedNames.Names)
+            if (!TryCompileSelectAssignmentFromSingleKnownTable(select, context, state))
             {
-                state[name] = HavocOrTaint("select-assignment-not-pure", span, context.DeclaredTypes.GetValueOrDefault(name));
+                foreach (var name in assignedNames.Names)
+                {
+                    state[name] = HavocOrTaint("select-assignment-not-pure", span, context.DeclaredTypes.GetValueOrDefault(name));
+                }
             }
 
             return;
@@ -388,6 +401,73 @@ public static class DynamicSqlTransfer
             CompileAssignment(element.Variable.Name, element.AssignmentKind, element.Expression, functionCallExists: false, select, context, state);
         }
     }
+
+    /// <summary>
+    /// <c>SELECT @var = expr FROM table [WHERE ...]</c> is unconditionally row-dependent (a
+    /// genuinely different value depending which row wins - CLAUDE.md: corpus DML never
+    /// executes), but when the FROM clause names EXACTLY ONE catalog-known table (no JOIN), the
+    /// SELECT has exactly one <c>@var = expr</c> element, and that expression's own shape is
+    /// nothing but literals/variables concatenated with that SAME table's own columns,
+    /// the expression's STRUCTURAL SHAPE is fully known even though the concrete row is not -
+    /// each column reference splices in as a typed <see cref="HoleKind.RowDependentColumn"/> hole
+    /// (the column's own catalog type is a hard fact; its per-row VALUE is what's unknown), the
+    /// same "known shape, unknown value" case an uninitialized DECLARE or an unseeded proc
+    /// parameter already gets. Returns false - leaving <paramref name="state"/> untouched, so the
+    /// caller falls back to the ordinary blanket taint - for any shape this can't structurally
+    /// recognize (no catalog supplied, a JOIN, more than one assigned variable, a function call/
+    /// subquery/unknown column inside the expression): never a guess.
+    /// </summary>
+    private static bool TryCompileSelectAssignmentFromSingleKnownTable(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
+    {
+        if (context.Catalog is not { } catalog
+            || select.QueryExpression is not QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } spec
+            || spec.SelectElements.Count != 1
+            || spec.SelectElements[0] is not SelectSetVariable { AssignmentKind: AssignmentKind.Equals, Expression: { } expression } setVar)
+        {
+            return false;
+        }
+
+        var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedTable.SchemaObject));
+        if (catalog.Find(qualifiedName) is not { } table)
+        {
+            return false;
+        }
+
+        if (TryFoldWithColumnSplice(expression, table, state, context) is not { } spliced)
+        {
+            return false;
+        }
+
+        var declaredType = context.DeclaredTypes.GetValueOrDefault(setVar.Variable.Name);
+        state[setVar.Variable.Name] = spliced with { DeclaredType = declaredType };
+        return true;
+    }
+
+    /// <summary>
+    /// The narrow expression folder <see cref="TryCompileSelectAssignmentFromSingleKnownTable"/>
+    /// needs: literals, variables (via <paramref name="state"/>), and a concatenation tree of
+    /// those - PLUS a bare/qualified reference to one of <paramref name="table"/>'s own columns,
+    /// which <see cref="ExpressionEvaluator.Fold"/> itself always declines
+    /// ("non-literal-expression:column-reference", correctly, everywhere else this scanner folds
+    /// an expression - a column reference has no meaning outside this ONE single-known-table
+    /// context). Deliberately does not delegate to <see cref="ExpressionEvaluator"/> at all: this
+    /// is a much narrower grammar (no function calls, no CAST) matching exactly the corpus shape
+    /// this gap targets, not a general-purpose column-aware evaluator.
+    /// </summary>
+    private static SqlTextValue? TryFoldWithColumnSplice(ScalarExpression expression, CatalogTable table, Dictionary<string, SqlTextValue> state, TransferContext context) => expression switch
+    {
+        StringLiteral literal => new SqlTextValue.Template([new TemplatePiece.Lit(literal.Value, context.Span(literal), literal.IsNational ? 2 : 1)]),
+        ParenthesisExpression paren => TryFoldWithColumnSplice(paren.Expression, table, state, context),
+        VariableReference variableRef => state.GetValueOrDefault(variableRef.Name),
+        ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } identifiers } colRef
+            when table.FindColumn(identifiers[^1].Value) is { Type: { } columnType }
+            => new SqlTextValue.Template([new TemplatePiece.Hole(columnType, context.Span(colRef), HoleKind.RowDependentColumn)]),
+        BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary
+            when TryFoldWithColumnSplice(binary.FirstExpression, table, state, context) is { } left
+                && TryFoldWithColumnSplice(binary.SecondExpression, table, state, context) is { } right
+            => SqlTextValue.Concat(left, right),
+        _ => null,
+    };
 
     /// <summary>
     /// EXEC('...')/EXEC(@sql), sp_executesql, and every other EXEC form. The first two produce
@@ -403,14 +483,14 @@ public static class DynamicSqlTransfer
     /// ProcCallGraph/ProcedureOutputSummary machinery) is a precision improvement for a later
     /// increment, never a soundness requirement - the blanket taint here is always safe.
     /// </summary>
-    private static void CompileExecute(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
+    private static void CompileExecute(ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
     {
         switch (node.ExecuteSpecification.ExecutableEntity)
         {
             case ExecutableStringList stringList:
                 if (emit)
                 {
-                    CompileStringList(stringList, node, context, state);
+                    CompileStringList(stringList, node, activeGuards, context, state);
                 }
 
                 break;
@@ -419,7 +499,7 @@ public static class DynamicSqlTransfer
                 when string.Equals(name, "sp_executesql", StringComparison.OrdinalIgnoreCase):
                 if (emit)
                 {
-                    CompileSpExecuteSql(procRef, node, context, state);
+                    CompileSpExecuteSql(procRef, node, activeGuards, context, state);
                 }
 
                 break;
@@ -430,7 +510,7 @@ public static class DynamicSqlTransfer
         }
     }
 
-    private static void CompileStringList(ExecutableStringList stringList, ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static void CompileStringList(ExecutableStringList stringList, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         SqlTextValue combined = new SqlTextValue.Template([]);
         foreach (var element in stringList.Strings)
@@ -442,7 +522,7 @@ public static class DynamicSqlTransfer
             }
         }
 
-        EmitScriptsOrFinding(combined, node, context, parameterDeclarationText: null, argumentBindings: null);
+        EmitScriptsOrFinding(combined, node, activeGuards, context, parameterDeclarationText: null, argumentBindings: null);
     }
 
     /// <summary>Every named execute-parameter beyond @stmt/@params (e.g. <c>@P = @Code</c>) whose value is a bare variable reference - captured unconditionally, since a NESTED dynamic-SQL pass may need it to seed one of ITS OWN parameters from this outer script's own declared type (see <see cref="DynamicSqlScript.ArgumentBindings"/>'s own doc comment).</summary>
@@ -451,7 +531,7 @@ public static class DynamicSqlTransfer
         "@stmt", "@statement", "@params", "@parameters",
     };
 
-    private static void CompileSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static void CompileSpExecuteSql(ExecutableProcedureReference procRef, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         if (procRef.Parameters.Count == 0)
         {
@@ -469,7 +549,7 @@ public static class DynamicSqlTransfer
         var query = ExpressionEvaluator.Fold(statementArg, state, context.SourcePath, context.Cap);
         var parameterDeclarationText = ResolveParameterDeclarationText(procRef, state, context);
         var argumentBindings = ResolveArgumentBindings(procRef);
-        EmitScriptsOrFinding(query, node, context, parameterDeclarationText, argumentBindings);
+        EmitScriptsOrFinding(query, node, activeGuards, context, parameterDeclarationText, argumentBindings);
     }
 
     private static Dictionary<string, string>? ResolveArgumentBindings(ExecutableProcedureReference procRef)
@@ -547,20 +627,46 @@ public static class DynamicSqlTransfer
 
     /// <summary>
     /// When <paramref name="value"/> is a real value, emits one script per surviving assembly
-    /// (existing behavior). When it is <see cref="SqlTextValue.Tainted"/> but carries
-    /// <see cref="SqlTextValue.GuardedAlternatives"/> (see <see cref="DynamicSqlCfg"/>'s own
-    /// join-branch fixup), each alternative is tried in turn as if it WERE the whole value - the
-    /// old scanner's <c>TryEmitGuardedAlternativeScripts</c>: if the overall value is unknown but
-    /// ONE specific branch's own known text can still be recovered, that is real, usable signal,
-    /// not a decline. Matches the old scanner's exact policy: if ANY alternative yields a script,
-    /// the site is reported as analyzed (via those scripts) and NOT also reported Unanalyzable -
-    /// a site already counted analyzed must never also land in the unanalyzable bucket.
+    /// (existing behavior). When <paramref name="activeGuards"/> - the static list of IF
+    /// predicates this EXEC is itself reached under (see <see cref="CompileLeaf"/>'s own doc
+    /// comment) - contains an EXACT match for one of <paramref name="value"/>'s own
+    /// <see cref="SqlTextValue.GuardedAlternatives"/> tags, that ONE alternative's value is used
+    /// in place of <paramref name="value"/> outright: the consuming EXEC's OWN guard proves which
+    /// branch produced it, so this is strictly MORE precise than the un-narrowed value, whether
+    /// that value is a live <see cref="TemplatePiece.Choice"/>/typed hole or
+    /// <see cref="SqlTextValue.Tainted"/>. Absent a match: for a <see cref="SqlTextValue.Tainted"/>
+    /// value, <paramref name="activeGuards"/> being NON-empty means the consuming EXEC IS itself
+    /// guarded, just by something this value's own tags don't account for - soundness-first
+    /// exact-text matching (never implication) means nothing here is PROVABLY the branch that
+    /// ran, so this declines with the tainted reason rather than guessing (the gap
+    /// <c>Scan_GuardedSetThenDifferentGuardExec_UnresolvableAliasType_StaysTainted</c> covers).
+    /// <paramref name="activeGuards"/> EMPTY (an unconditional EXEC) falls back to the old
+    /// scanner's <c>TryEmitGuardedAlternativeScripts</c> policy: try EVERY alternative in turn,
+    /// since nothing about this call site rules any of them out - if the overall value is unknown
+    /// but ONE specific branch's own known text can still be recovered, that is real, usable
+    /// signal, not a decline. A live (non-Tainted) value with no active-guard match simply emits
+    /// as-is (existing behavior, unaffected either way) - it was already a usable answer on its
+    /// own, narrowing is a bonus, never a precondition for reporting it. Matches the old
+    /// scanner's exact policy: if ANY alternative yields a script, the site is reported as
+    /// analyzed (via those scripts) and NOT also reported Unanalyzable.
     /// </summary>
     private static void EmitScriptsOrFinding(
-        SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings)
+        SqlTextValue value, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings)
     {
+        if (TryNarrowByActiveGuard(value, activeGuards) is { } narrowed)
+        {
+            TryEmitFromValue(narrowed, node, context, parameterDeclarationText, argumentBindings);
+            return;
+        }
+
         if (value is SqlTextValue.Tainted tainted)
         {
+            if (activeGuards.Count > 0)
+            {
+                context.Findings.Add(Unanalyzable(node, context, tainted.Reason));
+                return;
+            }
+
             var recovered = false;
             foreach (var alternative in tainted.GuardedAlternatives ?? [])
             {
@@ -576,6 +682,18 @@ public static class DynamicSqlTransfer
         }
 
         TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings);
+    }
+
+    private static SqlTextValue.Template? TryNarrowByActiveGuard(SqlTextValue value, IReadOnlyList<string> activeGuards)
+    {
+        if (activeGuards.Count == 0 || value.GuardedAlternatives is not { Count: > 0 } alternatives)
+        {
+            return null;
+        }
+
+        return alternatives.Where(alternative => activeGuards.Contains(alternative.GuardText, StringComparer.Ordinal))
+            .Select(alternative => alternative.Value)
+            .FirstOrDefault();
     }
 
     private static bool TryEmitFromValue(

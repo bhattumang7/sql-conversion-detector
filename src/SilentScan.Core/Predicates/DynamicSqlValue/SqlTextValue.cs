@@ -60,8 +60,13 @@ public abstract record SqlTextValue
     /// unknowable, must not silently drop the alternative the earlier join preserved. Two
     /// <see cref="Template"/>s simply append their piece lists - a <see cref="TemplatePiece.Choice"/>
     /// is NEVER distributed here (that would risk a cartesian explosion at every intermediate
-    /// concatenation instead of once, deliberately, in <see cref="Expand"/>). The result is a
-    /// fresh value, not itself a declared variable, so <see cref="DeclaredType"/> is always null.
+    /// concatenation instead of once, deliberately, in <see cref="Expand"/>). EITHER side's own
+    /// GuardedAlternatives are propagated the SAME way as the Tainted case above (the addend
+    /// spliced onto each alternative's own value) - this is what lets a plain `EXEC(@sql)` (which
+    /// internally Concats @sql onto an empty starting Template - see
+    /// <see cref="DynamicSqlTransfer.CompileStringList"/>) still see @sql's own guard tags rather
+    /// than losing them the moment they pass through a no-op concatenation. The result is a fresh
+    /// value, not itself a declared variable, so <see cref="DeclaredType"/> is always null.
     /// </summary>
     public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
     {
@@ -80,7 +85,30 @@ public abstract record SqlTextValue
 
         var aTemplate = (Template)a;
         var bTemplate = (Template)b;
-        return new Template([.. aTemplate.Pieces, .. bTemplate.Pieces]);
+        var result = new Template([.. aTemplate.Pieces, .. bTemplate.Pieces]);
+        return PropagateGuardedAlternativesThroughConcat(result, aTemplate, bTemplate);
+    }
+
+    private static Template PropagateGuardedAlternativesThroughConcat(Template result, Template a, Template b)
+    {
+        var combined = (SqlTextValue)result;
+        if (a.GuardedAlternatives is { Count: > 0 } aAlternatives)
+        {
+            foreach (var alt in aAlternatives)
+            {
+                combined = WithGuardedAlternative(combined, alt.GuardText, (Template)Concat(alt.Value, b));
+            }
+        }
+
+        if (b.GuardedAlternatives is { Count: > 0 } bAlternatives)
+        {
+            foreach (var alt in bAlternatives)
+            {
+                combined = WithGuardedAlternative(combined, alt.GuardText, (Template)Concat(a, alt.Value));
+            }
+        }
+
+        return (Template)combined;
     }
 
     /// <summary>

@@ -23,9 +23,12 @@ public static class DynamicSqlScannerV2
     /// callee's already-proven-constant OUTPUT parameter. Both null (the common case in isolated/
     /// unit-tested scans) leaves every formal parameter unseeded, reporting
     /// "variable-not-in-scope" if referenced - a call graph is purely additive precision, never a
-    /// soundness requirement. <paramref name="catalog"/> is accepted for call sites that need
-    /// catalog-aware resolution but not yet consulted everywhere - single-table SELECT-assignment
-    /// column resolution remains a deferred precision improvement.
+    /// soundness requirement. <paramref name="catalog"/>, when supplied, lets
+    /// <see cref="DynamicSqlTransfer.CompileLeaf"/>'s own SELECT-assignment handling splice a
+    /// single catalog-known table's own column types into an otherwise-tainted
+    /// <c>SELECT @var = expr FROM table</c> shape (see
+    /// <c>TryCompileSelectAssignmentFromSingleKnownTable</c>) - null leaves that shape exactly as
+    /// tainted/havoc'd as it always was.
     /// </summary>
     public static DynamicSqlExtractionResult Scan(
         SqlParseResult parseResult,
@@ -45,9 +48,9 @@ public static class DynamicSqlScannerV2
                 var context = new TransferContext(
                     new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase),
                     parseResult.SourcePath, Cap, enclosingScope ?? DynamicSqlScope.None,
-                    findings, scripts, outputSummaries, callGraph, outputSummaryIndex);
+                    findings, scripts, outputSummaries, callGraph, outputSummaryIndex, catalog);
 
-                var cfg = new DynamicSqlCfg(parseResult.SourcePath, Cap, s => DynamicSqlTransfer.CompileLeaf(s, context));
+                var cfg = new DynamicSqlCfg(parseResult.SourcePath, Cap, (s, activeGuards) => DynamicSqlTransfer.CompileLeaf(s, activeGuards, context));
                 cfg.Solve(batch.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
             }
         }

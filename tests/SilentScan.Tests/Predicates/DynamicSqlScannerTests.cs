@@ -1159,21 +1159,13 @@ public sealed class DynamicSqlScannerTests
         // The loop body itself reassigns @sql AFTER the EXEC reads it, in program order,
         // appending more text each time it runs - a genuine unbounded accumulator with no fixed
         // iteration count this scanner evaluates, so the possible-value set grows every round
-        // and is guaranteed to exceed the cardinality cap. Declines correctly, but now for the
-        // real, specific reason (the accumulation genuinely never bounds itself), not a blanket
-        // "this loop touches @sql" taint applied before the body was even examined.
-        //
-        // KNOWN REGRESSION (flagged, not fixed): the WHILE loop's own cardinality cap no longer
-        // triggers at all here. The V2 engine's CFG fixpoint over this 3-iteration loop currently
-        // emits an unbounded, duplicated set of AnalyzableScripts ("SELECT 1", "SELECT 1 AND
-        // 1=1", ... up to roughly 18-19 repeats of " AND 1=1", well beyond the 3 real loop
-        // iterations "WHILE @i < 3" permits and still under the 32-assembly cap so Widen never
-        // collapses it) instead of the old engine's clean "while-loop-body:cardinality-cap"
-        // decline. This looks like DynamicSqlCfg's loop-back-edge fixpoint not converging on the
-        // SAME semantic state fast enough (each round manufactures a new, longer alternative
-        // rather than recognizing the accumulator as genuinely unbounded and widening it early),
-        // not a one-line fix - left failing rather than weakening the assertion to accept
-        // silently-wrong duplicated/unbounded output.
+        // and is guaranteed to exceed the cardinality cap. DynamicSqlCfg.FindUnboundedAccumulators
+        // detects this structurally (a variable both self-referentially reassigned and EXEC'd
+        // within the SAME loop body) and forces it Tainted for the whole loop, rather than
+        // letting the general Join/Widen fixpoint either race to MaxFixpointRounds or
+        // accidentally stabilize on an arbitrary under-cap intermediate snapshot (the old V2 bug:
+        // duplicated AnalyzableScripts up to ~18-19 repeats of the appended text, none of them a
+        // real bound on the loop's actual behavior).
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @i INT = 0; " +
@@ -1936,20 +1928,11 @@ public sealed class DynamicSqlScannerTests
     public void Scan_ReplaceOnVariableDivergedAcrossIfBranches_CrossProductsIntoUnionedAssemblies()
     {
         // The WHERE-clause accumulator shape: @sql already carries two possible values from an
-        // earlier optional-filter IF, THEN gets REPLACE'd before the EXEC - REPLACE must
-        // cross-product over @sql's own assembly set, not decline the moment it sees more than
-        // one possible input.
-        //
-        // KNOWN REGRESSION (flagged, not fixed): BuiltinRegistry's REPLACE spec (Evaluate/
-        // HoleTransfer) only ever inspects call.Arguments as single Text/Hole values - it has no
-        // per-branch cross-product path at all for a source argument that resolved to a REAL
-        // multi-alternative Template/Choice (as opposed to a single Hole). When @sql carries two
-        // possible literal assemblies here, ExpressionEvaluator.ToBuiltinArgument apparently
-        // degrades the whole argument straight to a generic "symbolic-value-in-function-argument"
-        // Unresolved rather than folding REPLACE once per alternative and re-unioning the results
-        // the way the doc comment above (and this test's name) describe. This is a real feature
-        // gap, not a one-line fix - left failing rather than weakening the assertion to accept
-        // the outright decline.
+        // earlier optional-filter IF, THEN gets REPLACE'd before the EXEC -
+        // ExpressionEvaluator.TryFoldCrossProduct folds REPLACE once per alternative in @sql's
+        // own Choice and re-unions the results, instead of ToBuiltinArgument collapsing the
+        // whole argument straight to a generic "symbolic-value-in-function-argument" decline the
+        // moment it sees more than one possible input.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 '; " +
             "IF 1 = 1 SET @sql = @sql + N'AND t.col = ''$X$'' '; " +
@@ -1965,17 +1948,9 @@ public sealed class DynamicSqlScannerTests
     public void Scan_ReplaceOnVariableDivergedAcrossIfBranches_DeclinesWholeFoldIfAnyCombinationCollationDiverges()
     {
         // One of the two possible @sql values hits the ordinal-vs-case-insensitive divergence
-        // REPLACE always declines for - since an assembly SET means "one of these really
-        // happens", the whole fold must decline rather than silently dropping just that branch.
-        //
-        // KNOWN REGRESSION (flagged, not fixed): same root cause as the sibling
-        // CrossProductsIntoUnionedAssemblies test above - REPLACE never actually reaches its own
-        // per-branch collation check here, because a multi-alternative @sql degrades straight to
-        // the generic "symbolic-value-in-function-argument" reason before REPLACE's own Evaluate
-        // ever runs per alternative. The Outcome/single-Finding shape still matches (this assert
-        // block is otherwise unaffected), but the REASON is now the generic fallback instead of
-        // the specific "non-literal-expression:replace-collation-sensitive" the corpus study
-        // wants to distinguish - left failing rather than accepting the less-specific reason.
+        // REPLACE always declines for - since a Choice means "one of these really happens",
+        // TryFoldCrossProduct taints the WHOLE fold the moment any one alternative's own REPLACE
+        // taints, rather than silently dropping just that branch from the union.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'AbcABC'; " +
             "IF 1 = 1 SET @sql = N'plain'; " +
@@ -2296,19 +2271,13 @@ public sealed class DynamicSqlScannerTests
     // no-initializer taint left by the implicit "neither branch ran" path doesn't apply here.
     // ------------------------------------------------------------------
 
-    // KNOWN REGRESSION (flagged, not fixed) affecting all three tests below: the "a later EXEC's
-    // own guard, when it EXACTLY matches an earlier IF's guard text, proves that IF's THEN branch
-    // is the one that ran" narrowing never actually fires against a Template/Choice value in the
-    // V2 engine - only DynamicSqlCfg's ApplyGuardedAlternativeFixup + EmitScriptsOrFinding's
-    // GuardedAlternatives recovery exists, and that path only engages when the merged @sql value
-    // is Tainted. Since a no-initializer variable with a RESOLVABLE declared type now degrades to
-    // a typed-hole Template instead of Tainted (a genuine improvement elsewhere - see the
-    // FoldsToTypedHole tests above), it never reaches the recovery path at all: the un-narrowed
-    // union (every branch's own possible value, including the implicit "neither ran" hole) is
-    // reported verbatim regardless of which guard the CONSUMING EXEC itself uses. Building real
-    // guard-text matching against a live Choice (not just a Tainted+GuardedAlternatives value) is
-    // a genuine CFG-level feature, not a one-line fix - left failing rather than weakening these
-    // assertions to accept the un-narrowed union.
+    // DynamicSqlCfg.ApplyGuardedAlternativeFixup attaches each resolved branch's own value as a
+    // GuardedAlternative onto whatever the general Join produced (a live Choice, a widened Hole,
+    // ...), not just when the merge happens to stay Tainted, and propagates a NESTED join's own
+    // tags upward (an "ELSE IF" chain's inner guard survives to outer joins). A later EXEC's own
+    // static "active guard" stack (see DynamicSqlTransfer.CompileLeaf) is matched against those
+    // tags in EmitScriptsOrFinding: an EXACT text match narrows straight to that one alternative,
+    // regardless of whether the un-narrowed value was already usable on its own.
     [Fact]
     public void Scan_GuardedSetThenSameGuardExec_ResolvesPastNoInitializer()
     {
@@ -2368,18 +2337,15 @@ public sealed class DynamicSqlScannerTests
         // Same shape, but the declared type is a CREATE TYPE ... FROM alias, unresolvable
         // without a catalog - the IF's implicit ELSE branch stays tainted (no-initializer), and
         // ONE tainted side means the whole branch merge stays tainted too, exactly as before
-        // symbolic placeholders existed.
-        //
-        // KNOWN REGRESSION (flagged, not fixed): a related but distinct manifestation of the same
-        // missing-guard-matching gap described above the two GuardedSetThen*SameGuard* tests. Here
-        // the merged @sql value DOES stay Tainted (the alias type is unresolvable, so there is no
-        // Hole fallback), and DynamicSqlCfg's ApplyGuardedAlternativeFixup DOES attach 'SELECT 1'
-        // as a GuardedAlternative under the THEN branch's own guard text ("@mode = 1") - but
-        // EmitScriptsOrFinding recovers EVERY GuardedAlternative unconditionally the moment the
-        // overall value is Tainted, without ever checking whether the CONSUMING EXEC's own guard
-        // ("@mode = 1 AND @extra = 1") actually proves that alternative is the one in play. It
-        // recovers 'SELECT 1' as a real script with zero Findings here, where the old engine
-        // correctly stayed tainted. Left failing rather than accepting the unconditional recovery.
+        // symbolic placeholders existed. DynamicSqlCfg's ApplyGuardedAlternativeFixup DOES attach
+        // 'SELECT 1' as a GuardedAlternative under the THEN branch's own guard text
+        // ("@mode = 1"), but the consuming EXEC's own active guard ("@mode = 1 AND @extra = 1")
+        // is a DIFFERENT string - EmitScriptsOrFinding's exact-text-only narrowing (never
+        // implication) finds no match, and since the consuming EXEC IS itself guarded (a non-
+        // empty active-guard stack), it declines with the original tainted reason rather than
+        // falling back to the old "recover every alternative unconditionally" policy (that
+        // fallback only applies to an UNGUARDED consuming EXEC - see EmitScriptsOrFinding's own
+        // doc comment).
         var result = Scan(
             "DECLARE @sql dbo.SqlTextType; " +
             "IF @mode = 1 SET @sql = 'SELECT 1'; " +
