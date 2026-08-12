@@ -196,11 +196,11 @@ public sealed class ProcCallGraphBuilderTests
     }
 
     [Fact]
-    public void Build_CallerVariableAssignedTwiceAtTopLevel_DoesNotPropagateLiteral()
+    public void Build_CallerVariableAssignedTwiceAtTopLevel_PropagatesTheLastAssignmentBeforeTheCall()
     {
-        // Two top-level assignments make the value position-sensitive relative to the call site -
-        // this single linear pass has no position tracking, so it declines rather than guess
-        // which assignment was still in effect when the call actually ran.
+        // Two top-level assignments are no longer ambiguous once WHERE the call sits relative to
+        // them is known - T-SQL executes top-to-bottom, so the LAST assignment before the call
+        // ('Archived') is genuinely what's in effect when the call actually runs, not a guess.
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -214,6 +214,49 @@ public sealed class ProcCallGraphBuilderTests
 
         var edge = Assert.Single(graph.Edges);
         var argument = Assert.Single(edge.Arguments);
-        Assert.Null(argument.LiteralArgument);
+        Assert.Equal("Archived", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedAgainAfterTheCall_DoesNotPropagateTheLaterAssignment()
+    {
+        // A later assignment (after the call site) is irrelevant to what the call itself sees -
+        // only the LAST assignment BEFORE the call matters, matching real T-SQL execution order.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = N'Active';
+                EXEC dbo.Callee @v;
+                SET @v = N'Archived';
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("Active", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedNonLiterallyThenLiterallyBeforeTheCall_PropagatesTheLastLiteral()
+    {
+        // A non-literal assignment earlier in the prefix poisons the value only up to the point a
+        // LATER literal assignment (still before the call) overwrites it again - the non-literal
+        // write is not "sticky" once a real, later, position-proven literal supersedes it.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller (@Seed NVARCHAR(20)) AS
+            BEGIN
+                DECLARE @v NVARCHAR(20) = @Seed;
+                SET @v = N'Archived';
+                EXEC dbo.Callee @v;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("Archived", argument.LiteralArgument?.Value);
     }
 }

@@ -106,7 +106,7 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
-            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements);
+            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
@@ -119,7 +119,7 @@ public static class ProcCallGraphBuilder
         /// </summary>
         private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
-            IList<TSqlStatement>? currentScopeStatements)
+            IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -146,7 +146,7 @@ public static class ProcCallGraphBuilder
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
                 var literalArgument = actual.ParameterValue is StringLiteral stringLiteral
                     ? ToLiteralArgument(stringLiteral, sourcePath)
-                    : ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath);
+                    : ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument));
             }
@@ -155,34 +155,81 @@ public static class ProcCallGraphBuilder
         }
 
         private static ProcCallLiteralArgument? ResolvePropagatedLiteral(
-            string? callerVariableName, IList<TSqlStatement>? currentScopeStatements, string sourcePath) =>
+            string? callerVariableName, IList<TSqlStatement>? currentScopeStatements, string sourcePath, ExecuteStatement callSite) =>
             callerVariableName is not null && currentScopeStatements is not null
-                ? TryResolveTopLevelLiteral(currentScopeStatements, callerVariableName, sourcePath)
+                ? TryResolveTopLevelLiteral(currentScopeStatements, callerVariableName, sourcePath, callSite)
                 : null;
 
         /// <summary>
         /// One-level constant propagation (CLAUDE.md roadmap: trace a caller variable's own
         /// literal assignment back through a proc-call edge) for a bare variable argument -
         /// <c>DECLARE @v NVARCHAR(20) = N'Active'; EXEC callee @v;</c> resolves to 'Active' the
-        /// same way passing the literal directly would. Deliberately conservative on two fronts,
-        /// both required for this to be a proven fact rather than a guess: (1) <paramref
+        /// same way passing the literal directly would. Deliberately conservative on one front,
+        /// required for this to be a proven fact rather than a guess: <paramref
         /// name="variableName"/> must never be written inside ANY nested IF/WHILE/TRY anywhere in
         /// this scope (<see cref="ConditionallyWrittenVariableCollector"/>) - a conditional write
-        /// means the value at THIS call site depends on which branch ran, which this pass has no
-        /// way to determine relative to where the call itself sits; (2) the variable must have
-        /// EXACTLY ONE top-level literal assignment in the whole scope - two or more (even
-        /// agreeing ones) makes the value position-sensitive relative to the call site, which this
-        /// single linear pass over the scope's own top-level statements (no position tracking)
-        /// cannot resolve, so it declines rather than pick one arbitrarily.
+        /// means the value at any given point depends on which branch ran, which this pass has no
+        /// fold-state tracking to resolve. Beyond that, this walks the scope's OWN top-level
+        /// statements in program order UP TO (not including) the top-level statement that itself
+        /// contains <paramref name="callSite"/> (<see cref="FindTopLevelStatementIndex"/>) and
+        /// takes the LAST literal assignment found there - T-SQL executes top-to-bottom, so a
+        /// later top-level SET always overwrites an earlier one by the time the call actually
+        /// runs, exactly like two agreeing (or disagreeing) literals aren't actually ambiguous
+        /// once WHERE the call sits relative to them is known. A non-literal assignment anywhere
+        /// in that prefix still poisons everything at-or-before it (the variable's value there is
+        /// genuinely unknown, not just unproven) unless a LATER literal assignment in the same
+        /// prefix overwrites it again.
         /// </summary>
-        private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(IList<TSqlStatement> scopeStatements, string variableName, string sourcePath)
+        private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(
+            IList<TSqlStatement> scopeStatements, string variableName, string sourcePath, ExecuteStatement callSite)
         {
             if (IsWrittenInsideConditional(scopeStatements, variableName))
             {
                 return null;
             }
 
-            return FindSingleTopLevelLiteralAssignment(scopeStatements, variableName, sourcePath);
+            var callIndex = FindTopLevelStatementIndex(scopeStatements, callSite);
+            return FindLastLiteralAssignmentBeforeCall(scopeStatements, variableName, sourcePath, callIndex);
+        }
+
+        /// <summary>
+        /// The index of the top-level statement in <paramref name="scopeStatements"/> that either
+        /// IS <paramref name="target"/> or contains it as a descendant (identified by (line,
+        /// column) span containment - ScriptDOM guarantees a nested fragment's own start position
+        /// falls strictly within its container's, T-SQL having no non-linear text layout) - or
+        /// <paramref name="scopeStatements"/>.Count if none contains it (defensive: should not
+        /// happen for a call site genuinely reached via this same scope's own traversal).
+        /// </summary>
+        private static int FindTopLevelStatementIndex(IList<TSqlStatement> scopeStatements, TSqlFragment target)
+        {
+            for (var i = 0; i < scopeStatements.Count; i++)
+            {
+                if (Contains(scopeStatements[i], target))
+                {
+                    return i;
+                }
+            }
+
+            return scopeStatements.Count;
+        }
+
+        private static bool Contains(TSqlFragment container, TSqlFragment target)
+        {
+            var containerEnd = EndPosition(container);
+            var targetStart = (target.StartLine, target.StartColumn);
+            return (container.StartLine, container.StartColumn).CompareTo(targetStart) <= 0
+                && targetStart.CompareTo(containerEnd) <= 0;
+        }
+
+        private static (int Line, int Column) EndPosition(TSqlFragment fragment)
+        {
+            if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < 0 || fragment.LastTokenIndex >= fragment.ScriptTokenStream.Count)
+            {
+                return (fragment.StartLine, fragment.StartColumn);
+            }
+
+            var lastToken = fragment.ScriptTokenStream[fragment.LastTokenIndex];
+            return (lastToken.Line, lastToken.Column);
         }
 
         private static bool IsWrittenInsideConditional(IList<TSqlStatement> scopeStatements, string variableName)
@@ -197,38 +244,35 @@ public static class ProcCallGraphBuilder
         }
 
         /// <summary>
-        /// One pass over the scope's own top-level statements, counting every DECLARE/SET that
-        /// targets <paramref name="variableName"/> - more than one (even agreeing literals) makes
-        /// the value position-sensitive relative to the call site, which this pass has no way to
-        /// resolve without tracking WHERE the call itself sits, so it declines rather than guess.
+        /// One pass over the scope's own top-level statements STRICTLY BEFORE <paramref
+        /// name="callIndex"/>, tracking the LAST DECLARE/SET that targets <paramref
+        /// name="variableName"/> - T-SQL executes top-to-bottom, so a later assignment always
+        /// overwrites an earlier one by the time the call itself runs; earlier assignments (agreeing
+        /// or not) are no longer ambiguous once WHERE the call sits relative to them is known.
         /// </summary>
-        private static ProcCallLiteralArgument? FindSingleTopLevelLiteralAssignment(
-            IList<TSqlStatement> scopeStatements, string variableName, string sourcePath)
+        private static ProcCallLiteralArgument? FindLastLiteralAssignmentBeforeCall(
+            IList<TSqlStatement> scopeStatements, string variableName, string sourcePath, int callIndex)
         {
-            ProcCallLiteralArgument? found = null;
-            var assignmentCount = 0;
+            ProcCallLiteralArgument? current = null;
+            var everAssigned = false;
 
-            foreach (var statement in scopeStatements)
+            for (var i = 0; i < callIndex && i < scopeStatements.Count; i++)
             {
-                if (!TryGetAssignmentToVariable(statement, variableName, sourcePath, out var literal))
+                if (!TryGetAssignmentToVariable(scopeStatements[i], variableName, sourcePath, out var literal))
                 {
                     continue;
                 }
 
-                assignmentCount++;
-                if (literal is null)
-                {
-                    // A real assignment (DECLARE's own initializer, or a SET) whose RHS this pass
-                    // can't fold to a literal - the variable's value here is genuinely unknown,
-                    // not just unproven, so give up on this variable entirely rather than let a
-                    // LATER assignment's literal masquerade as the whole scope's answer.
-                    return null;
-                }
-
-                found = literal;
+                // A real assignment (DECLARE's own initializer, or a SET) whose RHS this pass
+                // can't fold to a literal makes the variable's value genuinely unknown from here
+                // on - `current` becomes null (literal is null in that case) exactly like the
+                // fold-declined case, but a LATER literal assignment before the call can still
+                // overwrite it again, so this keeps walking rather than giving up outright.
+                everAssigned = true;
+                current = literal;
             }
 
-            return assignmentCount == 1 ? found : null;
+            return everAssigned ? current : null;
         }
 
         /// <summary>
