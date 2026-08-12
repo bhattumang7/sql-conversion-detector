@@ -76,9 +76,10 @@ public static class DynamicSqlTransfer
     /// <see cref="DynamicSqlCfg.Solve"/>, which handles its own suppression internally, so running
     /// it during the OUTER scope's suppressed fixpoint rounds would do the nested scope's own
     /// work needlessly (and could double-report its findings/scripts once real emission runs).
-    /// Formal-parameter seeding from a caller's own call-graph edge (the old scanner's
-    /// <c>BuildParameterSeed</c>) is deferred - unseeded, a parameter reference simply reports
-    /// "variable-not-in-scope" exactly like today's behavior whenever no call graph is supplied.
+    /// Formal-parameter seeding from a caller's own call-graph edge (<see cref="BuildParameterSeed"/>,
+    /// mirroring the old scanner's own method of the same name) runs below whenever
+    /// <see cref="TransferContext.CallGraph"/> is supplied - a parameter reference reports
+    /// "variable-not-in-scope" only when no call graph was supplied at all.
     /// </summary>
     private static void CompileScopedBody(ProcedureStatementBodyBase procOrFunc, TransferContext context, bool emit)
     {
@@ -477,11 +478,10 @@ public static class DynamicSqlTransfer
     /// statement could depend on, so nothing observable is lost by not running them early. Any
     /// OTHER EXEC form (an ordinary stored-procedure call) has no such guarantee - this scanner
     /// cannot see what an arbitrary called procedure does internally, so every variable the call
-    /// site itself mentions is tainted, unconditionally and on every round (state mutation, not
-    /// emission) - deferred: seeding a caller's own OUTPUT/return-value variable from a callee's
-    /// own already-proven-constant OUTPUT parameter (the old scanner's cross-procedure
-    /// ProcCallGraph/ProcedureOutputSummary machinery) is a precision improvement for a later
-    /// increment, never a soundness requirement - the blanket taint here is always safe.
+    /// site itself mentions is tainted (state mutation, not emission) UNLESS
+    /// <see cref="SeedKnownOutputArguments"/> can seed it first from a callee's own
+    /// already-proven-constant OUTPUT parameter (<see cref="TransferContext.OutputSummaryIndex"/>) -
+    /// the blanket taint is always a safe fallback, seeding is purely additive precision on top.
     /// </summary>
     private static void CompileExecute(ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
     {

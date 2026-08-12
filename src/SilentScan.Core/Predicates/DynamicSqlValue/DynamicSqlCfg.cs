@@ -197,6 +197,24 @@ public sealed class DynamicSqlCfg
         {
             var thenValue = thenState.GetValueOrDefault(key);
             var elseValue = elseState.GetValueOrDefault(key);
+
+            // Nothing diverged for this variable at THIS join: either one side never even set it
+            // (never live on the other branch - see MergeStateInto's own doc comment, not a
+            // divergence), or both branches agree completely (Join's own StructurallyEqual
+            // shortcut already returned the shared value unchanged, so `working[key]` already
+            // equals it exactly - attaching it to itself as its own alternative is pure
+            // redundancy). This is the OVERWHELMING common case across the many non-dynamic-SQL
+            // variables a large real-world proc tracks (most IF statements don't touch most
+            // variables), so skipping it here - rather than doing WithGuardedAlternative/
+            // propagation work per key regardless of whether anything actually diverged - is
+            // what keeps this fixup's cost proportional to ACTUAL divergence instead of
+            // O(tracked variables x IF joins): a real corpus repo with a genuinely huge proc
+            // (thousands of DECLAREs/IFs) blew this up to tens of GB before this early-out.
+            if (thenValue is null || elseValue is null || SqlTextValue.StructurallyEqual(thenValue, elseValue))
+            {
+                continue;
+            }
+
             var current = working[key];
 
             if (thenValue is SqlTextValue.Template thenTemplate && elseValue is SqlTextValue.Tainted elseTainted)

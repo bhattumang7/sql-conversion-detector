@@ -165,7 +165,24 @@ public static class ExpressionEvaluator
     {
         var foldContext = new FunctionCallFoldContext(functionName, parameters, Span(sourcePath, site), state, sourcePath, cap);
 
-        if (TryFoldCrossProduct(foldContext, out var crossProduct))
+        // Every non-integer argument position is folded EXACTLY ONCE here, up front - reused both
+        // for TryFoldCrossProduct's own choice-detection scan and, via ToBuiltinArgument, for the
+        // ordinary non-choice path below. A naive "fold once to check for a Choice, fold again in
+        // the fallback path" design re-runs Fold on the SAME child expression twice per call,
+        // which for a chain of nested function calls (REPLACE(REPLACE(REPLACE(@x, ...), ...), ...) -
+        // a real dynamic-SQL-building pattern) doubles the cost at EVERY nesting level: O(2^depth)
+        // instead of O(depth). Caching here keeps every call site linear regardless of how deeply
+        // its arguments themselves nest other function calls.
+        var foldedArguments = new SqlTextValue?[parameters.Count];
+        for (var i = 0; i < parameters.Count; i++)
+        {
+            if (!IntegerArgumentPositions.Contains((functionName.ToUpperInvariant(), i)))
+            {
+                foldedArguments[i] = Fold(parameters[i], state, sourcePath, cap);
+            }
+        }
+
+        if (TryFoldCrossProduct(foldContext, foldedArguments, out var crossProduct))
         {
             return crossProduct;
         }
@@ -173,7 +190,9 @@ public static class ExpressionEvaluator
         var arguments = new List<BuiltinArgument>(parameters.Count);
         for (var i = 0; i < parameters.Count; i++)
         {
-            arguments.Add(FoldArgument(functionName, i, parameters[i], state, sourcePath, cap));
+            arguments.Add(foldedArguments[i] is { } folded
+                ? ToBuiltinArgument(folded)
+                : FoldArgument(functionName, i, parameters[i], state, sourcePath, cap));
         }
 
         var call = new BuiltinCall(functionName, arguments, foldContext.Site);
@@ -196,29 +215,28 @@ public static class ExpressionEvaluator
     /// never actually co-occur together) - returns false so the ordinary single-fold path runs
     /// and reports its own generic reason instead.
     /// </summary>
-    private static bool TryFoldCrossProduct(FunctionCallFoldContext context, out SqlTextValue result)
+    private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
         result = null!;
-        var (choiceIndex, choice) = FindSoleChoiceArgument(context);
+        var (choiceIndex, choice) = FindSoleChoiceArgument(foldedArguments);
         if (choiceIndex < 0)
         {
             return false;
         }
 
-        result = FoldOverChoiceAlternatives(context, choiceIndex, choice!);
+        result = FoldOverChoiceAlternatives(context, choiceIndex, choice!, foldedArguments);
         return true;
     }
 
     /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> solely to keep that method's own Cognitive Complexity (Sonar S3776) under the two nested-loop bodies it previously carried. Returns (-1, null) when no argument diverges, or when MORE than one does (the deliberately-declined multi-choice case - see <see cref="TryFoldCrossProduct"/>'s own doc comment).</summary>
-    private static (int Index, TemplatePiece.Choice? Choice) FindSoleChoiceArgument(FunctionCallFoldContext context)
+    private static (int Index, TemplatePiece.Choice? Choice) FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
     {
         var choiceIndex = -1;
         TemplatePiece.Choice? choice = null;
 
-        for (var i = 0; i < context.Parameters.Count; i++)
+        for (var i = 0; i < foldedArguments.Length; i++)
         {
-            if (IntegerArgumentPositions.Contains((context.FunctionName.ToUpperInvariant(), i))
-                || Fold(context.Parameters[i], context.State, context.SourcePath, context.Cap) is not SqlTextValue.Template { Pieces: [TemplatePiece.Choice c] })
+            if (foldedArguments[i] is not SqlTextValue.Template { Pieces: [TemplatePiece.Choice c] })
             {
                 continue;
             }
@@ -235,8 +253,8 @@ public static class ExpressionEvaluator
         return (choiceIndex, choice);
     }
 
-    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> for the same Cognitive Complexity reason as <see cref="FindSoleChoiceArgument"/>. Folds the whole call once per alternative in <paramref name="choice"/>, substituting it at <paramref name="choiceIndex"/> each time, and re-unions the results - or returns the first Tainted alternative's own value outright, per the "one bad path taints the whole Choice" policy documented on <see cref="TryFoldCrossProduct"/>.</summary>
-    private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, int choiceIndex, TemplatePiece.Choice choice)
+    /// <summary>Extracted from <see cref="TryFoldCrossProduct"/> for the same Cognitive Complexity reason as <see cref="FindSoleChoiceArgument"/>. Folds the whole call once per alternative in <paramref name="choice"/>, substituting it at <paramref name="choiceIndex"/> each time (every OTHER argument reuses <paramref name="foldedArguments"/>'s already-computed value rather than re-folding), and re-unions the results - or returns the first Tainted alternative's own value outright, per the "one bad path taints the whole Choice" policy documented on <see cref="TryFoldCrossProduct"/>.</summary>
+    private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, int choiceIndex, TemplatePiece.Choice choice, SqlTextValue?[] foldedArguments)
     {
         SqlTextValue? union = null;
         foreach (var alternative in choice.Alternatives)
@@ -244,21 +262,32 @@ public static class ExpressionEvaluator
             var arguments = new List<BuiltinArgument>(context.Parameters.Count);
             for (var i = 0; i < context.Parameters.Count; i++)
             {
-                arguments.Add(i == choiceIndex
-                    ? ToBuiltinArgument(alternative)
-                    : FoldArgument(context.FunctionName, i, context.Parameters[i], context.State, context.SourcePath, context.Cap));
+                arguments.Add(ResolveArgumentAt(context, i, choiceIndex, alternative, foldedArguments));
             }
 
-            var folded = ToSqlTextValue(BuiltinRegistry.Fold(new BuiltinCall(context.FunctionName, arguments, context.Site)), context.Site);
-            if (folded is SqlTextValue.Tainted)
+            var foldedCall = ToSqlTextValue(BuiltinRegistry.Fold(new BuiltinCall(context.FunctionName, arguments, context.Site)), context.Site);
+            if (foldedCall is SqlTextValue.Tainted)
             {
-                return folded;
+                return foldedCall;
             }
 
-            union = union is null ? folded : SqlTextValue.Join(union, folded, choice.GuardText, context.Cap, context.Site);
+            union = union is null ? foldedCall : SqlTextValue.Join(union, foldedCall, choice.GuardText, context.Cap, context.Site);
         }
 
         return union!;
+    }
+
+    /// <summary>The per-position argument resolution <see cref="FoldOverChoiceAlternatives"/>'s own loop needs, extracted to turn its nested ternary (Sonar S3358) into a named, independently-readable statement: the diverging position gets this alternative's own value, every other position reuses its already-cached fold (or, for an integer position never cached up front, folds it now).</summary>
+    private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template alternative, SqlTextValue?[] foldedArguments)
+    {
+        if (index == choiceIndex)
+        {
+            return ToBuiltinArgument(alternative);
+        }
+
+        return foldedArguments[index] is { } cachedArgument
+            ? ToBuiltinArgument(cachedArgument)
+            : FoldArgument(context.FunctionName, index, context.Parameters[index], context.State, context.SourcePath, context.Cap);
     }
 
     /// <summary>Every (function, zero-based parameter index) pair whose argument is INTEGER-typed rather than string/hole-typed - LEFT/RIGHT's length, SUBSTRING's start/length, STR's length/decimal, CHAR/NCHAR's code point.</summary>
