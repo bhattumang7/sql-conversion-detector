@@ -126,9 +126,14 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_ExpressionProvenanceWithNoInferredType_SkipsRatherThanGuessing()
     {
-        // Pass 2 doesn't attempt to type an arbitrary expression like UPPER(...) -
-        // InferredType is null, so TryGetScalarType returns null and this column is never
-        // guessed at, exactly like the pre-existing Unknown/disagreeing-Union case.
+        // The checker's own behavior given an ALREADY-null InferredType (constructed directly
+        // here, bypassing ScalarExpressionResolver, to isolate the checker from what actually
+        // types today) - never guessed at, exactly like the pre-existing Unknown/disagreeing-
+        // Union case. NOT a live example of an untyped expression: Pass 2's own
+        // BuiltinFunctionTypeResolver already types UPPER/LOWER/LTRIM/RTRIM/REVERSE/REPLACE/
+        // LEFT/RIGHT/SUBSTRING/STUFF/MIN/MAX/SUM/AVG/DATEADD (oracle-verified) - an expression
+        // this pass genuinely still can't type looks more like FORMAT(...) (locale/format-
+        // string rendering, deliberately never modeled - real guess risk).
         var lineage = Catalog(
             "dbo.vw_ExprOrders", "OrderCode",
             new ColumnProvenance.Expression(
