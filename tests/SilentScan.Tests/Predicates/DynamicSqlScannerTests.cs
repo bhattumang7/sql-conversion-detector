@@ -2933,4 +2933,163 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
         Assert.Equal("symbolic-value-broke-parse", finding.Reason);
     }
+
+    // ------------------------------------------------------------------
+    // Round 3 probes - PROBE-ONLY, temporary, deleted once triaged.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Probe_R3_MultiVariableConcatDirectlyInExec()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Report AS
+            BEGIN
+                DECLARE @a NVARCHAR(MAX) = N'/* comment */'
+                DECLARE @b NVARCHAR(MAX) = N'CREATE TABLE #T (x INT)'
+                DECLARE @c NVARCHAR(MAX) = N'INSERT INTO #T VALUES (1)'
+                DECLARE @d NVARCHAR(MAX) = N'SELECT x FROM #T'
+                EXEC (@a + @b + @c + @d)
+            END
+            """);
+        PrintProbe("R3 BUG-1A multi-variable concat in EXEC", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_SymbolicOrderByAppendedAfterLiteralSelect()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE TABLE dbo.T (Col1 INT NOT NULL, Col2 INT NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Sorted @Name SYSNAME AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT Col1, Col2 FROM dbo.T'
+                SET @sql = @sql + N' ORDER BY ' + @Name
+                EXEC (@sql)
+            END
+            """);
+        PrintProbe("R3 BUG-1B symbolic ORDER BY appended after literal SELECT", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_CreateFunctionNamedFromSymbolicVariable()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_BuildFn @FunctionName SYSNAME AS
+            BEGIN
+                DECLARE @tmp NVARCHAR(MAX) = N'CREATE FUNCTION ' + @FunctionName + N'(@TripID INT) RETURNS INT AS BEGIN RETURN 1 END'
+                EXEC (@tmp)
+            END
+            """);
+        PrintProbe("R3 BUG-1C CREATE FUNCTION named from symbolic variable", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_SpExecuteSqlArgumentItselfSymbolicConcatWithLiteralTemplate()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Remote @ServerName SYSNAME, @DbName SYSNAME AS
+            BEGIN
+                DECLARE @RemoteCall NVARCHAR(MAX) = N'exec ' + @ServerName + N'.' + @DbName + N'.dbo.spDBVersionOutput @CurrentDBVersion OUTPUT'
+                DECLARE @CurrentDBVersion INT
+                EXEC sp_executesql @RemoteCall, N'@CurrentDBVersion INT OUTPUT', @CurrentDBVersion OUTPUT
+            END
+            """);
+        PrintProbe("R3 BUG-1D sp_executesql arg itself symbolic concat", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_CardinalityCapFromManyOptionalAndFragments()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Merge @Action INT, @Col1 SYSNAME = NULL, @Col2 SYSNAME = NULL, @Col3 SYSNAME = NULL, @Col4 SYSNAME = NULL, @Col5 SYSNAME = NULL, @Col6 SYSNAME = NULL AS
+            BEGIN
+                DECLARE @SQL NVARCHAR(MAX)
+                IF @Action = 1
+                    SET @SQL = N' DELETE FROM dbo.T'
+                ELSE IF @Action = 2
+                    SET @SQL = N' UPDATE dbo.T SET x = 1'
+                ELSE
+                    SET @SQL = N' UPDATE dbo.T SET x = 2'
+                SET @SQL = @SQL + N' WHERE 1=1'
+                    + COALESCE(N' AND ' + @Col1 + N' = 1', N'')
+                    + COALESCE(N' AND ' + @Col2 + N' = 1', N'')
+                    + COALESCE(N' AND ' + @Col3 + N' = 1', N'')
+                    + COALESCE(N' AND ' + @Col4 + N' = 1', N'')
+                    + COALESCE(N' AND ' + @Col5 + N' = 1', N'')
+                    + COALESCE(N' AND ' + @Col6 + N' = 1', N'')
+                EXEC (@SQL)
+            END
+            """);
+        PrintProbe("R3 BUG-2 cardinality cap from many optional AND fragments", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_ReplaceSourceArgumentItselfSymbolic()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Scrub @DbName SYSNAME AS
+            BEGIN
+                DECLARE @output NVARCHAR(MAX) = N'SELECT ' + @DbName + N'.dbo.Col1 FROM $dbname$.dbo.T'
+                SET @output = REPLACE(@output, N'$dbname$', @DbName)
+                EXEC (@output)
+            END
+            """);
+        PrintProbe("R3 BUG-3 REPLACE source argument itself symbolic", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_UserDefinedScalarFunctionCallOnProcParam()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE FUNCTION dbo.ISOReturnDate(@d DATETIME) RETURNS INT AS
+            BEGIN
+                RETURN 20200101
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_Range @StartDate DATETIME AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE TripDate >= ' + CAST(dbo.ISOReturnDate(@StartDate) AS VARCHAR(20))
+                EXEC (@sql)
+            END
+            """);
+        PrintProbe("R3 BUG-4A user-defined scalar function call on proc param", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_SysFnVarbinToHexSubstringOnSymbolicValue()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_SetContext @value INT AS
+            BEGIN
+                DECLARE @before NVARCHAR(MAX) = N''
+                SET @before = @before + sys.fn_varbintohexsubstring(0, CAST(@value AS VARBINARY(MAX)), 1, 0)
+                DECLARE @execVar NVARCHAR(MAX) = N'SET CONTEXT_INFO ' + @before
+                EXEC (@execVar)
+            END
+            """);
+        PrintProbe("R3 BUG-4B sys.fn_varbintohexsubstring on symbolic value", extraction, pipeline);
+    }
+
+    [Fact]
+    public void Probe_R3_CaseWithNonLiteralColumnElseBranchThenSubstringTrim()
+    {
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE TABLE dbo.t_ConditionalOperators (id INT NOT NULL, DisplayName VARCHAR(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_Predicate @OperatorID INT AS
+            BEGIN
+                DECLARE @predicate NVARCHAR(MAX) = N''
+                SELECT @predicate = @predicate + N'AND Col ' +
+                    CASE co.id
+                        WHEN 1 THEN N'='
+                        WHEN 2 THEN N'<>'
+                        ELSE co.DisplayName
+                    END
+                FROM dbo.t_ConditionalOperators co WHERE co.id = @OperatorID
+                SET @predicate = SUBSTRING(@predicate, 4, LEN(@predicate))
+                EXEC (N'SELECT 1 ' + @predicate)
+            END
+            """);
+        PrintProbe("R3 BUG-5 CASE with non-literal ELSE then SUBSTRING/LEN trim", extraction, pipeline);
+    }
 }

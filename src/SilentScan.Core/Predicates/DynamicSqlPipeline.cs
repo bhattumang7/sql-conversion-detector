@@ -266,23 +266,25 @@ public static partial class DynamicSqlPipeline
             return false;
         }
 
-        if (placeholders is { Count: > 0 } && !AllPlaceholdersInSafePosition(parseResult.Fragment, placeholders))
-        {
-            accumulator.Findings.Add(new DynamicSqlFinding(
-                script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
-                DynamicSqlOutcome.Unanalyzable, "symbolic-value-unsupported-position"));
-            return false;
-        }
-
-        // A script with no placeholder, or one where every occurrence just proved itself safe
-        // (inside a string literal - a genuine varchar/nvarchar literal comparison BY
-        // CONSTRUCTION - or inside a table reference's own identifier parts, where a synthesized
-        // __silentscan_sym_...__ token can never resolve against the real catalog so the ordinary
-        // extractor below naturally finds nothing there), falls through to the same extraction
-        // path uniformly: no special-cased early return, and no "one statement only" restriction
-        // either - a sibling statement in the same multi-statement script that never touches a
-        // placeholder gets full, ordinary extraction. Remap stamps script.Confidence (already
-        // Medium whenever a placeholder exists at all) onto whatever it finds.
+        // A script with no placeholder, or one whose placeholders parsed successfully wherever
+        // they happen to sit, falls through to the same extraction path uniformly - no per-
+        // position allow-list, no special-cased early return, and no "one statement only"
+        // restriction either. There USED to be a position classifier here (string literal, or a
+        // table reference's own identifier parts) that declined the WHOLE call site the moment a
+        // placeholder sat anywhere else - deleted because it inverted the actual soundness
+        // argument: a synthesized __silentscan_sym_...__ token can NEVER resolve against the real
+        // catalog, in ANY grammar position, so it can only ever surface downstream as an
+        // unresolvable column/table/object reference - which the ordinary
+        // extractor/lineage/catalog-resolution machinery ALREADY handles by skipping it with its
+        // own specific reason (SkippedConstructs), never by guessing. An allow-list of "safe"
+        // positions can only ever enumerate a fraction of T-SQL's grammar (ORDER BY, EXECUTE's
+        // own procedure-name reference, CREATE-family object names, ...) and every position not
+        // yet added cost the ENTIRE statement its analysis, including any genuinely literal
+        // predicate elsewhere in the same statement that has nothing to do with the placeholder
+        // at all. Removing the gate can only ever LOSE a finding where the placeholder itself
+        // would have contributed one (never possible, since it can't resolve) - it can never
+        // FABRICATE one. Remap stamps script.Confidence (already Medium whenever a placeholder
+        // exists at all) onto whatever it finds.
         innerParseResult = parseResult;
         return true;
     }
@@ -600,138 +602,6 @@ public static partial class DynamicSqlPipeline
         }
 
         return string.IsNullOrWhiteSpace(remaining);
-    }
-
-    /// <summary>
-    /// Sound per-occurrence, not per-statement: EVERY placeholder occurrence anywhere in the
-    /// reparsed script must independently sit inside a string literal (a genuine varchar/nvarchar
-    /// literal comparison by construction) or inside a table reference's own identifier parts (a
-    /// synthesized <c>__silentscan_sym_...__</c> token can never collide with a real deployed
-    /// object, so nothing downstream is ever extracted against it) - never a bare value position
-    /// (a WHERE predicate, a SELECT expression), which still refuses. A script can freely MIX
-    /// both safe positions across multiple statements: a corpus-measured shape (First Responder
-    /// Kit's output-to-table blocks) has an <c>IF EXISTS(...) INSERT db.schema.table ...</c> where
-    /// one placeholder names the identifier and another sits quoted inside a literal in the SAME
-    /// or a SIBLING statement. Since this proves EVERY occurrence safe rather than special-casing
-    /// a whole-statement shape, there is no need to restrict which statement, or how many, the
-    /// script contains - a sibling statement that never touches a placeholder at all gets full,
-    /// ordinary extraction exactly as if the whole script were placeholder-free.
-    /// </summary>
-    private static bool AllPlaceholdersInSafePosition(TSqlFragment fragment, IReadOnlyList<PlaceholderOccurrence> occurrences)
-    {
-        var stringLiteralRanges = CollectStringLiteralRanges(fragment);
-        var tableIdentifiers = CollectAllTableReferenceNames(fragment);
-        return occurrences.All(o => IsWithinAnyRange(o, stringLiteralRanges) || tableIdentifiers.Any(name => IsWithinIdentifier(name, o)));
-    }
-
-    private static List<(int Start, int End)> CollectStringLiteralRanges(TSqlFragment fragment)
-    {
-        var collector = new StringLiteralRangeCollector();
-        fragment.Accept(collector);
-        return collector.Ranges;
-    }
-
-    private sealed class StringLiteralRangeCollector : TSqlFragmentVisitor
-    {
-        public List<(int Start, int End)> Ranges { get; } = [];
-
-        public override void ExplicitVisit(StringLiteral node)
-        {
-            Ranges.Add((node.StartOffset, node.StartOffset + node.FragmentLength));
-            base.ExplicitVisit(node);
-        }
-    }
-
-    private static bool IsWithinAnyRange(PlaceholderOccurrence occurrence, List<(int Start, int End)> ranges)
-    {
-        var end = occurrence.InnerStartOffset + occurrence.Length;
-        return ranges.Any(r => r.Start <= occurrence.InnerStartOffset && end <= r.End);
-    }
-
-    /// <summary>
-    /// Every table any statement in <paramref name="fragment"/> reads or writes, or targets via
-    /// DROP/TRUNCATE - a real corpus scan found the dominant shape is a full INSERT/SELECT with
-    /// its own WHERE clause, dynamically naming the table it reads via QUOTENAME, e.g. First
-    /// Responder Kit's <c>SET @sql = N'INSERT ... SELECT ... FROM ' + QUOTENAME(@Server) + N'.'
-    /// + QUOTENAME(@Db) + N' WHERE ServerName IS NULL OR ...'</c>, alongside DROP TABLE/TRUNCATE
-    /// TABLE's own distinct (non-<see cref="NamedTableReference"/>) target syntax. Scans the
-    /// WHOLE fragment - not one statement - since <see cref="AllPlaceholdersInSafePosition"/>
-    /// proves safety per OCCURRENCE, not per statement-shape, so there is no reason to restrict
-    /// which table names are even eligible to match. Deliberately NOT a general SchemaObjectName
-    /// collector - a CAST target's UserDataTypeReference or a scalar function call's own name
-    /// also carry a SchemaObjectName, and a placeholder there is a TYPE or FUNCTION identity, not
-    /// a table one; admitting those under this same "unresolvable ⇒ no downstream claim"
-    /// reasoning would be a different (and unverified) argument.
-    /// </summary>
-    private static List<SchemaObjectName> CollectAllTableReferenceNames(TSqlFragment fragment)
-    {
-        var collector = new TableReferenceNameCollector();
-        fragment.Accept(collector);
-        return collector.Names;
-    }
-
-    private sealed class TableReferenceNameCollector : TSqlFragmentVisitor
-    {
-        public List<SchemaObjectName> Names { get; } = [];
-
-        public override void ExplicitVisit(NamedTableReference node)
-        {
-            Names.Add(node.SchemaObject);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(DropTableStatement node)
-        {
-            Names.AddRange(node.Objects);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(TruncateTableStatement node)
-        {
-            Names.Add(node.TableName);
-            base.ExplicitVisit(node);
-        }
-
-        // DROP FUNCTION/PROCEDURE/VIEW/TRIGGER/SYNONYM all share DropObjectsStatement's own
-        // Objects shape, but ScriptDOM's visitor dispatches on each leaf type individually (there
-        // is no single ExplicitVisit(DropObjectsStatement) hook) - a symbolic identifier here is
-        // just as unresolvable against the real catalog as one in a FROM clause, for the same
-        // reason: nothing downstream ever looks it up as a TABLE reference.
-        public override void ExplicitVisit(DropFunctionStatement node)
-        {
-            Names.AddRange(node.Objects);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(DropProcedureStatement node)
-        {
-            Names.AddRange(node.Objects);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(DropViewStatement node)
-        {
-            Names.AddRange(node.Objects);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(DropTriggerStatement node)
-        {
-            Names.AddRange(node.Objects);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(DropSynonymStatement node)
-        {
-            Names.AddRange(node.Objects);
-            base.ExplicitVisit(node);
-        }
-    }
-
-    private static bool IsWithinIdentifier(SchemaObjectName name, PlaceholderOccurrence occurrence)
-    {
-        var end = occurrence.InnerStartOffset + occurrence.Length;
-        return name.Identifiers.Any(id => id.StartOffset <= occurrence.InnerStartOffset && end <= id.StartOffset + id.FragmentLength);
     }
 
     /// <summary>

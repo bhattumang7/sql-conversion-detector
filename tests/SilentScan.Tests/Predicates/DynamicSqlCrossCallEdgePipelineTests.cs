@@ -191,13 +191,17 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     }
 
     [Fact]
-    public async Task NoKnownCaller_PlaceholderInIdentifierAndValuePosition_StillUnanalyzable()
+    public async Task NoKnownCaller_PlaceholderBareInPredicateValuePosition_AnalyzedButNoFindingFabricated()
     {
-        // Near-miss for the fires-fixture above: @Flag's placeholder sits BARE in a WHERE
-        // predicate's value position, not inside any collected table identifier - so NOT every
-        // occurrence is within a name, and this still refuses via the ordinary Unsupported
-        // fallback exactly as before this change (the identifier-only exemption never widens to
-        // cover a genuine value position, only object identity).
+        // @Flag's placeholder sits BARE (unquoted) in a WHERE predicate's value position, so the
+        // reparsed text becomes `Col1 = __silentscan_sym_...__` - a syntactically valid but
+        // semantically nonsensical COLUMN-vs-COLUMN comparison, since a bare identifier there
+        // parses as a column reference. The invented token can never resolve against the real
+        // catalog, so ordinary column resolution safely skips it (SkippedConstructs) rather than
+        // guessing a type for it - the call site is still reported AnalyzedLiteral (its literal
+        // structure was fully reparsed) but produces no Typed/Tier1 finding at all, proving the
+        // "unresolvable ⇒ skipped, never fabricated" argument for the one position category
+        // (a genuine value position, not just an identifier one) most likely to raise doubt.
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_SkipChecks @SchemaName SYSNAME, @Flag SYSNAME AS
             BEGIN
@@ -206,8 +210,8 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
             END;
             """);
 
-        var finding = Assert.Single(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
-        Assert.Equal("symbolic-value-unsupported-position", finding.Reason);
+        var finding = Assert.Single(report.DynamicSqlFindings);
+        Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, finding.Outcome);
         Assert.Empty(report.TypedFindings);
         Assert.Empty(report.Tier1Findings);
     }

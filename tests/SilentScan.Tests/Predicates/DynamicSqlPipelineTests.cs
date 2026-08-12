@@ -959,4 +959,43 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
+
+    [Fact]
+    public async Task Analyze_SymbolicColumnNameInOrderByPosition_StillFindsUnrelatedLiteralWherePredicate_ScanForced_OracleConfirmed()
+    {
+        // A symbolic value can sit in a position this scanner has no dedicated handling for at
+        // all (here, an ORDER BY column name, built from a caller-supplied SYSNAME parameter) -
+        // that placeholder can never resolve against the real catalog (it's an invented token),
+        // so it is simply an unresolvable column reference the ordinary extractor already skips
+        // safely, exactly like any other unrecognized identifier. It must never cost the WHOLE
+        // call site its analysis: the real, fully-literal WHERE predicate earlier in the SAME
+        // statement still has to be found, typed, and oracle-confirmed.
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "CREATE PROCEDURE dbo.usp_Sorted @Name SYSNAME AS " +
+            "BEGIN " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT Col FROM dbo.T WHERE Col = N''x'''; " +
+            "SET @sql = @sql + N' ORDER BY ' + @Name; " +
+            "EXEC(@sql); " +
+            "END;");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScanner.Scan(parseResult, callGraph: new ProcCallGraph([])).AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var dynamicFinding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, dynamicFinding.Outcome);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(FindingConfidence.Medium, typedFinding.Confidence);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
 }
