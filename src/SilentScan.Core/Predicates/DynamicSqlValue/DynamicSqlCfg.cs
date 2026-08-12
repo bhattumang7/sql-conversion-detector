@@ -11,10 +11,17 @@ namespace SilentScan.Core.Predicates.DynamicSqlValue;
 /// the old scanner's split design, where this exact block/fixpoint machinery existed but ran
 /// ONLY for a GOTO-bearing scope - every other scope used separate, hand-written
 /// <c>HandleIf</c>/<c>HandleWhile</c>/<c>HandleTryCatch</c> methods, each with its own merge
-/// logic and its own "guarded alternatives" correlation subsystem. That subsystem is gone here:
-/// <see cref="SqlTextValue.Join"/> already merges two same-guard branches into one
-/// <see cref="TemplatePiece.Choice"/> internally, so an IF's join block just needs to look up
-/// which guard text governs it - no separate correlation machinery required.
+/// logic. <see cref="SqlTextValue.Join"/> already merges two same-guard branches into one
+/// <see cref="TemplatePiece.Choice"/> internally when BOTH sides resolve to a real value, so an
+/// IF's join block just needs to look up which guard text governs it for that case - no separate
+/// machinery required. When only ONE side resolves (the other taints - a genuinely common shape:
+/// "if X, append known text; else, read from a table"), <see cref="SqlTextValue.Join"/> itself
+/// stays branch-agnostic (it has no notion of "then" vs "else"), so THIS class applies
+/// <see cref="SqlTextValue.WithGuardedAlternative"/> separately, in <see cref="ApplyGuardedAlternativeFixup"/> -
+/// the one place branch identity (<see cref="_thenPredecessorByJoinBlock"/>) is still known,
+/// preserving the old scanner's own guarded-alternatives capability without baking
+/// branch-awareness into the general-purpose <see cref="SqlTextValue.Join"/> that every OTHER
+/// join point (loop back-edges, TRY/CATCH, GOTO convergence) also uses.
 /// <see cref="TSqlStatement"/>s this class does not itself understand (everything except IF/
 /// WHILE/TRY-CATCH/BEGIN-END/GOTO/LABEL/BREAK/CONTINUE) are handed to the caller-supplied
 /// leaf-compiler constructor delegate as opaque leaf steps - see
@@ -37,6 +44,8 @@ public sealed class DynamicSqlCfg
     private readonly List<Block> _blocks = [];
     private readonly Dictionary<string, int> _labelBlocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, string> _guardTextByJoinBlock = [];
+    private readonly Dictionary<int, int> _thenPredecessorByJoinBlock = [];
+    private readonly Dictionary<int, int> _elsePredecessorByJoinBlock = [];
     private readonly Dictionary<int, SourceSpan> _blockSpan = [];
     private SourceSpan _defaultSpan;
 
@@ -122,12 +131,76 @@ public sealed class DynamicSqlCfg
         }
 
         var working = new Dictionary<string, SqlTextValue>(merged, StringComparer.OrdinalIgnoreCase);
+
+        // BEFORE this block's own steps run, not after: BuildSequence keeps appending whatever
+        // statements FOLLOW an IF as steps on that SAME join block (no new block boundary), so a
+        // statement immediately after the IF - `SET @x = @x + '...'`, or the EXEC itself - reads
+        // straight out of `working`. Fixing it up only AFTER the steps ran would be one statement
+        // too late: the very first following statement would already have consumed the
+        // un-recovered value. Only in the final pass: by then the fixpoint has already fully
+        // converged, so both predecessors' own outStates entries (read here, however this block's
+        // own index relates to either of them) are already STABLE values.
+        if (emit && _guardTextByJoinBlock.ContainsKey(index))
+        {
+            ApplyGuardedAlternativeFixup(index, working, outStates);
+        }
+
         foreach (var step in _blocks[index].Steps)
         {
             step(working, emit);
         }
 
         return working;
+    }
+
+    /// <summary>
+    /// Restores the old scanner's guarded-alternatives capability for the one case
+    /// <see cref="SqlTextValue.Join"/> cannot handle itself (see this class's own doc comment):
+    /// an IF where EXACTLY one branch resolves a variable to a real value and the other does not.
+    /// Reads both predecessors' OWN raw values directly - never <paramref name="working"/>'s
+    /// already-merged result for the key, which can ALREADY be a generic typed
+    /// <see cref="HoleKind.WidenedChoice"/> hole rather than <see cref="SqlTextValue.Tainted"/>
+    /// (<see cref="SqlTextValue.Join"/>'s own uniform-declared-type recovery fires whenever both
+    /// branches happen to share a <see cref="SqlTextValue.DeclaredType"/> - the overwhelmingly
+    /// common case for one variable reassigned on both sides of the SAME IF - which would
+    /// otherwise pre-empt this fixup entirely, silently downgrading a fully known literal value
+    /// to an opaque hole). When the asymmetric shape is found, this OVERRIDES whatever
+    /// <see cref="SqlTextValue.Join"/> produced with a fresh <see cref="SqlTextValue.Tainted"/>
+    /// carrying the known branch as a <see cref="GuardedAlternative"/> - strictly more
+    /// information either way: an EXEC fed this value can now recover the exact known text
+    /// instead of rendering an unresolvable placeholder, and if recovery fails too, the ORIGINAL
+    /// unresolved branch's own reason still reports honestly.
+    /// </summary>
+    private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
+    {
+        var hasThen = _thenPredecessorByJoinBlock.TryGetValue(joinBlock, out var thenPredecessor);
+        var hasElse = _elsePredecessorByJoinBlock.TryGetValue(joinBlock, out var elsePredecessor);
+        var thenState = hasThen ? outStates[thenPredecessor] : null;
+        var elseState = hasElse ? outStates[elsePredecessor] : null;
+        if (thenState is null || elseState is null)
+        {
+            return;
+        }
+
+        var guardText = _guardTextByJoinBlock[joinBlock];
+        foreach (var key in working.Keys.ToList())
+        {
+            var thenValue = thenState.GetValueOrDefault(key);
+            var elseValue = elseState.GetValueOrDefault(key);
+
+            if (thenValue is SqlTextValue.Template thenTemplate && elseValue is SqlTextValue.Tainted elseTainted)
+            {
+                var declaredType = thenValue.DeclaredType ?? elseValue.DeclaredType;
+                var tainted = new SqlTextValue.Tainted(elseTainted.Reason, elseTainted.Location) { DeclaredType = declaredType };
+                working[key] = SqlTextValue.WithGuardedAlternative(tainted, guardText, thenTemplate);
+            }
+            else if (elseValue is SqlTextValue.Template elseTemplate && thenValue is SqlTextValue.Tainted thenTainted)
+            {
+                var declaredType = thenValue.DeclaredType ?? elseValue.DeclaredType;
+                var tainted = new SqlTextValue.Tainted(thenTainted.Reason, thenTainted.Location) { DeclaredType = declaredType };
+                working[key] = SqlTextValue.WithGuardedAlternative(tainted, guardText, elseTemplate);
+            }
+        }
     }
 
     private void RunFixpoint(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates)
@@ -414,11 +487,13 @@ public sealed class DynamicSqlCfg
         if (thenExit is { } te)
         {
             _blocks[te].Successors.Add(join);
+            _thenPredecessorByJoinBlock[join] = te;
         }
 
         if (elseExit is { } ee)
         {
             _blocks[ee].Successors.Add(join);
+            _elsePredecessorByJoinBlock[join] = ee;
         }
 
         return join;

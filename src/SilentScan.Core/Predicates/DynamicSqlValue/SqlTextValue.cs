@@ -3,6 +3,9 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
+/// <summary>One branch's own known value, preserved through an overall taint - see <see cref="SqlTextValue.GuardedAlternatives"/>.</summary>
+public sealed record GuardedAlternative(string GuardText, SqlTextValue.Template Value);
+
 /// <summary>
 /// The dataflow lattice value for one dynamic-SQL variable: either a <see cref="Template"/> (a
 /// literal/typed-hole/choice tree still capable of contributing real text) or
@@ -23,6 +26,20 @@ public abstract record SqlTextValue
     /// </summary>
     public SqlType? DeclaredType { get; init; }
 
+    /// <summary>
+    /// A side-channel that survives THROUGH a taint: when an IF's THEN branch resolves a
+    /// variable to a real value but the ELSE branch does not (or vice versa - see
+    /// <see cref="DynamicSqlCfg"/>'s own join-branch tracking), the branch that DID resolve is
+    /// remembered here, tagged by the guard's own canonical predicate text, even though the
+    /// variable's OVERALL value at this point is <see cref="Tainted"/> (we don't know which
+    /// branch actually ran). A later consumer that can independently prove the SAME branch is
+    /// the one in play - directly, an EXEC's own argument being exactly this tainted variable,
+    /// with nothing else known - can recover the alternative's value rather than declining
+    /// outright. Mirrors the old scanner's <c>FoldState.GuardedAlternatives</c>; capped at
+    /// <see cref="MaxGuardedAlternatives"/> to bound growth across many joins.
+    /// </summary>
+    public IReadOnlyList<GuardedAlternative>? GuardedAlternatives { get; init; }
+
     public sealed record Template(IReadOnlyList<TemplatePiece> Pieces) : SqlTextValue;
 
     public sealed record Tainted(string Reason, SourceSpan Location) : SqlTextValue;
@@ -36,7 +53,11 @@ public abstract record SqlTextValue
     /// <summary>
     /// String-concatenates two values left-to-right. <see cref="Tainted"/> absorbs (the FIRST
     /// tainted operand's own reason/location wins - concatenating a known-bad value with anything
-    /// else is still bad, and reporting the earliest cause is more useful than the latest). Two
+    /// else is still bad, and reporting the earliest cause is more useful than the latest) - but
+    /// if it carries <see cref="GuardedAlternatives"/>, <paramref name="b"/> is appended onto EACH
+    /// alternative's own value too (the old scanner's <c>ConcatAlternativesWithAddend</c>): a
+    /// later `SET @sql = @sql + '...'` after a branch that left @sql merely UNRESOLVED, not
+    /// unknowable, must not silently drop the alternative the earlier join preserved. Two
     /// <see cref="Template"/>s simply append their piece lists - a <see cref="TemplatePiece.Choice"/>
     /// is NEVER distributed here (that would risk a cartesian explosion at every intermediate
     /// concatenation instead of once, deliberately, in <see cref="Expand"/>). The result is a
@@ -44,7 +65,17 @@ public abstract record SqlTextValue
     /// </summary>
     public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
     {
-        if (a is Tainted) return a;
+        if (a is Tainted taintedA)
+        {
+            if (taintedA.GuardedAlternatives is { Count: > 0 } alternatives && b is Template)
+            {
+                var extended = alternatives.Select(alt => alt with { Value = (Template)Concat(alt.Value, b) }).ToList();
+                return taintedA with { GuardedAlternatives = extended };
+            }
+
+            return a;
+        }
+
         if (b is Tainted) return b;
 
         var aTemplate = (Template)a;
@@ -53,9 +84,45 @@ public abstract record SqlTextValue
     }
 
     /// <summary>
-    /// The one merge operation every control-flow join point uses (replaces the old scanner's
-    /// per-construct merge logic - <c>MergeUnioningDivergent</c>,
-    /// <c>TryMergeFreshlyDeclaredInOneBranchOnly</c>, the guarded-alternatives machinery). In order:
+    /// Caps how many <see cref="GuardedAlternative"/>s a single value accumulates across
+    /// repeated joins - same purpose as <see cref="Widen"/>'s own cap on Choice growth, applied
+    /// to this side-channel instead.
+    /// </summary>
+    public const int MaxGuardedAlternatives = 8;
+
+    /// <summary>
+    /// Attaches one more <see cref="GuardedAlternative"/> to <paramref name="value"/> - used by
+    /// <see cref="DynamicSqlCfg"/>'s own IF-join fixup (see that class for why branch identity
+    /// must be tracked there, not inside <see cref="Join"/> itself, which is branch-agnostic).
+    /// Deduplicates by <see cref="GuardedAlternative.GuardText"/> (a later attempt under the
+    /// SAME guard text replaces the earlier one rather than accumulating a duplicate) and caps
+    /// at <see cref="MaxGuardedAlternatives"/>, oldest dropped first.
+    /// </summary>
+    public static SqlTextValue WithGuardedAlternative(SqlTextValue value, string guardText, Template branchValue)
+    {
+        var existing = value.GuardedAlternatives ?? [];
+        var combined = existing.Where(a => !string.Equals(a.GuardText, guardText, StringComparison.Ordinal)).ToList();
+        combined.Add(new GuardedAlternative(guardText, branchValue));
+        if (combined.Count > MaxGuardedAlternatives)
+        {
+            combined.RemoveAt(0);
+        }
+
+        return value switch
+        {
+            Template t => t with { GuardedAlternatives = combined },
+            Tainted t => t with { GuardedAlternatives = combined },
+            _ => value,
+        };
+    }
+
+    /// <summary>
+    /// The one merge operation every control-flow join point uses for the value ITSELF (replaces
+    /// the old scanner's per-construct merge logic - <c>MergeUnioningDivergent</c>,
+    /// <c>TryMergeFreshlyDeclaredInOneBranchOnly</c>). Branch-agnostic by design - it has no
+    /// notion of "then" vs "else", so it never attaches a <see cref="GuardedAlternative"/> itself;
+    /// <see cref="DynamicSqlCfg"/> does that separately, from the ONE place branch identity is
+    /// still known (see <see cref="WithGuardedAlternative"/>). In order:
     /// (1) structurally identical values merge to themselves - most joins in straight-line-heavy
     /// code hit this; (2) two <see cref="Template"/>s become a single <see cref="TemplatePiece.Choice"/>
     /// (merging into an existing same-<paramref name="guardText"/> Choice on either side rather
@@ -84,9 +151,13 @@ public abstract record SqlTextValue
             // (BuiltinArgument/ExpressionEvaluator's own pattern match) would fail to recognize,
             // silently declining a fold that should have transferred cleanly. This must run
             // BEFORE MergeAsChoice - a Choice-of-holes is never useful, only ever a liability.
-            if (aTemplate.Pieces is [TemplatePiece.Hole aHole] && bTemplate.Pieces is [TemplatePiece.Hole bHole] && aHole.Type == bHole.Type)
+            // Keeps `a`'s OWN hole (its own origin/kind) rather than manufacturing a fresh one at
+            // the join site: for a loop back-edge, `a` is consistently the entry value (the
+            // FIRST occurrence reaching this point), so this is deterministic and reproduces
+            // real, traceable provenance instead of an arbitrary synthesized position.
+            if (aTemplate.Pieces is [TemplatePiece.Hole { } aHole] && bTemplate.Pieces is [TemplatePiece.Hole { } bHole] && aHole.Type == bHole.Type)
             {
-                return new Template([new TemplatePiece.Hole(aHole.Type, at, HoleKind.WidenedChoice)]) { DeclaredType = declaredType };
+                return aTemplate with { DeclaredType = declaredType };
             }
 
             var merged = MergeAsChoice(aTemplate, bTemplate, guardText);

@@ -92,6 +92,88 @@ public sealed class DynamicSqlParityTests
         Assert.Equal(script.Confidence, newScript.Confidence);
     }
 
+
+    /// <summary>
+    /// Regression test for a second real corpus-sweep finding (sp_Blitz.sql, CheckID 160): an IF
+    /// whose THEN branch appends known literal text and whose ELSE branch is a
+    /// <c>SELECT @v = expr FROM table</c> (always tainted - CLAUDE.md: corpus DML never
+    /// executes). <see cref="SqlTextValue.Join"/> cannot represent "known on one side, unknown
+    /// on the other" by itself, and its OWN uniform-declared-type recovery (both branches share
+    /// @StringToExecute's declared NVARCHAR(MAX)) was silently downgrading the THEN branch's
+    /// fully-known text to an opaque hole before <see cref="DynamicSqlCfg"/>'s
+    /// guarded-alternative fixup ever got a chance to preserve it. Two bugs, both fixed: (1) the
+    /// fixup now overrides Join's own choice for this exact shape rather than only patching an
+    /// already-<see cref="SqlTextValue.Tainted"/> result; (2) it runs BEFORE the join block's own
+    /// subsequent steps (a statement immediately following the IF, in the SAME block per
+    /// <see cref="DynamicSqlCfg.BuildSequence"/>'s own doc comment, was consuming the stale value
+    /// one statement too early). A follow-on `SET @sql = @sql + '...'` after the join also needed
+    /// <see cref="ExpressionEvaluator.FoldConcatenation"/>'s tainted-left short-circuit removed -
+    /// it was bypassing <see cref="SqlTextValue.Concat"/>'s own alternative-extension logic.
+    /// </summary>
+    [Fact]
+    public void IfWithOneTaintedBranch_RecoversTheKnownBranchAsGuardedAlternative()
+    {
+        var sql = """
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @StringToExecute NVARCHAR(MAX);
+                SET @StringToExecute = N'INSERT INTO #Results SELECT HAVING COUNT(*) > ';
+
+                IF 50 > (SELECT COUNT(*) FROM sys.databases)
+                    SET @StringToExecute = @StringToExecute + N' 50 ';
+                ELSE
+                    SELECT @StringToExecute = @StringToExecute + CAST(COUNT(*) * 2 AS NVARCHAR(50)) FROM sys.databases;
+
+                SET @StringToExecute = @StringToExecute + N' ORDER BY 1;';
+
+                EXECUTE(@StringToExecute);
+            END;
+            """;
+        var parseResult = SqlScriptParser.ParseText(SourcePath, sql);
+        Assert.False(parseResult.HasErrors, string.Join(';', parseResult.Errors.Select(e => e.Message)));
+
+        var oldScript = Assert.Single(SilentScan.Core.Predicates.DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var newScript = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
+
+        Assert.Equal("INSERT INTO #Results SELECT HAVING COUNT(*) >  50  ORDER BY 1;", oldScript.InnerText);
+        Assert.Equal(oldScript.InnerText, newScript.InnerText);
+        Assert.Equal(oldScript.Confidence, newScript.Confidence);
+    }
+
+
+    /// <summary>
+    /// Regression test for a third real corpus-sweep finding (wide-world-importers'
+    /// DeactivateTemporalTablesBeforeDataLoad.sql): <c>QUOTENAME(@TableName + '_' + @Suffix)</c> -
+    /// a builtin argument that is itself a CONCATENATION of several literal variables, producing
+    /// a MULTI-piece all-literal <see cref="SqlTextValue.Template"/> rather than one single Lit
+    /// piece. <see cref="ExpressionEvaluator.ToBuiltinArgument"/>'s old pattern match only
+    /// recognized a single-piece Template as a known value - any multi-piece one (even when every
+    /// piece was Lit, genuinely fully known) fell through to
+    /// <c>symbolic-value-in-function-argument</c>, wrongly declining a call this scanner could
+    /// have folded completely. Cascaded through 17 near-identical CREATE TRIGGER blocks in the
+    /// SAME procedure (85 scripts down to 17). Fixed by flattening every-piece-is-Lit regardless
+    /// of piece count, matching the old scanner's own <c>TryFlatten</c>.
+    /// </summary>
+    [Fact]
+    public void QuoteNameOverConcatenatedLiteralArgument_FoldsCompletely()
+    {
+        var sql = """
+            DECLARE @TableName SYSNAME = N'Cities';
+            DECLARE @Suffix NVARCHAR(MAX) = N'Archive';
+            DECLARE @sql NVARCHAR(MAX) = N'INSERT ' + QUOTENAME(@TableName + N'_' + @Suffix) + N' DEFAULT VALUES;';
+            EXEC(@sql);
+            """;
+        var parseResult = SqlScriptParser.ParseText(SourcePath, sql);
+        Assert.False(parseResult.HasErrors, string.Join(';', parseResult.Errors.Select(e => e.Message)));
+
+        var oldScript = Assert.Single(SilentScan.Core.Predicates.DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
+        var newScript = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
+
+        Assert.Equal("INSERT [Cities_Archive] DEFAULT VALUES;", oldScript.InnerText);
+        Assert.Equal(oldScript.InnerText, newScript.InnerText);
+        Assert.Equal(oldScript.Confidence, newScript.Confidence);
+    }
+
     [Theory]
     [MemberData(nameof(Scenarios))]
     public void OldAndNewEngine_AgreeOrNewIsStrictlyBetter(string scenarioName, string sql)

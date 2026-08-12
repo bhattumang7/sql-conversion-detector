@@ -409,21 +409,47 @@ public static class DynamicSqlTransfer
         return index < parameters.Count ? parameters[index].ParameterValue : null;
     }
 
+    /// <summary>
+    /// When <paramref name="value"/> is a real value, emits one script per surviving assembly
+    /// (existing behavior). When it is <see cref="SqlTextValue.Tainted"/> but carries
+    /// <see cref="SqlTextValue.GuardedAlternatives"/> (see <see cref="DynamicSqlCfg"/>'s own
+    /// join-branch fixup), each alternative is tried in turn as if it WERE the whole value - the
+    /// old scanner's <c>TryEmitGuardedAlternativeScripts</c>: if the overall value is unknown but
+    /// ONE specific branch's own known text can still be recovered, that is real, usable signal,
+    /// not a decline. Matches the old scanner's exact policy: if ANY alternative yields a script,
+    /// the site is reported as analyzed (via those scripts) and NOT also reported Unanalyzable -
+    /// a site already counted analyzed must never also land in the unanalyzable bucket.
+    /// </summary>
     private static void EmitScriptsOrFinding(
         SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings)
     {
         if (value is SqlTextValue.Tainted tainted)
         {
-            context.Findings.Add(Unanalyzable(node, context, tainted.Reason));
+            var recovered = false;
+            foreach (var alternative in tainted.GuardedAlternatives ?? [])
+            {
+                recovered |= TryEmitFromValue(alternative.Value, node, context, parameterDeclarationText, argumentBindings);
+            }
+
+            if (!recovered)
+            {
+                context.Findings.Add(Unanalyzable(node, context, tainted.Reason));
+            }
+
             return;
         }
 
+        TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings);
+    }
+
+    private static bool TryEmitFromValue(
+        SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings)
+    {
         var site = context.Span(node);
         var widened = SqlTextValue.Widen(value, context.Cap, site);
-        if (widened is SqlTextValue.Tainted taintedAfterWiden)
+        if (widened is SqlTextValue.Tainted)
         {
-            context.Findings.Add(Unanalyzable(node, context, taintedAfterWiden.Reason));
-            return;
+            return false;
         }
 
         var assemblies = SqlTextValue.Expand((SqlTextValue.Template)widened, context.Cap);
@@ -436,6 +462,8 @@ public static class DynamicSqlTransfer
                 context.Scope, argumentBindings, confidence,
                 rendered.Placeholders.Count > 0 ? rendered.Placeholders : null));
         }
+
+        return true;
     }
 
     /// <summary>

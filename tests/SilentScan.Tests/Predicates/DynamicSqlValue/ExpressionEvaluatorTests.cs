@@ -86,8 +86,10 @@ public sealed class ExpressionEvaluatorTests
     }
 
     [Fact]
-    public void Concatenation_TaintedLeftOperand_ShortCircuitsWithoutEvaluatingRight()
+    public void Concatenation_TaintedLeftOperandWithNoAlternatives_KeepsItsOwnReason()
     {
+        // Both operands ARE folded (Concat needs the right one to extend a tainted left operand's
+        // own GuardedAlternatives, if any) - with none present here, the result is unchanged.
         Assert.Equal("variable-not-in-scope", TaintReason(Fold("@unknown + 'b'")));
     }
 

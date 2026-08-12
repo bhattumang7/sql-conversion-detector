@@ -93,14 +93,17 @@ public static class ExpressionEvaluator
         }
     }
 
+    /// <summary>
+    /// Always folds BOTH operands before delegating to <see cref="SqlTextValue.Concat"/> - folding
+    /// is pure (reads <paramref name="state"/>, never mutates it), so there is no cost to skip by
+    /// short-circuiting on a tainted left operand, and <see cref="SqlTextValue.Concat"/> itself
+    /// needs the right operand's own value to extend a tainted left operand's own
+    /// <see cref="SqlTextValue.GuardedAlternatives"/> (a short-circuit here would silently drop
+    /// that extension, discarding a real, recoverable value for no benefit).
+    /// </summary>
     private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
     {
         var left = Fold(binary.FirstExpression, state, sourcePath, cap);
-        if (left is SqlTextValue.Tainted)
-        {
-            return left;
-        }
-
         var right = Fold(binary.SecondExpression, state, sourcePath, cap);
         return SqlTextValue.Concat(left, right);
     }
@@ -194,11 +197,25 @@ public static class ExpressionEvaluator
         return ToBuiltinArgument(Fold(parameter, state, sourcePath, cap));
     }
 
+    /// <summary>
+    /// A builtin argument's own fold is frequently a MULTI-piece all-literal Template - e.g.
+    /// <c>QUOTENAME(@TableName + '_' + @Suffix)</c>, where the argument expression is itself a
+    /// concatenation of several literal variables, each contributing its own <see cref="TemplatePiece.Lit"/>
+    /// piece rather than one single piece. Flattening every-piece-is-Lit down to one
+    /// <see cref="BuiltinArgument.Text"/> (regardless of piece count) is what makes this a KNOWN
+    /// value the registry can actually evaluate, matching the old scanner's own
+    /// <c>TryFlatten</c>. A single bare <see cref="TemplatePiece.Hole"/> is the ONLY shape that
+    /// transfers as a typed-unknown; anything else unresolved (a <see cref="TemplatePiece.Choice"/>
+    /// not yet expanded, or a MIX of literal and hole pieces - REPLACE's own hole-splice is the
+    /// one place that shape is handled, and it never reaches this general path) declines rather
+    /// than guessing.
+    /// </summary>
     private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value switch
     {
         SqlTextValue.Tainted tainted => new BuiltinArgument.Unresolved(tainted.Reason, tainted.Location),
-        SqlTextValue.Template { Pieces: [TemplatePiece.Lit lit] } => new BuiltinArgument.Text(lit.Text),
         SqlTextValue.Template { Pieces: [TemplatePiece.Hole hole] } => new BuiltinArgument.Hole(hole.Type, hole.Kind),
+        SqlTextValue.Template { Pieces.Count: > 0 } template when template.Pieces.All(p => p is TemplatePiece.Lit)
+            => new BuiltinArgument.Text(string.Concat(template.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text))),
         _ => new BuiltinArgument.Unresolved("symbolic-value-in-function-argument", default),
     };
 
@@ -250,11 +267,11 @@ public static class ExpressionEvaluator
         }
     }
 
-    /// <summary>Oracle-verified: LEN trims TRAILING spaces before counting (unlike DATALENGTH, not folded here) - <see cref="string.TrimEnd(char[])"/> over the space character matches exactly.</summary>
+    /// <summary>Oracle-verified: LEN trims TRAILING spaces before counting (unlike DATALENGTH, not folded here) - <see cref="string.TrimEnd(char[])"/> over the space character matches exactly. The inner string may be a MULTI-piece all-literal Template (e.g. a concatenation) - see <see cref="ToBuiltinArgument"/>'s own doc comment for why flattening every-piece-is-Lit, not just a single piece, matters.</summary>
     private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
         var folded = Fold(argument, state, sourcePath, cap);
-        if (folded is not SqlTextValue.Template { Pieces: [TemplatePiece.Lit lit] })
+        if (folded is not SqlTextValue.Template { Pieces.Count: > 0 } template || !template.Pieces.All(p => p is TemplatePiece.Lit))
         {
             // A placeholder's LEN is not a number - this evaluator does not know the real value,
             // so it cannot know its length either.
@@ -262,7 +279,7 @@ public static class ExpressionEvaluator
             return false;
         }
 
-        value = lit.Text.TrimEnd(' ').Length;
+        value = string.Concat(template.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)).TrimEnd(' ').Length;
         return true;
     }
 
