@@ -109,9 +109,16 @@ public sealed class DynamicSqlParityTests
     /// one statement too early). A follow-on `SET @sql = @sql + '...'` after the join also needed
     /// <see cref="ExpressionEvaluator.FoldConcatenation"/>'s tainted-left short-circuit removed -
     /// it was bypassing <see cref="SqlTextValue.Concat"/>'s own alternative-extension logic.
+    /// Since the ELSE branch's impure SELECT-assignment now degrades to a typed HavocWrite hole
+    /// (@StringToExecute's declared NVARCHAR(MAX) survives the taint) rather than a bare taint,
+    /// the ELSE side is no longer dropped outright: it joins the THEN side as a second Choice
+    /// alternative, so the new engine now ALSO emits a second, Medium-confidence script standing
+    /// in for the ELSE branch - strictly more coverage than the old engine's single recovered
+    /// script, never less, so the divergence policy (new may analyze more than old, never less)
+    /// still holds.
     /// </summary>
     [Fact]
-    public void IfWithOneTaintedBranch_RecoversTheKnownBranchAsGuardedAlternative()
+    public void IfWithOneTaintedBranch_RecoversTheKnownBranchAndReportsTheOtherAsAHole()
     {
         var sql = """
             CREATE PROCEDURE dbo.usp_Test AS
@@ -133,11 +140,18 @@ public sealed class DynamicSqlParityTests
         Assert.False(parseResult.HasErrors, string.Join(';', parseResult.Errors.Select(e => e.Message)));
 
         var oldScript = Assert.Single(SilentScan.Core.Predicates.DynamicSqlScanner.Scan(parseResult).AnalyzableScripts);
-        var newScript = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
+        var newScripts = DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts;
 
         Assert.Equal("INSERT INTO #Results SELECT HAVING COUNT(*) >  50  ORDER BY 1;", oldScript.InnerText);
-        Assert.Equal(oldScript.InnerText, newScript.InnerText);
-        Assert.Equal(oldScript.Confidence, newScript.Confidence);
+
+        // The old engine's exact recovered script still appears, unchanged, among the new engine's
+        // scripts - the divergence policy's "old analyzed a script new did not" violation never
+        // fires here, only an ADDITIONAL script the old engine could not produce.
+        var recovered = Assert.Single(newScripts, s => s.InnerText == oldScript.InnerText);
+        Assert.Equal(oldScript.Confidence, recovered.Confidence);
+        Assert.Equal(2, newScripts.Count);
+        var elseScript = Assert.Single(newScripts, s => s.InnerText != oldScript.InnerText);
+        Assert.Equal(SilentScan.Core.Predicates.FindingConfidence.Medium, elseScript.Confidence);
     }
 
 

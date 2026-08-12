@@ -32,4 +32,7 @@ public enum HoleKind
 
     /// <summary>A variable DECLAREd only inside a TRY block, referenced from its CATCH block - legal T-SQL (batch-wide storage exists regardless of whether the DECLARE line ever executed), but CATCH starts from the pre-TRY state, so how far TRY got before throwing is unknowable.</summary>
     TryOnlyDeclaration,
+
+    /// <summary>A builtin whose return type is fixed by the T-SQL spec regardless of its own argument's value (QUOTENAME's nvarchar(258), STR's CHAR(n)) - used when that argument itself could not be resolved to a real value OR a typed hole (so there is no argument-derived <see cref="HoleKind"/> to propagate), yet the builtin's own return type is still a hard guarantee.</summary>
+    ArgumentIndependentReturnType,
 }

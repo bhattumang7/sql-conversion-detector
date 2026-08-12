@@ -26,25 +26,27 @@ public static class BuiltinRegistry
 
     /// <summary>
     /// Resolves one <see cref="BuiltinCall"/> against its registered <see cref="BuiltinSpec"/>.
-    /// Order: (1) any <see cref="BuiltinArgument.Unresolved"/> argument declines immediately with
-    /// ITS OWN reason - no spec is even consulted; (2) a spec whose value is unconditionally
-    /// unknowable (<see cref="BuiltinSpec.UnconditionalFailReason"/> - SERVERPROPERTY,
-    /// SYSDATETIME, ...) declines with that reason regardless of arguments; (3) every argument
-    /// resolved to a concrete <see cref="BuiltinArgument.Text"/>/<see cref="BuiltinArgument.Number"/>
-    /// and the spec has an <see cref="BuiltinSpec.Evaluate"/> → run it; (4) at least one argument
-    /// is a <see cref="BuiltinArgument.Hole"/> and the spec has a
-    /// <see cref="BuiltinSpec.HoleTransfer"/> → run it; (5) the spec has a fixed
-    /// <see cref="BuiltinSpec.ReturnType"/> (GETDATE, NEWID, RAND, ... - unconditional, regardless
-    /// of whether a hole is even present, since these take no arguments whose resolution matters)
-    /// → a typed hole of that type; (6) otherwise decline.
+    /// Order: (1) an unrecognized function name declines immediately - with NO spec to consult,
+    /// this registry genuinely has no return-type fact to fall back on, so guessing one would
+    /// violate CLAUDE.md's "never guess" policy regardless of whether an argument is unresolved
+    /// too; (2) a spec whose value is unconditionally unknowable
+    /// (<see cref="BuiltinSpec.UnconditionalFailReason"/>) declines with that reason regardless of
+    /// arguments; (3) every argument resolved to a concrete
+    /// <see cref="BuiltinArgument.Text"/>/<see cref="BuiltinArgument.Number"/> and the spec has an
+    /// <see cref="BuiltinSpec.Evaluate"/> → run it; (4) the spec has a
+    /// <see cref="BuiltinSpec.HoleTransfer"/> → run it UNCONDITIONALLY, even when an argument is
+    /// <see cref="BuiltinArgument.Unresolved"/> rather than a typed <see cref="BuiltinArgument.Hole"/>
+    /// - a builtin whose return type does not actually depend on that argument's value (QUOTENAME's
+    /// nvarchar(258), STR's CHAR(n)) can still resolve; one that DOES need the argument's own type
+    /// (case conversion, LEFT/RIGHT, SUBSTRING passthrough) declines from inside its own
+    /// HoleTransfer, preserving that argument's OWN specific reason rather than a generic one; (5)
+    /// the spec has a fixed <see cref="BuiltinSpec.ReturnType"/> (GETDATE, NEWID, RAND, ... -
+    /// unconditional, regardless of arguments) → a typed hole of that type; (6) otherwise decline,
+    /// preferring the first <see cref="BuiltinArgument.Unresolved"/> argument's own reason over the
+    /// generic fallback when one is present.
     /// </summary>
     public static BuiltinFoldResult Fold(BuiltinCall call)
     {
-        if (call.Arguments.OfType<BuiltinArgument.Unresolved>().FirstOrDefault() is { } unresolved)
-        {
-            return new BuiltinFoldResult.Fail(unresolved.Reason);
-        }
-
         if (!Specs.TryGetValue(call.FunctionName, out var spec))
         {
             return new BuiltinFoldResult.Fail(NonLiteralFunctionCall);
@@ -61,8 +63,7 @@ public static class BuiltinRegistry
             return spec.Evaluate(call);
         }
 
-        var anyHole = call.Arguments.Any(a => a is BuiltinArgument.Hole);
-        if (anyHole && spec.HoleTransfer is not null)
+        if (spec.HoleTransfer is not null)
         {
             return spec.HoleTransfer(call);
         }
@@ -72,7 +73,9 @@ public static class BuiltinRegistry
             return BuiltinFoldResult.OkHole(returnType, call.Site, spec.ReturnKind);
         }
 
-        return new BuiltinFoldResult.Fail(anyHole ? SymbolicValueInFunctionArgument : NonLiteralFunctionCall);
+        var firstUnresolved = call.Arguments.OfType<BuiltinArgument.Unresolved>().FirstOrDefault();
+        return new BuiltinFoldResult.Fail(firstUnresolved?.Reason
+            ?? (call.Arguments.Any(a => a is BuiltinArgument.Hole) ? SymbolicValueInFunctionArgument : NonLiteralFunctionCall));
     }
 
     /// <summary>
@@ -130,14 +133,19 @@ public static class BuiltinRegistry
         yield return NonDeterministicTyped("NEWSEQUENTIALID", new SqlType(SqlTypeCategory.UniqueIdentifier));
         yield return NonDeterministicTyped("GETDATE", new SqlType(SqlTypeCategory.DateTime));
         yield return NonDeterministicTyped("GETUTCDATE", new SqlType(SqlTypeCategory.DateTime));
+        yield return NonDeterministicTyped("SYSDATETIME", new SqlType(SqlTypeCategory.DateTime2));
+        yield return NonDeterministicTyped("SYSUTCDATETIME", new SqlType(SqlTypeCategory.DateTime2));
+        yield return NonDeterministicTyped("SYSDATETIMEOFFSET", new SqlType(SqlTypeCategory.DateTimeOffset));
         yield return NonDeterministicTyped("RAND", new SqlType(SqlTypeCategory.Float));
         yield return NonDeterministicTyped("CHECKSUM", new SqlType(SqlTypeCategory.Int));
         yield return NonDeterministicTyped("BINARY_CHECKSUM", new SqlType(SqlTypeCategory.Int));
 
-        yield return UnconditionalFail("SYSDATETIME", "non-deterministic-function");
-        yield return UnconditionalFail("SYSUTCDATETIME", "non-deterministic-function");
-        yield return UnconditionalFail("SYSDATETIMEOFFSET", "non-deterministic-function");
-        yield return UnconditionalFail("SERVERPROPERTY", "environment-dependent-function");
+        // SERVERPROPERTY's own return type (sql_variant, per T-SQL docs) is a hard guarantee
+        // regardless of which property name is requested - the VALUE is what depends on the
+        // session/server environment, not the type, so this is EnvironmentDependent (not
+        // NonDeterministicTyped: re-running the SAME call on the SAME server returns the SAME
+        // value, unlike NEWID/GETDATE - it only varies ACROSS servers/sessions).
+        yield return FixedTypeSpec("SERVERPROPERTY", new SqlType(SqlTypeCategory.SqlVariant), HoleKind.EnvironmentDependent);
     }
 
     /// <summary>
@@ -162,6 +170,12 @@ public static class BuiltinRegistry
 
     private static bool IsSafeToCaseConvert(string input) => input.All(c => c is not ('i' or 'I') && c <= 127);
 
+    /// <summary>The FIRST <see cref="BuiltinArgument.Unresolved"/> reason found across <paramref name="arguments"/>, or the generic <see cref="SymbolicValueInFunctionArgument"/> fallback if none - used by every <c>HoleTransfer</c> below whose own type genuinely depends on an argument this registry couldn't resolve, so the decline reports WHY that argument was unresolvable rather than a reason-free "symbolic value" label.</summary>
+    private static BuiltinFoldResult.Fail UnresolvedOrGeneric(IEnumerable<BuiltinArgument> arguments) =>
+        arguments.OfType<BuiltinArgument.Unresolved>().FirstOrDefault() is { } unresolved
+            ? new BuiltinFoldResult.Fail(unresolved.Reason)
+            : new BuiltinFoldResult.Fail(SymbolicValueInFunctionArgument);
+
     /// <summary>Oracle-verified: LTRIM/RTRIM trim only the space character (0x20) - a tab or other whitespace is left untouched, unlike .NET's parameterless Trim family.</summary>
     private static BuiltinSpec TrimSpec(string name, Func<string, string> trim) => new(
         name,
@@ -174,7 +188,7 @@ public static class BuiltinRegistry
     private static BuiltinFoldResult PassThroughSingleArgumentType(BuiltinCall call) =>
         call.Arguments[0] is BuiltinArgument.Hole hole
             ? BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind)
-            : new BuiltinFoldResult.Fail(SymbolicValueInFunctionArgument);
+            : UnresolvedOrGeneric([call.Arguments[0]]);
 
     /// <summary>
     /// Oracle-verified: LEFT/RIGHT with a length at or beyond the input's own length return the
@@ -200,8 +214,12 @@ public static class BuiltinRegistry
         },
         HoleTransfer: call =>
         {
-            var length = ((BuiltinArgument.Number)call.Arguments[1]).Value;
-            return length < 0 ? new BuiltinFoldResult.Fail(NegativeLength) : PassThroughSingleArgumentType(call);
+            if (call.Arguments[1] is not BuiltinArgument.Number lengthArgument)
+            {
+                return UnresolvedOrGeneric([call.Arguments[1]]);
+            }
+
+            return lengthArgument.Value < 0 ? new BuiltinFoldResult.Fail(NegativeLength) : PassThroughSingleArgumentType(call);
         },
         ReturnType: null,
         ReturnKind: default,
@@ -235,6 +253,11 @@ public static class BuiltinRegistry
         },
         HoleTransfer: call =>
         {
+            if (call.Arguments[1] is not BuiltinArgument.Number || call.Arguments[2] is not BuiltinArgument.Number)
+            {
+                return UnresolvedOrGeneric([call.Arguments[1], call.Arguments[2]]);
+            }
+
             var (_, _, failure) = SubstringArgs(call);
             return failure ?? PassThroughSingleArgumentType(call);
         },
@@ -307,7 +330,7 @@ public static class BuiltinRegistry
                 return SpliceHoleIntoTemplate(source.Value, pattern.Value, replacementHole, call.Site);
             }
 
-            return new BuiltinFoldResult.Fail(SymbolicValueInFunctionArgument);
+            return UnresolvedOrGeneric(call.Arguments);
         },
         ReturnType: null,
         ReturnKind: default,
@@ -354,9 +377,17 @@ public static class BuiltinRegistry
                 ? new BuiltinFoldResult.Fail("non-literal-expression:quotename-null-result")
                 : BuiltinFoldResult.OkText(quoted, call.Site);
         },
-        HoleTransfer: call => call.Arguments[0] is BuiltinArgument.Hole quoteNameHole
-            ? BuiltinFoldResult.OkHole(new SqlType(SqlTypeCategory.NVarChar, Length: 258), call.Site, quoteNameHole.Kind)
-            : new BuiltinFoldResult.Fail(SymbolicValueInFunctionArgument),
+        // QUOTENAME's return TYPE is nvarchar(258) regardless of whether its input/delimiter
+        // resolved to a concrete value, a typed hole, or genuinely couldn't be resolved at all -
+        // only the runtime VALUE (real text vs. SQL NULL on an over-length/bad-delimiter input)
+        // depends on that, and this is a type-transfer, not a value fold. Propagates the input
+        // argument's own Kind when it IS a Hole (so provenance survives, matching every other
+        // passthrough here); falls back to ArgumentIndependentReturnType when it's Unresolved,
+        // since there is no argument-derived Kind left to propagate in that case.
+        HoleTransfer: call => BuiltinFoldResult.OkHole(
+            new SqlType(SqlTypeCategory.NVarChar, Length: 258),
+            call.Site,
+            call.Arguments[0] is BuiltinArgument.Hole quoteNameHole ? quoteNameHole.Kind : HoleKind.ArgumentIndependentReturnType),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
@@ -419,27 +450,46 @@ public static class BuiltinRegistry
         Evaluate: _ => new BuiltinFoldResult.Fail(NonLiteralFunctionCall),
         HoleTransfer: call =>
         {
-            var length = call.Arguments.Count >= 2 ? ((BuiltinArgument.Number)call.Arguments[1]).Value : 10;
+            int length;
+            if (call.Arguments.Count >= 2)
+            {
+                if (call.Arguments[1] is not BuiltinArgument.Number lengthArgument)
+                {
+                    return UnresolvedOrGeneric([call.Arguments[1]]);
+                }
+
+                length = lengthArgument.Value;
+            }
+            else
+            {
+                length = 10;
+            }
+
             if (length < 1)
             {
                 return new BuiltinFoldResult.Fail("non-literal-expression:str-length-out-of-range");
             }
 
-            return call.Arguments[0] is BuiltinArgument.Hole strHole
-                ? BuiltinFoldResult.OkHole(new SqlType(SqlTypeCategory.Char, Length: length), call.Site, strHole.Kind)
-                : new BuiltinFoldResult.Fail(NonLiteralFunctionCall);
+            // STR's length is pinned by the call site's own syntax (or the CHAR(10) default),
+            // exactly like CAST/CONVERT's target type - the RETURN type is fixed regardless of
+            // whether float_expr resolved to a typed hole or couldn't be resolved at all.
+            return call.Arguments[0] switch
+            {
+                BuiltinArgument.Hole strHole => BuiltinFoldResult.OkHole(new SqlType(SqlTypeCategory.Char, Length: length), call.Site, strHole.Kind),
+                BuiltinArgument.Unresolved => BuiltinFoldResult.OkHole(new SqlType(SqlTypeCategory.Char, Length: length), call.Site, HoleKind.ArgumentIndependentReturnType),
+                _ => new BuiltinFoldResult.Fail(NonLiteralFunctionCall),
+            };
         },
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-    /// <summary>A builtin whose VALUE is unknowable at compile time but whose RETURN TYPE is a hard T-SQL guarantee regardless of which call produced it - the same "known shape, unknown value" case an uninitialized DECLARE gets.</summary>
-    private static BuiltinSpec NonDeterministicTyped(string name, SqlType returnType) => new(
-        name, Evaluate: null, HoleTransfer: null, ReturnType: returnType, ReturnKind: HoleKind.NonDeterministicTyped, UnconditionalFailReason: null);
+    /// <summary>A builtin whose VALUE is unknowable at compile time but whose RETURN TYPE is a hard T-SQL guarantee regardless of which call produced it - the same "known shape, unknown value" case an uninitialized DECLARE gets. NEWID/GETDATE/RAND/... all report <see cref="HoleKind.NonDeterministicTyped"/> through this.</summary>
+    private static BuiltinSpec NonDeterministicTyped(string name, SqlType returnType) => FixedTypeSpec(name, returnType, HoleKind.NonDeterministicTyped);
 
-    /// <summary>A builtin that never folds, regardless of arguments - its result is unknowable in a way this registry does not (yet) reduce to a typed hole.</summary>
-    private static BuiltinSpec UnconditionalFail(string name, string reason) => new(
-        name, Evaluate: null, HoleTransfer: null, ReturnType: null, ReturnKind: default, UnconditionalFailReason: reason);
+    /// <summary>A builtin that takes no arguments whose resolution matters and whose return type is a hard T-SQL guarantee regardless - <paramref name="kind"/> lets a caller distinguish WHY the value itself is still unknowable (non-determinism vs. environment-dependence) while sharing the exact same dispatch (step 5 of <see cref="Fold"/>).</summary>
+    private static BuiltinSpec FixedTypeSpec(string name, SqlType returnType, HoleKind kind) => new(
+        name, Evaluate: null, HoleTransfer: null, ReturnType: returnType, ReturnKind: kind, UnconditionalFailReason: null);
 }
 
 /// <summary>One registered builtin's complete folding knowledge - see <see cref="BuiltinRegistry.Fold"/> for the dispatch order.</summary>

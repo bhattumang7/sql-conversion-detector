@@ -300,6 +300,9 @@ public sealed class BuiltinRegistryTests
     [InlineData("NEWSEQUENTIALID", SqlTypeCategory.UniqueIdentifier)]
     [InlineData("GETDATE", SqlTypeCategory.DateTime)]
     [InlineData("GETUTCDATE", SqlTypeCategory.DateTime)]
+    [InlineData("SYSDATETIME", SqlTypeCategory.DateTime2)]
+    [InlineData("SYSUTCDATETIME", SqlTypeCategory.DateTime2)]
+    [InlineData("SYSDATETIMEOFFSET", SqlTypeCategory.DateTimeOffset)]
     [InlineData("RAND", SqlTypeCategory.Float)]
     [InlineData("CHECKSUM", SqlTypeCategory.Int)]
     [InlineData("BINARY_CHECKSUM", SqlTypeCategory.Int)]
@@ -312,18 +315,23 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(HoleKind.NonDeterministicTyped, hole.Kind);
     }
 
-    [Theory]
-    [InlineData("SYSDATETIME", "non-deterministic-function")]
-    [InlineData("SYSUTCDATETIME", "non-deterministic-function")]
-    [InlineData("SYSDATETIMEOFFSET", "non-deterministic-function")]
-    [InlineData("SERVERPROPERTY", "environment-dependent-function")]
-    public void UnconditionalFail_AlwaysDeclinesWithItsOwnReason(string function, string expectedReason)
+    /// <summary>
+    /// SERVERPROPERTY's own return type (sql_variant) is a hard T-SQL guarantee regardless of
+    /// which property name is requested - only the VALUE depends on the server/session
+    /// environment, so this now degrades to a typed hole (EnvironmentDependent, not
+    /// NonDeterministicTyped: the SAME call on the SAME server always returns the SAME value,
+    /// unlike NEWID/GETDATE) instead of declining outright.
+    /// </summary>
+    [Fact]
+    public void ServerProperty_ProducesEnvironmentDependentTypedHole()
     {
-        var withArg = BuiltinRegistry.Fold(Call(function, new BuiltinArgument.Text("ServerName")));
-        var withoutArg = BuiltinRegistry.Fold(Call(function));
+        var withArg = OkHole(BuiltinRegistry.Fold(Call("SERVERPROPERTY", new BuiltinArgument.Text("ServerName"))));
+        var withoutArg = OkHole(BuiltinRegistry.Fold(Call("SERVERPROPERTY")));
 
-        Assert.Equal(expectedReason, FailReason(withArg));
-        Assert.Equal(expectedReason, FailReason(withoutArg));
+        Assert.Equal(SqlTypeCategory.SqlVariant, withArg.Type.Category);
+        Assert.Equal(HoleKind.EnvironmentDependent, withArg.Kind);
+        Assert.Equal(SqlTypeCategory.SqlVariant, withoutArg.Type.Category);
+        Assert.Equal(HoleKind.EnvironmentDependent, withoutArg.Kind);
     }
 
     [Fact]

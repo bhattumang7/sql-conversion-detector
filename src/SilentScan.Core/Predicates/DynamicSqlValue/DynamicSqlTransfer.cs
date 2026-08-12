@@ -312,7 +312,7 @@ public static class DynamicSqlTransfer
 
         if (functionCallExists || kind is not (AssignmentKind.Equals or AssignmentKind.AddEquals))
         {
-            state[name] = new SqlTextValue.Tainted("unsupported-assignment", span) { DeclaredType = declaredType };
+            state[name] = HavocOrTaint("unsupported-assignment", span, declaredType);
             return;
         }
 
@@ -321,7 +321,7 @@ public static class DynamicSqlTransfer
         // fold, so this taints rather than risking a null-reference fold below.
         if (expression is null)
         {
-            state[name] = new SqlTextValue.Tainted("unsupported-assignment", span) { DeclaredType = declaredType };
+            state[name] = HavocOrTaint("unsupported-assignment", span, declaredType);
             return;
         }
 
@@ -329,13 +329,29 @@ public static class DynamicSqlTransfer
 
         if (kind == AssignmentKind.AddEquals)
         {
-            var existing = state.TryGetValue(name, out var existingValue) ? existingValue : new SqlTextValue.Tainted("variable-not-in-scope", span);
+            var existing = state.TryGetValue(name, out var existingValue) ? existingValue : HavocOrTaint("variable-not-in-scope", span, declaredType);
             state[name] = SqlTextValue.Concat(existing, rhs) with { DeclaredType = declaredType };
             return;
         }
 
         state[name] = rhs with { DeclaredType = declaredType };
     }
+
+    /// <summary>
+    /// The one place a value degrades to a hole-or-taint by declared type: a typed
+    /// <see cref="HoleKind.HavocWrite"/> hole when <paramref name="declaredType"/> is known (this
+    /// scanner could not prove WHAT the statement wrote, but T-SQL's own DECLARE guarantees WHAT
+    /// TYPE it must be, regardless), <see cref="SqlTextValue.Tainted"/> only when even that much is
+    /// unknown. Every unmodeled-write site in this class (assignment shapes this scanner does not
+    /// fold, an EXEC this scanner cannot see through, a non-pure SELECT-assignment, an unseen
+    /// variable) goes through here so "known type, unknown value" never masquerades as "nothing
+    /// known at all" - the CLAUDE.md soundness contract is about the VALUE, never the type, which
+    /// is a hard compile-time fact independent of whatever this scanner could trace.
+    /// </summary>
+    private static SqlTextValue HavocOrTaint(string reason, SourceSpan span, SqlType? declaredType) =>
+        declaredType is { } type
+            ? new SqlTextValue.Template([new TemplatePiece.Hole(type, span, HoleKind.HavocWrite)]) { DeclaredType = type }
+            : new SqlTextValue.Tainted(reason, span);
 
     /// <summary>
     /// <c>SELECT @x = expr[, @y = expr2, ...]</c>, the other common way T-SQL assigns local
@@ -361,7 +377,7 @@ public static class DynamicSqlTransfer
         {
             foreach (var name in assignedNames.Names)
             {
-                state[name] = new SqlTextValue.Tainted("select-assignment-not-pure", span) { DeclaredType = context.DeclaredTypes.GetValueOrDefault(name) };
+                state[name] = HavocOrTaint("select-assignment-not-pure", span, context.DeclaredTypes.GetValueOrDefault(name));
             }
 
             return;
@@ -602,7 +618,7 @@ public static class DynamicSqlTransfer
         node.Accept(collector);
         foreach (var name in collector.Names.Where(n => state.ContainsKey(n) && !seeded.Contains(n)))
         {
-            state[name] = new SqlTextValue.Tainted("unsupported-execute-form", span) { DeclaredType = context.DeclaredTypes.GetValueOrDefault(name) };
+            state[name] = HavocOrTaint("unsupported-execute-form", span, context.DeclaredTypes.GetValueOrDefault(name));
         }
     }
 
@@ -697,9 +713,7 @@ public static class DynamicSqlTransfer
         {
             foreach (var name in collector.Names)
             {
-                state[name] = context.DeclaredTypes.TryGetValue(name, out var type)
-                    ? new SqlTextValue.Template([new TemplatePiece.Hole(type, span, HoleKind.HavocWrite)]) { DeclaredType = type }
-                    : new SqlTextValue.Tainted("unsupported-statement-in-scope", span);
+                state[name] = HavocOrTaint("unsupported-statement-in-scope", span, context.DeclaredTypes.GetValueOrDefault(name));
             }
         };
     }

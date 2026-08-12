@@ -111,10 +111,22 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("b", Assert.IsType<TemplatePiece.Lit>(template.Pieces[1]).Text);
     }
 
+    /// <summary>@x's declared type (INT) is a hard T-SQL guarantee regardless of this scanner not modeling `-=` - degrades to a typed HavocWrite hole, not a bare taint, matching <see cref="FetchIntoVariable_UnmodeledStatement_HavocsToTypedHoleWhenDeclaredTypeKnown"/>'s own contract.</summary>
     [Fact]
-    public void Set_UnsupportedAssignmentKind_Taints()
+    public void Set_UnsupportedAssignmentKind_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run("DECLARE @x INT = 5; SET @x -= 1;");
+
+        var template = Assert.IsType<SqlTextValue.Template>(result["@x"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+        Assert.Equal(new SqlType(SqlTypeCategory.Int), hole.Type);
+    }
+
+    [Fact]
+    public void Set_UnsupportedAssignmentKind_WithNoDeclaredType_Taints()
+    {
+        var result = Run("SET @x -= 1;");
 
         Assert.Equal("unsupported-assignment", TaintReason(result["@x"]));
     }
@@ -127,10 +139,22 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("literal", LitText(result["@x"]));
     }
 
+    /// <summary>@x's declared type (NVARCHAR(50)) is a hard T-SQL guarantee regardless of the FROM clause making the assigned value data-dependent - degrades to a typed HavocWrite hole, not a bare taint.</summary>
     [Fact]
-    public void SelectAssignment_WithFromClause_TaintsSelectAssignmentNotPure()
+    public void SelectAssignment_WithFromClause_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run("DECLARE @x NVARCHAR(50); SELECT @x = name FROM sys.tables;");
+
+        var template = Assert.IsType<SqlTextValue.Template>(result["@x"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+        Assert.Equal(new SqlType(SqlTypeCategory.NVarChar, Length: 50), hole.Type);
+    }
+
+    [Fact]
+    public void SelectAssignment_WithFromClause_WithNoDeclaredType_Taints()
+    {
+        var result = Run("SELECT @x = name FROM sys.tables;");
 
         Assert.Equal("select-assignment-not-pure", TaintReason(result["@x"]));
     }
@@ -246,8 +270,9 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("non-literal-argument", Assert.Single(findings).Reason);
     }
 
+    /// <summary>@rc's declared type (INT) is a hard T-SQL guarantee regardless of this scanner not seeing what dbo.SomeProc does internally - degrades to a typed HavocWrite hole, not a bare taint.</summary>
     [Fact]
-    public void OrdinaryProcedureCall_TaintsReferencedTrackedVariables()
+    public void OrdinaryProcedureCall_HavocsReferencedTrackedVariablesToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run(
             "DECLARE @rc INT = 1; DECLARE @unrelated NVARCHAR(50) = 'kept'; " +
@@ -256,7 +281,10 @@ public sealed class DynamicSqlTransferTests
 
         Assert.Empty(scripts);
         Assert.Empty(findings); // the ordinary-call path taints state; it never emits a finding/script itself
-        Assert.Equal("unsupported-execute-form", TaintReason(result["@rc"]));
+        var template = Assert.IsType<SqlTextValue.Template>(result["@rc"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+        Assert.Equal(new SqlType(SqlTypeCategory.Int), hole.Type);
         Assert.Equal("kept", LitText(result["@unrelated"])); // never mentioned by this call, so untouched
     }
 }

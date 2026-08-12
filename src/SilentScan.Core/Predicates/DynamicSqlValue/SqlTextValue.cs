@@ -130,8 +130,9 @@ public abstract record SqlTextValue
     /// otherwise, if both sides agree on one <see cref="SqlType"/> (their own
     /// <see cref="DeclaredType"/>, when set - never guessed from unrelated context), the merge
     /// becomes a typed <see cref="TemplatePiece.Hole"/> instead of giving up outright; (4)
-    /// otherwise <see cref="Tainted"/> with <see cref="DivergesInControlFlowGraphReason"/>,
-    /// still carrying either side's <see cref="DeclaredType"/> forward for a LATER join to recover.
+    /// otherwise <see cref="Tainted"/>, preferring a genuinely explanatory reason over the generic
+    /// <see cref="DivergesInControlFlowGraphReason"/> whenever one is available (see below), still
+    /// carrying either side's <see cref="DeclaredType"/> forward for a LATER join to recover.
     /// </summary>
     public static SqlTextValue Join(SqlTextValue a, SqlTextValue b, string guardText, int cap, SourceSpan at)
     {
@@ -171,7 +172,26 @@ public abstract record SqlTextValue
             return new Template([new TemplatePiece.Hole(type, at, HoleKind.WidenedChoice)]) { DeclaredType = carriedType };
         }
 
-        return new Tainted(DivergesInControlFlowGraphReason, at) { DeclaredType = carriedType };
+        // At least one side is Tainted here (the all-Template case already returned above).
+        // Exactly one side Tainted, the other a real Template that could not recover a
+        // uniform-type Hole above: the taint here is NOT actually "control flow diverges" in any
+        // useful sense - it is "one branch produced a genuinely unresolvable value, the other a
+        // known one this class just happened not to reduce to a shared type". Reporting the
+        // ALREADY-TAINTED side's own specific reason is strictly more informative than the generic
+        // sentinel, and attaching the known side as a GuardedAlternative under guardText means a
+        // later consumer that independently proves THAT branch is the one in play (an EXEC fed
+        // this value directly, with nothing else known) can still recover real text - the same
+        // recovery DynamicSqlCfg's own IF-only ApplyGuardedAlternativeFixup provides, generalized
+        // here to every join site (loop back-edges, TRY/CATCH, GOTO convergence), not just IF/ELSE.
+        // Both sides Tainted with different reasons (StructurallyEqual already caught the
+        // same-reason case) keeps `a`'s reason - the same "first cause wins" convention as Concat.
+        return (a, b) switch
+        {
+            (Tainted onlyA, Template bOnly) => WithGuardedAlternative(onlyA with { DeclaredType = carriedType }, guardText, bOnly),
+            (Template aOnly, Tainted onlyB) => WithGuardedAlternative(onlyB with { DeclaredType = carriedType }, guardText, aOnly),
+            (Tainted bothTaintedA, Tainted) => bothTaintedA with { DeclaredType = carriedType },
+            _ => new Tainted(DivergesInControlFlowGraphReason, at) { DeclaredType = carriedType }, // defensive: unreachable given today's two-subtype lattice
+        };
     }
 
     /// <summary>

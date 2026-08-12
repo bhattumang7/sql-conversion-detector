@@ -119,8 +119,16 @@ public sealed class SqlTextValueTests
         Assert.Equal(3, choice.Alternatives.Count); // A, B, C - not [[A, B], C] nested
     }
 
+    /// <summary>
+    /// The generic <see cref="SqlTextValue.DivergesInControlFlowGraphReason"/> sentinel is a LAST
+    /// resort, never the default: whenever exactly one side is already <see cref="SqlTextValue.Tainted"/>
+    /// with its own specific reason, that reason survives unchanged (a real cause, more useful than
+    /// "diverges"), and the OTHER side's known value survives too, as a <see cref="GuardedAlternative"/>
+    /// under <c>guardText</c> - a later consumer that independently proves that branch is the one in
+    /// play can still recover real text instead of an unresolvable placeholder.
+    /// </summary>
     [Fact]
-    public void Join_TemplateAndTainted_WithNoDeclaredType_ProducesTainted()
+    public void Join_TemplateAndTainted_WithNoDeclaredType_PreservesReasonAndKeepsKnownSideAsAlternative()
     {
         var template = Lit("A");
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin);
@@ -128,7 +136,22 @@ public sealed class SqlTextValueTests
         var result = SqlTextValue.Join(template, tainted, "guard", cap: 32, at: Origin);
 
         var resultTainted = Assert.IsType<SqlTextValue.Tainted>(result);
-        Assert.Equal(SqlTextValue.DivergesInControlFlowGraphReason, resultTainted.Reason);
+        Assert.Equal("non-literal-expression", resultTainted.Reason);
+        var alternative = Assert.Single(resultTainted.GuardedAlternatives!);
+        Assert.Equal("guard", alternative.GuardText);
+        Assert.True(SqlTextValue.StructurallyEqual(template, alternative.Value));
+    }
+
+    [Fact]
+    public void Join_TwoTaintedValues_WithDifferentReasons_KeepsFirstOperandsReason()
+    {
+        var a = new SqlTextValue.Tainted("reason-a", Origin);
+        var b = new SqlTextValue.Tainted("reason-b", Origin);
+
+        var result = SqlTextValue.Join(a, b, "guard", cap: 32, at: Origin);
+
+        var resultTainted = Assert.IsType<SqlTextValue.Tainted>(result);
+        Assert.Equal("reason-a", resultTainted.Reason);
     }
 
     [Fact]
@@ -145,14 +168,16 @@ public sealed class SqlTextValueTests
     }
 
     [Fact]
-    public void Join_TemplateAndTainted_WithDisagreeingDeclaredType_ProducesTainted()
+    public void Join_TemplateAndTainted_WithDisagreeingDeclaredType_ProducesTaintedWithGuardedAlternative()
     {
         var template = Lit("A") with { DeclaredType = NVarChar50 };
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = Int };
 
         var result = SqlTextValue.Join(template, tainted, "guard", cap: 32, at: Origin);
 
-        Assert.IsType<SqlTextValue.Tainted>(result);
+        var resultTainted = Assert.IsType<SqlTextValue.Tainted>(result);
+        Assert.Equal("non-literal-expression", resultTainted.Reason);
+        Assert.Single(resultTainted.GuardedAlternatives!);
     }
 
     [Fact]
