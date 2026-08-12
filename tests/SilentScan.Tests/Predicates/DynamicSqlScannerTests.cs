@@ -2056,6 +2056,29 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("non-literal-expression:replace-collation-sensitive", finding.Reason);
     }
 
+    [Fact]
+    public void Scan_ReplaceSourceMixingChoiceAndHole_CrossProductsOverChoiceThenSplicesHole()
+    {
+        // A source Template can accumulate BOTH an earlier REPLACE's own hole-splice AND a real
+        // IF-branch divergence (a genuine corpus shape, sp_BlitzIndex.sql) - the embedded Choice
+        // is resolved first (one alternative at a time, exactly like TryFoldCrossProduct), then
+        // each materialized candidate gets the SAME per-Lit-segment REPLACE splice already
+        // proven for the pure Hole-only mixed case.
+        var result = Scan(
+            "DECLARE @TableName NVARCHAR(128); " + // unresolved -> typed Hole
+            "DECLARE @sql NVARCHAR(MAX) = N'CREATE TABLE @@@Table@@@ (a INT'; " +
+            "IF @IncludeExtra = 1 BEGIN SET @sql += N', b INT'; END; " +
+            "SET @sql += N')'; " +
+            "SET @sql = REPLACE(@sql, N'@@@Table@@@', @TableName); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(2, texts.Count);
+        Assert.Matches(@"^CREATE TABLE __silentscan_sym_L\d+C\d+__ \(a INT\)$", texts[0]);
+        Assert.Matches(@"^CREATE TABLE __silentscan_sym_L\d+C\d+__ \(a INT, b INT\)$", texts[1]);
+    }
+
     // ------------------------------------------------------------------
     // CAST/CONVERT folding onto a VARCHAR(n)/NVARCHAR(n) target only - every non-string target
     // and CHAR/NCHAR's blank-padding declines rather than guessing a rendering.
