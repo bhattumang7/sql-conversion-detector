@@ -16,6 +16,11 @@ namespace SilentScan.Verify.Catalog;
 /// </summary>
 public static class LiveReadOnlyGuard
 {
+    /// <summary>
+    /// Default <see cref="SqlCommand.CommandTimeout"/> applied to every live read-only command.
+    /// </summary>
+    public const int DefaultCommandTimeoutSeconds = 300;
+
     public static void AssertSelectOnly(string sql)
     {
         var parseResult = SqlScriptParser.ParseText("live-query", sql);
@@ -38,11 +43,22 @@ public static class LiveReadOnlyGuard
     /// call left out at one of a dozen scattered <c>CreateCommand</c> sites is exactly the kind
     /// of omission code review alone reliably misses).
     /// </summary>
-    public static SqlCommand CreateReadOnlyCommand(this SqlConnection connection, string commandText)
+    /// <param name="connection">The open connection to build the command against.</param>
+    /// <param name="commandText">The SELECT-only command text; anything else is rejected by <c>AssertSelectOnly</c>.</param>
+    /// <param name="commandTimeoutSeconds">
+    /// Wall-clock ceiling for the command, defaulting to <see cref="DefaultCommandTimeoutSeconds"/>.
+    /// Catalog and module reads against a large database can outrun ADO.NET's 30-second default,
+    /// and a read-only SELECT that runs long is better waited on than aborted mid-scan.
+    /// </param>
+    public static SqlCommand CreateReadOnlyCommand(
+        this SqlConnection connection,
+        string commandText,
+        int commandTimeoutSeconds = DefaultCommandTimeoutSeconds)
     {
         AssertSelectOnly(commandText);
         var command = connection.CreateCommand();
         command.CommandText = commandText;
+        command.CommandTimeout = commandTimeoutSeconds;
         return command;
     }
 }
