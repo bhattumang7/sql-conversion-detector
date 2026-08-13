@@ -39,7 +39,7 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
         var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
 
         Assert.Equal(2, result.ModulesAnalyzed);
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
 
         var finding = Assert.Single(result.Report.TypedFindings, f => f.Column.ColumnName == "OrderCode");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);

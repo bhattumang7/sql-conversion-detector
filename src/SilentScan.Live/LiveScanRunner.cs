@@ -115,11 +115,13 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
-        IReadOnlyList<LiveLineageParityMismatch> parityMismatches;
+        LiveLineageParityReport parity;
         using (var parityStage = progress.Begin("checking live parity"))
         {
-            parityMismatches = await new LiveLineageParityChecker(connectionString).CheckAsync(lineage, cancellationToken);
-            parityStage.Complete($"{parityMismatches.Count:N0} mismatches");
+            parity = await new LiveLineageParityChecker(connectionString).CheckAsync(lineage, cancellationToken);
+            parityStage.Complete(
+                $"{parity.Mismatches.Count:N0} mismatches, {parity.UncompilableObjects.Count:N0} uncompilable, " +
+                $"{parity.StaleCachedMetadata.Count:N0} stale, {parity.Unverified.Count:N0} unverified");
         }
 
         var report = ScanReportBuilder.BuildFromParseResults(
@@ -146,7 +148,7 @@ public static class LiveScanRunner
         }
 
         return new LiveScanResult(
-            report, LiveCatalogSummary.From(catalog), moduleCount, parityMismatches,
+            report, LiveCatalogSummary.From(catalog), moduleCount, parity,
             unanalyzable, planCacheEvidence, rankedFindings, workloadFindings);
     }
 
@@ -173,15 +175,17 @@ public static class LiveScanRunner
 /// and analyzed, the environment parity gate's result, every module this pass saw but could not
 /// read a T-SQL body for (CLR-assembly-backed or encrypted - CLAUDE.md's same-honesty dynamic-
 /// SQL rule, applied to modules with no body to analyze at all), and - when requested - the
-/// plan-cache ranking signal. CLAUDE.md: "any mismatch is a P0 lineage bug", so
-/// <paramref name="LineageParityMismatches"/> is never merely informational; a non-empty list
-/// means this run's findings rest on at least one type the pipeline got wrong.
+/// plan-cache ranking signal. <paramref name="LineageParity"/> is never merely informational: a
+/// non-empty <see cref="LiveLineageParityReport.Mismatches"/> means this run's findings rest on
+/// at least one type the pipeline got wrong, verified against what the engine computes for that
+/// object right now - not against its cached <c>sys.columns</c> metadata, which can go stale
+/// without being a tool bug (see <see cref="LiveLineageParityChecker"/>).
 /// </summary>
 public sealed record LiveScanResult(
     ScanReport Report,
     LiveCatalogSummary CatalogSummary,
     int ModulesAnalyzed,
-    IReadOnlyList<LiveLineageParityMismatch> LineageParityMismatches,
+    LiveLineageParityReport LineageParity,
     IReadOnlyList<UnanalyzableModule> UnanalyzableModules,
     PlanCacheEvidenceResult? PlanCacheEvidence,
     IReadOnlyList<RankedFinding> RankedFindings,

@@ -135,9 +135,12 @@ public static class ScanDbCommand
 
         progress.Done(overall.Elapsed);
 
-        // Non-zero on a P0 lineage bug (CLAUDE.md: "any mismatch is a P0 lineage bug") in
-        // addition to a hard connection/read failure - findings built on a type the pipeline
-        // got demonstrably wrong should never report a clean exit code.
-        return result.LineageParityMismatches.Count == 0 ? 0 : 1;
+        // Non-zero on a P0 lineage bug in addition to a hard connection/read failure - findings
+        // built on a type the pipeline got demonstrably wrong (verified against what the engine
+        // computes for the object right now, not its possibly-stale cached metadata) should
+        // never report a clean exit code. An uncompilable object or a merely-stale cache is a
+        // condition of the scanned database, not a tool bug, so neither affects the exit code -
+        // both still appear in the report, prominently.
+        return result.LineageParity.Mismatches.Count == 0 ? 0 : 1;
     }
 }

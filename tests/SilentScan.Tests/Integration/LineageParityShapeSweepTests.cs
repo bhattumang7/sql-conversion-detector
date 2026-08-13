@@ -4,7 +4,7 @@ namespace SilentScan.Tests.Integration;
 
 /// <summary>
 /// Discovery harness for the real-database lineage parity mismatches CLAUDE.md treats as P0
-/// (<c>LiveScanResult.LineageParityMismatches</c>, computed by <c>LiveLineageParityChecker</c>
+/// (<c>LiveScanResult.LineageParity.Mismatches</c>, computed by <c>LiveLineageParityChecker</c>
 /// diffing every resolved view/TVF column's inferred type against <c>sys.columns</c>). A live
 /// scan against a real production database surfaced 25 mismatches across seven type-pair
 /// categories (Bit/Int, Int/TinyInt, Int/VarChar, Decimal/Money, Date/DateTime, DateTime/VarChar,
@@ -33,7 +33,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_Flags AS SELECT COALESCE(IsActive, 0) AS IsActive FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_Flags AS SELECT ISNULL(IsActive, 0) AS IsActive FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT CASE WHEN 1 = 1 THEN IsActive ELSE 0 END AS IsActive FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT CASE WHEN 1 = 1 THEN 0 ELSE IsActive END AS IsActive FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_Flags AS SELECT IIF(1 = 1, IsActive, 0) AS IsActive FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_FlagsOuter AS SELECT IsActive FROM dbo.vw_FlagsInner;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class LineageParityShapeSweepTests
                 FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- Int <-> TinyInt ----------------------------------------------------------------
@@ -132,7 +132,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_RatingsTotal AS SELECT SUM(Score) AS TotalScore FROM dbo.Ratings;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_RatingsAverage AS SELECT AVG(Score) AS AverageScore FROM dbo.Ratings;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_RatingsBumped AS SELECT Score + 1 AS BumpedScore FROM dbo.Ratings;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_RatingsMin AS SELECT MIN(Score) AS MinScore FROM dbo.Ratings;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_RatingsOuter AS SELECT Score FROM dbo.vw_RatingsInner;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- Int <-> VarChar ------------------------------------------------------------------
@@ -201,7 +201,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_OrdersText AS SELECT CAST(OrderId AS VARCHAR(20)) AS OrderIdText FROM dbo.Orders;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -214,7 +214,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_OrdersCode AS SELECT Code + '' AS Code FROM dbo.Orders;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -227,7 +227,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_OrdersLabeled AS SELECT OrderId, 'order' AS Label FROM dbo.Orders;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public sealed class LineageParityShapeSweepTests
                 FROM dbo.Orders;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- Decimal <-> Money ----------------------------------------------------------------
@@ -257,7 +257,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_InvoicesScaled AS SELECT Amount * 1.5 AS ScaledAmount FROM dbo.Invoices;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_InvoicesTotal AS SELECT Amount + Tax AS TotalAmount FROM dbo.Invoices;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_InvoicesSum AS SELECT SUM(Amount) AS TotalAmount FROM dbo.Invoices;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -296,7 +296,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_InvoicesAdjusted AS SELECT Amount + 0.5 AS AdjustedAmount FROM dbo.Invoices;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- Date <-> DateTime ------------------------------------------------------------------
@@ -311,7 +311,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_EventDates AS SELECT CAST(OccurredAt AS DATE) AS OccurredOn FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -324,7 +324,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_EventDates AS SELECT CONVERT(DATE, OccurredAt) AS OccurredOn FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -340,7 +340,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_EventDatesOuter AS SELECT OccurredAt, OccurredOn FROM dbo.vw_EventDatesInner;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- DateTime <-> VarChar --------------------------------------------------------------
@@ -356,7 +356,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT OccurredOnText FROM dbo.Events WHERE OccurredOnText > '2020-01-01';
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -372,7 +372,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT OccurredOnText FROM dbo.vw_Events WHERE OccurredOnText > '2020-01-01';
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -387,7 +387,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_EventsTyped AS SELECT CAST(OccurredOnText AS DATETIME) AS OccurredAt FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- Int <-> DateTime -------------------------------------------------------------------
@@ -403,7 +403,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT OccurredAt, DATEDIFF(day, OccurredAt, GETDATE()) AS AgeDays FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -419,7 +419,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_EventsOuter AS SELECT OccurredAt, OccurredYear FROM dbo.vw_EventsInner;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -433,7 +433,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT OccurredAt, DATEPART(month, OccurredAt) AS OccurredMonth FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     // ---- Round 2: more exotic shapes, one per category -------------------------------------
@@ -450,7 +450,7 @@ public sealed class LineageParityShapeSweepTests
                 FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -463,7 +463,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_Flags AS SELECT IsActive & 1 AS Masked FROM dbo.Flags;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -480,7 +480,7 @@ public sealed class LineageParityShapeSweepTests
                 FROM dbo.Users u LEFT JOIN dbo.UserFlags f ON f.UserId = u.UserId;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -494,7 +494,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT CategoryId, SUM(Score) AS TotalScore FROM dbo.Ratings GROUP BY CategoryId;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -508,7 +508,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT TotalScore FROM (SELECT SUM(Score) AS TotalScore FROM dbo.Ratings) x;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -525,7 +525,7 @@ public sealed class LineageParityShapeSweepTests
                 FROM dbo.Users u LEFT JOIN dbo.UserRatings r ON r.UserId = u.UserId;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -543,7 +543,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT CAST(OrderId AS VARCHAR(20)) AS Code FROM dbo.LegacyOrders;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -558,7 +558,7 @@ public sealed class LineageParityShapeSweepTests
             );
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -577,7 +577,7 @@ public sealed class LineageParityShapeSweepTests
             END;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -590,7 +590,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_InvoicesConverted AS SELECT Amount / Rate AS ConvertedAmount FROM dbo.Invoices;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -604,7 +604,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT CASE WHEN Amount > 0 THEN Amount ELSE Tax END AS PrimaryAmount FROM dbo.Invoices;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -622,7 +622,7 @@ public sealed class LineageParityShapeSweepTests
                 FROM dbo.vw_EventDatesInner;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -635,7 +635,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_EventDates AS SELECT CAST(OccurredAt AS DATE) AS OccurredOn FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -648,7 +648,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_Events AS SELECT COALESCE(OccurredAt, '2020-01-01') AS OccurredAt FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -661,7 +661,7 @@ public sealed class LineageParityShapeSweepTests
             CREATE VIEW dbo.vw_Events AS SELECT ISNULL(OccurredAt, '2020-01-01') AS OccurredAt FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -679,7 +679,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT OccurredOnText FROM dbo.vw_EventsLayer2 WHERE OccurredOnText >= '2020-01-01';
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -693,7 +693,7 @@ public sealed class LineageParityShapeSweepTests
                 SELECT OccurredAt, DATEDIFF_BIG(second, OccurredAt, GETDATE()) AS AgeSeconds FROM dbo.Events;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 
     [Fact]
@@ -709,6 +709,6 @@ public sealed class LineageParityShapeSweepTests
                 ) x;
             """);
 
-        Assert.Empty(result.LineageParityMismatches);
+        Assert.Empty(result.LineageParity.Mismatches);
     }
 }

@@ -25,7 +25,9 @@ public sealed class ReadableLiveScanWriterTests
         IReadOnlyList<LiveLineageParityMismatch>? mismatches = null,
         IReadOnlyList<UnanalyzableModule>? unanalyzable = null,
         IReadOnlyList<WorkloadFinding>? workloadFindings = null) =>
-        new(await EmptyReport(), Catalog, ModulesAnalyzed: 7, mismatches ?? [], unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? []);
+        new(await EmptyReport(), Catalog, ModulesAnalyzed: 7,
+            new LiveLineageParityReport(mismatches ?? [], [], [], []),
+            unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? []);
 
     [Fact]
     public async Task CatalogSummary_SaysWhatWasReadAndThatNothingWasExecuted()
@@ -45,11 +47,11 @@ public sealed class ReadableLiveScanWriterTests
             "srv/shop",
             ReadableStyle.Text);
 
-        Assert.Contains("View type mismatches against the server's own metadata (1)", rendered, StringComparison.Ordinal);
+        Assert.Contains("Column types this tool got wrong (1)", rendered, StringComparison.Ordinal);
         Assert.Contains("dbo.vw_Orders.OrderCode", rendered, StringComparison.Ordinal);
-        Assert.Contains("That is a bug in this tool", rendered, StringComparison.Ordinal);
+        Assert.Contains("a genuine inference bug in this tool", rendered, StringComparison.Ordinal);
         Assert.True(
-            rendered.IndexOf("View type mismatches", StringComparison.Ordinal) < rendered.IndexOf("Summary", StringComparison.Ordinal),
+            rendered.IndexOf("Column types this tool got wrong", StringComparison.Ordinal) < rendered.IndexOf("Summary", StringComparison.Ordinal),
             "the parity warning must come before the findings it casts doubt on");
     }
 

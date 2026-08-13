@@ -69,4 +69,40 @@ public sealed class LiveReadOnlyGuardTests
 
         Assert.Throws<InvalidOperationException>(() => connection.CreateReadOnlyCommand("DROP TABLE dbo.T;"));
     }
+
+    // The live lineage parity gate's ground truth (SilentScan.Live.Catalog.LiveDescribedColumnReader)
+    // describes views/inline TVFs via sys.dm_exec_describe_first_result_set - compile-only, never
+    // executing the described batch. Pinned here first because everything built on top of it
+    // assumes the guard accepts these exact shapes.
+    [Fact]
+    public void AssertSelectOnly_ViewDescribeBatchCrossApply_DoesNotThrow() =>
+        LiveReadOnlyGuard.AssertSelectOnly("""
+            SELECT s.name AS schema_name, o.name AS object_name,
+                   r.error_number, r.error_message,
+                   r.name AS column_name, ty.name AS type_name, r.max_length, r.precision, r.scale, r.collation_name
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            CROSS APPLY sys.dm_exec_describe_first_result_set(
+                N'SELECT * FROM ' + QUOTENAME(s.name) + N'.' + QUOTENAME(o.name), NULL, 0) r
+            LEFT JOIN sys.types ty ON ty.user_type_id = r.system_type_id
+            WHERE o.type = 'V' AND o.is_ms_shipped = 0
+            ORDER BY o.object_id, r.column_ordinal;
+            """);
+
+    [Fact]
+    public void AssertSelectOnly_FunctionDescribeByParameterizedProbeText_DoesNotThrow() =>
+        LiveReadOnlyGuard.AssertSelectOnly("""
+            SELECT r.error_number, r.error_message,
+                   r.name AS column_name, ty.name AS type_name, r.max_length, r.precision, r.scale, r.collation_name
+            FROM sys.dm_exec_describe_first_result_set(@probeText, NULL, 0) r
+            LEFT JOIN sys.types ty ON ty.user_type_id = r.system_type_id
+            ORDER BY r.column_ordinal;
+            """);
+
+    [Theory]
+    [InlineData("SELECT * FROM [dbo].[vw_Orders];")]
+    [InlineData("SELECT * FROM [dbo].[fn_Orders](CAST(NULL AS INT), CAST(NULL AS VARCHAR(50)));")]
+    [InlineData("SELECT * FROM [dbo].[fn_NoArgs]();")]
+    public void AssertSelectOnly_SynthesizedDescribeProbeText_DoesNotThrow(string probeText) =>
+        LiveReadOnlyGuard.AssertSelectOnly(probeText);
 }

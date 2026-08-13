@@ -15,6 +15,8 @@ namespace SilentScan.Live;
 /// </summary>
 public static class ReadableLiveScanWriter
 {
+    private const string ColumnHeading = "Column";
+
     /// <summary>
     /// Names the scanned target for the report heading, from the connection string's server and
     /// database only - never the whole connection string, which would put any credentials in it
@@ -77,23 +79,47 @@ public static class ReadableLiveScanWriter
 
     private static IEnumerable<ReadableBlock> LineageParity(LiveScanResult result)
     {
-        if (result.LineageParityMismatches.Count == 0)
+        var parity = result.LineageParity;
+
+        if (parity.Mismatches.Count > 0)
         {
-            yield break;
+            yield return new ReadableBlock.Heading(2, $"Column types this tool got wrong ({parity.Mismatches.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "Verified against the type the server computes for this object right now (sys.dm_exec_describe_first_result_set), not against its cached sys.columns metadata, so this is a genuine inference bug in this tool. Every finding below that touches one of these columns rests on a type the pipeline got wrong - read them as suspect until this is fixed. This is the only category that fails the scan.");
+            yield return new ReadableBlock.Table(
+                ["View column", "Facet", "Inferred", "Live"],
+                [.. parity.Mismatches.Select(m => new List<string> { $"{m.QualifiedViewName}.{m.ColumnName}", m.Facet, m.InferredValue, m.ActualValue })]);
         }
 
-        yield return new ReadableBlock.Heading(2, $"View type mismatches against the server's own metadata ({result.LineageParityMismatches.Count})");
-        yield return new ReadableBlock.Paragraph(
-            "The type this tool inferred for a view column disagrees with what sys.columns reports. That is a bug in this tool, not in the scanned database, and every finding below that touches one of these columns rests on a type the pipeline got wrong - read them as suspect until this is fixed.");
-        yield return new ReadableBlock.Table(
-            ["View column", "Facet", "Inferred", "Actual"],
-            [.. result.LineageParityMismatches.Select(m => new List<string>
-            {
-                $"{m.QualifiedViewName}.{m.ColumnName}",
-                m.Facet,
-                m.InferredValue,
-                m.ActualValue,
-            })]);
+        if (parity.UncompilableObjects.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(2, $"Objects the server cannot compile ({parity.UncompilableObjects.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "These views/functions do not currently compile - most often they reference something that no longer exists - so the server itself cannot describe them and nothing in this report covers their columns. That is a condition of the scanned database, not a bug in this tool, so it does not fail the scan. Their cached sys.columns metadata is a fossil from when they last compiled successfully.");
+            yield return new ReadableBlock.Table(
+                ["Object", "Error", "Message"],
+                [.. parity.UncompilableObjects.Select(u => new List<string> { u.QualifiedViewName, u.ErrorNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), u.ErrorMessage })]);
+        }
+
+        if (parity.StaleCachedMetadata.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(2, $"Objects whose cached metadata is out of date ({parity.StaleCachedMetadata.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "The server's cached column metadata for these objects disagrees with what it computes for them now - a base column's type changed after the object was created, and SQL Server does not refresh a view's or function's own cached metadata when that happens. This tool's inference agrees with the live answer, so nothing here is a finding - it is a maintenance signal for whoever owns the database (sp_refreshview / sp_refreshsqlmodule). Anything else reading these objects' metadata rather than querying them directly will see the stale type.");
+            yield return new ReadableBlock.Table(
+                [ColumnHeading, "Facet", "Cached", "Live"],
+                [.. parity.StaleCachedMetadata.Select(s => new List<string> { $"{s.QualifiedViewName}.{s.ColumnName}", s.Facet, s.CachedValue, s.LiveValue })]);
+        }
+
+        if (parity.Unverified.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(2, $"Columns that could not be live-verified ({parity.Unverified.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "This tool's inference disagrees with the object's cached sys.columns metadata, but the object could not be verified against a live answer - listed rather than dropped so nothing above is read as covering them.");
+            yield return new ReadableBlock.Table(
+                [ColumnHeading, "Why", "Inferred", "Cached"],
+                [.. parity.Unverified.Select(u => new List<string> { $"{u.QualifiedViewName}.{u.ColumnName}", u.Reason, u.InferredValue, u.CachedValue })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> PlanCacheEvidence(LiveScanResult result)
@@ -121,7 +147,7 @@ public static class ReadableLiveScanWriter
         if (observed.Count > 0)
         {
             yield return new ReadableBlock.Table(
-                ["Column", "Where", "Executions"],
+                [ColumnHeading, "Where", "Executions"],
                 [.. observed
                     .OrderByDescending(f => f.ObservedExecutionCount)
                     .ThenBy(f => f.Finding.SourcePath, StringComparer.Ordinal)
@@ -153,7 +179,7 @@ public static class ReadableLiveScanWriter
         yield return new ReadableBlock.Paragraph(
             "The live plan cache shows these columns converting in a real, currently-cached query plan, but no CREATE PROCEDURE/VIEW/FUNCTION body this scan read produced a matching finding - almost always ad-hoc, parameterized SQL sent directly from application code rather than a stored procedure. Confirmed by the plan itself, not a static inference.");
         yield return new ReadableBlock.Table(
-            ["Column", "Indexed", "Outcome", "Executions"],
+            [ColumnHeading, "Indexed", "Outcome", "Executions"],
             [.. result.WorkloadFindings
                 .OrderByDescending(f => f.ExecutionCount)
                 .Select(f => new List<string>

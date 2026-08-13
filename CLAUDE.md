@@ -33,6 +33,9 @@ to remember to keep alive.
 
 When you have to make code changes and are just moving to the next stage and all that you have to ask from me is yes, never stop for me in such situations - just continue working.
 
+# remote database
+When working with a remote database, make sure that no information about the schema of the remote database is leaked into the tests or comments or commit messages or any other place.
+
 ## Hard scope (do not revisit without asking)
 
 * SQL Server / T-SQL only. Parser is `Microsoft.SqlServer.TransactSql.ScriptDom`.
@@ -43,7 +46,12 @@ When you have to make code changes and are just moving to the next stage and all
 * A connected live database (`scan-db`) is scanned **read-only**: only
   catalog/metadata `SELECT` queries are issued, enforced in code
   (`LiveReadOnlyGuard`) rather than left to review alone - no DDL, no DML,
-  nothing from a target database is ever executed.
+  nothing from a target database is ever executed. `sys.dm_exec_describe_first_result_set`
+  is within this rule: it parses, binds, and compiles the batch text it's handed
+  and returns result-set metadata **without executing it** - no rows from any
+  user table, same compile-only principle as the Verify oracle's `SET
+  SHOWPLAN_XML` probes. The probe text handed to it is itself asserted
+  SELECT-only by `LiveReadOnlyGuard` before being bound as a parameter.
 * .NET 10, C#. Ubuntu; Docker assumed available.
 * Corpus stays at the pinned 5-repo pilot set unless we decide otherwise.
 * **Everything goes via the database — no file-parsed catalog, no file-only
@@ -123,7 +131,26 @@ never silently counted as clean. Soundness first: no heuristic string guessing.
 * Per repo: deploy DDL to a fresh database → diff inferred view column
   types/collations against `sys.columns` (any mismatch is a P0 lineage bug) →
   for each `ScanForced` finding, submit a self-authored probe `SELECT` under
-  `SET SHOWPLAN_XML ON` (compile-only, empty tables).
+  `SET SHOWPLAN_XML ON` (compile-only, empty tables). This plain `sys.columns`
+  diff is sound here specifically because the DDL was just deployed and
+  nothing has been alter'd since - staleness is structurally impossible in a
+  freshly-provisioned disposable database.
+* `scan-db`'s own lineage parity gate cannot make that assumption - a live
+  target may have had a base column retyped years after a view over it was
+  last created or altered, and SQL Server never refreshes a view's/inline
+  TVF's own cached column metadata when that happens (short of
+  `sp_refreshview`/`sp_refreshsqlmodule`). So for a view or inline TVF, ground
+  truth is what the engine computes for that object **right now**
+  (`sys.dm_exec_describe_first_result_set`), never its cached `sys.columns`
+  row. A disagreement with the live answer is a P0 lineage bug and fails the
+  scan. An object the server can no longer compile at all, and an object
+  whose cached metadata has merely drifted from a live answer this tool's own
+  inference agrees with, are conditions of the scanned database, not bugs in
+  this tool - both are reported prominently but neither fails the scan. Base
+  tables and multi-statement TVFs keep the plain `sys.columns`/authored-shape
+  diff: a base table's `sys.columns` *is* its definition, and a
+  multi-statement TVF's shape is its own authored `RETURNS @t TABLE(...)`
+  clause, so staleness cannot occur for either.
 * Static verdicts never depend on the cardinality estimator — they state what
   the predicate makes possible for the engine. Benchmarks pin compat level 160
   and MAXDOP 1, and sweep both CE modes and both collation families so the
