@@ -30,18 +30,26 @@ public sealed class LiveLineageParityChecker
     {
         var mismatches = new List<LiveLineageParityMismatch>();
 
+        // Every relation this gate will actually diff, resolved up front so the read below can
+        // discard the (far larger) set of columns belonging to objects lineage never resolved,
+        // without materializing them. Cyclic views are excluded here rather than mid-loop: their
+        // inferred types are meaningless, so fetching their columns would be wasted work.
+        var wanted = lineage.AllRelations.Keys
+            .Where(name => name is not null && !lineage.CyclicViews.Contains(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0)
+        {
+            return mismatches;
+        }
+
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
+        var actualByObject = await ReadAllColumnsAsync(connection, wanted, cancellationToken);
+
         foreach (var (qualifiedName, relation) in lineage.AllRelations.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {
-            if (qualifiedName is null || lineage.CyclicViews.Contains(qualifiedName))
-            {
-                continue;
-            }
-
-            var actualColumns = await ReadColumnsAsync(connection, qualifiedName, cancellationToken);
-            if (actualColumns.Count == 0)
+            if (qualifiedName is null || !actualByObject.TryGetValue(qualifiedName, out var actualColumns))
             {
                 // Not every resolved relation is a real server object (derived tables, MSTVFs
                 // that never became one) - absence here is not itself a mismatch.
@@ -68,41 +76,57 @@ public sealed class LiveLineageParityChecker
         return mismatches;
     }
 
-    private static async Task<Dictionary<string, ActualColumn>> ReadColumnsAsync(
-        SqlConnection connection, string schemaQualifiedObjectName, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads every relevant object's columns in ONE round trip, keyed by the same
+    /// <c>schema.object</c> form <see cref="SchemaObjectNameHelper.Qualify"/> produces for
+    /// lineage keys. This used to be a per-relation <c>OBJECT_ID(@objectName)</c> query issued
+    /// sequentially on a single connection - on a database with thousands of views that is
+    /// thousands of serial round trips, so the gate's wall-clock was dominated by network
+    /// latency rather than by any work. Rows for objects lineage did not resolve are skipped as
+    /// they stream past, so peak memory tracks the number of resolved relations, not the number
+    /// of columns in the database.
+    /// </summary>
+    private static async Task<Dictionary<string, Dictionary<string, ActualColumn>>> ReadAllColumnsAsync(
+        SqlConnection connection, HashSet<string> wanted, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT c.name AS column_name, ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name
+            SELECT s.name AS schema_name, o.name AS object_name,
+                   c.name AS column_name, ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name
             FROM sys.columns c
+            JOIN sys.objects o ON o.object_id = c.object_id
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
-            WHERE c.object_id = OBJECT_ID(@objectName)
-            ORDER BY c.column_id;
+            WHERE o.is_ms_shipped = 0
+            ORDER BY o.object_id, c.column_id;
             """;
 
         await using var command = connection.CreateReadOnlyCommand(sql);
-        command.Parameters.AddWithValue("@objectName", schemaQualifiedObjectName);
 
-        var columns = new Dictionary<string, ActualColumn>(StringComparer.OrdinalIgnoreCase);
-        try
+        var byObject = new Dictionary<string, Dictionary<string, ActualColumn>>(StringComparer.OrdinalIgnoreCase);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
         {
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            if (!wanted.Contains(qualifiedName))
             {
-                var name = reader.GetString(0);
-                columns[name] = new ActualColumn(
-                    TypeName: reader.GetString(1),
-                    MaxLength: reader.GetInt16(2),
-                    Precision: reader.GetByte(3),
-                    Scale: reader.GetByte(4),
-                    CollationName: await reader.IsDBNullAsync(5, cancellationToken) ? null : reader.GetString(5));
+                continue;
             }
-        }
-        catch (SqlException)
-        {
-            // An invalid/unresolvable object name for OBJECT_ID is not itself a parity mismatch.
+
+            if (!byObject.TryGetValue(qualifiedName, out var columns))
+            {
+                columns = new Dictionary<string, ActualColumn>(StringComparer.OrdinalIgnoreCase);
+                byObject[qualifiedName] = columns;
+            }
+
+            columns[reader.GetString(2)] = new ActualColumn(
+                TypeName: reader.GetString(3),
+                MaxLength: reader.GetInt16(4),
+                Precision: reader.GetByte(5),
+                Scale: reader.GetByte(6),
+                CollationName: await reader.IsDBNullAsync(7, cancellationToken) ? null : reader.GetString(7));
         }
 
-        return columns;
+        return byObject;
     }
 
     private static void CheckColumn(string qualifiedName, string columnName, SqlType inferredType, ActualColumn actual, List<LiveLineageParityMismatch> mismatches)

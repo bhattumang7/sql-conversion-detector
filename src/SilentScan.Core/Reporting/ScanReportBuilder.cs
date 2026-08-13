@@ -32,10 +32,34 @@ public static class ScanReportBuilder
     /// is computed, so that summary's own denominator - "how many comparisons were classified at
     /// all" - stays complete regardless of what the caller chooses to have reported.
     /// </param>
-    public static ScanReport BuildFromParseResults(IReadOnlyList<SqlParseResult> allParseResults, DatabaseCatalog catalog, FindingConfidence minimumConfidence = FindingConfidence.High)
+    /// <param name="resolvedLineage">
+    /// An already-resolved lineage catalog for exactly these parse results and this catalog, when
+    /// the caller has one. <c>LiveScanRunner</c> must resolve lineage itself to run the live
+    /// parity gate before the report is built; passing that same instance back in here avoids
+    /// resolving it a second time, which on a large database is one of the two most expensive
+    /// passes run twice for no benefit. Pass <see langword="null"/> (the default) and this
+    /// method resolves its own, exactly as it always has.
+    /// </param>
+    /// <param name="progress">Stage progress sink; defaults to no output.</param>
+    public static ScanReport BuildFromParseResults(
+        IEnumerable<SqlParseResult> allParseResults,
+        DatabaseCatalog catalog,
+        FindingConfidence minimumConfidence = FindingConfidence.High,
+        LineageCatalog? resolvedLineage = null,
+        IScanProgress? progress = null)
     {
+        progress ??= NullScanProgress.Instance;
         var fileHealth = new List<FileParseHealth>();
-        var usableParseResults = new List<SqlParseResult>();
+
+        // AST-free: only the source path of every usable file survives this streaming pass, not
+        // the SqlParseResult/Fragment itself. On a live-mode scan, allParseResults is a lazy,
+        // re-enumerable query that reparses from cheap retained module text on every enumeration
+        // (LiveScanRunner) - retaining the parsed objects here, even briefly, would defeat that:
+        // usableParseResults below stays a live QUERY, not a materialized list, specifically so
+        // every downstream phase gets its own fresh reparse-and-discard rather than sharing one
+        // list of every module's AST held for the whole method.
+        var usableSourcePaths = new HashSet<string>(StringComparer.Ordinal);
+        var usableCount = 0;
 
         foreach (var result in allParseResults)
         {
@@ -52,9 +76,18 @@ public static class ScanReportBuilder
             // either way.
             if (result.BatchCount > 0)
             {
-                usableParseResults.Add(result);
+                usableSourcePaths.Add(result.SourcePath);
+                usableCount++;
             }
         }
+
+        // A lazy query, not a materialized list: every enumeration below re-walks
+        // allParseResults from scratch (a fresh reparse, for live mode) and filters to the
+        // usable subset, rather than all sharing one list of every module's AST held alive for
+        // the whole method. Declared once and reused BY REFERENCE so every phase below still
+        // reads identically to before; only its TYPE (a query, not a list) changed.
+        IEnumerable<SqlParseResult> usableParseResults =
+            allParseResults.Where(r => usableSourcePaths.Contains(r.SourcePath));
 
         // Lineage needs every cleanly-parsed file together, so views can resolve against tables
         // (and other views) declared in a different file. Resolved before Tier-1 scanning (which
@@ -63,10 +96,26 @@ public static class ScanReportBuilder
         // instead of none at all. Also resolved before the dynamic SQL scan below - the call
         // graph a proc-body parameter seed needs (ProcCallGraphBuilder.Build) requires
         // TryGetProcedureParameters, which requires the catalog the caller already supplied.
-        var lineage = LineageResolver.Resolve(catalog, usableParseResults);
+        LineageCatalog lineage;
+        if (resolvedLineage is not null)
+        {
+            lineage = resolvedLineage;
+        }
+        else
+        {
+            using var lineageStage = progress.Begin("resolving lineage");
+            lineage = LineageResolver.Resolve(catalog, usableParseResults);
+            lineageStage.Complete($"{lineage.AllRelations.Count:N0} relations");
+        }
 
         var callGraphLedger = new SkipLedger();
-        var procCallGraph = ProcCallGraphBuilder.Build(usableParseResults, catalog, callGraphLedger);
+        ProcCallGraph procCallGraph;
+        using (var callGraphStage = progress.Begin("building call graph"))
+        {
+            procCallGraph = ProcCallGraphBuilder.Build(usableParseResults, catalog, callGraphLedger);
+            callGraphStage.Complete($"{procCallGraph.Edges.Count:N0} edges");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
 
         // OUTPUT-parameter tracking (roadmap "trace a constant OUTPUT value across a proc-call
         // edge"): an ordinary `EXEC dbo.Helper @out = @var OUTPUT` can only seed the CALLER's
@@ -80,23 +129,57 @@ public static class ScanReportBuilder
         const int maxOutputSummaryRounds = 5;
         var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>();
         List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
-        for (var round = 0; round < maxOutputSummaryRounds; round++)
+        using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
         {
-            dynamicSqlExtractions = usableParseResults
-                .Select(r => DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog))
-                .ToList();
-
-            var discoveredCount = outputSummaryIndex.Count;
-            foreach (var summary in dynamicSqlExtractions.SelectMany(r => r.OutputSummaries))
+            var rounds = 0;
+            for (var round = 0; round < maxOutputSummaryRounds; round++)
             {
-                outputSummaryIndex[(summary.QualifiedName, summary.ParameterName)] = summary.PossibleValues;
+                rounds = round + 1;
+
+                // Each round is independent per parse result (the shared outputSummaryIndex is
+                // read-only for the duration of a round and only folded in afterward), so the
+                // round itself parallelizes even though the rounds are inherently sequential.
+                // This loop re-scans every module up to five times and was the one remaining
+                // single-threaded pass over the whole database.
+                // usableParseResults is a lazy query (see its declaration above), so each round's
+                // enumeration below independently re-walks it - for a live-mode scan, that means a
+                // fresh reparse from cheap retained module text every round, up to 5x total parse
+                // CPU in the worst case, in exchange for never holding every module's AST across
+                // all 5 rounds simultaneously. Cheap in practice: the early-exit just below means
+                // most real scans finish in 1-2 rounds, and a reparse of a real database's whole
+                // module corpus measured in low single-digit seconds.
+                // AsOrdered, unlike the Tier-1/typed passes below: those feed lists that get
+                // sorted deterministically before reporting, but this one folds its results into
+                // outputSummaryIndex, where two modules summarizing the SAME (proc, parameter)
+                // key resolve last-writer-wins. Unordered completion would make which summary
+                // survives depend on thread scheduling - a real determinism break, not a
+                // cosmetic one.
+                dynamicSqlExtractions = usableParseResults
+                    .AsParallel()
+                    .AsOrdered()
+                    .Select(r =>
+                    {
+                        var scanned = DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog);
+                        dynamicStage.Advance();
+                        return scanned;
+                    })
+                    .ToList();
+
+                var discoveredCount = outputSummaryIndex.Count;
+                foreach (var summary in dynamicSqlExtractions.SelectMany(r => r.OutputSummaries))
+                {
+                    outputSummaryIndex[(summary.QualifiedName, summary.ParameterName)] = summary.PossibleValues;
+                }
+
+                if (outputSummaryIndex.Count == discoveredCount)
+                {
+                    break;
+                }
             }
 
-            if (outputSummaryIndex.Count == discoveredCount)
-            {
-                break;
-            }
+            dynamicStage.Complete($"{rounds} round{(rounds == 1 ? "" : "s")} over {usableCount:N0} modules");
         }
+        PhaseMemory.ReleaseBetweenPhases();
 
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
         var dynamicSqlScripts = dynamicSqlExtractions.SelectMany(r => r.AnalyzableScripts).ToList();
@@ -135,25 +218,43 @@ public static class ScanReportBuilder
             callerScopeByCalleeScope[group.Key] = group.Select(e => e.CallerScopeQualifiedName!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        var tier1PerFile = usableParseResults
-            .AsParallel()
-            .Select(r =>
-            {
-                var fileLedger = new SkipLedger();
-                var findings = NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope).ToList();
-                return (Findings: findings, Skipped: fileLedger.Entries);
-            })
-            .ToList();
+        List<(List<SargabilityFinding> Findings, IReadOnlyList<SkippedConstruct> Skipped)> tier1PerFile;
+        using (var tier1Stage = progress.Begin("scanning syntactic predicates", usableCount))
+        {
+            tier1PerFile = usableParseResults
+                .AsParallel()
+                .Select(r =>
+                {
+                    var fileLedger = new SkipLedger();
+                    var findings = NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope).ToList();
+                    tier1Stage.Advance();
+                    return (Findings: findings, Skipped: fileLedger.Entries);
+                })
+                .ToList();
+        }
+
         var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
         var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
+        PhaseMemory.ReleaseBetweenPhases();
 
-        var extractionResults = usableParseResults.AsParallel()
-            .Select(r => TypedPredicateExtractor.Extract(r, catalog, lineage, callerScopeByCalleeScope: callerScopeByCalleeScope))
-            .ToList();
+        List<PredicateExtractionResult> extractionResults;
+        using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
+        {
+            extractionResults = usableParseResults.AsParallel()
+                .Select(r =>
+                {
+                    var extracted = TypedPredicateExtractor.Extract(r, catalog, lineage, callerScopeByCalleeScope: callerScopeByCalleeScope);
+                    typedStage.Advance();
+                    return extracted;
+                })
+                .ToList();
+        }
         var typedFindings = extractionResults.SelectMany(r => r.TypedFindings).ToList();
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
         var collationConflictFindings = extractionResults.SelectMany(r => r.CollationConflictFindings).ToList();
         var writeLossFindings = extractionResults.SelectMany(r => r.WriteLossFindings).ToList();
+        PhaseMemory.ReleaseBetweenPhases();
+
         var skippedConstructs = new List<SkippedConstruct>();
         skippedConstructs.AddRange(catalog.Skipped.Entries);
         skippedConstructs.AddRange(lineage.Skipped.Entries);

@@ -1,6 +1,8 @@
 using System.CommandLine;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Reporting.Sarif;
 using SilentScan.Live;
 
@@ -92,10 +94,16 @@ public static class ScanDbCommand
             return 1;
         }
 
+        // Progress goes to stderr, never stdout: a large-database scan runs for minutes and used
+        // to print nothing at all until the finished report appeared, but the report itself is
+        // piped (--format json/sarif), so the two streams must stay separate.
+        var progress = new TextWriterScanProgress(stderr);
+        var overall = Stopwatch.StartNew();
+
         LiveScanResult result;
         try
         {
-            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, minimumConfidence, cancellationToken);
+            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, minimumConfidence, progress, cancellationToken);
         }
         catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
         {
@@ -103,17 +111,29 @@ public static class ScanDbCommand
             return 1;
         }
 
-        var content = reportFormat switch
+        // Rendering is its own reported stage rather than silent tail-time. On a database with a
+        // large finding count, serializing the report and writing it out is a substantial share
+        // of total wall clock - measured at roughly a third of a real run - and reporting "done"
+        // before it started meant the tool looked finished while it still had seconds of work
+        // left, which is exactly the "takes ages to output anything" symptom.
+        string content;
+        using (var renderStage = progress.Begin("rendering report"))
         {
-            ReportFormat.Sarif => SarifReportWriter.Write(result.Report),
-            ReportFormat.Json => JsonSerializer.Serialize(result, JsonOptions),
-            _ => ReadableLiveScanWriter.Write(result, ReadableLiveScanWriter.DescribeTarget(connectionString), ReportOutput.ToStyle(reportFormat)),
-        };
+            content = reportFormat switch
+            {
+                ReportFormat.Sarif => SarifReportWriter.Write(result.Report),
+                ReportFormat.Json => JsonSerializer.Serialize(result, JsonOptions),
+                _ => ReadableLiveScanWriter.Write(result, ReadableLiveScanWriter.DescribeTarget(connectionString), ReportOutput.ToStyle(reportFormat)),
+            };
+            renderStage.Complete($"{options.Format}, {content.Length:N0} chars");
+        }
 
         if (!ReportOutput.Emit(content, options.OutputPath, stdout, stderr))
         {
             return 1;
         }
+
+        progress.Done(overall.Elapsed);
 
         // Non-zero on a P0 lineage bug (CLAUDE.md: "any mismatch is a P0 lineage bug") in
         // addition to a hard connection/read failure - findings built on a type the pipeline

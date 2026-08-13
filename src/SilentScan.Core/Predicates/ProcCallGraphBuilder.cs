@@ -20,7 +20,7 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class ProcCallGraphBuilder
 {
-    public static ProcCallGraph Build(IReadOnlyList<SqlParseResult> parseResults, DatabaseCatalog catalog, SkipLedger ledger)
+    public static ProcCallGraph Build(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog, SkipLedger ledger)
     {
         var edges = new List<ProcCallEdge>();
         foreach (var result in parseResults)

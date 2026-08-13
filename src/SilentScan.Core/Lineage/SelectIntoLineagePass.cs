@@ -33,7 +33,7 @@ namespace SilentScan.Core.Lineage;
 /// </summary>
 public static class SelectIntoLineagePass
 {
-    public static void Apply(DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyList<SqlParseResult> parseResults)
+    public static void Apply(DatabaseCatalog catalog, LineageCatalog lineage, IEnumerable<SqlParseResult> parseResults)
     {
         foreach (var result in parseResults)
         {
