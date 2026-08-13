@@ -28,6 +28,9 @@ namespace SilentScan.Core.Diagnostics;
 public static class PhaseMemory
 {
     /// <summary>Blocking, compacting Gen2 collection - see the type-level doc comment for why this specific, unusual call is justified here and nowhere else in this codebase.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Major Code Smell", "S1215:\"GC.Collect\" should not be called",
+        Justification = "The type-level doc comment records the direct measurements: without this call at phase boundaries, a scan's peak RSS did not measurably drop no matter how much became garbage (2.5GB peak either way); with it, per-phase RSS measured 116-225MB and overall peak fell 43-48%. This class exists precisely to make that one exception explicit, documented, and single-sited.")]
     public static void ReleaseBetweenPhases() =>
         GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
 }

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using SilentScan.Core.Diagnostics;
 
 namespace SilentScan.Tests.Diagnostics;
@@ -106,8 +105,10 @@ public sealed class ScanProgressTests
         stage.Dispose();
         stage.Dispose();
 
-        Assert.Single(Regex.Matches(writer.ToString(), "resolving lineage"));
-        Assert.Single(writer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        // Exactly one emitted line, and the stage name appears on it - a second Dispose writing
+        // a duplicate line would fail the line count, so no regex occurrence-counting is needed.
+        var line = Assert.Single(writer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("resolving lineage", line, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -47,7 +47,7 @@ public sealed class NullScanProgress : IScanProgress
     }
 
     /// <inheritdoc />
-    public IScanStage Begin(string name, int? total = null) => NullScanStage.Instance;
+    public IScanStage Begin(string name, int? total = null) => NullScanStage.Shared;
 
     /// <inheritdoc />
     public void Done(TimeSpan elapsed)
@@ -56,7 +56,7 @@ public sealed class NullScanProgress : IScanProgress
 
     private sealed class NullScanStage : IScanStage
     {
-        internal static readonly NullScanStage Instance = new();
+        internal static readonly NullScanStage Shared = new();
 
         public void Advance(int count = 1)
         {
@@ -180,8 +180,16 @@ public sealed class TextWriterScanProgress : IScanProgress
             // someone whose scan just failed. Emit the elapsed time alone and let the error that
             // follows speak for itself.
             var advanced = Volatile.Read(ref _advanced);
-            var detail = _detail
-                ?? (_total is not null ? $"{advanced:N0}/{_total.Value:N0}" : advanced > 0 ? $"{advanced:N0}" : null);
+            var detail = _detail;
+            if (detail is null && _total is not null)
+            {
+                detail = $"{advanced:N0}/{_total.Value:N0}";
+            }
+            else if (detail is null && advanced > 0)
+            {
+                detail = $"{advanced:N0}";
+            }
+
             var suffix = detail is null ? string.Empty : detail + " ";
 
             lock (_owner._gate)
