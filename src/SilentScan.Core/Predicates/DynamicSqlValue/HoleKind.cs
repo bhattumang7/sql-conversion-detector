@@ -38,4 +38,7 @@ public enum HoleKind
 
     /// <summary>A column reference inside a `SELECT @var = expr FROM &lt;single catalog-known table&gt;` assignment - the column's own catalog type is a hard fact, but which ROW's value it holds is data-dependent (CLAUDE.md: corpus DML never executes), so only the type transfers.</summary>
     RowDependentColumn,
+
+    /// <summary>A call to a user-defined scalar function this scanner does not know how to evaluate, but whose RETURNS clause is a hard fact the catalog already read from its CREATE/ALTER FUNCTION DDL - the function's own body (and therefore its actual return VALUE) is never inspected, only its declared type.</summary>
+    UserFunctionDeclaredReturnType,
 }

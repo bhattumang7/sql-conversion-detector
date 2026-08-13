@@ -428,6 +428,32 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(HoleKind.EnvironmentDependent, withoutArg.Kind);
     }
 
+    /// <summary>
+    /// Oracle-verified (sys.dm_exec_describe_first_result_set, compat 160): every one of these
+    /// session/environment name-lookup builtins returns a fixed nvarchar(128) - ORIGINAL_LOGIN()
+    /// alone is nvarchar(4000) - regardless of arguments, since they read session/server state
+    /// this scanner could never have folded from source text. Same EnvironmentDependent treatment
+    /// as SERVERPROPERTY: a real T-SQL guarantee on the TYPE, never the VALUE.
+    /// </summary>
+    [Theory]
+    [InlineData("DB_NAME", 128)]
+    [InlineData("USER_NAME", 128)]
+    [InlineData("SUSER_SNAME", 128)]
+    [InlineData("SUSER_NAME", 128)]
+    [InlineData("APP_NAME", 128)]
+    [InlineData("HOST_NAME", 128)]
+    [InlineData("SCHEMA_NAME", 128)]
+    [InlineData("ORIGINAL_LOGIN", 4000)]
+    public void EnvironmentNameBuiltin_NoArguments_ProducesEnvironmentDependentTypedHole(string function, int expectedLength)
+    {
+        var result = BuiltinRegistry.Fold(Call(function));
+
+        var hole = OkHole(result);
+        Assert.Equal(SqlTypeCategory.NVarChar, hole.Type.Category);
+        Assert.Equal(expectedLength, hole.Type.Length);
+        Assert.Equal(HoleKind.EnvironmentDependent, hole.Kind);
+    }
+
     [Fact]
     public void UnknownFunction_DeclinesGenericNonLiteralFunctionCall()
     {

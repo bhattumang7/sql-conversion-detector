@@ -309,7 +309,7 @@ public static class DynamicSqlTransfer
                 continue;
             }
 
-            var folded = ExpressionEvaluator.Fold(element.Value, state, context.SourcePath, context.Cap);
+            var folded = ExpressionEvaluator.Fold(element.Value, state, context.SourcePath, context.Cap, context.Catalog);
             state[name] = folded with { DeclaredType = declaredType };
         }
     }
@@ -336,7 +336,7 @@ public static class DynamicSqlTransfer
             return;
         }
 
-        var rhs = ExpressionEvaluator.Fold(expression, state, context.SourcePath, context.Cap);
+        var rhs = ExpressionEvaluator.Fold(expression, state, context.SourcePath, context.Cap, context.Catalog);
 
         if (kind == AssignmentKind.AddEquals)
         {
@@ -515,7 +515,7 @@ public static class DynamicSqlTransfer
         SqlTextValue combined = new SqlTextValue.Template([]);
         foreach (var element in stringList.Strings)
         {
-            combined = SqlTextValue.Concat(combined, ExpressionEvaluator.Fold(element, state, context.SourcePath, context.Cap));
+            combined = SqlTextValue.Concat(combined, ExpressionEvaluator.Fold(element, state, context.SourcePath, context.Cap, context.Catalog));
             if (combined is SqlTextValue.Tainted)
             {
                 break;
@@ -546,7 +546,7 @@ public static class DynamicSqlTransfer
             return;
         }
 
-        var query = ExpressionEvaluator.Fold(statementArg, state, context.SourcePath, context.Cap);
+        var query = ExpressionEvaluator.Fold(statementArg, state, context.SourcePath, context.Cap, context.Catalog);
         var parameterDeclarationText = ResolveParameterDeclarationText(procRef, state, context);
         var argumentBindings = ResolveArgumentBindings(procRef);
         EmitScriptsOrFinding(query, node, activeGuards, context, parameterDeclarationText, argumentBindings);
@@ -580,7 +580,7 @@ public static class DynamicSqlTransfer
             return null;
         }
 
-        var folded = ExpressionEvaluator.Fold(paramsArg, state, context.SourcePath, context.Cap);
+        var folded = ExpressionEvaluator.Fold(paramsArg, state, context.SourcePath, context.Cap, context.Catalog);
         if (folded is not SqlTextValue.Template template)
         {
             return null;

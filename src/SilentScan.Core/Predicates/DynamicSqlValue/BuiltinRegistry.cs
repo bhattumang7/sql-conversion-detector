@@ -24,6 +24,9 @@ public static class BuiltinRegistry
     /// <summary>Every builtin this registry knows about, keyed case-insensitively - the single source of truth <see cref="Fold"/> dispatches through.</summary>
     private static readonly Dictionary<string, BuiltinSpec> Specs = BuildSpecs().ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>True when <paramref name="name"/> is a builtin this registry has its own spec for - lets a caller (the scalar-UDF catalog fallback in <see cref="ExpressionEvaluator"/>) distinguish "unrecognized name" from every other decline reason before it invests in a catalog lookup of its own.</summary>
+    public static bool IsKnownBuiltin(string name) => Specs.ContainsKey(name);
+
     /// <summary>
     /// Resolves one <see cref="BuiltinCall"/> against its registered <see cref="BuiltinSpec"/>.
     /// Order: (1) an unrecognized function name declines immediately - with NO spec to consult,
@@ -162,7 +165,29 @@ public static class BuiltinRegistry
         // NonDeterministicTyped: re-running the SAME call on the SAME server returns the SAME
         // value, unlike NEWID/GETDATE - it only varies ACROSS servers/sessions).
         yield return FixedTypeSpec("SERVERPROPERTY", new SqlType(SqlTypeCategory.SqlVariant), HoleKind.EnvironmentDependent);
+
+        // Every session/environment name-lookup builtin below is oracle-verified
+        // (sys.dm_exec_describe_first_result_set, compat 160) to return a fixed nvarchar(128) -
+        // ORIGINAL_LOGIN() alone is nvarchar(4000) - regardless of the caller's own arguments (or
+        // lack of them): these read session/server state, never anything this scanner could
+        // possibly have folded from source text, so - same reasoning as SERVERPROPERTY -
+        // EnvironmentDependent rather than NonDeterministicTyped. A common corpus pattern this
+        // unlocks: dynamic SQL that splices `'USE [' + DB_NAME() + ']'` or an audit-trail message
+        // built from USER_NAME()/APP_NAME()/HOST_NAME() - previously declined outright as an
+        // unrecognized function name, now a typed hole the rest of the template can still resolve
+        // around.
+        yield return EnvironmentNameSpec("DB_NAME");
+        yield return EnvironmentNameSpec("USER_NAME");
+        yield return EnvironmentNameSpec("SUSER_SNAME");
+        yield return EnvironmentNameSpec("SUSER_NAME");
+        yield return EnvironmentNameSpec("APP_NAME");
+        yield return EnvironmentNameSpec("HOST_NAME");
+        yield return EnvironmentNameSpec("SCHEMA_NAME");
+        yield return FixedTypeSpec("ORIGINAL_LOGIN", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), HoleKind.EnvironmentDependent);
     }
+
+    private static BuiltinSpec EnvironmentNameSpec(string name) =>
+        FixedTypeSpec(name, new SqlType(SqlTypeCategory.NVarChar, Length: 128), HoleKind.EnvironmentDependent);
 
     /// <summary>
     /// Oracle-verified (Turkish_CI_AS vs Latin1_General_CI_AS): every ASCII letter except 'i'/'I'

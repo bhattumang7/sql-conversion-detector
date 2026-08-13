@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -19,8 +20,8 @@ public static class ExpressionEvaluator
     private const string FnIsNull = "ISNULL";
     private const string NonLiteralOther = "non-literal-expression:other";
 
-    /// <summary>Folds a scalar expression to its <see cref="SqlTextValue"/> - a <see cref="SqlTextValue.Template"/> (possibly with holes/choices) or <see cref="SqlTextValue.Tainted"/> with a machine-readable reason, never a guess.</summary>
-    public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    /// <summary>Folds a scalar expression to its <see cref="SqlTextValue"/> - a <see cref="SqlTextValue.Template"/> (possibly with holes/choices) or <see cref="SqlTextValue.Tainted"/> with a machine-readable reason, never a guess. <paramref name="catalog"/>, when supplied, lets a call to a user-defined scalar function this scanner does not itself model still resolve to a typed hole from that function's own catalog-read RETURNS clause (see <see cref="TryFoldUserScalarFunction"/>) instead of declining outright.</summary>
+    public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
     {
         switch (expression)
         {
@@ -34,16 +35,16 @@ public static class ExpressionEvaluator
                     : new SqlTextValue.Tainted("variable-not-in-scope", Span(sourcePath, variableRef));
 
             case ParenthesisExpression paren:
-                return Fold(paren.Expression, state, sourcePath, cap);
+                return Fold(paren.Expression, state, sourcePath, cap, catalog);
 
             // ScriptDOM can wrap an operand in a UnaryExpression carrying UnaryExpressionType.Positive
             // purely as an artifact of how it resolves adjacent tokens. Unary plus has no real effect
             // on a string operand, so folding through to the inner expression is exact.
             case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
-                return Fold(unary.Expression, state, sourcePath, cap);
+                return Fold(unary.Expression, state, sourcePath, cap, catalog);
 
             case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary:
-                return FoldConcatenation(binary, state, sourcePath, cap);
+                return FoldConcatenation(binary, state, sourcePath, cap, catalog);
 
             case BinaryExpression:
                 return new SqlTextValue.Tainted("non-literal-expression:unsupported-operator", Span(sourcePath, expression));
@@ -54,28 +55,28 @@ public static class ExpressionEvaluator
                 // variable folds to a real value only by tracing a real literal/DECLARE/SET
                 // chain, and a bare `SET @x = NULL` never folds (no NullLiteral case here) rather
                 // than being treated as some placeholder value. `b` is never even inspected.
-                return Fold(isNullCall.Parameters[0], state, sourcePath, cap);
+                return Fold(isNullCall.Parameters[0], state, sourcePath, cap, catalog);
 
             case CoalesceExpression { Expressions.Count: > 0 } coalesce:
-                return Fold(coalesce.Expressions[0], state, sourcePath, cap);
+                return Fold(coalesce.Expressions[0], state, sourcePath, cap, catalog);
 
             case FunctionCall functionCall:
-                return FoldFunctionCall(functionCall.FunctionName.Value, functionCall.Parameters, functionCall, state, sourcePath, cap);
+                return FoldFunctionCall(functionCall.FunctionName.Value, functionCall.Parameters, functionCall, state, sourcePath, cap, catalog);
 
             case LeftFunctionCall leftCall:
-                return FoldFunctionCall(FnLeft, leftCall.Parameters, leftCall, state, sourcePath, cap);
+                return FoldFunctionCall(FnLeft, leftCall.Parameters, leftCall, state, sourcePath, cap, catalog);
 
             case RightFunctionCall rightCall:
-                return FoldFunctionCall(FnRight, rightCall.Parameters, rightCall, state, sourcePath, cap);
+                return FoldFunctionCall(FnRight, rightCall.Parameters, rightCall, state, sourcePath, cap, catalog);
 
             case CastCall castCall:
-                return FoldCastOrConvert(castCall.Parameter, castCall.DataType, castCall, state, sourcePath, cap);
+                return FoldCastOrConvert(castCall.Parameter, castCall.DataType, castCall, state, sourcePath, cap, catalog);
 
             case ConvertCall convertCall:
-                return FoldCastOrConvert(convertCall.Parameter, convertCall.DataType, convertCall, state, sourcePath, cap);
+                return FoldCastOrConvert(convertCall.Parameter, convertCall.DataType, convertCall, state, sourcePath, cap, catalog);
 
             case SimpleCaseExpression or SearchedCaseExpression or IIfCall:
-                return FoldConditional(expression, state, sourcePath, cap);
+                return FoldConditional(expression, state, sourcePath, cap, catalog);
 
             case ColumnReferenceExpression:
                 return new SqlTextValue.Tainted("non-literal-expression:column-reference", Span(sourcePath, expression));
@@ -102,14 +103,14 @@ public static class ExpressionEvaluator
     /// <see cref="SqlTextValue.GuardedAlternatives"/> (a short-circuit here would silently drop
     /// that extension, discarding a real, recoverable value for no benefit).
     /// </summary>
-    private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
-        var left = Fold(binary.FirstExpression, state, sourcePath, cap);
-        var right = Fold(binary.SecondExpression, state, sourcePath, cap);
+        var left = Fold(binary.FirstExpression, state, sourcePath, cap, catalog);
+        var right = Fold(binary.SecondExpression, state, sourcePath, cap, catalog);
         return SqlTextValue.Concat(left, right);
     }
 
-    private static SqlTextValue FoldConditional(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    private static SqlTextValue FoldConditional(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         // SearchedCaseExpression/IIfCall each have a real BooleanExpression condition this
         // evaluator CAN sometimes prove true or false outright (see TryEvaluatePredicate) -
@@ -151,17 +152,17 @@ public static class ExpressionEvaluator
         var remainingBranches = thenExpressions;
         if (whenClauses is not null)
         {
-            remainingBranches = ResolveDeterminableBranches(whenClauses, state, sourcePath, cap, out var decided);
+            remainingBranches = ResolveDeterminableBranches(whenClauses, state, sourcePath, cap, catalog, out var decided);
             if (decided is { } decidedBranch)
             {
-                return Fold(decidedBranch, state, sourcePath, cap);
+                return Fold(decidedBranch, state, sourcePath, cap, catalog);
             }
         }
 
         SqlTextValue? union = null;
         foreach (var branch in remainingBranches.Append(elseExpression))
         {
-            var folded = Fold(branch, state, sourcePath, cap);
+            var folded = Fold(branch, state, sourcePath, cap, catalog);
             if (folded is SqlTextValue.Tainted)
             {
                 return new SqlTextValue.Tainted("non-literal-expression:conditional", at);
@@ -189,13 +190,13 @@ public static class ExpressionEvaluator
     /// returned for the caller's existing union-every-remaining-branch fallback.
     /// </summary>
     private static List<ScalarExpression> ResolveDeterminableBranches(
-        IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)> whenClauses, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out ScalarExpression? decided)
+        IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)> whenClauses, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog, out ScalarExpression? decided)
     {
         decided = null;
         var remaining = new List<ScalarExpression>();
         foreach (var (condition, then) in whenClauses)
         {
-            var determined = TryEvaluatePredicate(condition, state, sourcePath, cap);
+            var determined = TryEvaluatePredicate(condition, state, sourcePath, cap, catalog);
             if (determined == true)
             {
                 decided = then;
@@ -221,15 +222,15 @@ public static class ExpressionEvaluator
     /// (undetermined), never a guess: the caller's own fallback (union every still-reachable
     /// branch) stays sound for every predicate shape this doesn't recognize.
     /// </summary>
-    private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (predicate is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals or BooleanComparisonType.NotEqualToExclamation or BooleanComparisonType.NotEqualToBrackets } comparison)
         {
             return null;
         }
 
-        var left = TryFoldToKnownLiteralText(comparison.FirstExpression, state, sourcePath, cap);
-        var right = TryFoldToKnownLiteralText(comparison.SecondExpression, state, sourcePath, cap);
+        var left = TryFoldToKnownLiteralText(comparison.FirstExpression, state, sourcePath, cap, catalog);
+        var right = TryFoldToKnownLiteralText(comparison.SecondExpression, state, sourcePath, cap, catalog);
         if (left is null || right is null)
         {
             return null;
@@ -247,21 +248,21 @@ public static class ExpressionEvaluator
     /// genuinely unknown whether it's NULL at runtime) makes COALESCE's own result unknowable
     /// too, so this returns null rather than guessing which argument wins.
     /// </summary>
-    private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (expression is CoalesceExpression { Expressions.Count: > 0 } coalesce)
         {
-            return TryFoldToKnownLiteralText(coalesce.Expressions[0], state, sourcePath, cap);
+            return TryFoldToKnownLiteralText(coalesce.Expressions[0], state, sourcePath, cap, catalog);
         }
 
-        var folded = Fold(expression, state, sourcePath, cap);
+        var folded = Fold(expression, state, sourcePath, cap, catalog);
         return folded is SqlTextValue.Template template && template.Pieces.All(p => p is TemplatePiece.Lit)
             ? string.Concat(template.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text))
             : null;
     }
 
     private static SqlTextValue FoldCastOrConvert(
-        ScalarExpression source, DataTypeReference dataType, TSqlFragment site, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+        ScalarExpression source, DataTypeReference dataType, TSqlFragment site, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         var targetType = SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null);
         if (targetType is null)
@@ -269,19 +270,26 @@ public static class ExpressionEvaluator
             return new SqlTextValue.Tainted("non-literal-expression:cast-target-not-pinned", Span(sourcePath, site));
         }
 
-        var argument = ToBuiltinArgument(Fold(source, state, sourcePath, cap));
+        var argument = ToBuiltinArgument(Fold(source, state, sourcePath, cap, catalog));
         var result = BuiltinRegistry.FoldCastOrConvert(targetType, argument, Span(sourcePath, site));
         return ToSqlTextValue(result, Span(sourcePath, site));
     }
 
     /// <summary>Bundles the loose values every step of a function-call fold needs to pass along together (Sonar S107's 7-parameter cap) - <paramref name="Site"/> is the call's own already-1-based <see cref="SourceSpan"/>, computed once in <see cref="FoldFunctionCall"/>.</summary>
     private sealed record FunctionCallFoldContext(
-        string FunctionName, IList<ScalarExpression> Parameters, SourceSpan Site, Dictionary<string, SqlTextValue> State, string SourcePath, int Cap);
+        string FunctionName, IList<ScalarExpression> Parameters, SourceSpan Site, Dictionary<string, SqlTextValue> State, string SourcePath, int Cap, DatabaseCatalog? Catalog);
 
     private static SqlTextValue FoldFunctionCall(
-        string functionName, IList<ScalarExpression> parameters, TSqlFragment site, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+        string functionName, IList<ScalarExpression> parameters, TSqlFragment site, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
-        var foldContext = new FunctionCallFoldContext(functionName, parameters, Span(sourcePath, site), state, sourcePath, cap);
+        if (!BuiltinRegistry.IsKnownBuiltin(functionName)
+            && site is FunctionCall userFunctionCall
+            && TryFoldUserScalarFunction(userFunctionCall, catalog, sourcePath, out var userFunctionResult))
+        {
+            return userFunctionResult;
+        }
+
+        var foldContext = new FunctionCallFoldContext(functionName, parameters, Span(sourcePath, site), state, sourcePath, cap, catalog);
 
         // Every non-integer argument position is folded EXACTLY ONCE here, up front - reused both
         // for TryFoldCrossProduct's own choice-detection scan and, via ToBuiltinArgument, for the
@@ -296,7 +304,7 @@ public static class ExpressionEvaluator
         {
             if (!IntegerArgumentPositions.Contains((functionName.ToUpperInvariant(), i)))
             {
-                foldedArguments[i] = Fold(parameters[i], state, sourcePath, cap);
+                foldedArguments[i] = Fold(parameters[i], state, sourcePath, cap, catalog);
             }
         }
 
@@ -315,11 +323,43 @@ public static class ExpressionEvaluator
         {
             arguments.Add(foldedArguments[i] is { } folded
                 ? ToBuiltinArgument(folded)
-                : FoldArgument(functionName, i, parameters[i], state, sourcePath, cap));
+                : FoldArgument(functionName, i, parameters[i], state, sourcePath, cap, catalog));
         }
 
         var call = new BuiltinCall(functionName, arguments, foldContext.Site);
         return ToSqlTextValue(BuiltinRegistry.Fold(call), foldContext.Site);
+    }
+
+    /// <summary>
+    /// A call to a function <see cref="BuiltinRegistry"/> has no spec for is not necessarily
+    /// unanalyzable: when it's a user-defined SCALAR function the catalog already read a RETURNS
+    /// type for (from that function's own CREATE/ALTER FUNCTION DDL - CLAUDE.md: catalog truth
+    /// always comes from the engine, never a file-parsed guess), the return TYPE is a hard fact
+    /// regardless of the function's own body or this call's arguments - the same "known shape,
+    /// unknown value" reasoning as <see cref="HoleKind.NonDeterministicTyped"/>/<see
+    /// cref="HoleKind.EnvironmentDependent"/>, just sourced from the catalog instead of this
+    /// registry's own builtin knowledge. The function's body is never inspected or evaluated -
+    /// only its declared signature. <paramref name="site"/> must be the real <see cref="FunctionCall"/>
+    /// node (never a <see cref="LeftFunctionCall"/>/<see cref="RightFunctionCall"/>, which are
+    /// always builtins and never reach here) so <see cref="SchemaObjectNameHelper.QualifyFunctionCall"/>
+    /// can read its schema-qualified CallTarget.
+    /// </summary>
+    private static bool TryFoldUserScalarFunction(FunctionCall site, DatabaseCatalog? catalog, string sourcePath, out SqlTextValue result)
+    {
+        result = null!;
+        if (catalog is not { } knownCatalog)
+        {
+            return false;
+        }
+
+        var qualifiedName = SchemaObjectNameHelper.QualifyFunctionCall(site);
+        if (!knownCatalog.TryGetScalarFunctionReturnType(qualifiedName, out var returnType) || returnType is not { } known)
+        {
+            return false;
+        }
+
+        result = new SqlTextValue.Template([new TemplatePiece.Hole(known, Span(sourcePath, site), HoleKind.UserFunctionDeclaredReturnType)]);
+        return true;
     }
 
     /// <summary>
@@ -571,7 +611,7 @@ public static class ExpressionEvaluator
 
         return foldedArguments[index] is { } cachedArgument
             ? ToBuiltinArgument(cachedArgument)
-            : FoldArgument(context.FunctionName, index, context.Parameters[index], context.State, context.SourcePath, context.Cap);
+            : FoldArgument(context.FunctionName, index, context.Parameters[index], context.State, context.SourcePath, context.Cap, context.Catalog);
     }
 
     /// <summary>Every (function, zero-based parameter index) pair whose argument is INTEGER-typed rather than string/hole-typed - LEFT/RIGHT's length, SUBSTRING's start/length, STR's length/decimal, CHAR/NCHAR's code point.</summary>
@@ -590,7 +630,7 @@ public static class ExpressionEvaluator
     /// values, never numeric ones, so a numeric variable reference always fails here. Every other
     /// position resolves as an ordinary string/hole argument.
     /// </summary>
-    private static BuiltinArgument FoldArgument(string functionName, int index, ScalarExpression parameter, Dictionary<string, SqlTextValue> state, string sourcePath, int cap)
+    private static BuiltinArgument FoldArgument(string functionName, int index, ScalarExpression parameter, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (IntegerArgumentPositions.Contains((functionName.ToUpperInvariant(), index)))
         {
@@ -599,7 +639,7 @@ public static class ExpressionEvaluator
                 : new BuiltinArgument.Unresolved("non-literal-expression:function-call-argument-diverges", Span(sourcePath, parameter));
         }
 
-        return ToBuiltinArgument(Fold(parameter, state, sourcePath, cap));
+        return ToBuiltinArgument(Fold(parameter, state, sourcePath, cap, catalog));
     }
 
     /// <summary>

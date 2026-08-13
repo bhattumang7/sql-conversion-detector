@@ -1684,6 +1684,103 @@ public sealed class DynamicSqlScannerTests
     }
 
     // ------------------------------------------------------------------
+    // Environment-name builtins (DB_NAME/USER_NAME/SUSER_SNAME/SUSER_NAME/APP_NAME/HOST_NAME/
+    // SCHEMA_NAME/ORIGINAL_LOGIN) - a real corpus pattern (audit-trail messages, schema-qualified
+    // USE statements) previously declined outright as an unrecognized function name; each now
+    // resolves to a typed hole since its return type (oracle-verified nvarchar(128), nvarchar(4000)
+    // for ORIGINAL_LOGIN) is a hard T-SQL guarantee independent of the caller's own arguments.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_DbNameConcatenatedIntoDynamicSql_FoldsToTypedHole()
+    {
+        // Real corpus shape: a table name qualified by DB_NAME() so a script works unmodified
+        // against whichever database it's deployed to. DB_NAME()'s VALUE can never be known from
+        // source text alone, but its return type (nvarchar(128), oracle-verified) is a hard
+        // guarantee - so this resolves to a typed hole instead of declining outright.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = 'SELECT * FROM ' + DB_NAME() + '.dbo.Orders'; EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Contains("__silentscan_sym_", script.InnerText, StringComparison.Ordinal);
+        Assert.Contains("SELECT * FROM ", script.InnerText, StringComparison.Ordinal);
+        Assert.Contains(".dbo.Orders", script.InnerText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scan_OriginalLoginProducesTypedHole()
+    {
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = ORIGINAL_LOGIN(); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
+    // ------------------------------------------------------------------
+    // User-defined scalar function fallback - a call to a function this scanner has no builtin
+    // spec for is not automatically unanalyzable when the catalog already knows its RETURNS type
+    // from the real CREATE/ALTER FUNCTION DDL (CLAUDE.md: catalog truth comes from the engine's
+    // own DDL, never a guess) - the function's own body is never inspected or evaluated, only its
+    // declared signature, matching how NEWID()/SERVERPROPERTY() already degrade to a typed hole
+    // instead of declining outright.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_UnmodeledScalarUdfWithCatalogKnownReturnType_FoldsToTypedHole()
+    {
+        var result = ScanWithCatalog(
+            "CREATE FUNCTION dbo.udf_FormatCode(@raw VARCHAR(50)) RETURNS VARCHAR(50) AS BEGIN RETURN @raw END;",
+            "DECLARE @sql NVARCHAR(MAX) = 'SELECT * FROM dbo.Orders WHERE Code = ''' + dbo.udf_FormatCode(@SomeParam) + ''''; EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Contains("__silentscan_sym_", script.InnerText, StringComparison.Ordinal);
+        Assert.Contains("SELECT * FROM dbo.Orders WHERE Code = '", script.InnerText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scan_UnmodeledScalarUdfWithoutSchemaQualification_StillResolvesAgainstDefaultDboSchema()
+    {
+        // A scalar UDF call with no explicit schema prefix - ScriptDom's own FunctionCall.CallTarget
+        // is absent (unlike "dbo.udf_X(...)"), so resolution must fall back to the same dbo default
+        // SchemaObjectNameHelper.QualifyFunctionCall applies, exactly matching how the catalog itself
+        // qualified the CREATE FUNCTION statement that defined it.
+        var result = ScanWithCatalog(
+            "CREATE FUNCTION dbo.udf_Unqualified(@raw VARCHAR(50)) RETURNS VARCHAR(50) AS BEGIN RETURN @raw END;",
+            "DECLARE @sql NVARCHAR(MAX) = udf_Unqualified(@SomeParam); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_CallToFunctionNotInCatalog_StillDeclinesAsUnrecognized()
+    {
+        // No CREATE FUNCTION for dbo.udf_NeverDefined anywhere - the catalog has no return type to
+        // offer, so this must decline exactly as it did before the UDF fallback existed, never a
+        // guess at some assumed type.
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.Unrelated (Id INT NOT NULL);",
+            "DECLARE @sql NVARCHAR(MAX) = dbo.udf_NeverDefined(@SomeParam); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_UnmodeledScalarUdfWithNoCatalogSupplied_DeclinesRatherThanGuessing()
+    {
+        // Scan() (no catalog argument) mirrors real callers that haven't wired the catalog through
+        // yet - the UDF fallback must never assume a type when there is no catalog to consult.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = dbo.udf_FormatCode(@SomeParam); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call", finding.Reason);
+    }
+
+    // ------------------------------------------------------------------
     // Whitelisted string-builder folding (roadmap "fold high-volume string-builder functions in
     // dynamic SQL, oracle-checked") - every expected string and every decline below was verified
     // directly against a live Docker SQL Server instance, not assumed from documentation.
