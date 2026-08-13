@@ -1,0 +1,101 @@
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates;
+using SilentScan.Core.Reporting;
+
+namespace SilentScan.Tests.Reporting;
+
+/// <summary>
+/// The dynamic-SQL OUTPUT-summary fixpoint loop in <see cref="ScanReportBuilder.BuildFromParseResults"/>
+/// runs up to 5 rounds, each scanning the same parsed modules with a growing
+/// <c>outputSummaryIndex</c> - only that index differs between rounds, never the parse itself.
+/// An earlier version of the streaming rewrite (every full-corpus phase reparsing fresh from a
+/// lazy source instead of sharing one materialized list - see
+/// <see cref="ScanReportBuilderStreamingSourceTests"/>) re-enumerated the lazy
+/// <c>allParseResults</c> source on EVERY round, so a database whose OUTPUT chains needed several
+/// rounds to converge reparsed its whole module corpus that many times over - measured directly:
+/// on a 300-chain/depth-5 Docker fixture needing 5 rounds, this single stage went from 1.6s to
+/// 8.2s (5.1x), becoming the slowest stage in the whole scan. The fix materializes the parsed
+/// modules ONCE for this phase and reuses that across all rounds, since nothing about the parse
+/// changes round to round.
+///
+/// This locks in the fix: a fixture whose OUTPUT chain genuinely needs 3 rounds to resolve must
+/// still enumerate the underlying source only a small, ROUND-COUNT-INDEPENDENT number of times.
+/// </summary>
+public sealed class ScanReportBuilderDynamicSqlReparseTests
+{
+    [Fact]
+    public void ThreeRoundOutputChain_EnumeratesSourceNoMoreThanASingleRoundWould()
+    {
+        // usp_L0 sets its OUTPUT directly (round 1 discovers its summary). usp_L1 calls usp_L0
+        // and forwards its resolved value (round 1 can't resolve this yet - L0's summary isn't
+        // known until AFTER round 1 folds it in - so round 2 discovers usp_L1's summary using
+        // it). usp_Consumer calls usp_L1 and splices the result into dynamic SQL (round 3 is the
+        // first round that can resolve THIS, using usp_L1's round-2 summary) - three rounds,
+        // not one, confirming the fixture actually exercises the multi-round path this test
+        // guards rather than trivially converging on round 1.
+        const string Sql = """
+            CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);
+            GO
+            CREATE PROCEDURE dbo.usp_L0 @Out VARCHAR(20) OUTPUT AS
+            BEGIN
+                SET @Out = 'C1';
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_L1 @Out VARCHAR(20) OUTPUT AS
+            BEGIN
+                DECLARE @Inner VARCHAR(20);
+                EXEC dbo.usp_L0 @Out = @Inner OUTPUT;
+                SET @Out = @Inner;
+            END
+            GO
+            CREATE PROCEDURE dbo.usp_Consumer AS
+            BEGIN
+                DECLARE @Code VARCHAR(20);
+                EXEC dbo.usp_L1 @Out = @Code OUTPUT;
+                EXEC('SELECT Code FROM dbo.Customers WHERE Code = ''' + @Code + '''');
+            END
+            """;
+
+        var parseResult = SqlScriptParser.ParseText("chain.sql", Sql);
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var countingSource = new EnumerationCountingSource([parseResult]);
+
+        var report = ScanReportBuilder.BuildFromParseResults(countingSource, catalog);
+
+        // Proves the fixture genuinely needed the multi-round path: this only comes back
+        // AnalyzedLiteral once usp_L1's OUTPUT has been resolved through usp_L0's own summary,
+        // which round 1 alone cannot do - a stale/unresolved chain would report Unanalyzable
+        // instead, since @Code would still look non-constant.
+        var finding = Assert.Single(report.DynamicSqlFindings);
+        Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, finding.Outcome);
+
+        // The regression this guards: enumeration count must not scale with how many rounds the
+        // OUTPUT-summary loop needed. Measured directly: materializing once (the fix) enumerates
+        // the source 7 times regardless of round count (one per full-corpus phase); reverting to
+        // re-enumerating per round pushed this fixture's 3 rounds to 9 - a small, round-count-
+        // dependent leak that widens with every extra round a real database's OUTPUT chains need.
+        // 8 sits strictly between the two, so this fails the moment the loop stops reusing its
+        // one materialization and starts scaling with round count again, while still tolerating a
+        // future +/-1 shift from unrelated changes elsewhere in the method.
+        Assert.True(
+            countingSource.EnumerationCount <= 8,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 7 with the fix applied), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+    }
+
+    /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>
+    private sealed class EnumerationCountingSource(IReadOnlyList<SqlParseResult> items) : IEnumerable<SqlParseResult>
+    {
+        public int EnumerationCount { get; private set; }
+
+        public IEnumerator<SqlParseResult> GetEnumerator()
+        {
+            EnumerationCount++;
+            return items.GetEnumerator();
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+}

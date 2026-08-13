@@ -131,6 +131,18 @@ public static class ScanReportBuilder
         List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
         using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
         {
+            // Every round scans the exact same parsed modules - only outputSummaryIndex differs
+            // between rounds. Materialized ONCE here rather than re-enumerating the lazy
+            // usableParseResults query per round (which would reparse the whole corpus fresh up
+            // to 5 times for no reason, since nothing about the parse itself changes round to
+            // round) - a real, measured regression: on a database whose OUTPUT-summary chains
+            // need several rounds to converge, this stage became the slowest in the scan purely
+            // from redundant reparsing. Scoped to this `using` block and released by
+            // PhaseMemory.ReleaseBetweenPhases() right after, exactly like every other phase's
+            // own bounded materialization (CatalogBuilder's internal one, callgraph's, tier1's,
+            // typed's) - never held simultaneously with another phase's.
+            var forThisPhase = usableParseResults.ToList();
+
             var rounds = 0;
             for (var round = 0; round < maxOutputSummaryRounds; round++)
             {
@@ -139,22 +151,13 @@ public static class ScanReportBuilder
                 // Each round is independent per parse result (the shared outputSummaryIndex is
                 // read-only for the duration of a round and only folded in afterward), so the
                 // round itself parallelizes even though the rounds are inherently sequential.
-                // This loop re-scans every module up to five times and was the one remaining
-                // single-threaded pass over the whole database.
-                // usableParseResults is a lazy query (see its declaration above), so each round's
-                // enumeration below independently re-walks it - for a live-mode scan, that means a
-                // fresh reparse from cheap retained module text every round, up to 5x total parse
-                // CPU in the worst case, in exchange for never holding every module's AST across
-                // all 5 rounds simultaneously. Cheap in practice: the early-exit just below means
-                // most real scans finish in 1-2 rounds, and a reparse of a real database's whole
-                // module corpus measured in low single-digit seconds.
                 // AsOrdered, unlike the Tier-1/typed passes below: those feed lists that get
                 // sorted deterministically before reporting, but this one folds its results into
                 // outputSummaryIndex, where two modules summarizing the SAME (proc, parameter)
                 // key resolve last-writer-wins. Unordered completion would make which summary
                 // survives depend on thread scheduling - a real determinism break, not a
                 // cosmetic one.
-                dynamicSqlExtractions = usableParseResults
+                dynamicSqlExtractions = forThisPhase
                     .AsParallel()
                     .AsOrdered()
                     .Select(r =>
