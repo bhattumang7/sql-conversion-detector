@@ -681,6 +681,18 @@ public static class DynamicSqlTransfer
             return;
         }
 
+        // A live value whose expansion would be absurdly large (see MaxExpandedPieceTotal's doc
+        // comment - a real 280KB proc produced one totalling tens of millions of pieces, an OOM
+        // if materialized) is declined HERE, with its own honest finding, rather than inside
+        // TryEmitFromValue's boolean - this is the one call site whose false would otherwise be
+        // silent, and CLAUDE.md's dynamic SQL policy is "never silently counted as clean".
+        if (SqlTextValue.Widen(value, context.Cap, context.Span(node)) is SqlTextValue.Template widenedForSizing
+            && SqlTextValue.ExpandedPieceTotal(widenedForSizing) > SqlTextValue.MaxExpandedPieceTotal)
+        {
+            context.Findings.Add(Unanalyzable(node, context, SqlTextValue.ExpansionSizeCapReason));
+            return;
+        }
+
         TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings);
     }
 
@@ -706,7 +718,18 @@ public static class DynamicSqlTransfer
             return false;
         }
 
-        var assemblies = SqlTextValue.Expand((SqlTextValue.Template)widened, context.Cap);
+        var widenedTemplate = (SqlTextValue.Template)widened;
+        if (SqlTextValue.ExpandedPieceTotal(widenedTemplate) > SqlTextValue.MaxExpandedPieceTotal)
+        {
+            // Defensive twin of EmitScriptsOrFinding's own pre-check (which owns the finding for
+            // the main-value path): this guards every OTHER caller - the guarded-alternatives
+            // recovery loop, the narrowed-by-active-guard path - so no route into Expand can
+            // materialize an absurd expansion. Declining one oversized alternative is just
+            // "not recovered", the same false every other unusable alternative returns.
+            return false;
+        }
+
+        var assemblies = SqlTextValue.Expand(widenedTemplate, context.Cap);
 
         // Two independent branches (or two proc-call-graph callers, two loop unrollings, ...)
         // frequently agree on the exact same rendered SQL text even though their own Template

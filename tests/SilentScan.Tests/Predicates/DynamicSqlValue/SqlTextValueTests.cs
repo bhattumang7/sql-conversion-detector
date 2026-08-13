@@ -332,4 +332,70 @@ public sealed class SqlTextValueTests
 
         Assert.True(SqlTextValue.ContainsHole(assemblies[0]));
     }
+
+    // ------------------------------------------------------------------
+    // The guarded-alternatives depth invariant: a value stored AS an alternative never carries
+    // alternatives of its own (see WithoutOwnAlternatives' doc comment in SqlTextValue).
+    // Without it, concatenating two alternative-bearing Templates nests each side's
+    // alternatives inside the other's stored values, so depth grows by one per Concat and the
+    // recursive propagation costs MaxGuardedAlternatives^depth - a real accumulator-style proc
+    // (`SET @sql = @sql + @piece` over IF/ELSE-IF-built variables) measured 78M+ Concat calls
+    // in 60s with no convergence. These pin the invariant at every store site, so a future
+    // refactor that reintroduces nesting fails HERE in milliseconds instead of hanging a scan.
+    // ------------------------------------------------------------------
+
+    private static SqlTextValue.Template WithAlternative(SqlTextValue.Template value, string guardText, SqlTextValue.Template alternative) =>
+        value with { GuardedAlternatives = [new GuardedAlternative(guardText, alternative)] };
+
+    [Fact]
+    public void WithGuardedAlternative_BranchValueCarryingAlternatives_StoresItFlattened()
+    {
+        // Built via `with` directly, NOT via WithGuardedAlternative itself - post-invariant,
+        // the funnel is exactly what strips this, so the nested shape must be hand-made.
+        var nestedBranch = WithAlternative(Lit("outer"), "inner-guard", Lit("inner"));
+
+        var result = SqlTextValue.WithGuardedAlternative(Lit("base"), "outer-guard", nestedBranch);
+
+        var stored = Assert.Single(result.GuardedAlternatives!);
+        Assert.Equal("outer-guard", stored.GuardText);
+        Assert.Null(stored.Value.GuardedAlternatives);
+        // Flattening drops only the side channel, never the value's own text.
+        Assert.Equal("outer", ((TemplatePiece.Lit)Assert.Single(stored.Value.Pieces)).Text);
+    }
+
+    [Fact]
+    public void Concat_TaintedLeftWithAlternatives_ExtendedStoredValuesStayFlat()
+    {
+        // The one store that bypasses WithGuardedAlternative's funnel: Concat's tainted-left
+        // path extends each alternative's value with b directly. b itself carrying alternatives
+        // is exactly what used to nest.
+        var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin)
+        {
+            GuardedAlternatives = [new GuardedAlternative("g1", Lit("SELECT "))],
+        };
+        var addend = WithAlternative(Lit("* FROM T"), "g2", Lit("* FROM U"));
+
+        var result = Assert.IsType<SqlTextValue.Tainted>(SqlTextValue.Concat(tainted, addend));
+
+        var extended = Assert.Single(result.GuardedAlternatives!);
+        Assert.Null(extended.Value.GuardedAlternatives);
+        Assert.Equal("SELECT * FROM T", string.Concat(extended.Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
+    }
+
+    [Fact]
+    public void Concat_TwoTemplatesEachCarryingAlternatives_PropagatedStoredValuesStayFlat()
+    {
+        // Template+Template is the accumulator path: each side's alternatives propagate onto
+        // the result with the OTHER side spliced in - both stored values must come out flat.
+        var a = WithAlternative(Lit("SELECT "), "ga", Lit("SELECT TOP 1 "));
+        var b = WithAlternative(Lit("* FROM T"), "gb", Lit("* FROM U"));
+
+        var result = Assert.IsType<SqlTextValue.Template>(SqlTextValue.Concat(a, b));
+
+        Assert.Equal(2, result.GuardedAlternatives!.Count);
+        Assert.All(result.GuardedAlternatives, alt => Assert.Null(alt.Value.GuardedAlternatives));
+        var byGuard = result.GuardedAlternatives.ToDictionary(alt => alt.GuardText);
+        Assert.Equal("SELECT TOP 1 * FROM T", string.Concat(byGuard["ga"].Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
+        Assert.Equal("SELECT * FROM U", string.Concat(byGuard["gb"].Value.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)));
+    }
 }

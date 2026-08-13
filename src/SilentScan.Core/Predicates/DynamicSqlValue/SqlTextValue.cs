@@ -3,7 +3,7 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
-/// <summary>One branch's own known value, preserved through an overall taint - see <see cref="SqlTextValue.GuardedAlternatives"/>.</summary>
+/// <summary>One branch's own known value, preserved through an overall taint - see <see cref="SqlTextValue.GuardedAlternatives"/>. Invariant: <see cref="Value"/> never carries <see cref="SqlTextValue.GuardedAlternatives"/> of its own (enforced at every store - see <c>SqlTextValue.WithoutOwnAlternatives</c>).</summary>
 public sealed record GuardedAlternative(string GuardText, SqlTextValue.Template Value);
 
 /// <summary>
@@ -74,7 +74,11 @@ public abstract record SqlTextValue
         {
             if (taintedA.GuardedAlternatives is { Count: > 0 } alternatives && b is Template)
             {
-                var extended = alternatives.Select(alt => alt with { Value = (Template)Concat(alt.Value, b) }).ToList();
+                // WithoutOwnAlternatives: this is the ONE store into an alternative slot that
+                // does not go through WithGuardedAlternative's own flattening funnel - the
+                // recursive Concat's result can carry b's alternatives, and storing them nested
+                // here would break the depth invariant that helper documents.
+                var extended = alternatives.Select(alt => alt with { Value = WithoutOwnAlternatives((Template)Concat(alt.Value, b)) }).ToList();
                 return taintedA with { GuardedAlternatives = extended };
             }
 
@@ -124,13 +128,15 @@ public abstract record SqlTextValue
     /// must be tracked there, not inside <see cref="Join"/> itself, which is branch-agnostic).
     /// Deduplicates by <see cref="GuardedAlternative.GuardText"/> (a later attempt under the
     /// SAME guard text replaces the earlier one rather than accumulating a duplicate) and caps
-    /// at <see cref="MaxGuardedAlternatives"/>, oldest dropped first.
+    /// at <see cref="MaxGuardedAlternatives"/>, oldest dropped first. The stored value is
+    /// FLATTENED via <see cref="WithoutOwnAlternatives"/> - see that helper for the depth
+    /// invariant this maintains and the measured blowup it prevents.
     /// </summary>
     public static SqlTextValue WithGuardedAlternative(SqlTextValue value, string guardText, Template branchValue)
     {
         var existing = value.GuardedAlternatives ?? [];
         var combined = existing.Where(a => !string.Equals(a.GuardText, guardText, StringComparison.Ordinal)).ToList();
-        combined.Add(new GuardedAlternative(guardText, branchValue));
+        combined.Add(new GuardedAlternative(guardText, WithoutOwnAlternatives(branchValue)));
         if (combined.Count > MaxGuardedAlternatives)
         {
             combined.RemoveAt(0);
@@ -143,6 +149,27 @@ public abstract record SqlTextValue
             _ => value,
         };
     }
+
+    /// <summary>
+    /// The depth invariant that keeps the guarded-alternatives side channel bounded: a value
+    /// stored AS an alternative never carries alternatives of its own. Without it,
+    /// concatenating two alternative-bearing <see cref="Template"/>s nests each side's
+    /// alternatives inside the other's stored values
+    /// (<see cref="PropagateGuardedAlternativesThroughConcat"/>), so nesting depth grows by one
+    /// per concatenation - and the recursive propagation then costs
+    /// <see cref="MaxGuardedAlternatives"/>^depth. A real-world stored procedure doing
+    /// <c>SET @sql = @sql + @piece</c> accumulation across variables built by IF/ELSE-IF chains
+    /// hit exactly this: measured at 78M+ <see cref="Concat"/> calls in 60 seconds with no
+    /// convergence (effectively a hang) and multi-GB heap growth, on a shape whose flattened
+    /// cost is a few thousand calls. Provably free of any capability loss: every consumer of
+    /// this side channel reads only the TOP level - <c>DynamicSqlTransfer.EmitScriptsOrFinding</c>
+    /// and <c>TryNarrowByActiveGuard</c> enumerate <see cref="GuardedAlternatives"/> directly,
+    /// and <see cref="DynamicSqlCfg"/>'s <c>PropagateNestedGuardedAlternatives</c> lifts a
+    /// BRANCH OUT-STATE's own top-level tags (never a stored alternative's nested ones) - so a
+    /// depth-2 tag was unreachable dead weight even before this invariant existed.
+    /// </summary>
+    private static Template WithoutOwnAlternatives(Template template) =>
+        template.GuardedAlternatives is { Count: > 0 } ? template with { GuardedAlternatives = null } : template;
 
     /// <summary>
     /// The one merge operation every control-flow join point uses for the value ITSELF (replaces
@@ -341,6 +368,65 @@ public abstract record SqlTextValue
             : new Tainted(CardinalityCapReason, at) { DeclaredType = value.DeclaredType };
     }
 
+    /// <summary>
+    /// Emitted when a value's total expanded size (see <see cref="ExpandedPieceTotal"/>) exceeds
+    /// <see cref="MaxExpandedPieceTotal"/> - the assembly-LENGTH counterpart to
+    /// <see cref="CardinalityCapReason"/>'s assembly-COUNT cap. Same reason-string style so
+    /// summary consumers group it alongside the other capacity declines.
+    /// </summary>
+    public const string ExpansionSizeCapReason = "expanded-assembly-size-cap";
+
+    /// <summary>
+    /// The most total <see cref="FlatPiece"/>s across all of a value's expanded assemblies that
+    /// <see cref="Expand"/> is allowed to materialize. <see cref="Widen"/> caps how many
+    /// assemblies exist (32), but nothing upstream caps how LONG one is - and a real database
+    /// produced a value whose expansion, though within the assembly-count cap, totalled tens of
+    /// millions of pieces (~9.5GB materialized, an OOM) from a 280KB procedure body. A million
+    /// pieces is far beyond any dynamic SQL text worth reparsing as a probe script (the largest
+    /// real module body observed - 3.5MB of T-SQL - folds to well under 100k pieces), so
+    /// exceeding this is a capacity decline (<see cref="ExpansionSizeCapReason"/>, an honest
+    /// Unanalyzable finding), never a silent drop.
+    /// </summary>
+    public const long MaxExpandedPieceTotal = 1L << 20;
+
+    /// <summary>
+    /// The exact total number of <see cref="FlatPiece"/>s <see cref="Expand"/> would emit,
+    /// summed across every assembly - computed WITHOUT materializing anything, so
+    /// <c>DynamicSqlTransfer.TryEmitFromValue</c> can decline an absurdly large expansion
+    /// (<see cref="MaxExpandedPieceTotal"/>) before it allocates. The recurrence per piece:
+    /// a plain piece adds one to each of the current assemblies (total += count); a Choice
+    /// multiplies the assemblies (count *= sum of alternatives' counts) after replicating every
+    /// existing prefix (total *= that sum) and appending each alternative expansion onto each
+    /// prefix (total += count * sum of alternatives' own totals).
+    /// </summary>
+    public static long ExpandedPieceTotal(Template template)
+    {
+        long count = 1;
+        long total = 0;
+        foreach (var piece in template.Pieces)
+        {
+            if (piece is TemplatePiece.Choice choice)
+            {
+                long alternativeCountSum = 0;
+                long alternativeTotalSum = 0;
+                foreach (var alternative in choice.Alternatives)
+                {
+                    alternativeCountSum += ExpansionCount(alternative);
+                    alternativeTotalSum += ExpandedPieceTotal(alternative);
+                }
+
+                total = total * alternativeCountSum + count * alternativeTotalSum;
+                count *= alternativeCountSum;
+            }
+            else
+            {
+                total += count;
+            }
+        }
+
+        return total;
+    }
+
     /// <summary>The number of concrete assemblies <see cref="Expand"/> would produce - the product, across every <see cref="TemplatePiece.Choice"/> piece, of the sum of each alternative's own count (1 for a Choice-free Template).</summary>
     public static long ExpansionCount(Template template)
     {
@@ -362,34 +448,67 @@ public abstract record SqlTextValue
     /// everywhere else. <paramref name="maxAssemblies"/> is an assertion, not a decline path:
     /// <see cref="Widen"/> must already have collapsed anything that would exceed it, so hitting
     /// the cap here means Widen has a bug, not that this call site needs its own cap-handling.
+    /// Imperative and linear in the OUTPUT size, deliberately: <see cref="Widen"/> caps how many
+    /// assemblies exist but nothing caps how many PIECES one carries, and a real multi-megabyte
+    /// stored procedure body builds dynamic SQL through tens of thousands of concatenation
+    /// pieces - an earlier implementation that layered one lazy Select/SelectMany per piece and
+    /// re-copied the whole prefix list per appended piece was O(pieces^2) with a pieces-deep
+    /// iterator chain, and OOM'd at ~9.5GB expanding exactly such a proc. Non-Choice pieces
+    /// append IN PLACE to every assembly under construction; only a Choice forks (copies), and
+    /// fork counts are already bounded by <see cref="Widen"/>'s own cap. The emitted assembly
+    /// ORDER is identical to the lazy version's (prefix-major, then alternative, then the
+    /// alternative's own expansion) - deterministic output ordering is a CLAUDE.md requirement,
+    /// so this is a load-bearing property, not a stylistic one.
     /// </summary>
     public static IReadOnlyList<IReadOnlyList<FlatPiece>> Expand(Template template, int maxAssemblies)
     {
-        IEnumerable<IReadOnlyList<FlatPiece>> assemblies = new[] { (IReadOnlyList<FlatPiece>)[] };
+        var assemblies = new List<List<FlatPiece>> { new() };
 
         foreach (var piece in template.Pieces)
         {
-            assemblies = piece switch
+            if (piece is TemplatePiece.Choice choice)
             {
-                TemplatePiece.Choice choice => assemblies.SelectMany(prefix =>
-                    choice.Alternatives.SelectMany(alt => Expand(alt, maxAssemblies).Select(altAssembly => Append(prefix, altAssembly)))),
-                _ => assemblies.Select(prefix => Append(prefix, FlatPiece.From(piece))),
-            };
+                assemblies = ForkAssemblies(assemblies, choice, maxAssemblies);
+            }
+            else
+            {
+                var flat = FlatPiece.From(piece);
+                foreach (var assembly in assemblies)
+                {
+                    assembly.Add(flat);
+                }
+            }
         }
 
-        var result = assemblies.ToList();
-        if (result.Count > maxAssemblies)
+        if (assemblies.Count > maxAssemblies)
         {
             throw new InvalidOperationException(
-                $"Expand produced {result.Count} assemblies, exceeding the {maxAssemblies} cap - Widen should have collapsed this Choice before Expand ever ran.");
+                $"Expand produced {assemblies.Count} assemblies, exceeding the {maxAssemblies} cap - Widen should have collapsed this Choice before Expand ever ran.");
         }
 
-        return result;
+        return assemblies;
     }
 
-    private static IReadOnlyList<FlatPiece> Append(IReadOnlyList<FlatPiece> prefix, FlatPiece piece) => [.. prefix, piece];
+    /// <summary>Extracted from <see cref="Expand"/> solely to keep that method's Cognitive Complexity (Sonar S3776) under the triple-nested fork loop it would otherwise carry. Replicates each existing assembly once per (alternative, alternative-assembly) pair, preserving <see cref="Expand"/>'s documented prefix-major output order.</summary>
+    private static List<List<FlatPiece>> ForkAssemblies(List<List<FlatPiece>> assemblies, TemplatePiece.Choice choice, int maxAssemblies)
+    {
+        var forked = new List<List<FlatPiece>>();
+        foreach (var prefix in assemblies)
+        {
+            foreach (var alternative in choice.Alternatives)
+            {
+                foreach (var alternativeAssembly in Expand(alternative, maxAssemblies))
+                {
+                    var combined = new List<FlatPiece>(prefix.Count + alternativeAssembly.Count);
+                    combined.AddRange(prefix);
+                    combined.AddRange(alternativeAssembly);
+                    forked.Add(combined);
+                }
+            }
+        }
 
-    private static IReadOnlyList<FlatPiece> Append(IReadOnlyList<FlatPiece> prefix, IReadOnlyList<FlatPiece> suffix) => [.. prefix, .. suffix];
+        return forked;
+    }
 
     public static bool ContainsHole(IReadOnlyList<FlatPiece> assembly) => assembly.Any(p => p is FlatPiece.Hole);
 
