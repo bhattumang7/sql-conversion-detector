@@ -190,9 +190,31 @@ public sealed class ExpressionEvaluatorTests
     }
 
     [Fact]
-    public void SearchedCase_OneBranchDoesNotFold_DeclinesConditional()
+    public void SearchedCase_OneBranchDoesNotFold_DeclinesWithThatBranchsOwnReason()
     {
-        Assert.Equal("non-literal-expression:conditional", TaintReason(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END")));
+        // The overall CASE still declines (its own value genuinely depends on which branch runs,
+        // and @unknown's own branch never resolves) - but SqlTextValue.Join's existing mixed
+        // Tainted/Template handling means the decline now carries @unknown's own specific reason
+        // (more informative than the old generic "non-literal-expression:conditional" wrapper),
+        // with the KNOWN 'c' branch preserved as a recoverable GuardedAlternative rather than
+        // discarded outright - the same join-site mechanism every other divergence in this engine
+        // already relies on (loop back-edges, TRY/CATCH, IF/ELSE), now reached for CASE/IIF too.
+        Assert.Equal("variable-not-in-scope", TaintReason(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END")));
+    }
+
+    [Fact]
+    public void SearchedCase_OneBranchDoesNotFold_PreservesTheKnownBranchAsGuardedAlternative()
+    {
+        // The same shape as the test above, examined at the SqlTextValue level: the overall
+        // result stays Tainted (never a guess about which branch actually ran), but the KNOWN
+        // 'c' branch is not simply discarded - it survives as a GuardedAlternative, the exact same
+        // recovery mechanism DynamicSqlCfg's IF/ELSE join already relies on, now reached for
+        // CASE/IIF too via SqlTextValue.Join instead of FoldConditional's own separate early-decline.
+        var tainted = Assert.IsType<SqlTextValue.Tainted>(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END"));
+
+        var alternative = Assert.Single(tainted.GuardedAlternatives!);
+        var text = Assert.Single(alternative.Value.Pieces);
+        Assert.Equal("c", Assert.IsType<TemplatePiece.Lit>(text).Text);
     }
 
     [Fact]

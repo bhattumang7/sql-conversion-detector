@@ -183,15 +183,19 @@ public static class ExpressionEvaluator
             }
         }
 
+        // A branch that itself folds to Tainted no longer aborts the WHOLE conditional outright -
+        // SqlTextValue.Join already handles a mixed Tainted/Template join gracefully (attaching
+        // the KNOWN branch as a GuardedAlternative under the taint, the same mechanism every
+        // other join point in this engine - loop back-edges, TRY/CATCH, GOTO convergence -
+        // already relies on), so folding through Join here instead of pre-empting it lets a
+        // conditional with one genuinely unresolvable branch and one perfectly known branch still
+        // recover the known one, rather than discarding it. Never a guess: an unresolvable
+        // branch's own content stays exactly as unresolvable as before, only reachable via its
+        // own GuardedAlternative machinery, not silently assumed.
         SqlTextValue? union = null;
         foreach (var branch in remainingBranches.Append(elseExpression))
         {
             var folded = Fold(branch, state, sourcePath, cap, catalog);
-            if (folded is SqlTextValue.Tainted)
-            {
-                return new SqlTextValue.Tainted("non-literal-expression:conditional", at);
-            }
-
             union = union is null ? folded : SqlTextValue.Join(union, folded, guardText: string.Empty, cap, at);
         }
 
