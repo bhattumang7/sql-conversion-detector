@@ -20,6 +20,7 @@ public static class ExpressionEvaluator
     private const string FnLeft = "LEFT";
     private const string FnRight = "RIGHT";
     private const string FnIsNull = "ISNULL";
+    private const string FnSubstring = "SUBSTRING";
     private const string NonLiteralOther = "non-literal-expression:other";
 
     /// <summary>Folds a scalar expression to its <see cref="SqlTextValue"/> - a <see cref="SqlTextValue.Template"/> (possibly with holes/choices) or <see cref="SqlTextValue.Tainted"/> with a machine-readable reason, never a guess. <paramref name="catalog"/>, when supplied, lets a call to a user-defined scalar function this scanner does not itself model still resolve to a typed hole from that function's own catalog-read RETURNS clause (see <see cref="TryFoldUserScalarFunction"/>) instead of declining outright.</summary>
@@ -67,7 +68,7 @@ public static class ExpressionEvaluator
                 FunctionName.Value: var substringName,
                 Parameters: [VariableReference sourceRef, var startExpr, FunctionCall { FunctionName.Value: var lenName, Parameters: [VariableReference lenArgRef] }],
             }
-                when string.Equals(substringName, "SUBSTRING", StringComparison.OrdinalIgnoreCase)
+                when string.Equals(substringName, FnSubstring, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(lenName, "LEN", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(sourceRef.Name, lenArgRef.Name, StringComparison.OrdinalIgnoreCase)
                     && FoldInteger(startExpr, state, sourcePath, cap, out var substringStart)
@@ -83,6 +84,35 @@ public static class ExpressionEvaluator
                 // off x's own already-folded value structurally, even when x is not fully known
                 // (e.g. still contains a Hole later in the template) - see TryTrimLeadingCharacters.
                 return trimmedFromStart;
+
+            case FunctionCall
+            {
+                FunctionName.Value: var trailingSubstringName,
+                Parameters: [VariableReference trailingSourceRef, var trailingStartExpr, BinaryExpression
+                {
+                    BinaryExpressionType: BinaryExpressionType.Subtract,
+                    FirstExpression: FunctionCall { FunctionName.Value: var trailingLenName, Parameters: [VariableReference trailingLenArgRef] },
+                    SecondExpression: var trimCountExpr,
+                }],
+            }
+                when string.Equals(trailingSubstringName, FnSubstring, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(trailingLenName, "LEN", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(trailingSourceRef.Name, trailingLenArgRef.Name, StringComparison.OrdinalIgnoreCase)
+                    && FoldInteger(trailingStartExpr, state, sourcePath, cap, out var trailingStart)
+                    && trailingStart == 1
+                    && FoldInteger(trimCountExpr, state, sourcePath, cap, out var trimCount)
+                    && trimCount >= 0
+                    && TryTrimTrailingCharacters(Fold(trailingSourceRef, state, sourcePath, cap, catalog), trimCount) is { } trimmedFromEnd:
+                // SUBSTRING(x, 1, LEN(x) - K) is the mirror-image "drop a fixed trailing
+                // separator" idiom (e.g. stripping a trailing ',' left by repeated
+                // `@select = @select + '...,'` concatenation). Unlike the leading-trim case
+                // above, this one is NOT clamp-safe by itself - a too-short x makes LEN(x) - K
+                // negative, a real SQL Server runtime error (Msg 537), not "everything". So this
+                // only folds when K literal characters are structurally PROVEN present at x's own
+                // tail (walked off by TryTrimTrailingCharacters): that proof is itself proof that
+                // x's true length is >= K, so LEN(x) - K is non-negative and the result is exactly
+                // x with its last K characters removed - never a guess about x's unseen middle.
+                return trimmedFromEnd;
 
             case FunctionCall functionCall:
                 return FoldFunctionCall(functionCall.FunctionName.Value, functionCall.Parameters, functionCall, state, sourcePath, cap, catalog);
@@ -646,7 +676,7 @@ public static class ExpressionEvaluator
     private static readonly HashSet<(string Function, int Index)> IntegerArgumentPositions =
     [
         (FnLeft, 1), (FnRight, 1),
-        ("SUBSTRING", 1), ("SUBSTRING", 2),
+        (FnSubstring, 1), (FnSubstring, 2),
         ("STR", 1), ("STR", 2),
         ("CHAR", 0), ("NCHAR", 0),
         ("REPLICATE", 1),
@@ -826,6 +856,46 @@ public static class ExpressionEvaluator
 
             remaining -= lit.Text.Length;
             index++;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The mirror image of <see cref="TryTrimLeadingCharacters"/>: walks backward from the END of
+    /// <paramref name="value"/>'s own pieces, consuming <paramref name="count"/> characters across
+    /// however many trailing <see cref="TemplatePiece.Lit"/> pieces it takes. Declines (returns
+    /// null) the instant it would need to consume from a non-Lit piece (Hole/Choice) - reaching
+    /// the requested count entirely within literal text is itself the proof that x's real runtime
+    /// length is at least <paramref name="count"/>, which is what makes the caller's
+    /// <c>LEN(x) - count</c> non-negative and this trim exact rather than a guess.
+    /// </summary>
+    private static SqlTextValue? TryTrimTrailingCharacters(SqlTextValue value, int count)
+    {
+        if (count == 0)
+        {
+            return value;
+        }
+
+        if (value is not SqlTextValue.Template template)
+        {
+            return null;
+        }
+
+        var remaining = count;
+        var index = template.Pieces.Count - 1;
+        while (index >= 0 && template.Pieces[index] is TemplatePiece.Lit lit)
+        {
+            if (lit.Text.Length >= remaining)
+            {
+                var trimmedText = lit.Text[..^remaining];
+                var head = template.Pieces.Take(index);
+                var pieces = (trimmedText.Length == 0 ? head : head.Append(new TemplatePiece.Lit(trimmedText, lit.Origin, lit.PrefixLength))).ToList();
+                return new SqlTextValue.Template(pieces);
+            }
+
+            remaining -= lit.Text.Length;
+            index--;
         }
 
         return null;

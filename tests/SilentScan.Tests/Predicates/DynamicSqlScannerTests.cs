@@ -158,6 +158,52 @@ public sealed class DynamicSqlScannerTests
         Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
     }
 
+    [Fact]
+    public void Scan_SubstringOfVariableFromOneToLenMinusConstant_TrimsTrailingLiteralSuffix()
+    {
+        // SUBSTRING(x, 1, LEN(x) - K) is the mirror-image real-world idiom for stripping a fixed
+        // trailing separator (e.g. a trailing ',' left by repeated `@select = @select + '...,'`
+        // concatenation) - found verbatim in production code. Unlike the leading-trim idiom, this
+        // one is NOT clamp-safe by itself: a too-short x would make LEN(x) - K negative, a genuine
+        // SQL Server runtime error, not "everything". It only folds because the K trailing
+        // characters being removed are themselves proven to exist as a literal suffix of
+        // @select's own already-folded value - that proof is what makes LEN(x) - K non-negative.
+        var result = Scan("""
+            DECLARE @Name VARCHAR(50)
+            DECLARE @select VARCHAR(MAX) = ''
+            SET @select = @select + @Name + 'ABC,'
+            SET @select = SUBSTRING(@select, 1, LEN(@select) - 1)
+            EXEC ('SELECT ' + @select)
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__ABC$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SubstringOfVariableFromOneToLenMinusConstant_TrailingLiteralShorterThanTrim_FoldsToDeclaredTypeHole()
+    {
+        // The trailing literal piece is only 1 character ('C'), but the idiom asks to trim 2 -
+        // trimming would require reaching back INTO the preceding hole, which
+        // TryTrimTrailingCharacters never attempts (no guessing: we cannot prove @select's true
+        // length is >= 2 without knowing the hole's content). The exact TRIM value therefore
+        // declines, but SUBSTRING's own source-type passthrough still applies (its result type
+        // depends only on the source's declared type, never the length argument's value or the
+        // content), so this resolves to a VARCHAR(MAX) hole rather than an unanalyzable finding.
+        var result = Scan("""
+            DECLARE @Name VARCHAR(50)
+            DECLARE @select VARCHAR(MAX) = ''
+            SET @select = @select + @Name + 'C'
+            SET @select = SUBSTRING(@select, 1, LEN(@select) - 2)
+            EXEC ('SELECT ' + @select)
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
     /// <summary>A fake ILiveRowValueFetcher for unit tests - no database involved, just a fixed lookup table keyed exactly like the real fetcher's own contract, plus a call log so a test can assert it was (or wasn't) invoked.</summary>
     private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, string Column, string KeyColumn, string KeyValue), IReadOnlyList<string>> filteredValues, IReadOnlyDictionary<(string Table, string Column), IReadOnlyList<string>>? unfilteredValues = null) : ILiveRowValueFetcher
     {
