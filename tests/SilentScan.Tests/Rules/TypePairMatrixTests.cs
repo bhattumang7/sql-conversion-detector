@@ -26,9 +26,13 @@ public sealed class TypePairMatrixTests
 
     [Fact]
     public void Instance_HasAllExpectedEntries() =>
-        // 508 numeric/datetime/string-family entries plus 6 binary-family entries (Roadmap
-        // Phase A3: Binary/VarBinary/Timestamp, all ordered cross-category pairs).
-        Assert.Equal(514, TypePairMatrix.Instance.Entries.Count);
+        // 514 numeric/datetime/string/binary-family entries (Roadmap Phase A3) plus 276 more
+        // from widening cross-family probing to cover every pair across numeric/date-time/binary
+        // together (not just within one family) and Binary/VarBinary/Timestamp vs string in both
+        // directions - previously-unprobed cells found auditing a real production database's
+        // Unknown-verdict rate (CLAUDE.md: never guess a cross-category verdict from the
+        // precedence list alone - every cell must trace back to a real oracle probe).
+        Assert.Equal(790, TypePairMatrix.Instance.Entries.Count);
 
     [Fact]
     public void Instance_ProbesEveryDeclaredCollationWithTheSameEntryCount()
@@ -46,7 +50,10 @@ public sealed class TypePairMatrixTests
         foreach (var collation in SilentScan.Verify.Oracle.TypeMatrixGenerator.Collations)
         {
             Assert.True(byCollation.Contains(collation), $"matrix has no entries for collation '{collation}'");
-            Assert.Equal(80, byCollation[collation].Count());
+            // +12 per collation (4 StringFamily categories x 3 newly-added Binary/VarBinary/
+            // Timestamp CrossFamilyOther entries, string-column-vs-binary-value direction) since
+            // BinaryFamily joined CrossFamilyOther.
+            Assert.Equal(92, byCollation[collation].Count());
         }
     }
 

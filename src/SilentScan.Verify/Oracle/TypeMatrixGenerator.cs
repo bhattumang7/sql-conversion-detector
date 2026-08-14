@@ -96,9 +96,13 @@ public sealed class TypeMatrixGenerator
 
     /// <summary>
     /// Non-string representatives probed against every <see cref="StringFamily"/> category in
-    /// both directions (string column vs numeric/datetime/guid value, and vice versa) - the
-    /// classic "varchar column vs int/date parameter" bug class the blanket
-    /// precedence-list-only heuristic used to guess at instead of probing.
+    /// both directions (string column vs numeric/datetime/guid/binary value, and vice versa) -
+    /// the classic "varchar column vs int/date parameter" bug class the blanket
+    /// precedence-list-only heuristic used to guess at instead of probing. The three
+    /// <see cref="BinaryFamily"/> entries at the end are real, oracle-confirmed-comparable
+    /// pairs (a rowversion/binary/varbinary column or value against a string, e.g. a hex-encoded
+    /// rowversion literal compared against the real column) - previously entirely unprobed
+    /// against strings even though every OTHER category here was.
     /// </summary>
     public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> CrossFamilyOther =
     [
@@ -119,6 +123,9 @@ public sealed class TypeMatrixGenerator
         (SqlTypeCategory.DateTime2, "DATETIME2"),
         (SqlTypeCategory.DateTimeOffset, "DATETIMEOFFSET"),
         (SqlTypeCategory.UniqueIdentifier, "UNIQUEIDENTIFIER"),
+        (SqlTypeCategory.Binary, "BINARY(16)"),
+        (SqlTypeCategory.VarBinary, "VARBINARY(16)"),
+        (SqlTypeCategory.Timestamp, "ROWVERSION"),
     ];
 
     private readonly DatabaseProvisioner _provisioner;
@@ -177,9 +184,17 @@ public sealed class TypeMatrixGenerator
                 var baseFamily = numericFamily.Concat(dateTimeFamily).Concat(binaryFamily).ToList();
                 await DeployFamilyTablesAsync(familyDb, baseFamily, collationName: null, cancellationToken);
                 var familyContext = new ProbeContext(familyDb, CollationName: null, entries, v => serverVersion ??= v, cancellationToken);
-                await ProbeFamilyAsync(numericFamily, familyContext);
-                await ProbeFamilyAsync(dateTimeFamily, familyContext);
-                await ProbeFamilyAsync(binaryFamily, familyContext);
+
+                // Cross-probed as ONE combined family, not three separate within-family-only
+                // passes (numeric vs numeric, date/time vs date/time, binary vs binary) - every
+                // pair across numeric/date-time/binary needs its own real probe too (an int
+                // column vs a date value, a bit column vs a datetime value, a rowversion column
+                // vs a decimal value, ...), not just same-family pairs. All three families are
+                // already deployed together into this one database (baseFamily above), so this
+                // costs nothing extra to deploy - it was previously just unprobed, not
+                // unprobeable. Closes the single largest slice of `no-probed-matrix-cell`
+                // Unknowns found auditing a real production database's scan.
+                await ProbeFamilyAsync(baseFamily, familyContext);
 
                 // Non-string column vs a string-typed value (e.g. `WHERE IntColumn = '123'`) is
                 // not collation-sensitive - the target isn't a string, so which collation family
@@ -296,10 +311,19 @@ public sealed class TypeMatrixGenerator
 
     /// <summary>
     /// SQL Server error numbers this generator treats as real CompileFailed=true facts about a
-    /// type pair, empirically observed from the two distinct compile errors SQL Server actually
+    /// type pair, empirically observed from the four distinct compile errors SQL Server actually
     /// raises for "these two types cannot be compared at all": 206 ("Operand type clash: %ls is
-    /// incompatible with %ls", e.g. uniqueidentifier vs a numeric/datetime type) and 402 ("The
-    /// data types %ls and %ls are incompatible in the %ls operator", e.g. time vs date/datetime).
+    /// incompatible with %ls", e.g. uniqueidentifier vs a numeric/datetime type), 402 ("The
+    /// data types %ls and %ls are incompatible in the %ls operator", e.g. time vs date/datetime),
+    /// and a pair surfaced once cross-family probing was widened to include timestamp/rowversion
+    /// vs string (char/varchar to timestamp specifically refuses even an implicit attempt, unlike
+    /// every other cross-family pair this generator had probed before) - 257 ("Implicit
+    /// conversion from data type %ls to %ls is not allowed. Use the CONVERT function to run this
+    /// query", the VALUE-side direction: a string value compared against a timestamp column) and
+    /// 260 ("Disallowed implicit conversion from data type %ls to data type %ls, table '%ls',
+    /// column '%ls'. Use the CONVERT function to run this query", the COLUMN-side direction: a
+    /// string COLUMN compared against a timestamp value - a distinct error number specifically
+    /// because it names the offending column, not just the two types).
     /// Deliberately NOT a blanket `catch (SqlException)`: that previously swallowed error 208
     /// ("Invalid object name") from a probe table this generator forgot to deploy
     /// (dbo.T_UniqueIdentifier) and recorded a fabricated CompileFailed=true for a pair that
@@ -307,7 +331,7 @@ public sealed class TypeMatrixGenerator
     /// in the generator or its deployment, not an empirical fact about the type pair, and must
     /// fail the run loudly instead of being recorded as a wrong verdict.
     /// </summary>
-    private static readonly HashSet<int> TypeIncompatibilityErrorNumbers = [206, 402];
+    private static readonly HashSet<int> TypeIncompatibilityErrorNumbers = [206, 257, 260, 402];
 
     private async Task ProbeOnePairAsync(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string otherSyntax, ProbeContext context)
     {
