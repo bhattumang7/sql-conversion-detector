@@ -1002,21 +1002,53 @@ public static class DynamicSqlTransfer
 
     /// <summary>
     /// Taints the return-value variable (<c>EXEC @rc = proc</c>) and every argument passed with
-    /// OUTPUT, plus any other variable the call site happens to mention - this scanner does not
-    /// model what an arbitrary called procedure does internally, so any variable named in the
-    /// call could come back holding something other than what was folded for it. Scoped to the
-    /// variables THIS call actually mentions (T-SQL locals have no aliasing) rather than every
-    /// tracked variable - one this call never references cannot have been mutated by it.
+    /// OUTPUT - this scanner does not model what an arbitrary called procedure does internally,
+    /// so either of those COULD come back holding something other than what was folded for it. A
+    /// plain (non-OUTPUT) argument is a genuine T-SQL call-by-VALUE - the callee cannot write
+    /// back through it no matter what it does internally, so it is never tainted here (was
+    /// previously blanket-tainted along with everything else the call site merely mentioned,
+    /// needlessly declining a variable the callee could not possibly have touched - a real
+    /// production pattern: EXEC @RC = dbo.SomeHelper @sql, @otherArg OUTPUT used @sql only to
+    /// PASS dynamic SQL text INTO the helper, never to receive anything back). Any executable
+    /// entity shape other than an ordinary procedure reference (rare) falls back to the old
+    /// blanket "every referenced variable could have been written" default, matching this
+    /// project's general "unmodeled construct stays conservative" philosophy.
     /// </summary>
     private static void TaintReferencedVariables(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         var seeded = SeedKnownOutputArguments(node, context, state);
         var span = context.Span(node);
-        var collector = new ReferencedVariableCollector();
-        node.Accept(collector);
-        foreach (var name in collector.Names.Where(n => state.ContainsKey(n) && !seeded.Contains(n)))
+        foreach (var name in CollectWritableVariableNames(node).Where(n => state.ContainsKey(n) && !seeded.Contains(n)))
         {
             state[name] = HavocOrTaint("unsupported-execute-form", span, context.DeclaredTypes.GetValueOrDefault(name));
+        }
+    }
+
+    private static IEnumerable<string> CollectWritableVariableNames(ExecuteStatement node)
+    {
+        if (node.ExecuteSpecification.Variable is { } returnStatusVariable)
+        {
+            yield return returnStatusVariable.Name;
+        }
+
+        if (node.ExecuteSpecification.ExecutableEntity is ExecutableProcedureReference { Parameters: { } parameters })
+        {
+            foreach (var parameter in parameters)
+            {
+                if (parameter is { IsOutput: true, ParameterValue: VariableReference outputVariable })
+                {
+                    yield return outputVariable.Name;
+                }
+            }
+
+            yield break;
+        }
+
+        var collector = new ReferencedVariableCollector();
+        node.Accept(collector);
+        foreach (var name in collector.Names)
+        {
+            yield return name;
         }
     }
 

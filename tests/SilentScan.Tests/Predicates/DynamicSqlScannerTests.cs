@@ -1453,14 +1453,32 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableMutatedByProcCallWithReturnAssignment_FoldsToTypedHole()
+    public void Scan_ExecOfVariableMutatedByProcCallWithReturnAssignment_PreservesKnownValue_NotAnOutputArgument()
     {
-        // `EXEC @rc = dbo.BuildQuery @sql` is the same unmodeled-write shape as the OUTPUT-
-        // argument case above; @sql's own declared type is known, so it degrades to a typed hole.
+        // `EXEC @rc = dbo.BuildQuery @sql` taints @rc (the return-status target) - but @sql is
+        // passed WITHOUT the OUTPUT keyword, a genuine T-SQL call-by-VALUE the callee cannot
+        // write back through no matter what it does internally, so @sql itself is never touched
+        // and keeps its own already-known literal value.
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @rc INT; " +
             "EXEC @rc = dbo.BuildQuery @sql; " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariablePassedAsOutputArgument_FoldsToTypedHole()
+    {
+        // The genuine OUTPUT case, unlike the by-value one above: @sql IS marked OUTPUT, a real
+        // T-SQL call-by-reference the callee CAN write through - @sql's own declared type is
+        // known, so it degrades to a typed hole rather than keeping its stale prior value.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
+            "EXEC dbo.BuildQuery @sql OUTPUT; " +
             "EXEC(@sql);");
 
         Assert.Empty(result.Findings);
