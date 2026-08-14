@@ -88,7 +88,11 @@ public static class BuiltinRegistry
     /// fold (truncation) only works for a VarChar/NVarChar target (oracle-verified: silently
     /// truncates over-length input, no error) - Char/NChar's blank-padding rendering isn't modeled,
     /// so those decline the value fold even for a concrete Text source, but the TYPE-transfer fold
-    /// (the source is a Hole) accepts Char/NChar too, since a hole never needs a rendered value.
+    /// (the source isn't a concrete Text) accepts Char/NChar too, since it never needs a rendered
+    /// value - CAST's own RESULT TYPE is a hard syntactic fact regardless of whether the source
+    /// itself resolved to a clean typed Hole or couldn't resolve AT ALL (a MIXED literal+hole
+    /// template, a Choice, ...): the source's own unresolvability only ever blocks computing the
+    /// exact rendered VALUE, never the type CAST/CONVERT's own syntax already pins.
     /// </summary>
     public static BuiltinFoldResult FoldCastOrConvert(SqlType targetType, BuiltinArgument source, SourceSpan site)
     {
@@ -97,9 +101,9 @@ public static class BuiltinRegistry
             return new BuiltinFoldResult.Fail("non-literal-expression:cast-target-not-pinned");
         }
 
-        if (source is BuiltinArgument.Unresolved unresolved)
+        if (source is BuiltinArgument.Unresolved)
         {
-            return new BuiltinFoldResult.Fail(unresolved.Reason);
+            return BuiltinFoldResult.OkHole(targetType, site, HoleKind.ArgumentIndependentReturnType);
         }
 
         if (source is BuiltinArgument.Hole castHole)

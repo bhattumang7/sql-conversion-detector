@@ -538,6 +538,26 @@ public sealed class BuiltinRegistryTests
     }
 
     [Fact]
+    public void FoldCastOrConvert_VarCharTarget_UnresolvedSource_StillTransfersTargetTypeAnyway()
+    {
+        // The source being totally unresolvable (a MIXED literal+hole template, a Choice, ...)
+        // only ever blocks computing the exact rendered VALUE - CAST/CONVERT's own RESULT TYPE is
+        // pinned by the call site's own syntax regardless, the same hard fact that already lets a
+        // clean Hole source transfer its type. Found auditing a real production database: this
+        // was previously the single largest contributor to "symbolic-value-in-function-argument"
+        // (CAST(@predicate AS VARCHAR(n)) where @predicate is built from mixed literal/parameter
+        // concatenation) - the whole containing dynamic-SQL statement declined outright even
+        // though the CAST's own type was never actually in question.
+        var target = new SqlType(SqlTypeCategory.VarChar, Length: 200);
+
+        var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Unresolved("symbolic-value-in-function-argument", Site), Site);
+
+        var hole = OkHole(result);
+        Assert.Equal(target, hole.Type);
+        Assert.Equal(HoleKind.ArgumentIndependentReturnType, hole.Kind);
+    }
+
+    [Fact]
     public void FoldCastOrConvert_NonStringTarget_DeclinesCastTargetNotPinned()
     {
         var target = new SqlType(SqlTypeCategory.Int);
