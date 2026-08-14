@@ -36,12 +36,23 @@ public sealed class LivePlanCacheReader
     // decode is never attempted on a plan belonging to some other, possibly-currently-dropping
     // database in the first place - the failure mode is structurally unreachable, not just
     // retried around.
+    //
+    // Plain CONVERT, not TRY_CONVERT: found live against a real compatibility-level-100 database
+    // (SQL Server 2008), where TRY_CONVERT (added in compat 110) errors outright with "not a
+    // recognized built-in function name" - a hard SQL failure, not a permission gap, that made
+    // this entire reader silently degrade to "unavailable" on every pre-2012-compat database
+    // regardless of what VIEW SERVER STATE the login actually had. TRY_CONVERT's whole point -
+    // returning NULL instead of erroring on an unconvertible input - was never needed here in the
+    // first place: sys.dm_exec_plan_attributes's own 'dbid' attribute is guaranteed numeric by the
+    // DMV's own contract, oracle-verified (every cached plan's own 'dbid' row converts cleanly),
+    // so a plain CONVERT is both correct and works on every compat level the engine itself
+    // supports, not just 110+.
     private const string Sql = """
         WITH FilteredPlans AS (
             SELECT DISTINCT qs.plan_handle, qs.execution_count
             FROM sys.dm_exec_query_stats qs
             CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) epa
-            WHERE epa.attribute = 'dbid' AND TRY_CONVERT(int, epa.value) = DB_ID()
+            WHERE epa.attribute = 'dbid' AND CONVERT(int, epa.value) = DB_ID()
         )
         SELECT TOP (@maxPlans) fp.execution_count, qp.query_plan
         FROM FilteredPlans fp
