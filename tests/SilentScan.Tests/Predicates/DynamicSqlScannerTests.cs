@@ -3507,4 +3507,98 @@ public sealed class DynamicSqlScannerTests
             """);
         PrintProbe("R3 BUG-5 CASE with non-literal ELSE then SUBSTRING/LEN trim", extraction, pipeline);
     }
+
+    // ------------------------------------------------------------------
+    // Self-referential SELECT-assignment append (SELECT @x = @x + expr FROM t) - the running-
+    // total/"quirky update" idiom real corpus code uses to accumulate dynamic SQL text across
+    // rows (SQL-Server-First-Responder-Kit's sp_Blitz.sql: an aggregate count spliced into an
+    // ORDER BY/OPTION(RECOMPILE) tail). T-SQL evaluates this per matching row as
+    // @x := @x + expr(row), so @x's final value always keeps its OWN prior value intact with at
+    // most some unknown text appended - never something unrelated to what @x already held.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Scan_SelectAssignmentSelfAppendsUnresolvableAggregateFromUncatalogedTable_PreservesKnownPrefix()
+    {
+        // Both IF and ELSE branches append to the SAME @StringToExecute that already holds a big
+        // literal prefix - the IF branch appends a literal, the ELSE branch appends an aggregate
+        // over sys.databases (uncataloged, unresolvable). Before the self-referential-append fix,
+        // the ELSE branch's own SELECT-assignment discarded that ENTIRE prefix via the general
+        // HavocOrTaint path, rendering ONLY a bare placeholder followed by the trailing literal -
+        // which then broke the parse outright (the placeholder alone can't open a whole
+        // INSERT/SELECT statement). Now the prefix survives and only the truly-unknown appended
+        // piece is a hole, so both branches analyze cleanly.
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @StringToExecute NVARCHAR(MAX)
+                SET @StringToExecute = N'INSERT INTO #BlitzResults (CheckID) SELECT 160 HAVING COUNT(DISTINCT plan_handle) > '
+
+                IF 50 > (SELECT COUNT(*) FROM sys.databases)
+                    SET @StringToExecute = @StringToExecute + N' 50 '
+                ELSE
+                    SELECT @StringToExecute = @StringToExecute + CAST(COUNT(*) * 2 AS NVARCHAR(50)) FROM sys.databases
+
+                SET @StringToExecute = @StringToExecute + N' ORDER BY COUNT(DISTINCT plan_handle) DESC OPTION (RECOMPILE);'
+
+                EXECUTE(@StringToExecute)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Equal(2, extraction.AnalyzableScripts.Count);
+        Assert.DoesNotContain(pipeline.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        Assert.Contains(extraction.AnalyzableScripts, s =>
+            s.InnerText.Contains("__silentscan_sym_", StringComparison.Ordinal)
+            && s.InnerText.Contains("INSERT INTO #BlitzResults (CheckID) SELECT 160 HAVING COUNT(DISTINCT plan_handle) > __silentscan_sym_", StringComparison.Ordinal)
+            && s.InnerText.Contains("ORDER BY COUNT(DISTINCT plan_handle) DESC OPTION (RECOMPILE);", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentSelfAppendWithUninitializedPriorValue_ConcatenatesTwoHolesSoundly()
+    {
+        // @x's own PRIOR value is itself an uninitialized-DECLARE hole, not literal text - self-
+        // append must still soundly concatenate two unknowns rather than fabricating any content,
+        // producing two adjacent placeholder tokens (one for the prior value, one for the
+        // appended aggregate) instead of collapsing to a single generic hole.
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @StringToExecute NVARCHAR(MAX)
+                SELECT @StringToExecute = @StringToExecute + CAST(COUNT(*) AS NVARCHAR(50)) FROM sys.databases
+                EXECUTE(@StringToExecute)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Matches(@"^(__silentscan_sym_L\d+C\d+__){2}$", script.InnerText);
+
+        // No real SQL text survives once both holes are stripped - honestly unanalyzable at the
+        // pipeline stage, not this fix's concern (it only guarantees the CONCATENATION stays
+        // sound; whether what's left is enough to parse is a separate, correctly-reported outcome).
+        var finding = Assert.Single(pipeline.Findings);
+        Assert.Equal("symbolic-value-not-positionable:whole-statement", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentAppendsToADifferentVariableThanTheOneOnTheLeft_StaysOrdinaryHavoc()
+    {
+        // SELECT @x = @y + expr FROM t - @x is NOT self-referential (the appended-to variable on
+        // the right is @y, not @x), so this scanner must not assume @x's own prior value survives;
+        // it falls back to ordinary havoc exactly as before this fix.
+        var (extraction, _) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @x NVARCHAR(MAX) = N'SELECT 1 WHERE 1 = '
+                DECLARE @y NVARCHAR(MAX) = N'unrelated'
+                SELECT @x = @y + CAST(COUNT(*) AS NVARCHAR(50)) FROM sys.databases
+                EXECUTE(@x)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
 }

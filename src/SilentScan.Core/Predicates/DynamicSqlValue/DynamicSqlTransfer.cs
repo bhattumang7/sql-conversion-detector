@@ -365,6 +365,40 @@ public static class DynamicSqlTransfer
             : new SqlTextValue.Tainted(reason, span);
 
     /// <summary>
+    /// <c>SELECT @x = @x + expr FROM t [...]</c> - the running-total/"quirky update" idiom (real
+    /// corpus shape: SQL-Server-First-Responder-Kit's sp_Blitz.sql accumulates a placeholder count
+    /// this way) - is NOT an arbitrary rewrite of @x the way <see cref="HavocOrTaint"/>'s general
+    /// "unmodeled write" case has to assume. T-SQL evaluates this per matching row as
+    /// <c>@x := @x + expr(row)</c> in sequence, so @x's FINAL value is always its OWN prior value
+    /// with zero or more unknown fragments appended - NEVER something unrelated to what @x already
+    /// held (zero rows leaves @x completely unchanged; one or more rows only ever extends it).
+    /// Recognizing this narrow shape and modeling it as <see cref="SqlTextValue.Concat"/>(existing,
+    /// unknown-appended-hole) instead of a fresh unconstrained Hole is what lets a big literal
+    /// prefix @x already held survive this statement - the general path (assigning THAT prefix a
+    /// context-free <see cref="HoleKind.HavocWrite"/> hole) would otherwise discard it entirely,
+    /// even though every execution of THIS specific shape provably keeps it intact. Deliberately
+    /// narrow: only the SAME variable appearing as the untouched LEFT operand of a top-level
+    /// addition (the idiom's actual shape everywhere it's been seen) - anything else (the variable
+    /// on the right, nested inside a function call, multiple assigned variables) falls back to the
+    /// caller's own general havoc, never a guess.
+    /// </summary>
+    private static bool TryCompileSelfReferentialAppend(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
+    {
+        if (select.QueryExpression is not QuerySpecification { SelectElements: [SelectSetVariable { AssignmentKind: AssignmentKind.Equals } setVar] }
+            || setVar.Expression is not BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add, FirstExpression: VariableReference selfRef } binary
+            || !string.Equals(selfRef.Name, setVar.Variable.Name, StringComparison.OrdinalIgnoreCase)
+            || !state.TryGetValue(setVar.Variable.Name, out var existing))
+        {
+            return false;
+        }
+
+        var declaredType = context.DeclaredTypes.GetValueOrDefault(setVar.Variable.Name);
+        var appended = HavocOrTaint("select-assignment-not-pure", context.Span(binary.SecondExpression), declaredType);
+        state[setVar.Variable.Name] = SqlTextValue.Concat(existing, appended) with { DeclaredType = declaredType };
+        return true;
+    }
+
+    /// <summary>
     /// <c>SELECT @x = expr[, @y = expr2, ...]</c>, the other common way T-SQL assigns local
     /// variables. Only the "pure assignment" shape - no FROM/WHERE/HAVING/TOP, every select
     /// element a variable assignment - is trustworthy: a FROM clause makes the assigned value
@@ -386,7 +420,8 @@ public static class DynamicSqlTransfer
             || spec.SelectElements.Count == 0
             || !spec.SelectElements.All(e => e is SelectSetVariable))
         {
-            if (!TryCompileSelectAssignmentFromSingleKnownTable(select, context, state))
+            if (!TryCompileSelectAssignmentFromSingleKnownTable(select, context, state)
+                && !TryCompileSelfReferentialAppend(select, context, state))
             {
                 foreach (var name in assignedNames.Names)
                 {
