@@ -134,8 +134,12 @@ public sealed class DynamicSqlScannerTests
     {
         // The leading literal piece is only 2 characters, but the idiom asks to skip 3 - trimming
         // would require slicing INTO the following hole, which is never attempted (no guessing).
-        // Falls back to the ordinary per-argument decomposition, which itself declines on the
-        // now-unfoldable LEN(@predicate) length argument, exactly as before this fix existed.
+        // Falls back to the ordinary per-argument decomposition, which itself declines: SUBSTRING's
+        // HoleTransfer no longer needs a CONCRETE length to pass through its source's own type
+        // (the result type never depends on the length's value, only slicing does), but it still
+        // prefers the length argument's OWN unresolved reason over the generic fallback when the
+        // source itself isn't a typed Hole to pass through either - here the unfoldable
+        // LEN(@predicate) length argument's own reason surfaces, exactly as before this widening.
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @predicate VARCHAR(MAX) = ''
@@ -2331,7 +2335,12 @@ public sealed class DynamicSqlScannerTests
     public void Scan_IntVariableFromUnfoldableExpression_StillDeclines_NotAGuess()
     {
         // A length carried through an expression FoldInteger genuinely can't evaluate (a column
-        // reference) still declines exactly as before this widening - never a guess.
+        // reference) still declines - never a guess. LEFT/RIGHT's HoleTransfer only needs to
+        // PROVE the length negative to decline on the length itself; an unprovable length falls
+        // through toward the source argument, but still prefers the LENGTH's own unresolved
+        // reason over the generic fallback - the source here is concrete literal text (nothing to
+        // pass a type through from either), so the length's own reason surfaces, exactly as
+        // before this widening.
         var result = Scan(
             "CREATE TABLE dbo.T (N INT NOT NULL); " +
             "DECLARE @n INT; SELECT @n = N FROM dbo.T; " +
@@ -2925,7 +2934,9 @@ public sealed class DynamicSqlScannerTests
     public void Scan_LenOfNonLiteralExpression_DeclinesLeft()
     {
         // LEN's own argument doesn't fold (an undeclared variable) - the length stays unknown,
-        // same generic reason as any other non-literal LEFT/RIGHT length argument.
+        // same reason as any other non-literal LEFT/RIGHT length argument (LEFT's HoleTransfer
+        // still prefers the length's OWN unresolved reason over the generic fallback, even though
+        // it no longer requires a concrete length to pass through the source's own type).
         var result = Scan("DECLARE @sql VARCHAR(MAX) = LEFT(N'abcdef', LEN(@undeclared)); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -3697,6 +3708,33 @@ public sealed class DynamicSqlScannerTests
             CREATE PROCEDURE dbo.usp_BuildReport @TableNameParam SYSNAME, @HintParam NVARCHAR(50) AS
             BEGIN
                 DECLARE @sql NVARCHAR(MAX) = N'CREATE TABLE ' + @TableNameParam + N' (ID INT); INSERT ' + @TableNameParam + N' (ID) SELECT ' + @HintParam + N' 1'
+                EXEC(@sql)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Single(extraction.AnalyzableScripts);
+        Assert.DoesNotContain(pipeline.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+    }
+
+    [Fact]
+    public void Analyze_PlaceholderStandsForEntireMissingSearchCondition_ElidesToTautologyAndAnalyzesTheRest()
+    {
+        // Real corpus shape: an unseeded proc parameter stands for a WHOLE optional filter
+        // fragment appended after WHERE, immediately followed by a real, load-bearing predicate
+        // (`WHERE <filter> AND real.condition`) - a bare identifier-shaped placeholder token can
+        // never be a legal search_condition on its own (T-SQL has no standalone-boolean-value
+        // grammar outside a real comparison/EXISTS/IN), and the OLD blank-to-a-single-space
+        // elision policy left a dangling "AND" with no left operand, so this used to decline
+        // outright as symbolic-value-broke-parse even though the REST of the statement (the real
+        // predicate, the real SELECT list) was fully known. The "1=1" filler candidate produces a
+        // genuine (if uninformative) search_condition here, letting the rest of the statement
+        // analyze - PartiallyAnalyzed, never a fabricated verdict about the elided fragment itself
+        // (int-literal-vs-int-literal has no column operand at all).
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Report @Filter NVARCHAR(200) AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE ' + @Filter + N' AND 1 = 1'
                 EXEC(@sql)
             END
             """);

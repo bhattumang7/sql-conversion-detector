@@ -305,30 +305,72 @@ public static partial class DynamicSqlPipeline
     /// <summary>
     /// The fallback for a symbolic value that broke the parse outright: it may not stand for a
     /// single scalar at all, but for a whole optional clause/fragment (an appended filter, a
-    /// query hint) - no identifier-shaped token can ever sit legally in that position, but a
-    /// single space might. Blanking EVERY placeholder unconditionally (the old, cruder policy)
-    /// is unsound whenever a script mixes one genuinely-optional placeholder with another that is
-    /// a real, load-bearing identifier elsewhere in the SAME script (a real corpus shape:
-    /// SQL-Server-First-Responder-Kit's sp_BlitzFirst.sql builds a temp table name AND a TOP-style
-    /// clause as two separate placeholders in the same statement) - blanking the load-bearing one
-    /// breaks a parse that blanking only the genuinely-optional one would have fixed. Instead,
-    /// this targets ONLY the placeholder(s) ScriptDOM's own error message actually names ("Incorrect
-    /// syntax near '__silentscan_sym_...__'"), elides just those, and reparses - repeating with any
-    /// NEWLY blamed placeholder each round (a token-render depending on the one just elided can
-    /// itself become the new complaint) until it succeeds, no round makes further progress, or
-    /// every placeholder is already elided. This can only ever CONVERGE to the old
+    /// query hint), an entire missing search_condition, or a single missing value - no
+    /// identifier-shaped token can ever sit legally in any of those positions, but the right
+    /// grammar-neutral filler (see <see cref="ElisionFillerCandidates"/>) might. Blanking EVERY
+    /// placeholder unconditionally (the old, cruder policy) is unsound whenever a script mixes
+    /// one genuinely-optional placeholder with another that is a real, load-bearing identifier
+    /// elsewhere in the SAME script (a real corpus shape: SQL-Server-First-Responder-Kit's
+    /// sp_BlitzFirst.sql builds a temp table name AND a TOP-style clause as two separate
+    /// placeholders in the same statement) - blanking the load-bearing one breaks a parse that
+    /// blanking only the genuinely-optional one would have fixed. Instead, this targets ONLY the
+    /// placeholder(s) ScriptDOM's own error message actually names ("Incorrect syntax near
+    /// '__silentscan_sym_...__'"), elides just those, and reparses - repeating with any NEWLY
+    /// blamed placeholder each round (a token-render depending on the one just elided can itself
+    /// become the new complaint) until it succeeds, no round makes further progress, or every
+    /// placeholder is already elided - then, if that whole loop still didn't converge, retrying
+    /// the entire thing with the NEXT filler candidate. This can only ever CONVERGE to the old
     /// blank-everything behavior in the worst case, never do worse - every input the old policy
-    /// recovered, this recovers too, in the same or fewer rounds. A space, unlike deleting the
-    /// span outright, can never fuse two adjacent literal fragments into a token that wasn't there
-    /// in either the real runtime query or the elided one (T-SQL treats whitespace as a pure token
-    /// separator everywhere outside a quoted literal/identifier, and a placeholder inside one of
-    /// those would already have classified as a SAFE position long before this ever runs) - so
-    /// extraction against the result can only ever under-report relative to the true runtime query
-    /// (the elided fragment's own content stays genuinely unknown), never fabricate a finding that
-    /// depends on it.
+    /// recovered, this recovers too, in the same or fewer rounds. Every candidate filler is
+    /// provably incapable of fabricating a typed-predicate verdict about a real column (see each
+    /// candidate's own reasoning on <see cref="ElisionFillerCandidates"/>) - extraction against
+    /// the result can only ever under-report relative to the true runtime query (the elided
+    /// fragment's own content stays genuinely unknown), never fabricate a finding that depends on
+    /// it.
     /// </summary>
+    /// <summary>
+    /// Fillers tried, in order, for each blamed placeholder round - a SINGLE filler is applied
+    /// uniformly across every blamed placeholder within one attempt (never mixed per-placeholder;
+    /// that would require knowing each one's own grammar position, which this scanner has no way
+    /// to determine). Each candidate is provably incapable of fabricating a typed-predicate
+    /// verdict about a real column, so widening past the original space-only policy costs nothing
+    /// in soundness:
+    /// - " " (space): the original policy - correct for a placeholder standing in for a whole
+    ///   OPTIONAL clause/fragment that can vanish entirely (a TOP-style clause, an appended
+    ///   filter). Tried first since it changes the fewest tokens.
+    /// - "1=1": correct for a placeholder standing in for an entire missing search_condition
+    ///   (a bare `WHERE __ph__`, or `WHERE __ph__ AND real.condition`) - integer-literal-vs-
+    ///   integer-literal has no column operand at all, so TypedPredicateExtractor ledgers it as
+    ///   the existing benign "no column operand" skip, never attributes a verdict to a real
+    ///   column.
+    /// - "NULL": correct for a placeholder standing in for a single missing SCALAR value (a
+    ///   comparison's RHS, a SELECT-list item, a function argument) - LiteralTypeResolver
+    ///   resolves NullLiteral to a null SqlType, so a predicate comparing a real column against
+    ///   it collapses to the SAME "operand-type-unresolved" Unknown a column vs. an unseeded
+    ///   parameter already gets, never a fabricated verdict.
+    /// </summary>
+    private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL"];
+
     private static bool TryReparseWithTargetedElision(
         DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors,
+        [NotNullWhen(true)] out SqlParseResult? elidedParseResult,
+        [NotNullWhen(true)] out Func<int, int, SourceSpan>? map)
+    {
+        foreach (var filler in ElisionFillerCandidates)
+        {
+            if (TryReparseWithTargetedElision(script, placeholders, originalErrors, filler, out elidedParseResult, out map))
+            {
+                return true;
+            }
+        }
+
+        elidedParseResult = null;
+        map = null;
+        return false;
+    }
+
+    private static bool TryReparseWithTargetedElision(
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors, string filler,
         [NotNullWhen(true)] out SqlParseResult? elidedParseResult,
         [NotNullWhen(true)] out Func<int, int, SourceSpan>? map)
     {
@@ -351,7 +393,7 @@ public static partial class DynamicSqlPipeline
             }
 
             var toElideNow = placeholders.Where(p => toElide.Contains(PlaceholderToken(p))).ToList();
-            var variant = NeutralElisionVariant.Build(script.InnerText, toElideNow);
+            var variant = NeutralElisionVariant.Build(script.InnerText, toElideNow, filler);
             var parseResult = SqlScriptParser.ParseText(virtualPath, variant.Text);
             if (!parseResult.HasErrors)
             {
@@ -399,7 +441,7 @@ public static partial class DynamicSqlPipeline
 
         public string Text { get; }
 
-        public static NeutralElisionVariant Build(string innerText, IReadOnlyList<PlaceholderOccurrence> occurrences)
+        public static NeutralElisionVariant Build(string innerText, IReadOnlyList<PlaceholderOccurrence> occurrences, string filler = " ")
         {
             var sorted = occurrences.OrderBy(o => o.InnerStartOffset).ToList();
             var text = new StringBuilder();
@@ -415,9 +457,17 @@ public static partial class DynamicSqlPipeline
                     text.Append(innerText[i]);
                 }
 
-                fillerOrigins[text.Length] = occurrence.Origin;
-                innerOffsets.Add(occurrence.InnerStartOffset);
-                text.Append(' ');
+                // Every position within a MULTI-character filler (e.g. "1=1") maps back to the
+                // SAME original offset - there is no finer-grained original position to give it,
+                // and Map() only ever needs to answer "does this location belong to elided
+                // filler text or real source", not which filler character specifically.
+                for (var i = 0; i < filler.Length; i++)
+                {
+                    fillerOrigins[text.Length + i] = occurrence.Origin;
+                    innerOffsets.Add(occurrence.InnerStartOffset);
+                }
+
+                text.Append(filler);
 
                 cursor = occurrence.InnerStartOffset + occurrence.Length;
             }

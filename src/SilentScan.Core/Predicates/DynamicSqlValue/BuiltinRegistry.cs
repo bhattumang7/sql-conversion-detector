@@ -184,7 +184,73 @@ public static class BuiltinRegistry
         yield return EnvironmentNameSpec("HOST_NAME");
         yield return EnvironmentNameSpec("SCHEMA_NAME");
         yield return FixedTypeSpec("ORIGINAL_LOGIN", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), HoleKind.EnvironmentDependent);
+
+        // Oracle-verified (sys.dm_exec_describe_first_result_set, compat 160): every one of these
+        // is a genuinely common corpus builtin found entirely missing from this registry auditing
+        // a real production database - each one's absence meant EVERY dynamic-SQL variable it
+        // touched declined outright as "non-literal-expression:function-call", not just that one
+        // sub-expression. None gets a real Evaluate (computing the true value would mean modeling
+        // real date/string arithmetic, a separate, larger effort) - a typed hole is still a
+        // strict improvement over declining, and lets the surrounding template still resolve.
+        yield return DateAdd();
+        yield return FixedTypeSpec("DATEPART", new SqlType(SqlTypeCategory.Int), HoleKind.ArgumentIndependentReturnType);
+        yield return FixedTypeSpec("DATEDIFF", new SqlType(SqlTypeCategory.Int), HoleKind.ArgumentIndependentReturnType);
+        yield return FixedTypeSpec("CHARINDEX", new SqlType(SqlTypeCategory.Int), HoleKind.ArgumentIndependentReturnType);
+        yield return FixedTypeSpec("DATALENGTH", new SqlType(SqlTypeCategory.Int), HoleKind.ArgumentIndependentReturnType);
+        yield return FixedTypeSpec("LEN", new SqlType(SqlTypeCategory.Int), HoleKind.ArgumentIndependentReturnType);
+        yield return StuffSpec();
+
+        // Every ERROR_* function is only ever valid inside a CATCH block and SCOPE_IDENTITY()
+        // reads the session's own last IDENTITY insert - both genuinely environment/execution-
+        // context-dependent, same category as SERVERPROPERTY, never anything foldable from source
+        // text.
+        yield return FixedTypeSpec("ERROR_MESSAGE", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), HoleKind.EnvironmentDependent);
+        yield return FixedTypeSpec("ERROR_NUMBER", new SqlType(SqlTypeCategory.Int), HoleKind.EnvironmentDependent);
+        yield return FixedTypeSpec("ERROR_SEVERITY", new SqlType(SqlTypeCategory.Int), HoleKind.EnvironmentDependent);
+        yield return FixedTypeSpec("ERROR_STATE", new SqlType(SqlTypeCategory.Int), HoleKind.EnvironmentDependent);
+        yield return FixedTypeSpec("ERROR_LINE", new SqlType(SqlTypeCategory.Int), HoleKind.EnvironmentDependent);
+        yield return FixedTypeSpec("ERROR_PROCEDURE", new SqlType(SqlTypeCategory.NVarChar, Length: 128), HoleKind.EnvironmentDependent);
+        yield return FixedTypeSpec("SCOPE_IDENTITY", new SqlType(SqlTypeCategory.Decimal, Precision: 38, Scale: 0), HoleKind.EnvironmentDependent);
     }
+
+    /// <summary>
+    /// DATEADD's result type is NOT argument-independent like the others above: oracle-verified
+    /// (same rule <see cref="Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult"/> already
+    /// applies for typed-predicate purposes, reused here for consistency) - passes through the
+    /// third argument's own type when it's already date/time-family, else resolves to plain
+    /// datetime (the engine implicitly converts a numeric/string date argument). When the third
+    /// argument isn't even a typed Hole (fully Unresolved, or a concrete Text/Number this
+    /// registry doesn't itself evaluate), the datetime default still holds - the ONLY way DATEADD
+    /// returns something OTHER than datetime is when the caller already proved the date argument
+    /// itself is a MORE specific date/time type.
+    /// </summary>
+    private static BuiltinSpec DateAdd() => new(
+        "DATEADD",
+        Evaluate: null,
+        HoleTransfer: call => BuiltinFoldResult.OkHole(
+            call.Arguments is [_, _, BuiltinArgument.Hole { Type: { } thirdArgumentType }]
+                ? Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(thirdArgumentType)
+                : new SqlType(SqlTypeCategory.DateTime),
+            call.Site,
+            HoleKind.ArgumentIndependentReturnType),
+        ReturnType: null,
+        ReturnKind: default,
+        UnconditionalFailReason: null);
+
+    /// <summary>
+    /// STUFF(source, start, length, replacement) - oracle-verified: its result type follows the
+    /// SOURCE argument (like REPLACE/SUBSTRING), never the replacement text. No Evaluate (unlike
+    /// REPLACE/SUBSTRING): computing the real spliced value needs start/length arithmetic this
+    /// registry doesn't otherwise model for this builtin - a typed-hole passthrough is still a
+    /// strict improvement over the prior outright decline.
+    /// </summary>
+    private static BuiltinSpec StuffSpec() => new(
+        "STUFF",
+        Evaluate: null,
+        HoleTransfer: PassThroughSingleArgumentType,
+        ReturnType: null,
+        ReturnKind: default,
+        UnconditionalFailReason: null);
 
     private static BuiltinSpec EnvironmentNameSpec(string name) =>
         FixedTypeSpec(name, new SqlType(SqlTypeCategory.NVarChar, Length: 128), HoleKind.EnvironmentDependent);
@@ -232,6 +298,20 @@ public static class BuiltinRegistry
             : UnresolvedOrGeneric([call.Arguments[0]]);
 
     /// <summary>
+    /// The LEFT/RIGHT/SUBSTRING/REPLICATE shape: the result type passes through
+    /// <paramref name="call"/>'s own first (source) argument regardless of whether a LATER
+    /// length/count/start argument resolved - but when the source itself isn't a typed Hole
+    /// (nothing to pass through), the decline should still prefer that OTHER argument's own
+    /// <see cref="BuiltinArgument.Unresolved"/> reason (e.g. "variable-not-in-scope") over the
+    /// generic fallback, since it is usually the more informative one - <paramref name="otherArguments"/>
+    /// checked in the order given, source checked last.
+    /// </summary>
+    private static BuiltinFoldResult PassThroughSourceType(BuiltinCall call, params ReadOnlySpan<BuiltinArgument> otherArguments) =>
+        call.Arguments[0] is BuiltinArgument.Hole hole
+            ? BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind)
+            : UnresolvedOrGeneric([.. otherArguments, call.Arguments[0]]);
+
+    /// <summary>
     /// Oracle-verified: LEFT/RIGHT with a length at or beyond the input's own length return the
     /// whole string, no padding. A negative length is a distinct real-server error (Msg 536) this
     /// scanner has no representation for, so it declines rather than guessing at a runtime error.
@@ -263,15 +343,14 @@ public static class BuiltinRegistry
             var input = ((BuiltinArgument.Text)call.Arguments[0]).Value;
             return BuiltinFoldResult.OkText(string.Concat(Enumerable.Repeat(input, count)), call.Site);
         },
-        HoleTransfer: call =>
-        {
-            if (call.Arguments[1] is not BuiltinArgument.Number countArgument)
-            {
-                return UnresolvedOrGeneric([call.Arguments[1]]);
-            }
-
-            return countArgument.Value < 0 ? new BuiltinFoldResult.Fail("non-literal-expression:replicate-negative-count") : PassThroughSingleArgumentType(call);
-        },
+        // The result TYPE (varchar/nvarchar of the source's own collation) never depends on the
+        // count's own VALUE - only actually SLICING the string does (the Evaluate branch above,
+        // which does require a concrete Number). So a hole/unresolved count still lets the type
+        // pass through; only a count PROVEN negative is a real error (Msg 106) worth declining
+        // for - an unresolved count can never be proven negative, so it never blocks this.
+        HoleTransfer: call => call.Arguments[1] is BuiltinArgument.Number { Value: < 0 }
+            ? new BuiltinFoldResult.Fail("non-literal-expression:replicate-negative-count")
+            : PassThroughSourceType(call, call.Arguments[1]),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
@@ -305,15 +384,13 @@ public static class BuiltinRegistry
             var input = ((BuiltinArgument.Text)call.Arguments[0]).Value;
             return BuiltinFoldResult.OkText(slice(input, Math.Min(length, input.Length)), call.Site);
         },
-        HoleTransfer: call =>
-        {
-            if (call.Arguments[1] is not BuiltinArgument.Number lengthArgument)
-            {
-                return UnresolvedOrGeneric([call.Arguments[1]]);
-            }
-
-            return lengthArgument.Value < 0 ? new BuiltinFoldResult.Fail(NegativeLength) : PassThroughSingleArgumentType(call);
-        },
+        // Same reasoning as Replicate's own HoleTransfer above: LEFT/RIGHT's result type never
+        // depends on the length's VALUE, only actually slicing does - a hole/unresolved length
+        // still lets the source's type pass through; only a length PROVEN negative (Msg 536) is
+        // worth declining for.
+        HoleTransfer: call => call.Arguments[1] is BuiltinArgument.Number { Value: < 0 }
+            ? new BuiltinFoldResult.Fail(NegativeLength)
+            : PassThroughSourceType(call, call.Arguments[1]),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
@@ -344,15 +421,20 @@ public static class BuiltinRegistry
             var clampedLength = Math.Min(length, input.Length - (start - 1));
             return BuiltinFoldResult.OkText(input.Substring(start - 1, clampedLength), call.Site);
         },
+        // Same reasoning as LEFT/RIGHT's own HoleTransfer: the result type never depends on
+        // start/length's own VALUES, only actually slicing does. Only a start/length PROVEN
+        // negative or a start PROVEN below 1 (both real, modeled error/behavior cases) declines -
+        // an unresolved start or length can never be proven either, so it never blocks this.
         HoleTransfer: call =>
         {
-            if (call.Arguments[1] is not BuiltinArgument.Number || call.Arguments[2] is not BuiltinArgument.Number)
+            if (call.Arguments[1] is BuiltinArgument.Number { Value: < 1 })
             {
-                return UnresolvedOrGeneric([call.Arguments[1], call.Arguments[2]]);
+                return new BuiltinFoldResult.Fail("non-literal-expression:substring-start-below-one");
             }
 
-            var (_, _, failure) = SubstringArgs(call);
-            return failure ?? PassThroughSingleArgumentType(call);
+            return call.Arguments[2] is BuiltinArgument.Number { Value: < 0 }
+                ? new BuiltinFoldResult.Fail(NegativeLength)
+                : PassThroughSourceType(call, call.Arguments[1], call.Arguments[2]);
         },
         ReturnType: null,
         ReturnKind: default,
