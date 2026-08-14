@@ -37,16 +37,19 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfVariableDeclaredOnlyInsideOneIfBranch_FoldsToSymbolicPlaceholder()
+    public void Scan_ExecOfVariableDeclaredOnlyInsideOneIfBranch_AnalyzesBothTheKnownAndUnknownPath()
     {
         // T-SQL locals are scoped to the whole batch, not to the block they happen to be
         // DECLARE'd inside - a variable declared (and assigned) only inside an IF's THEN branch,
         // with no ELSE, is still perfectly legal to reference afterward: on the path that never
-        // ran the THEN branch, it is simply NULL. That is not a genuine divergence the way two
-        // branches assigning two DIFFERENT real values is - the variable's OWN declared type is
-        // still a hard guarantee regardless of which path ran, so this must fold to a symbolic
-        // placeholder (the same "known shape, unknown value" case an uninitialized DECLARE
-        // already gets), not the generic diverges-across-if-branches taint.
+        // ran the THEN branch, it is simply NULL. The variable's own DECLARE is now pre-seeded
+        // batch-wide (an UninitializedDeclare hole) BEFORE the IF even runs, so the join at the
+        // bottom of the IF sees two genuine alternatives - the pre-seeded hole (the path that
+        // skipped the assignment) and the real "SELECT 1" literal (the path that ran it) - the
+        // SAME "diverges across branches, analyze each independently" mechanism this engine
+        // already uses for two branches assigning two DIFFERENT real values, now correctly
+        // reached here too instead of collapsing to one generic placeholder that discarded the
+        // fully-known "SELECT 1" possibility.
         var result = Scan("""
             IF @flag = 1
             BEGIN
@@ -57,7 +60,9 @@ public sealed class DynamicSqlScannerTests
             """);
 
         Assert.Empty(result.Findings);
-        Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText.Contains("__silentscan_sym_", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -130,16 +135,16 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_SubstringOfVariableWithLenOfSameVariableAsLength_FirstPieceShorterThanTrim_DeclinesRatherThanGuesses()
+    public void Scan_SubstringOfVariableWithLenOfSameVariableAsLength_FirstPieceShorterThanTrim_FoldsToDeclaredTypeHole()
     {
         // The leading literal piece is only 2 characters, but the idiom asks to skip 3 - trimming
         // would require slicing INTO the following hole, which is never attempted (no guessing).
-        // Falls back to the ordinary per-argument decomposition, which itself declines: SUBSTRING's
-        // HoleTransfer no longer needs a CONCRETE length to pass through its source's own type
-        // (the result type never depends on the length's value, only slicing does), but it still
-        // prefers the length argument's OWN unresolved reason over the generic fallback when the
-        // source itself isn't a typed Hole to pass through either - here the unfoldable
-        // LEN(@predicate) length argument's own reason surfaces, exactly as before this widening.
+        // Falls back to the ordinary per-argument decomposition: SUBSTRING's own source-type
+        // passthrough no longer requires a clean Hole - @predicate itself is a MIXED literal+hole
+        // template (from @Name's own unknown value), but it still carries its own DECLARE type
+        // (VARCHAR(MAX)) regardless of that content being unresolved, and SUBSTRING's result type
+        // depends only on the source's TYPE, never its content or the length argument's value. So
+        // this now resolves to a VARCHAR(MAX) hole rather than declining outright.
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @predicate VARCHAR(MAX) = ''
@@ -148,9 +153,9 @@ public sealed class DynamicSqlScannerTests
             EXEC (@predicate)
             """);
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
     }
 
     /// <summary>A fake ILiveRowValueFetcher for unit tests - no database involved, just a fixed lookup table keyed exactly like the real fetcher's own contract, plus a call log so a test can assert it was (or wasn't) invoked.</summary>
@@ -1144,6 +1149,38 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal(2, result.AnalyzableScripts.Count);
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 2");
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 3");
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableDeclaredOnlyInASiblingIfElseIfBranch_FoldsToTypedHole_NotVariableNotInScope()
+    {
+        // T-SQL's own DECLARE is a compile-time, BATCH-scoped construct - a variable declared
+        // inside only ONE branch of an IF/ELSE IF chain is still perfectly legal to reference
+        // from a SIBLING branch that never runs that DECLARE (simply NULL there), even though
+        // this branch's own path through the CFG never visits the node that declares it. Real
+        // corpus shape (found auditing a real production database: several large IF/ELSE-IF-
+        // chain-shaped report procs, each branch declaring its own working variables) - the
+        // sibling branch's reference must resolve to a typed hole, not the misleading
+        // "variable-not-in-scope" a genuinely undeclared-anywhere variable gets (that label
+        // implies a real T-SQL compile error, which this is not).
+        var result = Scan("""
+            DECLARE @kind INT = 1
+            IF @kind = 1
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX)
+                SET @sql = N'SELECT 1'
+                EXEC(@sql)
+            END
+            ELSE IF @kind = 2
+            BEGIN
+                EXEC(@sql)
+            END
+            """);
+
+        Assert.Empty(result.Findings);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText.Contains("__silentscan_sym_", StringComparison.Ordinal));
     }
 
     [Fact]

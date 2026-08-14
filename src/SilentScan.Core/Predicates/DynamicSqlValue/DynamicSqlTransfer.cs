@@ -98,6 +98,7 @@ public static class DynamicSqlTransfer
         var seed = qualifiedName is not null && formalParameters is { Count: > 0 }
             ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext)
             : new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+        SeedBatchDeclaredVariables(procOrFunc.StatementList!.Statements, nestedContext, seed);
 
         var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext));
         var folded = cfg.Solve(procOrFunc.StatementList!.Statements, seed);
@@ -231,8 +232,81 @@ public static class DynamicSqlTransfer
 
         var nestedScope = new DynamicSqlScope(SchemaObjectNameHelper.Qualify(trigger.Name), trigger.TriggerObject.Name);
         var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+        SeedBatchDeclaredVariables(trigger.StatementList!.Statements, nestedContext, seed);
         var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext));
-        cfg.Solve(trigger.StatementList!.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+        cfg.Solve(trigger.StatementList!.Statements, seed);
+    }
+
+    /// <summary>
+    /// T-SQL's own DECLARE is a compile-time, BATCH-scoped construct - a variable declared inside
+    /// only ONE branch of an IF/ELSE IF chain is still perfectly legal to reference from a SIBLING
+    /// branch that never runs that DECLARE (it is simply NULL there, exactly like referencing a
+    /// no-initializer DECLARE before its own line runs), even though only one branch's own path
+    /// through this CFG ever visits the node that declares it. Without this, a sibling branch's
+    /// own reference had NO entry in `state` at all and reported the misleading
+    /// "variable-not-in-scope" - the same label a genuinely undeclared-anywhere variable gets,
+    /// even though this shape compiles fine in real SQL Server (found auditing a real production
+    /// database: several dozen call sites across a handful of large IF/ELSE-IF-chain-shaped procs,
+    /// none an actual undeclared-variable bug). Pre-seeding every DECLARE found ANYWHERE in the
+    /// batch - regardless of which branch it sits under - as an UninitializedDeclare hole before
+    /// the CFG solver ever runs closes this: the branch that actually reaches its own DECLARE
+    /// still overwrites this with its real value (an initializer, or the identical hole again),
+    /// and every OTHER branch now correctly sees a typed-but-unknown value instead of a bare
+    /// taint. TryAdd only - never overwrites an already-seeded name (a formal parameter, seeded
+    /// separately and never colliding with a local's name in valid T-SQL, but defensive either way).
+    /// </summary>
+    internal static void SeedBatchDeclaredVariables(IList<TSqlStatement> statements, TransferContext context, Dictionary<string, SqlTextValue> seed)
+    {
+        var collector = new BatchDeclaredVariableCollector();
+        foreach (var statement in statements)
+        {
+            statement.Accept(collector);
+        }
+
+        foreach (var (name, element) in collector.Declarations)
+        {
+            var declaredType = SqlTypeReferenceResolver.Resolve(element.DataType, columnCollation: null);
+            if (declaredType is null)
+            {
+                continue;
+            }
+
+            context.DeclaredTypes.TryAdd(name, declaredType);
+            seed.TryAdd(name, new SqlTextValue.Template([new TemplatePiece.Hole(declaredType, context.Span(element), HoleKind.UninitializedDeclare)]) { DeclaredType = declaredType });
+        }
+    }
+
+    /// <summary>
+    /// Collects every DECLARE found ANYWHERE in a batch/proc body, regardless of IF/BEGIN/TRY
+    /// nesting - the default (un-overridden) ExplicitVisit already recurses into every container,
+    /// so this never needs to enumerate specific statement kinds itself. Deliberately does NOT
+    /// descend into a NESTED CREATE/ALTER PROCEDURE/FUNCTION body (a real, if rare, T-SQL shape -
+    /// see CompileScopedBody's own handling of it) - that inner body is a SEPARATE batch with its
+    /// own separate variable scope, so a DECLARE inside it must never leak into the OUTER batch's
+    /// own seeding.
+    /// </summary>
+    private sealed class BatchDeclaredVariableCollector : TSqlFragmentVisitor
+    {
+        public List<(string Name, DeclareVariableElement Element)> Declarations { get; } = [];
+
+        public override void ExplicitVisit(DeclareVariableStatement node)
+        {
+            foreach (var element in node.Declarations)
+            {
+                Declarations.Add((element.VariableName.Value, element));
+            }
+        }
+
+        public override void ExplicitVisit(ProcedureStatementBodyBase node)
+        {
+            // A nested proc/function body is its own separate batch/scope - stop here.
+        }
+
+        public override void ExplicitVisit(TriggerStatementBody node)
+        {
+            // Same reasoning as ProcedureStatementBodyBase above.
+        }
     }
 
     // Only ProcedureStatementBody's parameters are ever reachable from a call graph (built from

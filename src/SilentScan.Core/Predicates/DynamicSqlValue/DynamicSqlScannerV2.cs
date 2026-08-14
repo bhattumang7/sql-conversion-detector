@@ -56,12 +56,24 @@ public static class DynamicSqlScannerV2
                     new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase),
                     parseResult.SourcePath, Cap, enclosingScope ?? DynamicSqlScope.None,
                     findings, scripts, outputSummaries, callGraph, outputSummaryIndex, catalog, rowValueFetcher);
-
-                var cfg = new DynamicSqlCfg(parseResult.SourcePath, Cap, (s, activeGuards) => DynamicSqlTransfer.CompileLeaf(s, activeGuards, context));
-                cfg.Solve(batch.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+                SolveBatch(batch, context);
             }
         }
 
         return new DynamicSqlExtractionResult(findings, scripts, outputSummaries);
+    }
+
+    /// <summary>
+    /// Pre-seeds every DECLARE found anywhere in the batch (see <see cref="DynamicSqlTransfer.SeedBatchDeclaredVariables"/>
+    /// for why - T-SQL's own DECLARE is batch-scoped, not block-scoped) before handing the batch
+    /// to the CFG solver.
+    /// </summary>
+    private static void SolveBatch(TSqlBatch batch, TransferContext context)
+    {
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
+        DynamicSqlTransfer.SeedBatchDeclaredVariables(batch.Statements, context, seed);
+
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => DynamicSqlTransfer.CompileLeaf(s, activeGuards, context));
+        cfg.Solve(batch.Statements, seed);
     }
 }

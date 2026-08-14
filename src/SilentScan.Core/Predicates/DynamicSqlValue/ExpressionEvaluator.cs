@@ -685,11 +685,11 @@ public static class ExpressionEvaluator
     /// </summary>
     private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value switch
     {
-        SqlTextValue.Tainted tainted => new BuiltinArgument.Unresolved(tainted.Reason, tainted.Location),
+        SqlTextValue.Tainted tainted => new BuiltinArgument.Unresolved(tainted.Reason, tainted.Location, tainted.DeclaredType),
         SqlTextValue.Template { Pieces: [TemplatePiece.Hole hole] } => new BuiltinArgument.Hole(hole.Type, hole.Kind),
         SqlTextValue.Template { Pieces.Count: > 0 } template when template.Pieces.All(p => p is TemplatePiece.Lit)
             => new BuiltinArgument.Text(string.Concat(template.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text))),
-        _ => new BuiltinArgument.Unresolved("symbolic-value-in-function-argument", default),
+        _ => new BuiltinArgument.Unresolved("symbolic-value-in-function-argument", default, value.DeclaredType),
     };
 
     private static SqlTextValue ToSqlTextValue(BuiltinFoldResult result, SourceSpan site) => result switch

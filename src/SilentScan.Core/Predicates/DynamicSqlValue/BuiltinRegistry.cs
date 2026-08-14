@@ -296,10 +296,20 @@ public static class BuiltinRegistry
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-    private static BuiltinFoldResult PassThroughSingleArgumentType(BuiltinCall call) =>
-        call.Arguments[0] is BuiltinArgument.Hole hole
-            ? BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind)
-            : UnresolvedOrGeneric([call.Arguments[0]]);
+    /// <summary>
+    /// A clean <see cref="BuiltinArgument.Hole"/> passes through directly. When the source isn't
+    /// a Hole but IS an <see cref="BuiltinArgument.Unresolved"/> that still carries its
+    /// originating variable's own declared <see cref="Catalog.SqlType"/> (e.g. a VARCHAR(200)
+    /// variable whose CONTENT is a mixed literal+hole template, or fully Tainted, but whose own
+    /// DECLARE type is a hard fact regardless) - a builtin whose result type depends only on the
+    /// source's TYPE, never its content, can still resolve from that type alone.
+    /// </summary>
+    private static BuiltinFoldResult PassThroughSingleArgumentType(BuiltinCall call) => call.Arguments[0] switch
+    {
+        BuiltinArgument.Hole hole => BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind),
+        BuiltinArgument.Unresolved { Type: { } declaredType } => BuiltinFoldResult.OkHole(declaredType, call.Site, HoleKind.ArgumentIndependentReturnType),
+        _ => UnresolvedOrGeneric([call.Arguments[0]]),
+    };
 
     /// <summary>
     /// The LEFT/RIGHT/SUBSTRING/REPLICATE shape: the result type passes through
@@ -310,10 +320,12 @@ public static class BuiltinRegistry
     /// generic fallback, since it is usually the more informative one - <paramref name="otherArguments"/>
     /// checked in the order given, source checked last.
     /// </summary>
-    private static BuiltinFoldResult PassThroughSourceType(BuiltinCall call, params ReadOnlySpan<BuiltinArgument> otherArguments) =>
-        call.Arguments[0] is BuiltinArgument.Hole hole
-            ? BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind)
-            : UnresolvedOrGeneric([.. otherArguments, call.Arguments[0]]);
+    private static BuiltinFoldResult PassThroughSourceType(BuiltinCall call, params ReadOnlySpan<BuiltinArgument> otherArguments) => call.Arguments[0] switch
+    {
+        BuiltinArgument.Hole hole => BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind),
+        BuiltinArgument.Unresolved { Type: { } declaredType } => BuiltinFoldResult.OkHole(declaredType, call.Site, HoleKind.ArgumentIndependentReturnType),
+        _ => UnresolvedOrGeneric([.. otherArguments, call.Arguments[0]]),
+    };
 
     /// <summary>
     /// Oracle-verified: LEFT/RIGHT with a length at or beyond the input's own length return the
@@ -514,6 +526,17 @@ public static class BuiltinRegistry
         if (call.Arguments[0] is BuiltinArgument.Hole sourceHole)
         {
             return BuiltinFoldResult.OkHole(sourceHole.Type, call.Site, sourceHole.Kind);
+        }
+
+        // The source's CONTENT is what TryFoldReplaceWithMixedSource above already handles when
+        // it's a recognizable literal+hole mix - this is the case where the source resolved to
+        // NEITHER a clean Hole NOR a splice-able mix, but still carries its own originating
+        // variable's declared type (e.g. fully Tainted for an unrelated reason) - REPLACE's
+        // result type depends only on the source's type, never its content, so that alone is
+        // still enough to resolve.
+        if (call.Arguments[0] is BuiltinArgument.Unresolved { Type: { } sourceDeclaredType })
+        {
+            return BuiltinFoldResult.OkHole(sourceDeclaredType, call.Site, HoleKind.ArgumentIndependentReturnType);
         }
 
         if (call.Arguments[0] is BuiltinArgument.Text source

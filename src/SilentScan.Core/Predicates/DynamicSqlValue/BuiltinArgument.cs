@@ -23,8 +23,19 @@ public abstract record BuiltinArgument
     /// <summary>A typed-but-unknown value - <paramref name="Kind"/> is carried through a passthrough transfer (UPPER/LTRIM/SUBSTRING/...) unchanged, so the ORIGINAL reason this became a hole survives however many builtins it folds through.</summary>
     public sealed record Hole(SqlType Type, HoleKind Kind) : BuiltinArgument;
 
-    /// <summary>Could not resolve to EITHER a concrete value or a typed hole - the containing call declines with this reason, unconsulted by any <see cref="BuiltinSpec"/>.</summary>
-    public sealed record Unresolved(string Reason, SourceSpan Location) : BuiltinArgument;
+    /// <summary>
+    /// Could not resolve to EITHER a concrete value or a typed hole - the containing call
+    /// declines with this reason, unless its own spec can still use <paramref name="Type"/> (the
+    /// ORIGINATING <see cref="Catalog.SqlType"/>-typed variable's own declared type, when the
+    /// unresolved value came from one - e.g. a mixed literal+hole template built from a variable
+    /// DECLAREd VARCHAR(200), or a Tainted value carrying its own <c>DeclaredType</c>). A builtin
+    /// whose result type only depends on the source's TYPE, never its content (CAST/CONVERT's
+    /// syntax-pinned target already gets this via a different path; LEFT/RIGHT/SUBSTRING/REPLICATE's
+    /// own source-type passthrough is the one this actually widens) can still resolve from this
+    /// alone. Null when no declared type was ever known for the value this came from - never
+    /// guessed from unrelated context.
+    /// </summary>
+    public sealed record Unresolved(string Reason, SourceSpan Location, SqlType? Type = null) : BuiltinArgument;
 }
 
 /// <summary>One builtin invocation, arguments already resolved, ready for <see cref="BuiltinRegistry.Fold"/>.</summary>
