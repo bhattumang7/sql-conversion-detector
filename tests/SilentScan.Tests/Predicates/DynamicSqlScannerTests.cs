@@ -102,6 +102,315 @@ public sealed class DynamicSqlScannerTests
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText.Contains("__silentscan_sym_", StringComparison.Ordinal) && s.InnerText.Contains("WHERE id = 1", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Scan_SubstringOfVariableWithLenOfSameVariableAsLength_TrimsLeadingLiteralPrefix()
+    {
+        // SUBSTRING(x, n, LEN(x)) is a common real-world idiom for stripping a fixed leading
+        // literal prefix (e.g. " AND ") off a predicate string built by repeated concatenation -
+        // found verbatim in production code as `SUBSTRING(@predicate, 4, LEN(@predicate))`. It
+        // never actually needs @predicate's own LENGTH: SQL Server clamps a too-long `length`
+        // argument to whatever remains from position `n` onward, so this is always "everything
+        // from n to the end" - computable by trimming (n-1) characters off @predicate's own
+        // known leading literal piece, even though @predicate still carries an unresolved hole
+        // later on (an uninitialized @Name here) that makes its overall LENGTH genuinely unknown.
+        // Before this existed, the LEN(@predicate) argument itself declined
+        // (non-literal-expression:function-call-argument-diverges) and took the whole SUBSTRING -
+        // and therefore the whole EXEC - down with it.
+        var result = Scan("""
+            DECLARE @Name VARCHAR(50)
+            DECLARE @predicate VARCHAR(MAX) = ''
+            SET @predicate = @predicate + 'ABCD' + @Name
+            SET @predicate = SUBSTRING(@predicate, 4, LEN(@predicate))
+            EXEC (@predicate)
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^D__silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SubstringOfVariableWithLenOfSameVariableAsLength_FirstPieceShorterThanTrim_DeclinesRatherThanGuesses()
+    {
+        // The leading literal piece is only 2 characters, but the idiom asks to skip 3 - trimming
+        // would require slicing INTO the following hole, which is never attempted (no guessing).
+        // Falls back to the ordinary per-argument decomposition, which itself declines on the
+        // now-unfoldable LEN(@predicate) length argument, exactly as before this fix existed.
+        var result = Scan("""
+            DECLARE @Name VARCHAR(50)
+            DECLARE @predicate VARCHAR(MAX) = ''
+            SET @predicate = @predicate + 'AB' + @Name
+            SET @predicate = SUBSTRING(@predicate, 4, LEN(@predicate))
+            EXEC (@predicate)
+            """);
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    /// <summary>A fake ILiveRowValueFetcher for unit tests - no database involved, just a fixed lookup table keyed exactly like the real fetcher's own contract, plus a call log so a test can assert it was (or wasn't) invoked.</summary>
+    private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, string Column, string KeyColumn, string KeyValue), IReadOnlyList<string>> filteredValues, IReadOnlyDictionary<(string Table, string Column), IReadOnlyList<string>>? unfilteredValues = null) : ILiveRowValueFetcher
+    {
+        public List<(string TableQualifiedName, string SelectColumn, IReadOnlyList<(string Column, string LiteralValue)> EqualityKeys, int MaxRows)> Calls { get; } = [];
+
+        public IReadOnlyList<string>? TryFetchDistinctValues(
+            string tableQualifiedName, string selectColumn, IReadOnlyList<(string Column, string LiteralValue)> equalityKeys, int maxRows)
+        {
+            Calls.Add((tableQualifiedName, selectColumn, equalityKeys, maxRows));
+
+            if (equalityKeys.Count == 1
+                && filteredValues.TryGetValue((tableQualifiedName, selectColumn, equalityKeys[0].Column, equalityKeys[0].LiteralValue), out var filtered))
+            {
+                return filtered.Take(maxRows).ToList();
+            }
+
+            if (equalityKeys.Count == 0 && unfilteredValues is not null
+                && unfilteredValues.TryGetValue((tableQualifiedName, selectColumn), out var unfiltered))
+            {
+                return unfiltered.Take(maxRows).ToList();
+            }
+
+            return null;
+        }
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentPinnedByLiteralEqualityKey_WithFetcher_ResolvesSingleRealValue()
+    {
+        // The --fetch-sql-from-tables splice: the WHERE clause pins the row down to a single
+        // literal-equality key (SettingName = 'ReportSql') and exactly one distinct value comes
+        // back, so a supplied fetcher's real value replaces the RowDependentColumn hole entirely -
+        // the resulting script is a genuine, fully-known literal, not a symbolic placeholder.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>
+        {
+            [("dbo.Templates", "Definition", "SettingName", "ReportSql")] = ["SELECT * FROM dbo.Reports"],
+        });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = 'ReportSql'
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+        Assert.Equal(FindingConfidence.High, script.Confidence);
+
+        // The CFG's fixpoint solver re-evaluates state-mutating statements across several
+        // (suppressed, non-emitting) rounds before it converges - the fetcher is genuinely
+        // called more than once for this one call site, not a bug (a real live implementation
+        // memoizes per (table, column, keys, maxRows) to avoid the redundant round-trips this
+        // implies - Core's own contract makes no call-count promise either way). Every call must
+        // still carry identical, correct arguments.
+        Assert.NotEmpty(fetcher.Calls);
+        Assert.All(fetcher.Calls, call =>
+        {
+            Assert.Equal("dbo.Templates", call.TableQualifiedName);
+            Assert.Equal("Definition", call.SelectColumn);
+            Assert.Equal(("SettingName", "ReportSql"), Assert.Single(call.EqualityKeys));
+        });
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithoutFetcher_StillFoldsToSymbolicPlaceholder_NotAffectedByFeature()
+    {
+        // No fetcher supplied (the ordinary static-only path, and every existing scan-corpus/
+        // file-mode call site) - behavior is byte-for-byte the pre-existing RowDependentColumn
+        // hole, never silently different depending on whether the feature COULD apply.
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);",
+            """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = 'ReportSql'
+            EXEC (@sql)
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Contains("__silentscan_sym_", script.InnerText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_NoWhereClause_FetchesEveryDistinctValue()
+    {
+        // No WHERE clause at all no longer declines the fetch outright - every distinct value in
+        // the column is a real candidate this scanner has no static way to exclude, so the
+        // fetcher is called with an EMPTY key list (no filter pushed down) and every candidate it
+        // returns feeds the analysis, exactly like the pinned-key case above.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var fetcher = new FakeRowValueFetcher(
+            new Dictionary<(string, string, string, string), IReadOnlyList<string>>(),
+            new Dictionary<(string, string), IReadOnlyList<string>> { [("dbo.Templates", "Definition")] = ["SELECT * FROM dbo.Reports"] });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+        Assert.Contains(fetcher.Calls, call => call.EqualityKeys.Count == 0);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_MultipleMatchingRows_AnalyzesEachCandidateIndependently()
+    {
+        // More than one distinct value comes back - no longer declined as "ambiguous". Each
+        // candidate becomes its own analyzable script (the SAME Choice-widening mechanism an
+        // IF/ELSE branch's own divergence already uses), so neither candidate is silently lost.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>
+        {
+            [("dbo.Templates", "Definition", "SettingName", "Ambiguous")] = ["SELECT A FROM dbo.T1", "SELECT B FROM dbo.T2"],
+        });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = 'Ambiguous'
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Equal(2, extraction.AnalyzableScripts.Count);
+        Assert.Contains(extraction.AnalyzableScripts, s => s.InnerText == "SELECT A FROM dbo.T1");
+        Assert.Contains(extraction.AnalyzableScripts, s => s.InnerText == "SELECT B FROM dbo.T2");
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_NonLiteralWhereCondition_StillFetchesIgnoringThatCondition()
+    {
+        // A WHERE condition this pass can't push down (here: compared against a variable, not a
+        // literal) is simply skipped rather than aborting the whole fetch - the filter narrows on
+        // a best-effort basis only, never a reason to decline outright.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var fetcher = new FakeRowValueFetcher(
+            new Dictionary<(string, string, string, string), IReadOnlyList<string>>(),
+            new Dictionary<(string, string), IReadOnlyList<string>> { [("dbo.Templates", "Definition")] = ["SELECT * FROM dbo.Reports"] });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @name VARCHAR(50) = 'x'
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = @name
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+        Assert.Contains(fetcher.Calls, call => call.EqualityKeys.Count == 0);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_ZeroRowsMatch_DeclinesRatherThanGuesses()
+    {
+        // The fetcher itself returning null (its own contract: the read failed or genuinely zero
+        // rows matched) must fall back to the ordinary symbolic placeholder, not propagate a
+        // missing value as if it were an empty string.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>());
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = 'DoesNotExist'
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Contains("__silentscan_sym_", script.InnerText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scan_DeclareInitializerAsScalarSubqueryFromSingleKnownTable_WithFetcher_ResolvesRealValue()
+    {
+        // The real-world dominant shape for "load dynamic SQL from a table" turned out NOT to be
+        // `SELECT @var = col FROM t`, but a scalar-subquery DECLARE initializer:
+        // `DECLARE @sql VARCHAR(MAX) = (SELECT col FROM t WHERE key = @param)`. Without this case,
+        // --fetch-sql-from-tables would be a no-op against that shape - it would still decline as
+        // non-literal-expression:sql-loaded-from-table via ExpressionEvaluator.Fold's ScalarSubquery
+        // case, never even reaching the fetcher. The WHERE key here is compared against a
+        // variable (not a literal), so it is not pushed down either - matching the real pattern
+        // this was found against, where the filter column is a proc parameter.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var fetcher = new FakeRowValueFetcher(
+            new Dictionary<(string, string, string, string), IReadOnlyList<string>>(),
+            new Dictionary<(string, string), IReadOnlyList<string>> { [("dbo.Templates", "Definition")] = ["SELECT * FROM dbo.Reports"] });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @name VARCHAR(50) = 'x'
+            DECLARE @sql VARCHAR(MAX) = (SELECT Definition FROM dbo.Templates WHERE SettingName = @name)
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+        Assert.Contains(fetcher.Calls, call => call.TableQualifiedName == "dbo.Templates" && call.SelectColumn == "Definition" && call.EqualityKeys.Count == 0);
+    }
+
+    [Fact]
+    public void Scan_SetAssignmentAsScalarSubqueryFromSingleKnownTable_WithFetcher_ResolvesRealValue()
+    {
+        // Same shape as the DECLARE-initializer case above, reached via SET instead - both funnel
+        // through DynamicSqlTransfer.FoldByDeclaredType, so both must resolve identically.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>
+        {
+            [("dbo.Templates", "Definition", "SettingName", "ReportSql")] = ["SELECT * FROM dbo.Reports"],
+        });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SET @sql = (SELECT Definition FROM dbo.Templates WHERE SettingName = 'ReportSql')
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+    }
+
     private static DynamicSqlExtractionResult Scan(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
@@ -1904,14 +2213,15 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_LeftWithNonLiteralLength_Declines()
+    public void Scan_LeftWithLengthCarriedInIntVariable_TierC_ProducesAnalyzableScript()
     {
-        // This scanner tracks only string variable values, never numeric ones - a length carried
-        // in a variable is declined, not guessed.
+        // An INTEGER-family DECLARE now folds its own literal initializer (FoldByDeclaredType),
+        // so a length carried in a plain int variable resolves through FoldInteger's own
+        // (newly added) variable-reference case, not declined the way it used to be.
         var result = Scan("DECLARE @n INT = 3; DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdef', @n); EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("abc", script.InnerText);
     }
 
     [Fact]
@@ -1965,12 +2275,14 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_SubstringWithNonLiteralStart_Declines()
+    public void Scan_SubstringWithStartCarriedInIntVariable_TierC_ProducesAnalyzableScript()
     {
+        // Same widening as LEFT above - a SUBSTRING start position carried in a plain int
+        // variable now resolves instead of declining.
         var result = Scan("DECLARE @n INT = 2; DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', @n, 3); EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("bcd", script.InnerText);
     }
 
     [Fact]
@@ -1985,6 +2297,48 @@ public sealed class DynamicSqlScannerTests
 
         var script = Assert.Single(result.AnalyzableScripts);
         Assert.Equal("SELECT * FROM Orders", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_IntVariableChainThroughArithmetic_ResolvesCorrectSum_NotStringConcat()
+    {
+        // The specific correctness hazard the FoldByDeclaredType/FoldInteger split guards
+        // against: `@j = @i + 1` must arithmetically add (5 + 1 = 6), never fall through to
+        // Fold's general (string-concatenation-flavored) BinaryExpression-Add handling, which
+        // would otherwise silently produce "51".
+        var result = Scan(
+            "DECLARE @i INT = 5; DECLARE @j INT = @i + 1; " +
+            "DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdefg', @j); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("abcdef", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_IntVariableAddEquals_ResolvesArithmeticSum_NotStringConcat()
+    {
+        // `@i += 1` on an INTEGER-family variable is arithmetic, not the ordinary +=
+        // text-concatenation path every other declared type still uses.
+        var result = Scan(
+            "DECLARE @i INT = 5; SET @i += 2; " +
+            "DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdefg', @i); EXEC(@sql);");
+
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("abcdefg", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_IntVariableFromUnfoldableExpression_StillDeclines_NotAGuess()
+    {
+        // A length carried through an expression FoldInteger genuinely can't evaluate (a column
+        // reference) still declines exactly as before this widening - never a guess.
+        var result = Scan(
+            "CREATE TABLE dbo.T (N INT NOT NULL); " +
+            "DECLARE @n INT; SELECT @n = N FROM dbo.T; " +
+            "DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdef', @n); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
     }
 
     // ------------------------------------------------------------------
@@ -3278,14 +3632,17 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfSqlTextLoadedViaSubqueryFromRealTable_ReportsDistinctReason()
+    public void Scan_ExecOfSqlTextLoadedViaSubqueryFromRealTable_NoFetcher_FoldsToSymbolicPlaceholder()
     {
-        // The SQL text's own content lives in a database ROW, not anywhere in the source file -
-        // genuinely unknowable without reading real table data, which CLAUDE.md forbids for
-        // corpus code (no execution of corpus DML/procs). This must stay Unanalyzable - the
-        // point of this test is only that it gets a SPECIFIC, honest reason distinguishing "the
-        // value lives in a table" from an ordinary uncorrelated scalar subquery, rather than the
-        // generic non-literal-expression:subquery bucket.
+        // The SQL text's own content lives in a database ROW, not anywhere in the source file, so
+        // without a fetcher (the ordinary static-only path, and every scan-corpus/file-mode call
+        // site - CLAUDE.md forbids executing corpus DML/procs) the concrete value can never be
+        // known. But the STRUCTURAL SHAPE is: single catalog-known table, no JOIN, one selected
+        // column - fully known even though the row is not, the same "known shape, unknown value"
+        // case the equivalent `SELECT @var = col FROM t` form already gets. This must resolve to
+        // an analyzable script parameterized on a RowDependentColumn hole, not decline outright -
+        // matching this project's real-world dominant shape for "load dynamic SQL from a table"
+        // (a scalar-subquery DECLARE initializer, not a SELECT-assignment).
         var result = ScanWithCatalog(
             "CREATE TABLE dbo.tblScheduleAnalysisIssueSolutions (issue_id INT NOT NULL, solution_id INT NOT NULL, solution_sql NVARCHAR(4000) NOT NULL);",
             """
@@ -3296,9 +3653,9 @@ public sealed class DynamicSqlScannerTests
             END
             """);
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("non-literal-expression:sql-loaded-from-table", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Contains("__silentscan_sym_", script.InnerText, StringComparison.Ordinal);
     }
 
     [Fact]

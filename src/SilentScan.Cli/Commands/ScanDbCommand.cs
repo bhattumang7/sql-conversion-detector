@@ -15,7 +15,9 @@ namespace SilentScan.Cli.Commands;
 /// body (views/procs/functions/triggers, from <c>sys.sql_modules</c>) through the same
 /// Lineage/Predicates/Rules pipeline <c>scan</c> uses against parsed files. Types, per-column
 /// collations, and the indexed flag are all facts read from the engine, not guesses. Issues
-/// metadata <c>SELECT</c>s only - nothing is ever executed against the connected database.
+/// <c>SELECT</c>s only - never DDL/DML, nothing else is ever executed against the connected
+/// database; with <c>--fetch-sql-from-tables</c>, some of those SELECTs read real row content
+/// (not just catalog metadata), still read-only.
 /// Renders as readable text (default) or markdown, or as JSON or SARIF, matching <c>scan</c>'s surface.
 /// </summary>
 public static class ScanDbCommand
@@ -56,12 +58,19 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => "high",
         };
 
+        var fetchSqlFromTablesOption = new Option<bool>("--fetch-sql-from-tables")
+        {
+            Description = "Also fetch the real value(s) of dynamic SQL text stored in a table (e.g. SELECT @sql = Definition FROM dbo.Templates WHERE Name = 'X') instead of leaving it unanalyzable - narrowed by whatever literal WHERE conditions can be pushed down, every distinct value analyzed as its own candidate when more than one matches. Reads real row content, not just catalog metadata - off by default.",
+            DefaultValueFactory = _ => false,
+        };
+
         var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for sargability findings.")
         {
             connectionStringArgument,
             formatOption,
             planCacheEvidenceOption,
             confidenceOption,
+            fetchSqlFromTablesOption,
             outputOption,
         };
 
@@ -69,18 +78,19 @@ public static class ScanDbCommand
         {
             var connectionString = parseResult.GetValue(connectionStringArgument)!;
             var planCacheEvidence = parseResult.GetValue(planCacheEvidenceOption);
+            var fetchSqlFromTables = parseResult.GetValue(fetchSqlFromTablesOption);
             var options = new ReportOptions(
                 parseResult.GetValue(formatOption)!,
                 parseResult.GetValue(confidenceOption)!,
                 parseResult.GetValue(outputOption));
-            return await RunAsync(connectionString, planCacheEvidence, options, Console.Out, Console.Error, cancellationToken);
+            return await RunAsync(connectionString, planCacheEvidence, fetchSqlFromTables, options, Console.Out, Console.Error, cancellationToken);
         });
 
         return command;
     }
 
     internal static async Task<int> RunAsync(
-        string connectionString, bool includePlanCacheEvidence, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
+        string connectionString, bool includePlanCacheEvidence, bool fetchSqlFromTables, ReportOptions options, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken = default)
     {
         if (!ReportOutput.TryParseFormat(options.Format, out var reportFormat))
         {
@@ -103,7 +113,7 @@ public static class ScanDbCommand
         LiveScanResult result;
         try
         {
-            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, minimumConfidence, progress, cancellationToken);
+            result = await LiveScanRunner.RunAsync(connectionString, includePlanCacheEvidence, minimumConfidence, progress, fetchSqlFromTables, cancellationToken);
         }
         catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
         {

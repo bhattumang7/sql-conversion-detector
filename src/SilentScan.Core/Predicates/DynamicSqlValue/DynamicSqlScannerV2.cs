@@ -28,14 +28,21 @@ public static class DynamicSqlScannerV2
     /// single catalog-known table's own column types into an otherwise-tainted
     /// <c>SELECT @var = expr FROM table</c> shape (see
     /// <c>TryCompileSelectAssignmentFromSingleKnownTable</c>) - null leaves that shape exactly as
-    /// tainted/havoc'd as it always was.
+    /// tainted/havoc'd as it always was. <paramref name="rowValueFetcher"/>, when supplied
+    /// (scan-db's own opt-in <c>--fetch-sql-from-tables</c> flag only - never file-mode/corpus,
+    /// which has no live connection to fetch through), lets that same SELECT-assignment splice
+    /// go one step further: when the WHERE clause pins the row down to a literal-equality key,
+    /// the real value is fetched and spliced in as a genuine literal instead of a
+    /// <see cref="HoleKind.RowDependentColumn"/> hole. Null (the default) leaves that shape
+    /// exactly as it was - purely additive precision, never a soundness requirement.
     /// </summary>
     public static DynamicSqlExtractionResult Scan(
         SqlParseResult parseResult,
         DynamicSqlScope? enclosingScope = null,
         ProcCallGraph? callGraph = null,
         IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? outputSummaryIndex = null,
-        DatabaseCatalog? catalog = null)
+        DatabaseCatalog? catalog = null,
+        ILiveRowValueFetcher? rowValueFetcher = null)
     {
         var findings = new List<DynamicSqlFinding>();
         var scripts = new List<DynamicSqlScript>();
@@ -48,7 +55,7 @@ public static class DynamicSqlScannerV2
                 var context = new TransferContext(
                     new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase),
                     parseResult.SourcePath, Cap, enclosingScope ?? DynamicSqlScope.None,
-                    findings, scripts, outputSummaries, callGraph, outputSummaryIndex, catalog);
+                    findings, scripts, outputSummaries, callGraph, outputSummaryIndex, catalog, rowValueFetcher);
 
                 var cfg = new DynamicSqlCfg(parseResult.SourcePath, Cap, (s, activeGuards) => DynamicSqlTransfer.CompileLeaf(s, activeGuards, context));
                 cfg.Solve(batch.Statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));

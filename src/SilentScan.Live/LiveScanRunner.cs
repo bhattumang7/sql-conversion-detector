@@ -1,8 +1,10 @@
+using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Predicates.DynamicSqlValue;
 using SilentScan.Core.Reporting;
 using SilentScan.Live.Catalog;
 using SilentScan.Verify.Catalog;
@@ -43,12 +45,23 @@ public static class LiveScanRunner
     /// produced no output at all until the finished report was rendered, leaving a caller unable
     /// to distinguish a slow stage from a hung one. Defaults to no output.
     /// </param>
+    /// <param name="fetchSqlFromTables">
+    /// When true, additionally lets the dynamic-SQL engine's own SELECT-assignment splice
+    /// (<c>SELECT @sql = Definition FROM dbo.Templates WHERE Name = 'X'</c>) fetch the real
+    /// value from this target once the WHERE clause pins the row down to a literal key, instead
+    /// of leaving it a RowDependentColumn hole - see <see cref="LiveTableRowValueFetcher"/>. Off
+    /// by default: it reads real row content (not just catalog metadata) from a user table, a
+    /// meaningfully bigger read than every other live probe this tool issues, so it stays opt-in
+    /// even though `scan-db` targets a development/staging database the user is already working
+    /// against, not an untrusted one.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<LiveScanResult> RunAsync(
         string connectionString,
         bool includePlanCacheEvidence = false,
         FindingConfidence minimumConfidence = FindingConfidence.High,
         IScanProgress? progress = null,
+        bool fetchSqlFromTables = false,
         CancellationToken cancellationToken = default)
     {
         progress ??= NullScanProgress.Instance;
@@ -102,6 +115,20 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        // A #temp table CREATEd only inside a dynamically-built SQL string (SET @ddl = @ddl +
+        // 'CREATE TABLE #Runs (...)'; EXEC (@ddl)) is invisible to the static-body pass just
+        // above - it has no literal CreateTableStatement anywhere in the AST. Best-effort,
+        // catalog-free constant-folding (this pass runs before the real catalog is even
+        // complete) recovers the common case: a chain of literal concatenation building the
+        // whole DDL text inside one proc. See DynamicSqlTempTableDiscovery's own doc comment.
+        using (var dynamicExtrasStage = progress.Begin("discovering dynamic-SQL temp tables"))
+        {
+            var discovered = DynamicSqlTempTableDiscovery.Discover(parseResultSource(), catalog.DefaultCollation?.Name, catalog.TempdbCollation?.Name);
+            catalog.MergeFileModeExtras(discovered);
+            dynamicExtrasStage.Complete($"{catalog.Tables.Count:N0} tables");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         // Resolved once, here, and handed to ScanReportBuilder below so the findings pipeline
         // reuses this exact instance. Lineage is a pure function of (catalog, parseResultSource()'s
         // output), so resolving it twice never disagreed with itself - but on a large database it
@@ -124,8 +151,21 @@ public static class LiveScanRunner
                 $"{parity.StaleCachedMetadata.Count:N0} stale, {parity.Unverified.Count:N0} unverified");
         }
 
-        var report = ScanReportBuilder.BuildFromParseResults(
-            parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress);
+        ScanReport report;
+        if (fetchSqlFromTables)
+        {
+            await using var fetchConnection = new SqlConnection(connectionString);
+            await fetchConnection.OpenAsync(cancellationToken);
+            var rowValueFetcher = new LiveTableRowValueFetcher(fetchConnection);
+            report = ScanReportBuilder.BuildFromParseResults(
+                parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress,
+                rowValueFetcher: rowValueFetcher);
+        }
+        else
+        {
+            report = ScanReportBuilder.BuildFromParseResults(
+                parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress);
+        }
 
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];

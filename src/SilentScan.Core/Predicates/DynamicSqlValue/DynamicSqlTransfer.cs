@@ -24,7 +24,8 @@ public sealed record TransferContext(
     List<ProcedureOutputSummary> OutputSummaries,
     ProcCallGraph? CallGraph = null,
     IReadOnlyDictionary<(string ProcedureQualifiedName, string ParameterName), IReadOnlyList<string>>? OutputSummaryIndex = null,
-    DatabaseCatalog? Catalog = null)
+    DatabaseCatalog? Catalog = null,
+    ILiveRowValueFetcher? RowValueFetcher = null)
 {
     public SourceSpan Span(TSqlFragment fragment) => new(SourcePath, fragment.StartLine, fragment.StartColumn);
 }
@@ -309,9 +310,79 @@ public static class DynamicSqlTransfer
                 continue;
             }
 
-            var folded = ExpressionEvaluator.Fold(element.Value, state, context.SourcePath, context.Cap, context.Catalog);
-            state[name] = folded with { DeclaredType = declaredType };
+            state[name] = FoldByDeclaredType(element.Value, declaredType, context, state, site);
         }
+    }
+
+    /// <summary>
+    /// A declared-INTEGER-family variable's initializer/assignment folds through
+    /// <see cref="ExpressionEvaluator.FoldInteger"/> first - the only fold path that actually
+    /// evaluates <c>+</c>/<c>-</c> arithmetically - rather than the general (string-
+    /// concatenation-flavored) <see cref="ExpressionEvaluator.Fold"/>, whose own
+    /// <c>BinaryExpression</c> handling treats <c>+</c> as concatenation: routing an int
+    /// assignment through it would silently produce "51" for <c>@j = @i + 1</c> where
+    /// <c>@i</c> is 5, not the correct 6. A successful integer fold is stored as an ordinary
+    /// literal-text <see cref="TemplatePiece.Lit"/> - the same shape a string literal already
+    /// uses - so <see cref="ExpressionEvaluator.FoldInteger"/>'s own (newly added) variable-
+    /// reference case can read it straight back for a LATER statement, closing the chain (e.g.
+    /// <c>DECLARE @start INT = 5; ... SUBSTRING(@s, @start, 10)</c>). Every other declared type,
+    /// and any int-typed initializer <see cref="ExpressionEvaluator.FoldInteger"/> itself
+    /// declines (a column reference, an unmodeled function, ...), falls back to the general fold
+    /// exactly as before this existed - a strict widening, never a behavior change for anything
+    /// that already resolved.
+    /// </summary>
+    private static SqlTextValue FoldByDeclaredType(
+        ScalarExpression expression, SqlType? declaredType, TransferContext context, Dictionary<string, SqlTextValue> state, SourceSpan site)
+    {
+        if (declaredType is { Category: SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt or SqlTypeCategory.Int or SqlTypeCategory.BigInt }
+            && ExpressionEvaluator.FoldInteger(expression, state, context.SourcePath, context.Cap, out var value))
+        {
+            return new SqlTextValue.Template([new TemplatePiece.Lit(value.ToString(System.Globalization.CultureInfo.InvariantCulture), site, PrefixLength: 0)])
+                with { DeclaredType = declaredType };
+        }
+
+        if (expression is ScalarSubquery { QueryExpression: QuerySpecification { FromClause: not null } } subquery
+            && TryFoldScalarSubqueryFromSingleKnownTable(subquery, context, state) is { } fetched)
+        {
+            return fetched with { DeclaredType = declaredType };
+        }
+
+        var folded = ExpressionEvaluator.Fold(expression, state, context.SourcePath, context.Cap, context.Catalog);
+        return folded with { DeclaredType = declaredType };
+    }
+
+    /// <summary>
+    /// The <c>DECLARE @x TYPE = (SELECT col FROM t WHERE ...)</c> / <c>SET @x = (SELECT col FROM
+    /// t WHERE ...)</c> counterpart of <see cref="TryCompileSelectAssignmentFromSingleKnownTable"/>
+    /// - same "single catalog-known table, no JOIN, one selected scalar expression" recognition
+    /// and the same <see cref="TryFetchLiveScalar"/> live-fetch splice, just reached from a
+    /// <see cref="ScalarSubquery"/> expression node instead of a <c>SELECT @var = ...</c>
+    /// statement. This is the shape <see cref="ExpressionEvaluator.Fold"/>'s own
+    /// <c>ScalarSubquery</c> case declines outright as <c>non-literal-expression:sql-loaded-from-table</c>
+    /// - real production code overwhelmingly uses a scalar-subquery initializer for this pattern,
+    /// not the `SELECT @var = col FROM t` form, so leaving this case out would have made
+    /// <c>--fetch-sql-from-tables</c> a no-op against it. Returns null - falling back to
+    /// <see cref="ExpressionEvaluator.Fold"/>'s ordinary decline - for a JOIN, more than one
+    /// select element, a non-scalar/non-column-spliceable select expression, or when no fetcher
+    /// was supplied (every corpus/file-mode scan).
+    /// </summary>
+    private static SqlTextValue? TryFoldScalarSubqueryFromSingleKnownTable(ScalarSubquery subquery, TransferContext context, Dictionary<string, SqlTextValue> state)
+    {
+        if (context.Catalog is not { } catalog
+            || subquery.QueryExpression is not QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } spec
+            || spec.SelectElements is not [SelectScalarExpression { Expression: { } expression }])
+        {
+            return null;
+        }
+
+        var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedTable.SchemaObject));
+        if (catalog.Find(qualifiedName) is not { } table
+            || TryFoldWithColumnSplice(expression, table, state, context) is not { } spliced)
+        {
+            return null;
+        }
+
+        return TryFetchLiveScalar(expression, table, spec.WhereClause, context) ?? spliced;
     }
 
     private static void CompileAssignment(
@@ -336,16 +407,30 @@ public static class DynamicSqlTransfer
             return;
         }
 
-        var rhs = ExpressionEvaluator.Fold(expression, state, context.SourcePath, context.Cap, context.Catalog);
-
         if (kind == AssignmentKind.AddEquals)
         {
             var existing = state.TryGetValue(name, out var existingValue) ? existingValue : HavocOrTaint("variable-not-in-scope", span, declaredType);
+
+            // `@i += expr` on an INTEGER-family variable means arithmetic addition, not string
+            // concatenation - only reachable when BOTH the existing value and this statement's
+            // own RHS are themselves already-resolved integers (see FoldByDeclaredType's own
+            // reasoning); anything else falls through to the ordinary text-concatenation path
+            // exactly as before, unchanged.
+            if (declaredType is { Category: SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt or SqlTypeCategory.Int or SqlTypeCategory.BigInt }
+                && ExpressionEvaluator.TryLiteralAsInteger(existing, out var existingInt)
+                && ExpressionEvaluator.FoldInteger(expression, state, context.SourcePath, context.Cap, out var addValue))
+            {
+                state[name] = new SqlTextValue.Template([new TemplatePiece.Lit((existingInt + addValue).ToString(System.Globalization.CultureInfo.InvariantCulture), span, PrefixLength: 0)])
+                    with { DeclaredType = declaredType };
+                return;
+            }
+
+            var rhs = ExpressionEvaluator.Fold(expression, state, context.SourcePath, context.Cap, context.Catalog);
             state[name] = SqlTextValue.Concat(existing, rhs) with { DeclaredType = declaredType };
             return;
         }
 
-        state[name] = rhs with { DeclaredType = declaredType };
+        state[name] = FoldByDeclaredType(expression, declaredType, context, state, span);
     }
 
     /// <summary>
@@ -474,8 +559,130 @@ public static class DynamicSqlTransfer
             return false;
         }
 
+        spliced = TryFetchLiveScalar(expression, table, spec.WhereClause, context) ?? spliced;
+
         var declaredType = context.DeclaredTypes.GetValueOrDefault(setVar.Variable.Name);
         state[setVar.Variable.Name] = spliced with { DeclaredType = declaredType };
+        return true;
+    }
+
+    /// <summary>
+    /// <c>--fetch-sql-from-tables</c>'s own splice: when the selected expression is a BARE
+    /// column reference (not a concatenation - a concatenated shape has no single scalar value to
+    /// fetch), a live fetch through <see cref="TransferContext.RowValueFetcher"/> reads up to
+    /// <see cref="TransferContext.Cap"/> real distinct values instead of leaving it a
+    /// <see cref="HoleKind.RowDependentColumn"/> hole - whatever literal-equality conjuncts the
+    /// WHERE clause offers (<see cref="TryExtractLiteralEqualityKeys"/>) narrow the fetch on the
+    /// database side, best-effort (an OR, a non-literal comparison, or no WHERE at all just means
+    /// fewer/no conjuncts are pushed down, never a decline - every real candidate value the
+    /// column could hold is still a genuine possibility this scanner has no way to rule out
+    /// statically). Exactly one distinct value splices in as a plain literal; more than one
+    /// becomes a <see cref="TemplatePiece.Choice"/> (via <see cref="SqlTextValue.Join"/>, the
+    /// SAME mechanism an IF/ELSE branch's own divergence already uses), so every fetched
+    /// candidate is analyzed independently rather than guessing which one a given call actually
+    /// selects - the engine's own existing cardinality cap (<see cref="TransferContext.Cap"/>)
+    /// gracefully degrades an oversized fan-out to a typed hole exactly as it already does for
+    /// every other source of divergence. Returns null (falling back to the ordinary
+    /// RowDependentColumn hole) only for: no fetcher supplied (the default, always, for every
+    /// corpus/file-mode scan), a non-bare-column expression, or a failed/empty fetch.
+    /// </summary>
+    private static SqlTextValue.Template? TryFetchLiveScalar(ScalarExpression expression, CatalogTable table, WhereClause? whereClause, TransferContext context)
+    {
+        if (context.RowValueFetcher is not { } fetcher
+            || expression is not ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } selectedIdentifiers } selectedColumnRef
+            || table.FindColumn(selectedIdentifiers[^1].Value) is not { } selectedColumn)
+        {
+            return null;
+        }
+
+        var equalityKeys = TryExtractLiteralEqualityKeys(whereClause, table);
+        var fetchedValues = fetcher.TryFetchDistinctValues(table.QualifiedName, selectedColumn.Name, equalityKeys, context.Cap);
+        if (fetchedValues is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var site = context.Span(selectedColumnRef);
+        var guardText = $"live-fetch:{table.QualifiedName}.{selectedColumn.Name}";
+        SqlTextValue combined = new SqlTextValue.Template([new TemplatePiece.Lit(fetchedValues[0], site, PrefixLength: 0)]);
+        for (var i = 1; i < fetchedValues.Count; i++)
+        {
+            var next = new SqlTextValue.Template([new TemplatePiece.Lit(fetchedValues[i], site, PrefixLength: 0)]);
+            combined = SqlTextValue.Join(combined, next, guardText, context.Cap, site);
+        }
+
+        return combined as SqlTextValue.Template;
+    }
+
+    /// <summary>
+    /// Best-effort: collects every `Column = literal` conjunct from a WHERE clause that this
+    /// pass can statically recognize (every column belonging to <paramref name="table"/>),
+    /// skipping - never declining outright - anything it can't push down (an OR branch, a
+    /// non-equality comparison, a comparison against a variable/expression rather than a
+    /// literal). An empty list (no WHERE at all, or nothing usable in it) means no filter is
+    /// statically known - the caller still fetches every distinct value in the column, since
+    /// every one of them is a real candidate this scanner has no static way to exclude.
+    /// </summary>
+    private static List<(string Column, string LiteralValue)> TryExtractLiteralEqualityKeys(WhereClause? whereClause, CatalogTable table)
+    {
+        var keys = new List<(string, string)>();
+        if (whereClause?.SearchCondition is { } condition)
+        {
+            CollectEqualityKeys(condition, table, keys);
+        }
+
+        return keys;
+    }
+
+    private static void CollectEqualityKeys(BooleanExpression expression, CatalogTable table, List<(string Column, string LiteralValue)> keys)
+    {
+        switch (expression)
+        {
+            case BooleanParenthesisExpression paren:
+                CollectEqualityKeys(paren.Expression, table, keys);
+                break;
+
+            case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
+                CollectEqualityKeys(and.FirstExpression, table, keys);
+                CollectEqualityKeys(and.SecondExpression, table, keys);
+                break;
+
+            case BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals } cmp:
+                if (!TryAddEqualityKey(cmp.FirstExpression, cmp.SecondExpression, table, keys))
+                {
+                    TryAddEqualityKey(cmp.SecondExpression, cmp.FirstExpression, table, keys);
+                }
+
+                break;
+
+            default:
+                // OR, inequality, a function call, a comparison against something other than a
+                // literal, ... - not pushed down, but not a reason to decline the fetch entirely.
+                break;
+        }
+    }
+
+    private static bool TryAddEqualityKey(ScalarExpression columnSide, ScalarExpression literalSide, CatalogTable table, List<(string Column, string LiteralValue)> keys)
+    {
+        if (columnSide is not ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } identifiers } colRef
+            || table.FindColumn(identifiers[^1].Value) is null)
+        {
+            return false;
+        }
+
+        var literalText = literalSide switch
+        {
+            StringLiteral s => s.Value,
+            IntegerLiteral i => i.Value,
+            _ => null,
+        };
+
+        if (literalText is null)
+        {
+            return false;
+        }
+
+        keys.Add((colRef.MultiPartIdentifier.Identifiers[^1].Value, literalText));
         return true;
     }
 

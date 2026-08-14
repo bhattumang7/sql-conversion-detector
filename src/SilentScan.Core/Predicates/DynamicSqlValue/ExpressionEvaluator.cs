@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
@@ -59,6 +61,28 @@ public static class ExpressionEvaluator
 
             case CoalesceExpression { Expressions.Count: > 0 } coalesce:
                 return Fold(coalesce.Expressions[0], state, sourcePath, cap, catalog);
+
+            case FunctionCall
+            {
+                FunctionName.Value: var substringName,
+                Parameters: [VariableReference sourceRef, var startExpr, FunctionCall { FunctionName.Value: var lenName, Parameters: [VariableReference lenArgRef] }],
+            }
+                when string.Equals(substringName, "SUBSTRING", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(lenName, "LEN", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(sourceRef.Name, lenArgRef.Name, StringComparison.OrdinalIgnoreCase)
+                    && FoldInteger(startExpr, state, sourcePath, cap, out var substringStart)
+                    && substringStart >= 1
+                    && TryTrimLeadingCharacters(Fold(sourceRef, state, sourcePath, cap, catalog), substringStart - 1) is { } trimmedFromStart:
+                // SUBSTRING(x, n, LEN(x)) is a common "drop a fixed prefix" idiom (e.g. trimming a
+                // leading " AND " off a predicate string built by repeated concatenation) - and,
+                // crucially, it never actually needs x's own LENGTH to be known: SQL Server clamps
+                // a too-long `length` argument down to whatever remains from `start` to the end of
+                // the string (oracle-verified, see BuiltinRegistry.Substring), so requesting
+                // LEN(x) characters ALWAYS returns "everything from position n onward" regardless
+                // of x's true length. This lets the result be computed by trimming (n-1) characters
+                // off x's own already-folded value structurally, even when x is not fully known
+                // (e.g. still contains a Hole later in the template) - see TryTrimLeadingCharacters.
+                return trimmedFromStart;
 
             case FunctionCall functionCall:
                 return FoldFunctionCall(functionCall.FunctionName.Value, functionCall.Parameters, functionCall, state, sourcePath, cap, catalog);
@@ -672,17 +696,24 @@ public static class ExpressionEvaluator
     };
 
     /// <summary>
-    /// Folds an integer-valued argument: a bare literal, +/- of two such foldable integers (a
-    /// "strip the trailing delimiter" idiom, e.g. <c>LEN(@x) - LEN(@y)</c>), or <c>LEN(...)</c>
-    /// over a string this evaluator already folds to a single concrete value. Anything else (a
-    /// plain variable, an unsupported function, a column reference) declines rather than
-    /// guessing - this evaluator tracks only string variable values, never numeric ones.
+    /// Folds an integer-valued argument: a bare literal, a variable whose own tracked value is
+    /// an already-resolved integer literal (see <see cref="TryLiteralAsInteger"/> - populated by
+    /// <c>DynamicSqlTransfer.FoldByDeclaredType</c> for a DECLARE/SET into an INTEGER-family
+    /// variable, itself routed through this same method so a straight-line chain of int
+    /// variables resolves end to end), +/- of two such foldable integers (a "strip the trailing
+    /// delimiter" idiom, e.g. <c>LEN(@x) - LEN(@y)</c>, or ordinary int variable arithmetic like
+    /// <c>@start + 1</c>), or <c>LEN(...)</c> over a string this evaluator already folds to a
+    /// single concrete value. Anything else (an unsupported function, a column reference, a
+    /// variable whose own value isn't itself a resolved integer) declines rather than guessing.
     /// </summary>
     public static bool FoldInteger(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
         switch (expression)
         {
             case IntegerLiteral literal when int.TryParse(literal.Value, out value):
+                return true;
+
+            case VariableReference variableRef when state.TryGetValue(variableRef.Name, out var variableValue) && TryLiteralAsInteger(variableValue, out value):
                 return true;
 
             case ParenthesisExpression paren:
@@ -712,6 +743,25 @@ public static class ExpressionEvaluator
         }
     }
 
+    /// <summary>
+    /// True when <paramref name="value"/> is a single already-resolved literal-text piece that
+    /// parses as an integer - the shape an INTEGER-family DECLARE/SET stores (see
+    /// <c>DynamicSqlTransfer.FoldByDeclaredType</c>), reusing the exact same
+    /// <see cref="TemplatePiece.Lit"/> representation a string literal already uses rather than a
+    /// separate numeric domain. Shared by <see cref="FoldInteger"/>'s own variable-reference case
+    /// and <c>DynamicSqlTransfer</c>'s <c>+=</c> handling, so both read a folded int the same way.
+    /// </summary>
+    internal static bool TryLiteralAsInteger(SqlTextValue value, out int result)
+    {
+        if (value is SqlTextValue.Template { Pieces: [TemplatePiece.Lit lit] } && int.TryParse(lit.Text, out result))
+        {
+            return true;
+        }
+
+        result = 0;
+        return false;
+    }
+
     /// <summary>Oracle-verified: LEN trims TRAILING spaces before counting (unlike DATALENGTH, not folded here) - <see cref="string.TrimEnd(char[])"/> over the space character matches exactly. The inner string may be a MULTI-piece all-literal Template (e.g. a concatenation) - see <see cref="ToBuiltinArgument"/>'s own doc comment for why flattening every-piece-is-Lit, not just a single piece, matters.</summary>
     private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
@@ -726,6 +776,55 @@ public static class ExpressionEvaluator
 
         value = string.Concat(template.Pieces.Cast<TemplatePiece.Lit>().Select(l => l.Text)).TrimEnd(' ').Length;
         return true;
+    }
+
+    /// <summary>
+    /// The <c>SUBSTRING(x, n, LEN(x))</c> idiom's own splice: removes the first <paramref name="count"/>
+    /// characters from <paramref name="value"/>'s FIRST piece and keeps every later piece
+    /// unchanged - safe (and exact) only when that first piece is itself an already-known
+    /// <see cref="TemplatePiece.Lit"/> at least <paramref name="count"/> characters long, which
+    /// covers the realistic case this idiom is used for (trimming a fixed leading literal
+    /// fragment, e.g. <c>" AND "</c>, off a predicate string that may still contain unresolved
+    /// holes further along). Declines (returns null) for a <see cref="SqlTextValue.Tainted"/>
+    /// source, an empty template, a non-<see cref="TemplatePiece.Lit"/> or too-short first piece
+    /// (would require slicing INTO a later piece - not attempted, never a guess) - the caller
+    /// falls back to the ordinary per-argument decomposition exactly as before this existed.
+    /// <paramref name="count"/> of 0 returns <paramref name="value"/> unchanged, whatever its
+    /// shape (even <see cref="SqlTextValue.Tainted"/>) - <c>SUBSTRING(x, 1, LEN(x))</c> is exactly
+    /// <c>x</c>, so no fold precondition is needed at all in that case.
+    /// </summary>
+    private static SqlTextValue? TryTrimLeadingCharacters(SqlTextValue value, int count)
+    {
+        if (count == 0)
+        {
+            return value;
+        }
+
+        if (value is not SqlTextValue.Template template)
+        {
+            return null;
+        }
+
+        // Concat does not guarantee adjacent Lit pieces are merged into one (e.g. an empty ''
+        // initializer contributes its own empty Lit piece ahead of the real text) - so the chars
+        // to trim may need to be consumed across SEVERAL leading Lit pieces, not just the first.
+        var remaining = count;
+        var index = 0;
+        while (index < template.Pieces.Count && template.Pieces[index] is TemplatePiece.Lit lit)
+        {
+            if (lit.Text.Length >= remaining)
+            {
+                var trimmedText = lit.Text[remaining..];
+                var tail = template.Pieces.Skip(index + 1);
+                var pieces = (trimmedText.Length == 0 ? tail : tail.Prepend(new TemplatePiece.Lit(trimmedText, lit.Origin, PrefixLength: 0))).ToList();
+                return new SqlTextValue.Template(pieces);
+            }
+
+            remaining -= lit.Text.Length;
+            index++;
+        }
+
+        return null;
     }
 
     private static SourceSpan Span(string sourcePath, TSqlFragment fragment) => new(sourcePath, fragment.StartLine, fragment.StartColumn);

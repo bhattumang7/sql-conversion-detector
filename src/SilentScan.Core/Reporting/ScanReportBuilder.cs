@@ -41,12 +41,20 @@ public static class ScanReportBuilder
     /// method resolves its own, exactly as it always has.
     /// </param>
     /// <param name="progress">Stage progress sink; defaults to no output.</param>
+    /// <param name="rowValueFetcher">
+    /// scan-db's own opt-in <c>--fetch-sql-from-tables</c> live row fetch (<see
+    /// cref="ILiveRowValueFetcher"/>) - lets the dynamic-SQL engine's SELECT-assignment splice
+    /// resolve a real value instead of a RowDependentColumn hole when the WHERE clause pins the
+    /// row down to a literal key. Null (the default, and every corpus/file-mode caller) leaves
+    /// that shape exactly as it was - purely additive precision, never a soundness requirement.
+    /// </param>
     public static ScanReport BuildFromParseResults(
         IEnumerable<SqlParseResult> allParseResults,
         DatabaseCatalog catalog,
         FindingConfidence minimumConfidence = FindingConfidence.High,
         LineageCatalog? resolvedLineage = null,
-        IScanProgress? progress = null)
+        IScanProgress? progress = null,
+        ILiveRowValueFetcher? rowValueFetcher = null)
     {
         progress ??= NullScanProgress.Instance;
         var fileHealth = new List<FileParseHealth>();
@@ -162,7 +170,7 @@ public static class ScanReportBuilder
                     .AsOrdered()
                     .Select(r =>
                     {
-                        var scanned = DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog);
+                        var scanned = DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog, rowValueFetcher: rowValueFetcher);
                         dynamicStage.Advance();
                         return scanned;
                     })
