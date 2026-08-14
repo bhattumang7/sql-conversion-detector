@@ -3196,22 +3196,19 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ExecOfNCharOfNonLiteralArgument_StillRefuses()
+    public void Scan_ExecOfNCharOfNonLiteralArgument_FoldsToFixedWidthTypedHole()
     {
-        // Near-miss: NCHAR's own argument isn't foldable to an integer literal (a plain column
-        // reference has no meaning here, so this exercises the FailNonLiteralExpression fallback
-        // via a variable that was never declared). NCHAR's integer argument position resolves
-        // through ExpressionEvaluator.FoldInteger, which - like every integer-argument position
-        // (see the LEFT/LEN sibling test below) - reports the SAME generic
-        // "function-call-argument-diverges" reason for any fold failure, regardless of the
-        // specific underlying cause; this is an established, deliberate simplification (FoldInteger
-        // has no reason channel of its own), not specific to NCHAR.
+        // NCHAR's own argument isn't foldable to an integer literal (a variable that was never
+        // declared) - but NCHAR/CHAR always return exactly one character (or NULL for an
+        // out-of-range code point, never an error), a hard T-SQL guarantee regardless of the code
+        // point argument's own value, the same "known shape, unknown value" reasoning CAST/CONVERT's
+        // own target type already gets. This now resolves to a typed nchar(1) hole rather than
+        // declining the whole call site outright.
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = NCHAR(@undeclaredCodePoint); EXEC(@sql);");
 
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("non-literal-expression:function-call-argument-diverges", finding.Reason);
-        Assert.Empty(result.AnalyzableScripts);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^__silentscan_sym_L\d+C\d+__$", script.InnerText);
     }
 
     [Fact]

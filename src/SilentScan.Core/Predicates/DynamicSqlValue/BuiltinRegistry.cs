@@ -148,8 +148,8 @@ public static class BuiltinRegistry
         yield return Replicate();
         yield return Reverse();
         yield return QuoteName();
-        yield return CharOrNChar("CHAR", maxCodePoint: 255);
-        yield return CharOrNChar("NCHAR", maxCodePoint: 65535);
+        yield return CharOrNChar("CHAR", maxCodePoint: 255, SqlTypeCategory.Char);
+        yield return CharOrNChar("NCHAR", maxCodePoint: 65535, SqlTypeCategory.NChar);
         yield return Str();
 
         yield return NonDeterministicTyped("NEWID", new SqlType(SqlTypeCategory.UniqueIdentifier));
@@ -637,7 +637,7 @@ public static class BuiltinRegistry
     /// here, the old scanner never attempted one for CHAR/NCHAR, since their sole argument is
     /// always an integer expression, never a value this scanner's string-hole model covers.
     /// </summary>
-    private static BuiltinSpec CharOrNChar(string name, int maxCodePoint) => new(
+    private static BuiltinSpec CharOrNChar(string name, int maxCodePoint, SqlTypeCategory category) => new(
         name,
         Evaluate: call =>
         {
@@ -646,7 +646,12 @@ public static class BuiltinRegistry
                 ? new BuiltinFoldResult.Fail("non-literal-expression:char-out-of-range")
                 : BuiltinFoldResult.OkText(((char)codePoint).ToString(), call.Site);
         },
-        HoleTransfer: null,
+        // Oracle-verified: CHAR/NCHAR always return exactly one character (or NULL for an
+        // out-of-range code point, never an error) - the RESULT TYPE (char(1)/nchar(1)) is a hard
+        // guarantee regardless of the code point argument's own value, the same "known shape,
+        // unknown value" reasoning CAST/CONVERT's own target type already gets. Only the actual
+        // rendered character (or whether it's NULL) depends on a concrete argument, never the type.
+        HoleTransfer: call => BuiltinFoldResult.OkHole(new SqlType(category, Length: 1), call.Site, HoleKind.ArgumentIndependentReturnType),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
