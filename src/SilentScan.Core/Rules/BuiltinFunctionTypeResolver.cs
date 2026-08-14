@@ -106,10 +106,15 @@ public static class BuiltinFunctionTypeResolver
     /// MIN/MAX preserve their (only) argument's exact type unmodified - oracle-verified
     /// (MIN(TinyIntCol) returns tinyint, MAX(MoneyCol) returns money; unlike SUM/AVG below,
     /// neither widens an integer-family argument). DATEADD's return type follows its THIRD
-    /// argument (the date expression, index 2, not its datepart keyword at index 0) - oracle-
-    /// verified across date/datetime/smalldatetime/datetime2, each returning that same category
-    /// unchanged (no widening the way SQL Server's own docs might suggest for smalldatetime/date
-    /// inputs elsewhere).
+    /// argument (the date expression, index 2, not its datepart keyword at index 0) ONLY when
+    /// that argument is already date/time-family (date/datetime/smalldatetime/datetime2/
+    /// datetimeoffset/time) - oracle-verified across all of those, each returning that same
+    /// category unchanged (no widening). When the third argument is NOT date/time-family (an
+    /// int, as in the common `DATEADD(day, DATEDIFF(day,0,x), 0)` truncation idiom, or a
+    /// string literal/expression), the ENGINE implicitly converts it to a date and DATEADD
+    /// returns plain `datetime` - also oracle-verified (a naive argument-passthrough rule here
+    /// mistyped exactly this shape as Int/VarChar, which is what produced two of the four live
+    /// lineage-parity mismatches this fix closes). See <see cref="ResolveDateAddResult"/>.
     /// </summary>
     private static readonly Dictionary<string, int> ArgumentTypeFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -138,6 +143,16 @@ public static class BuiltinFunctionTypeResolver
     /// <see cref="WidenIntegerAggregateResult"/>.
     /// </summary>
     private static readonly HashSet<string> IntegerWideningAggregates = new(StringComparer.OrdinalIgnoreCase) { "SUM", "AVG" };
+
+    /// <summary>True for DATEADD - the caller must resolve its third argument's type and pass it through <see cref="ResolveDateAddResult"/> rather than using it unmodified, since the passthrough only holds when that argument is already date/time-family.</summary>
+    public static bool RequiresDateAddResultAdjustment(string functionName) =>
+        string.Equals(functionName, "DATEADD", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Applies DATEADD's result-type rule to its already-resolved third argument: date/time-family types pass through unchanged; every other category (the engine implicitly converts a numeric or string date argument) resolves to plain <c>datetime</c>, oracle-verified.</summary>
+    public static SqlType ResolveDateAddResult(SqlType thirdArgumentType) =>
+        thirdArgumentType.IsDateTimeFamily
+            ? thirdArgumentType
+            : new SqlType(SqlTypeCategory.DateTime);
 
     /// <summary>The fixed return type for a built-in function call, or null if this function isn't in the curated table (never guessed).</summary>
     public static SqlType? ResolveFixedReturnType(string functionName) =>

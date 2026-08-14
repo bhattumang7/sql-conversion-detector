@@ -110,9 +110,22 @@ internal static class ComputedColumnTypeResolver
         if (Rules.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
         {
             var argumentType = Resolve(functionCall.Parameters[argumentIndex], columnTypes, typeAliases);
-            return argumentType is not null && Rules.BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name)
-                ? Rules.BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType)
-                : argumentType;
+            if (argumentType is null)
+            {
+                return null;
+            }
+
+            if (Rules.BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name))
+            {
+                return Rules.BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
+            }
+
+            if (Rules.BuiltinFunctionTypeResolver.RequiresDateAddResultAdjustment(name))
+            {
+                return Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
+            }
+
+            return argumentType;
         }
 
         return Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);

@@ -76,6 +76,10 @@ public static class ScalarExpressionResolver
             {
                 argumentType = BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
             }
+            else if (argumentType is not null && BuiltinFunctionTypeResolver.RequiresDateAddResultAdjustment(name))
+            {
+                argumentType = BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
+            }
 
             return new ColumnProvenance.Expression(argumentType, inputs, context.SourcePath, functionCall.StartLine);
         }
