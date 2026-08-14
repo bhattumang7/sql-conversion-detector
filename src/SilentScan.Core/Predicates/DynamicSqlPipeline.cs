@@ -230,8 +230,8 @@ public static partial class DynamicSqlPipeline
                 // what happened: an ASSUMPTION this scanner made broke the parse, not the source.
                 // Before giving up outright: a symbolic value standing for a whole optional
                 // clause/fragment (rather than one scalar) can never fit an identifier-shaped
-                // token, but a single space might - see TryReparseWithNeutralElision.
-                if (TryReparseWithNeutralElision(script, placeholders, out var elidedParseResult, out var map))
+                // token, but a single space might - see TryReparseWithTargetedElision.
+                if (TryReparseWithTargetedElision(script, placeholders, parseResult.Errors, out var elidedParseResult, out var map))
                 {
                     innerParseResult = elidedParseResult;
                     elisionMap = map;
@@ -291,40 +291,81 @@ public static partial class DynamicSqlPipeline
     }
 
     /// <summary>
-    /// The one fallback for a symbolic value that broke the parse outright: it may not stand for
-    /// a single scalar at all, but for a whole optional clause/fragment (an appended filter, a
-    /// cursor body) - no identifier-shaped token can ever sit legally in that position. Replacing
-    /// every occurrence with a single space instead of its usual token either still fails to
-    /// parse (the fragment wasn't actually optional in a "may be entirely absent" sense - e.g. a
-    /// cursor's <c>DECLARE ... CURSOR FOR</c> body, which needs a real SELECT no matter what;
-    /// declines exactly as before, no change) or reveals a valid statement missing only the part
-    /// this scanner could never see anyway. A space, unlike deleting the span outright, can never
-    /// fuse two adjacent literal fragments into a token that wasn't there in either the real
-    /// runtime query OR the elided one (T-SQL treats whitespace as a pure token separator
-    /// everywhere outside a quoted literal/identifier, and a placeholder inside one of those
-    /// would already have classified as a SAFE position long before this ever runs) - so
-    /// extraction against the result can only ever under-report relative to the true runtime
-    /// query (the elided fragment's own content stays genuinely unknown), never fabricate a
-    /// finding that depends on it.
+    /// A placeholder token's own rendered text - <see cref="TemplateRenderer"/>'s private
+    /// <c>PlaceholderToken</c> reimplemented here since the two rarely need to agree on anything
+    /// else, but MUST agree on this exact shape for the matching below to find anything.
     /// </summary>
-    private static bool TryReparseWithNeutralElision(
-        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders,
+    private static string PlaceholderToken(PlaceholderOccurrence occurrence) =>
+        $"__silentscan_sym_L{occurrence.Origin.Line}C{occurrence.Origin.Column}__";
+
+    /// <summary>Matches one placeholder's own token text - same shape as <see cref="TemplateRenderer"/>'s private PlaceholderToken, duplicated here (rather than shared) since a ScriptDOM error message is the only other place this exact string ever needs to be recognized rather than produced.</summary>
+    [GeneratedRegex(@"__silentscan_sym_L\d+C\d+__")]
+    private static partial Regex PlaceholderTokenRegex();
+
+    /// <summary>
+    /// The fallback for a symbolic value that broke the parse outright: it may not stand for a
+    /// single scalar at all, but for a whole optional clause/fragment (an appended filter, a
+    /// query hint) - no identifier-shaped token can ever sit legally in that position, but a
+    /// single space might. Blanking EVERY placeholder unconditionally (the old, cruder policy)
+    /// is unsound whenever a script mixes one genuinely-optional placeholder with another that is
+    /// a real, load-bearing identifier elsewhere in the SAME script (a real corpus shape:
+    /// SQL-Server-First-Responder-Kit's sp_BlitzFirst.sql builds a temp table name AND a TOP-style
+    /// clause as two separate placeholders in the same statement) - blanking the load-bearing one
+    /// breaks a parse that blanking only the genuinely-optional one would have fixed. Instead,
+    /// this targets ONLY the placeholder(s) ScriptDOM's own error message actually names ("Incorrect
+    /// syntax near '__silentscan_sym_...__'"), elides just those, and reparses - repeating with any
+    /// NEWLY blamed placeholder each round (a token-render depending on the one just elided can
+    /// itself become the new complaint) until it succeeds, no round makes further progress, or
+    /// every placeholder is already elided. This can only ever CONVERGE to the old
+    /// blank-everything behavior in the worst case, never do worse - every input the old policy
+    /// recovered, this recovers too, in the same or fewer rounds. A space, unlike deleting the
+    /// span outright, can never fuse two adjacent literal fragments into a token that wasn't there
+    /// in either the real runtime query or the elided one (T-SQL treats whitespace as a pure token
+    /// separator everywhere outside a quoted literal/identifier, and a placeholder inside one of
+    /// those would already have classified as a SAFE position long before this ever runs) - so
+    /// extraction against the result can only ever under-report relative to the true runtime query
+    /// (the elided fragment's own content stays genuinely unknown), never fabricate a finding that
+    /// depends on it.
+    /// </summary>
+    private static bool TryReparseWithTargetedElision(
+        DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors,
         [NotNullWhen(true)] out SqlParseResult? elidedParseResult,
         [NotNullWhen(true)] out Func<int, int, SourceSpan>? map)
     {
-        var variant = NeutralElisionVariant.Build(script.InnerText, placeholders);
         var virtualPath = $"{script.CallSite.SourcePath}::dynamic-sql@{script.CallSite.Line}::elided";
-        var parseResult = SqlScriptParser.ParseText(virtualPath, variant.Text);
-        if (parseResult.HasErrors)
+        var toElide = new HashSet<string>(StringComparer.Ordinal);
+        var errors = originalErrors;
+
+        for (var round = 0; round <= placeholders.Count; round++)
         {
-            elidedParseResult = null;
-            map = null;
-            return false;
+            var blamed = errors.SelectMany(e => PlaceholderTokenRegex().Matches(e.Message).Select(m => m.Value));
+            var addedAny = false;
+            foreach (var token in blamed)
+            {
+                addedAny |= toElide.Add(token);
+            }
+
+            if (!addedAny)
+            {
+                break;
+            }
+
+            var toElideNow = placeholders.Where(p => toElide.Contains(PlaceholderToken(p))).ToList();
+            var variant = NeutralElisionVariant.Build(script.InnerText, toElideNow);
+            var parseResult = SqlScriptParser.ParseText(virtualPath, variant.Text);
+            if (!parseResult.HasErrors)
+            {
+                elidedParseResult = parseResult;
+                map = (line, column) => variant.Map(line, column, script.SegmentMap);
+                return true;
+            }
+
+            errors = parseResult.Errors;
         }
 
-        elidedParseResult = parseResult;
-        map = (line, column) => variant.Map(line, column, script.SegmentMap);
-        return true;
+        elidedParseResult = null;
+        map = null;
+        return false;
     }
 
     /// <summary>

@@ -3324,6 +3324,31 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("symbolic-value-broke-parse", finding.Reason);
     }
 
+    [Fact]
+    public void Analyze_TwoSymbolicPlaceholdersOneLoadBearingOneOptional_TargetedElisionKeepsTheLoadBearingOne()
+    {
+        // Real corpus shape (SQL-Server-First-Responder-Kit's sp_BlitzFirst.sql): a temp table
+        // name built from a symbolic value is reused as an IDENTIFIER in both CREATE TABLE and
+        // INSERT - that placeholder is genuinely load-bearing and can NEVER be blanked without
+        // breaking the parse (CREATE TABLE with no name, INSERT with no target). A SEPARATE
+        // symbolic value sits where only an optional query hint could go - THAT one can be
+        // blanked. The old blank-everything elision policy would blank BOTH, breaking the parse
+        // a second time (no table name survives) even though the actual culprit was the other
+        // placeholder alone. Targeted elision must isolate just the placeholder ScriptDOM's own
+        // error blames, leaving the load-bearing identifier as a real token, and succeed.
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_BuildReport @TableNameParam SYSNAME, @HintParam NVARCHAR(50) AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'CREATE TABLE ' + @TableNameParam + N' (ID INT); INSERT ' + @TableNameParam + N' (ID) SELECT ' + @HintParam + N' 1'
+                EXEC(@sql)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        Assert.Single(extraction.AnalyzableScripts);
+        Assert.DoesNotContain(pipeline.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+    }
+
     // ------------------------------------------------------------------
     // Round 3 probes - PROBE-ONLY, temporary, deleted once triaged.
     // ------------------------------------------------------------------
