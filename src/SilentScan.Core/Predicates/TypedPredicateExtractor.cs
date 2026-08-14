@@ -60,8 +60,21 @@ public static class TypedPredicateExtractor
 
         private const string OperandPositionLedgerReason = "not a seek position - nested inside a CASE/IIF/COALESCE/NULLIF branch (or similar operand position) within an enclosing filter clause";
 
-        /// <summary>Skip-ledger construct kind for a comparison where neither side resolved to a real column - most commonly a column wrapped in COALESCE/CASE/NULLIF/IIF on both sides, or against another wrapped expression.</summary>
+        /// <summary>Skip-ledger construct kind for a comparison where neither side resolved to a real column - most commonly a column wrapped in COALESCE/CASE/NULLIF/IIF on both sides, or against another wrapped expression. Genuinely benign: neither side was ever a bare column reference in the first place.</summary>
         private const string NoColumnOperandConstructKind = "no column operand";
+
+        /// <summary>
+        /// Skip-ledger construct kind for a comparison where at least one side IS syntactically a
+        /// bare <see cref="ColumnReferenceExpression"/> yet still failed to resolve to a
+        /// <see cref="PredicateOperand.Column"/> - unlike <see cref="NoColumnOperandConstructKind"/>,
+        /// this is a genuine analysis gap (an unresolved FROM-scope reference, most commonly), not
+        /// a benign "both sides are expressions" shape. Splitting this out keeps
+        /// <c>SkippedConstructSummary</c>'s "no column operand" bucket honestly reserved for the
+        /// harmless case, per CLAUDE.md's "never silently counted as clean" - a two-sided
+        /// unresolved-column comparison used to fall into the exact same bucket as `expr = expr`
+        /// with no way to tell them apart in the published study's honesty numbers.
+        /// </summary>
+        private const string UnresolvedColumnComparisonConstructKind = "unresolved column comparison";
 
         private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
         private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
@@ -1147,17 +1160,38 @@ public static class TypedPredicateExtractor
 
             if (column is null || other is null)
             {
-                // Neither side resolved to a real column - most commonly a column WRAPPED in
-                // COALESCE/CASE/NULLIF/IIF, which resolves through ResolveOperand's
-                // ExpressionTypeInferencer branch into a typed Value rather than a Column (Tier-1
-                // separately flags this same shape as a syntactic FunctionWrappedColumn finding
-                // when it sits directly in a filter position). Ledgered rather than silently
-                // dropped, matching every other "nothing to classify here" branch in this method.
-                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NoColumnOperandConstructKind, "neither side of this comparison resolved to a real column - most commonly both sides are expressions (e.g. a column wrapped in COALESCE/CASE/NULLIF/IIF compared to a literal)");
+                RecordNoColumnOperand(first, second, node);
                 return;
             }
 
             AddFinding(column, other, operatorText, node);
+        }
+
+        /// <summary>
+        /// Neither side resolved to a real column. Two genuinely different shapes land here: a
+        /// comparison where neither side was ever a bare column reference to begin with (most
+        /// commonly a column WRAPPED in COALESCE/CASE/NULLIF/IIF, which resolves through
+        /// ResolveOperand's ExpressionTypeInferencer branch into a typed Value rather than a
+        /// Column - Tier-1 separately flags this same shape as a syntactic FunctionWrappedColumn
+        /// finding when it sits directly in a filter position) is genuinely benign; a bare
+        /// ColumnReferenceExpression that failed to resolve in scope (an unresolvable FROM-scope
+        /// alias, most commonly) is a real analysis gap that happened to land in the same code
+        /// path - ledgered under a distinct ConstructKind so the two are never conflated in the
+        /// published honesty numbers.
+        /// </summary>
+        private void RecordNoColumnOperand(ScalarExpression first, ScalarExpression second, TSqlFragment node)
+        {
+            if (first is ColumnReferenceExpression || second is ColumnReferenceExpression)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, UnresolvedColumnComparisonConstructKind,
+                    "at least one side of this comparison is a bare column reference that failed to resolve to a real column (most commonly an unresolved FROM-scope alias) - not the benign no-column-operand shape");
+                return;
+            }
+
+            ledger.Record(
+                AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NoColumnOperandConstructKind,
+                "neither side of this comparison resolved to a real column - most commonly both sides are expressions (e.g. a column wrapped in COALESCE/CASE/NULLIF/IIF compared to a literal)");
         }
 
         private void AddFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
@@ -1231,6 +1265,14 @@ public static class TypedPredicateExtractor
                 case ConvertCall convertCall:
                     return ResolveCastOrConvertOperand(convertCall.DataType, convertCall.Parameter, scopeChain, convertCall);
 
+                // `col = (SELECT x FROM ...)` - a scalar subquery used as a plain comparison
+                // operand, not the `IN`/`= ANY`/`<> ALL` shape ResolveInSubqueryType's two other
+                // callers handle. Same machinery: resolve the subquery's single output column
+                // through lineage rather than leaving it opaque. A multi-column or otherwise
+                // unresolvable subquery still resolves Unknown, exactly as before - never a guess.
+                case ScalarSubquery scalarSubquery:
+                    return new PredicateOperand.Value(ResolveInSubqueryType(scalarSubquery));
+
                 // Roadmap Phase B: arithmetic, CASE/COALESCE/NULLIF/IIF - CLAUDE.md's own named
                 // hard cases - now resolved through the shared ExpressionTypeInferencer instead
                 // of falling to Unknown. The leaf callback recurses back into ResolveOperand for
@@ -1302,6 +1344,10 @@ public static class TypedPredicateExtractor
                 if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name))
                 {
                     argumentType = Rules.BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
+                }
+                else if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.RequiresDateAddResultAdjustment(name))
+                {
+                    argumentType = Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
                 }
 
                 return new PredicateOperand.Value(argumentType);

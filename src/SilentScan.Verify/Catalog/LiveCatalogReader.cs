@@ -63,7 +63,132 @@ public sealed class LiveCatalogReader
                 SourceLine: 0));
         }
 
+        foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
+        {
+            var qualifiedName = $"{schemaName}.{functionName}";
+            catalog.AddOrReplace(new CatalogTable(
+                SchemaName: schemaName,
+                Name: functionName,
+                Kind: CatalogTableKind.ClrTableValuedFunction,
+                Columns: columns,
+                Indexes: [],
+                SourcePath: qualifiedName,
+                SourceLine: 0));
+        }
+
+        foreach (var (qualifiedName, returnType) in await ReadClrScalarFunctionReturnTypesAsync(connection, catalog.DefaultCollation?.Name, cancellationToken))
+        {
+            catalog.AddScalarFunctionReturnType(qualifiedName, returnType);
+        }
+
         return catalog;
+    }
+
+    /// <summary>
+    /// A SQLCLR table-valued function's return-table columns, read from <c>sys.columns</c>
+    /// keyed off <c>sys.objects.type = 'FT'</c> (assembly TVF) rather than the ordinary
+    /// <c>sys.tables</c> join <see cref="ReadColumnsAsync"/> uses - there is no
+    /// <c>sys.sql_modules</c> body to parse for one of these, but the engine still exposes its
+    /// return shape as real column metadata, so a caller referencing it in a FROM clause can be
+    /// typed exactly like a real table even though the function body itself stays unanalyzable.
+    /// </summary>
+    private static async Task<List<(string SchemaName, string FunctionName, List<CatalogColumn> Columns)>> ReadClrTableValuedFunctionShapesAsync(
+        SqlConnection connection, SkipLedger skipLedger, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT o.object_id, s.name AS schema_name, o.name AS function_name, c.name AS column_name,
+                   ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name, c.is_nullable
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            JOIN sys.columns c ON c.object_id = o.object_id
+            JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+            WHERE o.type = 'FT' AND o.is_ms_shipped = 0
+            ORDER BY o.object_id, c.column_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var byFunction = new Dictionary<int, (string SchemaName, string FunctionName, List<CatalogColumn> Columns)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var objectId = reader.GetInt32(0);
+            var schemaName = reader.GetString(1);
+            var functionName = reader.GetString(2);
+            var columnName = reader.GetString(3);
+            var typeName = reader.GetString(4);
+            var maxLength = reader.GetInt16(5);
+            var precision = reader.GetByte(6);
+            var scale = reader.GetByte(7);
+            var collationName = await reader.IsDBNullAsync(8, cancellationToken) ? null : reader.GetString(8);
+            var isNullable = reader.GetBoolean(9);
+
+            var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName);
+            if (type is null)
+            {
+                skipLedger.Record(
+                    AnalysisPass.Catalog, $"{schemaName}.{functionName}", 0, 0,
+                    "live column type",
+                    $"'{columnName}' has sys.types name '{typeName}', which this pass does not map to a scalar comparison type (CLR UDT, geography/geometry, hierarchyid, or similar) - type left UNKNOWN.");
+            }
+
+            if (!byFunction.TryGetValue(objectId, out var entry))
+            {
+                entry = (schemaName, functionName, []);
+                byFunction[objectId] = entry;
+            }
+
+            entry.Columns.Add(new CatalogColumn(columnName, type, isNullable, IsIdentity: false, IsComputed: false, IsPersisted: false));
+        }
+
+        return [.. byFunction.Values];
+    }
+
+    /// <summary>
+    /// A SQLCLR scalar function's return type, read from <c>sys.parameters</c> at
+    /// <c>parameter_id = 0</c> (the standard way the engine exposes any function's own return
+    /// type, CLR or T-SQL) keyed off <c>sys.objects.type = 'FS'</c> - the ordinary scalar-UDF
+    /// return-type table (<see cref="DatabaseCatalog.AddScalarFunctionReturnType"/>) is otherwise
+    /// populated only from a parsed <c>CREATE FUNCTION</c> body, which a CLR function has none of.
+    /// Unlike <c>sys.columns</c>, <c>sys.parameters</c> carries no <c>collation_name</c> column
+    /// at all (verified against the real engine - querying one throws "Invalid column name"), so
+    /// <paramref name="databaseDefaultCollationName"/> is used for any string-family return type
+    /// instead. This is not a guess: a SQLCLR scalar function has no way to declare a COLLATE on
+    /// its own return value, so its string output collation is always the connected database's
+    /// default - oracle-verified directly (<c>sys.dm_exec_describe_first_result_set</c> against a
+    /// real deployed CLR scalar function returning nvarchar reported exactly the database's own
+    /// default collation, nothing else).
+    /// </summary>
+    private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> ReadClrScalarFunctionReturnTypesAsync(
+        SqlConnection connection, string? databaseDefaultCollationName, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, o.name AS function_name,
+                   ty.name AS type_name, p.max_length, p.precision, p.scale
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            JOIN sys.parameters p ON p.object_id = o.object_id AND p.parameter_id = 0
+            JOIN sys.types ty ON ty.user_type_id = p.user_type_id
+            WHERE o.type = 'FS' AND o.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var returnTypes = new List<(string, SqlType?)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var typeName = reader.GetString(2);
+            var maxLength = reader.GetInt16(3);
+            var precision = reader.GetByte(4);
+            var scale = reader.GetByte(5);
+
+            var returnType = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, databaseDefaultCollationName);
+            returnTypes.Add((qualifiedName, returnType));
+        }
+
+        return returnTypes;
     }
 
     private static async Task<Collation?> ReadDatabaseDefaultCollationAsync(SqlConnection connection, CancellationToken cancellationToken)

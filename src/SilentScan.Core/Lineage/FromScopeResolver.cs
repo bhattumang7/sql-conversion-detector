@@ -1,12 +1,16 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
+using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Lineage;
 
 /// <summary>Resolves a FROM clause to an alias-&gt;relation scope, flattening the join tree to its leaf table references.</summary>
 public static class FromScopeResolver
 {
+    /// <summary>Skip-ledger construct kind shared by every "this FROM-clause table reference didn't resolve" entry in this class - one label for the whole family (missing DDL, unresolved table variable, unmodeled PIVOT/UNPIVOT shape, genuinely unsupported reference kind).</summary>
+    private const string FromTableReferenceConstructKind = "FROM table reference";
+
     /// <summary>
     /// Bundles the context threaded through every table-reference resolution in this class -
     /// introduced to keep individual method signatures within a sane parameter count once
@@ -183,6 +187,8 @@ public static class FromScopeResolver
         QueryDerivedTable derived => ResolveDerivedTableReference(derived, context),
         SchemaObjectFunctionTableReference tvf => ResolveTvfTableReference(tvf, context),
         VariableTableReference variableTable => ResolveVariableTableReference(variableTable, context),
+        PivotedTableReference pivot => ResolvePivotedTableReference(pivot, context),
+        UnpivotedTableReference unpivot => ResolveUnpivotedTableReference(unpivot, context),
         _ => ResolveUnsupportedTableReference(tableReference, context),
     };
 
@@ -257,7 +263,7 @@ public static class FromScopeResolver
             var reason = IsSystemDatabaseReference(named.SchemaObject)
                 ? $"'{qualifiedName}' references a SQL Server system database - intentionally out of scope (no DDL will ever exist to catalog it)"
                 : $"'{qualifiedName}' has no known DDL and is not a resolved view/TVF";
-            ledger?.Record(AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn, "FROM table reference", reason);
+            ledger?.Record(AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn, FromTableReferenceConstructKind, reason);
         }
 
         ResolvedRelation relation;
@@ -362,14 +368,159 @@ public static class FromScopeResolver
         var tvfQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(tvf.SchemaObject));
         if (!resolvedViews.TryGetValue(tvfQualifiedName, out var tvfRelation))
         {
-            ledger?.Record(
-                AnalysisPass.Lineage, sourcePath, tvf.StartLine, tvf.StartColumn,
-                "FROM table-valued function", $"'{tvfQualifiedName}' is not a resolved inline/multi-statement TVF");
-            tvfRelation = ResolvedRelation.Empty;
+            // Not an inline/multi-statement TVF this scan parsed a body for - try a SQLCLR
+            // (assembly) TVF next: the engine still exposes its return-table columns as real
+            // sys.columns metadata (LiveCatalogReader registers these as CatalogTableKind.
+            // ClrTableValuedFunction) even though there is no T-SQL body to resolve. A caller
+            // referencing e.g. dbo.Split(...) becomes fully typeable this way; the function's own
+            // body remains reported as unanalyzable, unaffected by this fallback.
+            var clrTvf = catalog.Find(tvfQualifiedName, scope: null);
+            if (clrTvf is { Kind: CatalogTableKind.ClrTableValuedFunction })
+            {
+                tvfRelation = ToResolvedRelation(clrTvf, tvfQualifiedName);
+            }
+            else
+            {
+                ledger?.Record(
+                    AnalysisPass.Lineage, sourcePath, tvf.StartLine, tvf.StartColumn,
+                    "FROM table-valued function", $"'{tvfQualifiedName}' is not a resolved inline/multi-statement TVF");
+                tvfRelation = ResolvedRelation.Empty;
+            }
         }
 
         var tvfAlias = tvf.Alias?.Value ?? SchemaObjectNameHelper.Resolve(tvf.SchemaObject).Name;
         return (tvfAlias, new ScopeEntry(tvfRelation, IsViewLayer: true));
+    }
+
+    /// <summary>
+    /// <c>FROM (source) PIVOT (Agg(ValueCol) FOR PivotCol IN ([A],[B],...)) AS p</c> -
+    /// statically resolvable end to end, unlike OPENQUERY/OPENROWSET: every piece (the pivoted-
+    /// out column names, the aggregate function, the source/pivot column identifiers) is right
+    /// there in the syntax, no remote schema needed. Every non-value, non-pivot column from the
+    /// inner source passes through with its own provenance unchanged (PIVOT's implicit GROUP BY);
+    /// each name in <c>InColumns</c> becomes a new <see cref="ColumnProvenance.Expression"/>
+    /// column typed through the exact same curated aggregate-function table
+    /// (<see cref="BuiltinFunctionTypeResolver"/>) an ordinary <c>SUM(x)</c> in a view's SELECT
+    /// list already resolves through - oracle-verified directly: <c>PIVOT(SUM(TinyIntCol) ...)</c>
+    /// widens to int, matching plain <c>SUM(TinyIntCol)</c>'s own already-verified widening rule.
+    /// Only a single value column is real T-SQL syntax (ScriptDOM's <c>IList</c> shape
+    /// notwithstanding) - anything else declines rather than guesses which one applies.
+    /// </summary>
+    private static (string? Alias, ScopeEntry Entry) ResolvePivotedTableReference(PivotedTableReference pivot, ResolutionContext context)
+    {
+        var (_, _, sourcePath, ledger, _, _, _) = context;
+        var (_, innerEntry) = ResolveTableReference(pivot.TableReference, context, aliasOverride: null);
+        var innerColumns = innerEntry.Relation.Columns;
+
+        if (pivot.ValueColumns.Count != 1)
+        {
+            ledger?.Record(
+                AnalysisPass.Lineage, sourcePath, pivot.StartLine, pivot.StartColumn,
+                FromTableReferenceConstructKind, "PIVOT with other than exactly one value column is not modeled");
+            return (pivot.Alias?.Value, new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false));
+        }
+
+        var valueColumnName = pivot.ValueColumns[0].MultiPartIdentifier.Identifiers[^1].Value;
+        var pivotColumnName = pivot.PivotColumn.MultiPartIdentifier.Identifiers[^1].Value;
+        var aggregateFunctionName = pivot.AggregateFunctionIdentifier.Identifiers[^1].Value;
+
+        var valueColumn = innerColumns.FirstOrDefault(c => string.Equals(c.Name, valueColumnName, StringComparison.OrdinalIgnoreCase));
+        var aggregateResultType = valueColumn is not null
+            ? ResolveAggregateResultType(aggregateFunctionName, ColumnProvenanceAnalysis.TryGetScalarType(valueColumn.Provenance))
+            : null;
+
+        var pivotedColumns = new List<ResolvedColumn>();
+        foreach (var column in innerColumns)
+        {
+            if (string.Equals(column.Name, valueColumnName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(column.Name, pivotColumnName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            pivotedColumns.Add(column);
+        }
+
+        var valueInputs = valueColumn is not null ? new[] { valueColumn.Provenance } : [];
+        foreach (var inColumn in pivot.InColumns)
+        {
+            pivotedColumns.Add(new ResolvedColumn(
+                inColumn.Value,
+                new ColumnProvenance.Expression(aggregateResultType, valueInputs, sourcePath, pivot.StartLine)));
+        }
+
+        return (pivot.Alias?.Value, new ScopeEntry(new ResolvedRelation(QualifiedName: null, pivotedColumns), IsViewLayer: false));
+    }
+
+    /// <summary>
+    /// <c>FROM source UNPIVOT (ValueCol FOR PivotCol IN (ColA, ColB, ...)) AS u</c> - the mirror
+    /// of PIVOT above, equally statically resolvable. Oracle-verified: <c>PivotCol</c> always
+    /// resolves to nvarchar(128) (the same sysname-family constant this codebase's identity
+    /// functions like SUSER_SNAME already use), and <c>ValueCol</c> takes the IN list's shared
+    /// column type UNCHANGED - but only when every one of those columns shares the EXACT same
+    /// type; the engine outright refuses to compile a type mismatch across the IN list (Msg 8167,
+    /// confirmed directly), so a genuine mismatch here declines rather than guesses which type
+    /// wins, honestly matching what would be a compile error on the real target anyway.
+    /// </summary>
+    private static (string? Alias, ScopeEntry Entry) ResolveUnpivotedTableReference(UnpivotedTableReference unpivot, ResolutionContext context)
+    {
+        var (_, _, sourcePath, ledger, _, _, _) = context;
+        var (_, innerEntry) = ResolveTableReference(unpivot.TableReference, context, aliasOverride: null);
+        var innerColumns = innerEntry.Relation.Columns;
+
+        var inColumnNames = unpivot.InColumns
+            .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
+            .ToList();
+        var inColumnTypes = inColumnNames
+            .Select(name => innerColumns.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)))
+            .Select(c => c is not null ? ColumnProvenanceAnalysis.TryGetScalarType(c.Provenance) : null)
+            .ToList();
+
+        SqlType? valueType = null;
+        if (inColumnTypes.Count > 0 && inColumnTypes.All(t => t is not null) && inColumnTypes.Distinct().Count() == 1)
+        {
+            valueType = inColumnTypes[0];
+        }
+        else
+        {
+            ledger?.Record(
+                AnalysisPass.Lineage, sourcePath, unpivot.StartLine, unpivot.StartColumn,
+                FromTableReferenceConstructKind, "UNPIVOT IN-list columns do not all share one resolved type - the engine itself refuses to compile a genuine mismatch (Msg 8167), and this pass never guesses which type would win");
+        }
+
+        var passthroughColumns = innerColumns
+            .Where(c => !inColumnNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        var valueInputs = inColumnTypes.Any(t => t is not null)
+            ? innerColumns.Where(c => inColumnNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase)).Select(c => c.Provenance).ToArray()
+            : [];
+
+        var unpivotedColumns = new List<ResolvedColumn>(passthroughColumns)
+        {
+            new(unpivot.ValueColumn.Value, new ColumnProvenance.Expression(valueType, valueInputs, sourcePath, unpivot.StartLine)),
+            new(unpivot.PivotColumn.Value, new ColumnProvenance.Expression(new SqlType(SqlTypeCategory.NVarChar, Length: 128), [], sourcePath, unpivot.StartLine)),
+        };
+
+        return (unpivot.Alias?.Value, new ScopeEntry(new ResolvedRelation(QualifiedName: null, unpivotedColumns), IsViewLayer: false));
+    }
+
+    /// <summary>Types a PIVOT aggregate result through the exact same curated table an ordinary aggregate function call resolves through (<see cref="BuiltinFunctionTypeResolver"/>) - fixed-return (COUNT), argument-type passthrough (MIN/MAX), or integer-widening (SUM/AVG). An aggregate not in that table, or an unresolved value column, stays Unknown rather than guessed.</summary>
+    private static SqlType? ResolveAggregateResultType(string aggregateFunctionName, SqlType? valueType)
+    {
+        if (BuiltinFunctionTypeResolver.ResolveFixedReturnType(aggregateFunctionName) is { } fixedType)
+        {
+            return fixedType;
+        }
+
+        if (valueType is null || BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(aggregateFunctionName) is null)
+        {
+            return null;
+        }
+
+        return BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(aggregateFunctionName)
+            ? BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(valueType)
+            : valueType;
     }
 
     private static (string? Alias, ScopeEntry Entry) ResolveVariableTableReference(VariableTableReference variableTable, ResolutionContext context)
@@ -389,7 +540,7 @@ public static class FromScopeResolver
         {
             ledger?.Record(
                 AnalysisPass.Lineage, sourcePath, variableTable.StartLine, variableTable.StartColumn,
-                "FROM table reference", $"table variable '{variableName}' has no known DECLARE/RETURNS in scope");
+                FromTableReferenceConstructKind, $"table variable '{variableName}' has no known DECLARE/RETURNS in scope");
         }
 
         var variableTableAlias = variableTable.Alias?.Value ?? variableName;
@@ -400,11 +551,13 @@ public static class FromScopeResolver
     {
         var (_, _, sourcePath, ledger, _, _, _) = context;
 
-        // OPENQUERY/OPENROWSET/PIVOT/table-valued function calls etc: not yet resolved.
-        // Empty columns means any reference against this alias falls through to "not found".
+        // OPENQUERY (remote server's own dialect, no reachable schema) / a columnless
+        // OPENROWSET / etc: not resolvable at all, not just "not yet resolved" - PIVOT/UNPIVOT
+        // used to land here too but now have their own dedicated resolvers above. Empty columns
+        // means any reference against this alias falls through to "not found".
         ledger?.Record(
             AnalysisPass.Lineage, sourcePath, tableReference.StartLine, tableReference.StartColumn,
-            "FROM table reference", $"unsupported table reference kind '{tableReference.GetType().Name}' (OPENQUERY/OPENROWSET/PIVOT/table-valued function/etc.)");
+            FromTableReferenceConstructKind, $"unsupported table reference kind '{tableReference.GetType().Name}' (OPENQUERY/OPENROWSET/table-valued function/etc.)");
         return ((tableReference as TableReferenceWithAlias)?.Alias?.Value, new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false));
     }
 

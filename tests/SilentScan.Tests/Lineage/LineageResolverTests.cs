@@ -304,6 +304,40 @@ public sealed class LineageResolverTests
     }
 
     [Fact]
+    public void Resolve_DateAddDayTruncationIdiom_OracleVerified_ResolvesToDateTimeNotInt()
+    {
+        // Oracle-verified: DATEADD(day, DATEDIFF(day, 0, x), 0) - the common date-truncation
+        // idiom - returns datetime, NOT the literal `0` third argument's own Int category. A
+        // naive argument-passthrough rule mistyped this exact shape as Int in a real production
+        // database, producing a live lineage-parity mismatch.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (Placed DATETIME NOT NULL);",
+            "CREATE VIEW dbo.vw_Orders AS SELECT DATEADD(day, DATEDIFF(day, 0, Placed), 0) AS PlacedDate FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_Orders")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("PlacedDate")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.DateTime, expr.InferredType!.Category);
+    }
+
+    [Fact]
+    public void Resolve_DateAddOnStringLiteralBaseDate_OracleVerified_ResolvesToDateTimeNotVarChar()
+    {
+        // Oracle-verified: DATEADD(hour, n, '12/30/1899') - a string-literal base date, the
+        // shape behind a real "minutes since midnight" time-of-day idiom - returns datetime, NOT
+        // the literal's own VarChar category. The same shape mistyped as VarChar in a real
+        // production database, producing another live lineage-parity mismatch.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Shifts (StartMinuteOfDay INT NOT NULL);",
+            "CREATE VIEW dbo.vw_Shifts AS SELECT DATEADD(minute, StartMinuteOfDay, '12/30/1899') AS StartAsTime FROM dbo.Shifts;");
+
+        var view = lineage.Find("dbo.vw_Shifts")!;
+        var expr = Assert.IsType<ColumnProvenance.Expression>(view.FindColumn("StartAsTime")!.Provenance);
+
+        Assert.Equal(SqlTypeCategory.DateTime, expr.InferredType!.Category);
+    }
+
+    [Fact]
     public void Resolve_ScalarUdfCallInSelectList_ResolvesToExpressionWithNoInferredType()
     {
         // A scalar UDF is not in the curated builtin table and is out of scope for this pass

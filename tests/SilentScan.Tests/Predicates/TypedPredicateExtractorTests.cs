@@ -594,6 +594,45 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_TempTableCreatedOnlyInsideDynamicSql_LaterStaticPredicateResolvesItsShape()
+    {
+        // End-to-end proof of DynamicSqlTempTableDiscovery (found auditing a real production
+        // database: 6,516 skip occurrences, 98% concentrated in two modules building a #temp
+        // table this exact way): #Runs has no literal CreateTableStatement ANYWHERE in this
+        // proc's static AST - it exists only as string-literal pieces assembled into @ddl and
+        // handed to EXEC. CatalogBuilder's own static pass alone would leave the later
+        // `SELECT RunID FROM #Runs WHERE RunID = 1` predicate with no known table at all
+        // (`no known DDL`, TableQualifiedName null, Verdict.Unknown) - merging in
+        // DynamicSqlTempTableDiscovery's output (mirroring exactly what LiveScanRunner does)
+        // must let that same predicate resolve to a real, typed column instead.
+        var sql = """
+            CREATE PROCEDURE dbo.usp_BuildRuns
+            AS
+            BEGIN
+                DECLARE @ddl NVARCHAR(MAX) = ''
+                SET @ddl = @ddl + 'CREATE TABLE #Runs ('
+                SET @ddl = @ddl + 'RunID INT NOT NULL'
+                SET @ddl = @ddl + ')'
+                EXEC (@ddl)
+
+                SELECT RunID FROM #Runs WHERE RunID = 1;
+            END
+            """;
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        catalog.MergeFileModeExtras(DynamicSqlTempTableDiscovery.Discover([result]));
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var findings = TypedPredicateExtractor.Extract(result, catalog, lineage).TypedFindings;
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("#Runs", finding.Column.TableQualifiedName);
+        Assert.Equal(SqlTypeCategory.Int, finding.Column.Type!.Category);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+    }
+
+    [Fact]
     public void Extract_InlineTvfWithAlias_QualifiedColumnResolves()
     {
         var findings = Extract(
@@ -843,6 +882,23 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.TypedFindings);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "non-seekable operator" && s.Reason.Contains("NOT IN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_ComparisonBetweenTwoUnresolvedColumnReferences_LedgersDistinctlyFromNoColumnOperand()
+    {
+        // Both sides ARE bare column references syntactically (r.A, r.B) - unlike the genuinely
+        // benign "no column operand" shape (both sides are expressions), this is a real analysis
+        // gap: the alias resolved (it's in ByAlias), but its relation is empty because OPENQUERY
+        // is an unsupported table reference kind, so every column lookup against it fails. Before
+        // this fix, this landed in the exact same "no column operand" bucket as a harmless
+        // `expr = expr` comparison, with no way to tell the two apart in the honesty numbers.
+        var result = ExtractAll(
+            "SELECT * FROM OPENQUERY(RemoteServer, 'SELECT A, B FROM Remote') AS r WHERE r.A = r.B;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "unresolved column comparison");
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "no column operand");
     }
 
     [Fact]
@@ -1162,6 +1218,36 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.TypedFindings);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "subquery comparison predicate");
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToScalarSubquery_ResolvesSubqueryOutputColumnType()
+    {
+        // `col = (SELECT x FROM ...)` used to fall to ResolveOperand's default arm - no case
+        // at all for a bare ScalarSubquery, unlike the dedicated IN/= ANY/<> ALL machinery -
+        // so the other side stayed permanently untyped (an operand-type-unresolved Unknown)
+        // even when the subquery's own single output column resolved just fine through
+        // lineage. Reuses that exact resolution (ResolveInSubqueryType).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Amount INT NOT NULL); CREATE TABLE dbo.Settings (SettingValue INT NOT NULL, SettingId INT NOT NULL);",
+            "SELECT Amount FROM dbo.T WHERE Amount = (SELECT SettingValue FROM dbo.Settings WHERE SettingId = 1);");
+
+        var finding = Assert.Single(result.TypedFindings, f => f.Column.TableQualifiedName == "dbo.T");
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.Equal(SqlTypeCategory.Int, ((PredicateOperand.Value)finding.OtherOperand).Type!.Category);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToMultiColumnScalarSubquery_StaysUnknownNotAGuess()
+    {
+        // A genuinely multi-column subquery has no single well-defined output type - stays
+        // Unknown, same as the IN-subquery machinery's own multi-column decline.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Amount INT NOT NULL); CREATE TABLE dbo.Wide (A INT NOT NULL, B INT NOT NULL);",
+            "SELECT Amount FROM dbo.T WHERE Amount = (SELECT A, B FROM dbo.Wide);");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.Unknown, finding.Verdict);
     }
 
     [Fact]
@@ -1695,6 +1781,11 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
         "CREATE TABLE dbo.TIsNull (Id INT NOT NULL);",
         "CREATE TABLE dbo.TStringFn (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        "CREATE TABLE dbo.TDateAddTrunc (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+        """
+        CREATE TABLE dbo.TScalarSubquery (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        CREATE TABLE dbo.SettingsScalarSubquery (SettingId INT NOT NULL);
+        """,
         """
         CREATE TABLE dbo.TCastInt (Id INT NOT NULL);
         CREATE TABLE dbo.RawCastInt (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -2899,6 +2990,50 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
             """);
 
         var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToDateAddDayTruncationIdiom_ResolvesDateTimeNotInt_ScanForced_OracleConfirmed()
+    {
+        // Oracle-verified: DATEADD(day, DATEDIFF(day, 0, @p), 0) - the common date-truncation
+        // idiom, where the third argument is the INT literal 0, not a date/time expression -
+        // resolves to datetime, not Int. A naive argument-passthrough rule mistyped this shape
+        // (real production database, this exact idiom, found through a live scan-db run) as Int,
+        // which would have missed the varchar-column-vs-datetime conversion entirely.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TDateAddTrunc (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_FindDateAddTrunc @P INT
+            AS
+            BEGIN
+                SELECT 1 FROM dbo.TDateAddTrunc WHERE Code = DATEADD(day, DATEDIFF(day, 0, @P), 0);
+            END
+            """);
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task ColumnComparedToScalarSubquery_ResolvesSubqueryOutputColumnType_ScanForced_OracleConfirmed()
+    {
+        // Oracle-verified: `varchar Code = (SELECT int-typed SettingId FROM ...)` converts the
+        // column exactly like the equivalent bare-int-value comparison would - the scalar
+        // subquery case ResolveOperand had no type resolution for at all before this fix,
+        // permanently Unknown regardless of how well-typed its own output column was.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.TScalarSubquery (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+            "CREATE TABLE dbo.SettingsScalarSubquery (SettingId INT NOT NULL);",
+            "SELECT 1 FROM dbo.TScalarSubquery WHERE Code = (SELECT SettingId FROM dbo.SettingsScalarSubquery);");
+
+        var finding = Assert.Single(result.TypedFindings, f => f.Column.TableQualifiedName == "dbo.TScalarSubquery");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);

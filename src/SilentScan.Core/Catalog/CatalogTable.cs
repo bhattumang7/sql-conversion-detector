@@ -8,6 +8,17 @@ public enum CatalogTableKind
 
     /// <summary>A <c>CREATE TYPE ... AS TABLE</c> shape - reusable as a table-valued parameter's declared type, not a queryable object in its own right (coverage-remediation-plan.md Phase 3.2).</summary>
     TableType,
+
+    /// <summary>
+    /// A SQLCLR (assembly) table-valued function's return shape, read directly from
+    /// <c>sys.columns</c> on a live target (<c>LiveCatalogReader</c>) - the engine exposes a CLR
+    /// TVF's return-table columns exactly like a view's, even though there is no T-SQL body to
+    /// parse for it. Resolved identically to <see cref="Table"/> everywhere except
+    /// <c>FromScopeResolver</c>'s TVF-reference handler, which tries this as a fallback only
+    /// after the normal inline/multi-statement TVF lookup misses. Never has indexes (a function's
+    /// returned rowset has none) or a scope (unscoped, like a real table).
+    /// </summary>
+    ClrTableValuedFunction,
 }
 
 public sealed record CatalogTable(
