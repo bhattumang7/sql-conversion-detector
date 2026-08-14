@@ -3670,13 +3670,16 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Analyze_ExecOfCursorBodyEntirelyFromSymbolicVariable_StaysUnanalyzable_NeutralElisionAlsoFailsToParse()
+    public void Analyze_ExecOfCursorBodyEntirelyFromSymbolicVariable_ElidesToATrivialQuery()
     {
         // @Query stands for the ENTIRE cursor SELECT, not an optional trailing fragment -
-        // DECLARE ... CURSOR FOR needs a real SELECT no matter what, so eliding to a single
-        // space fails to parse too (nothing static survives). This must stay Unanalyzable, not
-        // be misclassified as PartiallyAnalyzed - the neutral-elision fallback only ever helps
-        // when SOMETHING valid survives the elision; it must never invent one when it doesn't.
+        // DECLARE ... CURSOR FOR needs a real query no matter what, so eliding to a single space
+        // (or "1=1"/"NULL", neither of which is a query either) fails to parse. The "(SELECT 1)"
+        // filler candidate - tried only after all three others already failed - is the one
+        // grammar-neutral filler that DOES satisfy a whole-missing-query position; a real corpus
+        // shape (a temp/local cursor built from an entirely symbolic body) now recovers as
+        // PartiallyAnalyzed rather than declining outright. "(SELECT 1)" itself has no column
+        // operand and no FROM clause, so it can never contribute a fabricated predicate finding.
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_CursorQuery @Query NVARCHAR(MAX) AS
             BEGIN
@@ -3687,9 +3690,7 @@ public sealed class DynamicSqlScannerTests
 
         Assert.Empty(extraction.Findings);
         Assert.Single(extraction.AnalyzableScripts);
-        var finding = Assert.Single(pipeline.Findings);
-        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
-        Assert.Equal("symbolic-value-broke-parse", finding.Reason);
+        Assert.DoesNotContain(pipeline.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
     }
 
     [Fact]

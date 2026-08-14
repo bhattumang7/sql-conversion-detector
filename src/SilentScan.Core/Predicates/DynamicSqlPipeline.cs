@@ -348,8 +348,14 @@ public static partial class DynamicSqlPipeline
     ///   resolves NullLiteral to a null SqlType, so a predicate comparing a real column against
     ///   it collapses to the SAME "operand-type-unresolved" Unknown a column vs. an unseeded
     ///   parameter already gets, never a fabricated verdict.
+    /// - "(SELECT 1)": correct for a placeholder standing in for an ENTIRE missing query (real
+    ///   corpus shape: `DECLARE cur CURSOR FOR __ph__`, or a FROM-clause derived-table source) -
+    ///   no real grammar position needing a full query accepts a bare scalar/boolean filler
+    ///   instead, so this is tried only after all three above have already failed. `SELECT 1` has
+    ///   no column operand and no FROM clause of its own, so it can never contribute a fabricated
+    ///   predicate finding either.
     /// </summary>
-    private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL"];
+    private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL", "(SELECT 1)"];
 
     private static bool TryReparseWithTargetedElision(
         DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors,
