@@ -85,7 +85,25 @@ public abstract record SqlTextValue
             return a;
         }
 
-        if (b is Tainted) return b;
+        if (b is Tainted taintedB)
+        {
+            if (taintedB.GuardedAlternatives is { Count: > 0 } alternativesB && a is Template)
+            {
+                // The mirror image of the a-is-Tainted case above: a's own literal/hole prefix
+                // (e.g. the "SELECT " in `'SELECT ' + @select`) must PREPEND onto each of b's
+                // alternatives, not just get silently dropped by returning b unchanged - a
+                // GuardedAlternative's own Value is only ever meaningful as a substitute for the
+                // WHOLE consumed expression (EmitScriptsOrFinding's unconditional recovery loop
+                // has no other context to fall back on), so an alternative missing its own
+                // surrounding literal context would misrepresent a bare fragment (e.g. a raw
+                // column list with no SELECT/FROM around it) as if it were the complete dynamic
+                // SQL text.
+                var extended = alternativesB.Select(alt => alt with { Value = WithoutOwnAlternatives((Template)Concat(a, alt.Value)) }).ToList();
+                return taintedB with { GuardedAlternatives = extended };
+            }
+
+            return b;
+        }
 
         var aTemplate = (Template)a;
         var bTemplate = (Template)b;

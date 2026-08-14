@@ -2969,6 +2969,28 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_LiteralPrefixConcatenatedOntoAGuardedAlternative_PrefixSurvivesInTheRecoveredScript()
+    {
+        // SqlTextValue.Concat's own doc comment claims "EITHER side's own GuardedAlternatives are
+        // propagated the SAME way" - but the actual code only handled the case where the TAINTED
+        // operand is on the LEFT (`a`); when a known literal prefix concatenates onto a TAINTED
+        // right-hand value that itself carries a recoverable GuardedAlternative (b), the prefix
+        // was silently dropped rather than prepended onto that alternative - a real corpus shape
+        // (`EXEC('SELECT ' + @select + ' FROM dbo.' + @t)` where @select's own fold ends up
+        // Tainted-with-alternatives from an earlier IF-guarded append) lost its "SELECT " prefix
+        // entirely, producing a bare, un-prefixed column list that could never parse as SQL.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = N'2'; " +
+            "IF 1 = 1 BEGIN SET @sql = FORMAT(2, N'N'); END " +
+            "ELSE BEGIN SET @sql = N'3'; END " +
+            "EXEC(N'SELECT ' + @sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 3", script.InnerText);
+    }
+
+    [Fact]
     public void Scan_IfBranchesProduceByteIdenticalAssemblies_CollapseToOneScript()
     {
         // Both branches happen to assign the exact same literal text - the union must not report
