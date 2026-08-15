@@ -251,7 +251,8 @@ Compile-only SHOWPLAN_XML exposes all of these; none require execution.
 | `NonParallelPlanReason` attribute | Whole plan forced serial; value names the cause (e.g. scalar UDF) |
 | Table Valued Function operator | MSTVF present as fence (an iTVF dissolves into base operators instead); estimated rows shows the fixed 1/100 guess |
 | `ContainsInterleavedExecutionCandidates` | 2017+ marker: an MSTVF in this plan is eligible for interleaved execution (correlated ones are not) |
-| `ContainsInlineScalarTsqlUdfs` | 2019+ marker: scalar UDF(s) were inlined — the finding's severity downgrade signal |
+| `ContainsInlineScalarTsqlUdfs="1"` on `StmtSimple` | 2019+ marker: scalar UDF(s) were inlined — the finding's severity downgrade signal. Oracle-verified (T1-1's `ScalarUdfVerifier`, natural probe, no hint). |
+| `<UserDefinedFunction FunctionName="[db].[schema].[fn]">` element | Scalar UDF call NOT folded away — the counterpart to `ContainsInlineScalarTsqlUdfs`; absent exactly when that attribute is present. Oracle-verified. **Surprising, load-bearing discovery**: `OPTION (USE HINT('DISABLE_TSQL_SCALAR_UDF_INLINING'))` reliably forces this element for a call made directly at the top level, but does NOT propagate into a scalar UDF called from inside a view's own definition — a trivially-inlineable function referenced through a view still dissolves away under the hint. `ScalarUdfProbeBuilder` always probes the underlying function directly (never through the referencing view) specifically because of this. |
 | `StatementOptmEarlyAbortReason` = `TimeOut` / `MemoryLimitExceeded` | Optimizer gave up early; plan is a best guess (query too complex) |
 | `StatementOptmLevel="TRIVIAL"` | Skipped full optimization (also suppresses missing-index requests) |
 | `NoJoinPredicate` warning | Accidental Cartesian product detected at compile |

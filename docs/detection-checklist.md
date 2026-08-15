@@ -38,39 +38,39 @@ signal, not findings; no schema details recorded here).
       `PhysicalOp="Table-valued function"` / `StatementType="INSERT EXEC"`,
       oracle-verified directly). iTVFs never fire — oracle-verified against
       `sys.objects.type='IF'` on the local test DB.
+- [x] Scalar UDF stream (`ScalarUdfFindingKind`): predicate-context invocation
+      (WHERE/JOIN ON/HAVING/MERGE ON, ranked first), reached through
+      view/iTVF expansion (`Lineage.ScalarUdfMap`, same depth/origin shape as
+      the TVF-fence map), schema-level dependency (computed column/DEFAULT/
+      CHECK constraint, catalog-only via `SchemaDependencyScanner` — no
+      query-site AST needed), projection-context invocation (SELECT list/
+      ORDER BY/GROUP BY/SET/variable assignment, ranked last). Every call
+      carries the finding's own inlineability read (SQL 2019+ FROID: engine
+      `is_inlineable` preferred, `ScalarUdfInlineabilityScanner`'s static
+      blocker scan only ever explains, never asserts Inlineable on its own),
+      non-schemabound constant-argument-folding defeat, and CLR data-access
+      status. Dynamic-SQL folding and verify-corpus oracle confirmation both
+      wired in (`ScalarUdfProbeBuilder`/`ScalarUdfVerifier`; two-probe design
+      — pinned probe with `OPTION (USE HINT('DISABLE_TSQL_SCALAR_UDF_INLINING'))`
+      confirms the function reference via a `<UserDefinedFunction
+      FunctionName="...">` plan element, natural probe cross-checks the
+      finding's own Inlineability read via `ContainsInlineScalarTsqlUdfs="1"`
+      on the `StmtSimple`). Oracle-discovered and load-bearing: the hint does
+      NOT propagate into a scalar UDF called from inside a view's own
+      definition (a call that inlines away under the hint at the top level
+      still inlines away identically with it, even though the same view
+      referenced elsewhere shows the `UserDefinedFunction` element for a
+      genuinely non-inlineable function) — so every probe targets the finding's
+      underlying function directly, never through the referencing view,
+      mirroring `TvfFenceProbeBuilder`'s identical choice. SchemaDependency
+      findings are never probed — the constraint/computed-column definition
+      text they cite is already engine truth. All findings share the same
+      "never guess" catalog gate: a 2-part call that doesn't resolve in the
+      scalar-UDF registry (built-in or truly unknown) never fires.
 
 ---
 
 ## Tier 1 — build next (high precision, needs our machinery, high base rate)
-
-### 1. Scalar UDF stream
-The #1 production killer after implicit conversions. Referenced by 73% of
-procs in the production copy; 603 inline TVFs reference a scalar UDF, which
-inlining spreads into every caller — a lineage-only detection no other tool has.
-
-- [ ] Scalar UDF invoked in a predicate (WHERE/ON/HAVING): per-row execution,
-      non-sargable, forces the whole plan serial (pre-inlining).
-- [ ] Scalar UDF in SELECT list / per-row expression context (lower severity,
-      still per-row + serial).
-- [ ] Scalar UDF reached **through inline-TVF/view expansion** — lineage pass
-      attributes the UDF cost to every consumer, with depth + origin like
-      conversion findings. (603 iTVFs in the production copy carry one.)
-- [ ] Scalar UDF in a **computed column, DEFAULT, or CHECK constraint** —
-      forces every query touching the table serial, even queries not naming
-      the column. Pure catalog detection (`sys.computed_columns`, constraint
-      definitions). Production copy: 37 defaults + a handful of check
-      constraints reference UDFs.
-- [ ] **Inlineability classification** (SQL 2019+ scalar UDF inlining): body
-      scan against the documented blocker list (GETDATE-class intrinsics,
-      WHILE, TRY/CATCH, certain table-access patterns). A "will NOT inline"
-      tag is what makes the finding damning on modern servers.
-- [ ] Non-schemabound scalar UDF defeating constant-folding: engine won't
-      treat it as deterministic → per-row execution even for constant
-      arguments. Catalog flag check.
-- [ ] CLR scalar UDF with data access (forces serial; catalog knows it's CLR).
-- Guards: distinguish predicate vs projection context; report inlined-in-2019+
-  cases at reduced severity only when the blocker scan proves inlineable.
-- Oracle: plan shows UDF reference / `NonParallelPlanReason`; compile-only.
 
 ### 3. Join-key and cross-object type/collation mismatch
 Direct reuse of the precedence matrix on new predicate sites. Production copy:
