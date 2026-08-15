@@ -19,11 +19,14 @@ public sealed record ProcCallLiteralArgument(string Value, string SourcePath, in
 /// is the bare variable name passed, when the argument value is a plain <c>VariableReference</c> -
 /// null for a literal, an expression, a subquery, or anything else this pass doesn't need to
 /// distinguish further; <paramref name="IsLiteral"/> is true only for a genuine literal value.
-/// <paramref name="LiteralArgument"/> is populated only when the actual value is specifically a
-/// <c>StringLiteral</c> - the only literal shape dynamic-SQL constant-folding (Tier A/C) can ever
-/// consume; a numeric/date/other literal leaves this null even though <paramref name="IsLiteral"/>
-/// is still true, since seeding a string-concatenation fold with a non-string literal's raw text
-/// would be a guess about implicit conversion this project's soundness-first rule forbids.
+/// <paramref name="LiteralArgument"/> is populated for a <c>StringLiteral</c> or an
+/// <c>IntegerLiteral</c> argument - the two literal shapes whose OWN source text is provably
+/// their canonical string form with no formatting ambiguity (an integer literal's digits are
+/// exactly what an implicit int-to-varchar conversion produces; unlike a date, money, or real
+/// literal, where the source text and the engine's own canonical rendering can genuinely
+/// differ). Any other literal kind leaves this null even though <paramref name="IsLiteral"/> is
+/// still true, since seeding a string-concatenation fold with THAT raw text would be a guess
+/// about implicit conversion this project's soundness-first rule forbids.
 /// Neither <paramref name="CallerVariableName"/> nor <paramref name="FormalParameterType"/> claims
 /// to know the caller variable's own value - only <paramref name="LiteralArgument"/> ever supplies
 /// a concrete value for cross-call-edge seeding.

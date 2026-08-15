@@ -259,4 +259,69 @@ public sealed class ProcCallGraphBuilderTests
         var argument = Assert.Single(edge.Arguments);
         Assert.Equal("Archived", argument.LiteralArgument?.Value);
     }
+
+    [Fact]
+    public void Build_DirectIntegerLiteralArgument_PopulatesLiteralArgument()
+    {
+        // An integer literal's own source text (digits only) IS its canonical string form -
+        // unlike a date/money/real literal, there's no formatting ambiguity to guess about, so
+        // (unlike those other literal kinds) it seeds LiteralArgument directly, the same as a
+        // StringLiteral already does. Real corpus shape: a bitmask/mode argument
+        // (dbo.spRIL_PrintingFunction's own @ColumnControlBits/@RowControlBits) passed as a bare
+        // integer literal at its one in-database call site.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Mask int) AS SELECT 1;
+            GO
+            EXEC dbo.Callee 127;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.True(argument.IsLiteral);
+        Assert.Equal("127", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_CallerVariableAssignedIntegerLiteralAtTopLevel_PropagatesTheIntegerLiteral()
+    {
+        // One-level constant propagation through a caller variable (already proven for a string
+        // literal above) extends the same way to an integer literal assigned via DECLARE's own
+        // initializer.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Mask int) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+            BEGIN
+                DECLARE @m INT = 267;
+                EXEC dbo.Callee @m;
+            END
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@m", argument.CallerVariableName);
+        Assert.Equal("267", argument.LiteralArgument?.Value);
+    }
+
+    [Fact]
+    public void Build_DirectDecimalLiteralArgument_DoesNotPopulateLiteralArgument()
+    {
+        // A decimal/real/money literal's own source text is NOT provably its canonical string
+        // form (trailing zeros, precision, and formatting can differ from what an implicit
+        // conversion to varchar actually produces) - unlike an integer literal (digits only, no
+        // such ambiguity), seeding from it would be a guess this project's soundness-first rule
+        // forbids, so LiteralArgument stays null even though IsLiteral is still true. (A T-SQL
+        // date literal is NOT a distinct case here - ScriptDOM parses it as an ordinary
+        // StringLiteral, already covered by the passing string-literal tests above.)
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@d decimal(10,2)) AS SELECT 1;
+            GO
+            EXEC dbo.Callee 3.140;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.True(argument.IsLiteral);
+        Assert.Null(argument.LiteralArgument);
+    }
 }

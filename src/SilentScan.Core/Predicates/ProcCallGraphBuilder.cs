@@ -144,15 +144,32 @@ public static class ProcCallGraphBuilder
                 }
 
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
-                var literalArgument = actual.ParameterValue is StringLiteral stringLiteral
-                    ? ToLiteralArgument(stringLiteral, sourcePath)
-                    : ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
+                var literalArgument = TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath)
+                    ?? ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
                 matched.Add(new ProcCallArgument(
                     formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument));
             }
 
             return matched;
         }
+
+        /// <summary>
+        /// A literal expression this pass can seed a callee with directly, without any
+        /// formatting guess: a <see cref="StringLiteral"/> (its text IS the value), or an
+        /// <see cref="IntegerLiteral"/> (its own <c>Value</c> text - digits only, no locale/
+        /// precision/rounding ambiguity - IS also exactly the text T-SQL's own implicit int-to-
+        /// varchar conversion produces, unlike a date, money, or real literal, where the source
+        /// text and the canonical string form can genuinely differ). Any other literal kind
+        /// (date, money, real/float, binary, ...) stays unseeded on purpose - seeding those from
+        /// raw source text would be a guess about formatting this project's soundness-first rule
+        /// forbids, not a proven fact.
+        /// </summary>
+        private static ProcCallLiteralArgument? TryGetDirectLiteralArgument(ScalarExpression parameterValue, string sourcePath) => parameterValue switch
+        {
+            StringLiteral stringLiteral => ToLiteralArgument(stringLiteral, sourcePath),
+            IntegerLiteral integerLiteral => ToIntegerLiteralArgument(integerLiteral, sourcePath),
+            _ => null,
+        };
 
         private static ProcCallLiteralArgument? ResolvePropagatedLiteral(
             string? callerVariableName, IList<TSqlStatement>? currentScopeStatements, string sourcePath, ExecuteStatement callSite) =>
@@ -295,12 +312,12 @@ public static class ProcCallGraphBuilder
                         return false;
                     }
 
-                    literal = element.Value is StringLiteral stringLiteral ? ToLiteralArgument(stringLiteral, sourcePath) : null;
+                    literal = element.Value is null ? null : TryGetDirectLiteralArgument(element.Value, sourcePath);
                     return true;
 
                 case SetVariableStatement set when string.Equals(set.Variable.Name, variableName, StringComparison.OrdinalIgnoreCase):
-                    literal = set.AssignmentKind == AssignmentKind.Equals && set.Expression is StringLiteral setLiteral
-                        ? ToLiteralArgument(setLiteral, sourcePath)
+                    literal = set.AssignmentKind == AssignmentKind.Equals && set.Expression is not null
+                        ? TryGetDirectLiteralArgument(set.Expression, sourcePath)
                         : null;
                     return true;
 
@@ -314,6 +331,15 @@ public static class ProcCallGraphBuilder
             var prefixLength = stringLiteral.IsNational ? 2 : 1;
             return new ProcCallLiteralArgument(stringLiteral.Value, sourcePath, stringLiteral.StartLine, stringLiteral.StartColumn, prefixLength);
         }
+
+        /// <summary>
+        /// No quote prefix to strip (<c>PrefixLength: 0</c>) - an integer literal's own source
+        /// text (digits, optionally a leading sign) already IS its canonical string form, the
+        /// same convention <c>ExpressionEvaluator.FoldInteger</c> uses when it stores a folded
+        /// integer back as a <c>Lit</c> piece for a later statement to read.
+        /// </summary>
+        private static ProcCallLiteralArgument ToIntegerLiteralArgument(IntegerLiteral integerLiteral, string sourcePath) =>
+            new(integerLiteral.Value, sourcePath, integerLiteral.StartLine, integerLiteral.StartColumn, PrefixLength: 0);
 
         /// <summary>
         /// Every variable name written (DECLARE-with-value or SET) anywhere inside an IF/WHILE/
