@@ -387,6 +387,24 @@ Compile-only SHOWPLAN_XML exposes all of these; none require execution.
 | Index spool / table spool operators with cost share | On-the-fly index build / repeated-work materialization |
 | `Lookup="1"` on an index operation | Key/RID lookup (non-covering index) |
 
+### Markers not yet researched (needed before implementing the candidate that depends on them)
+
+Each row is an open question, not a guessed answer — resolve against the
+standing Docker instance before writing the rule, never assert a marker name
+here without having actually seen it in a probe's SHOWPLAN_XML.
+
+| Candidate stream | What needs determining |
+|---|---|
+| Join predicate incomplete vs. backing FK | Is this verdict-bearing at all, or syntactic-only (AST + catalog fact, no plan needed to confirm)? If verdict-bearing, compile-only SHOWPLAN can't demonstrate "extra rows returned" — decide what the oracle would actually assert. |
+| Temp-table shape mismatch across a proc-call boundary | Does a shape mismatch on `INSERT INTO #temp EXEC` surface as a compile error, a `CONVERT_IMPLICIT` inside the batch's plan, or neither until execution? |
+| Hint validity against the catalog (nonexistent index / wrong-index hint) | Nonexistent-index case is likely a compile error, not a plan at all — confirm. Wrong-index case: confirm the exact element/attribute naming the hinted index in SHOWPLAN so the probe can assert a scan of *that specific* index. |
+| Composite index leading-column violation | Confirm the plan shows a scan (or a seek with a residual predicate) rather than a clean seek, and find the precise marker distinguishing "seek with residual" from "true seek" — they can look similar. |
+| ARITHABORT-driven plan-cache duplication | This one may not be a compile-only SHOWPLAN case at all — the effect only shows up as two different cached plans for the same query text under different session settings. Confirm whether this needs a DMV-based oracle (`sys.dm_exec_query_stats`/`sys.dm_exec_plan_attributes`) instead of the usual compile-only probe, which would make it a different oracle *shape*, not just a new marker. |
+| `TOP(100) PERCENT` ignored by the optimizer | Likely syntactic-only (documented, unconditional engine behavior) — confirm that's true and skip marker research entirely if so, rather than inventing an oracle for a fact that doesn't vary. |
+| `ORDER BY` in a view / inline TVF not guaranteed | Same question as above: syntactic-only (cite the documented guarantee gap) vs. verdict-bearing (prove no `Sort` is preserved into the outer query) — decide before designing a probe. |
+| `IF` containing queries inside a procedure | The consequence is repeated compiles/estimation, which a single compile-only probe can't show — likely needs a DMV-based oracle (recompile counters across executions) rather than the standard SHOWPLAN_XML shape. |
+| CHECK-constraint-as-enum dead predicate | Not yet accepted (open scope question above) — do this research only after that decision, not before. |
+
 ## Appendix 2 — Canonical forced-serial lists (encodable, finite)
 
 **Whole plan goes serial** when any of these is present:

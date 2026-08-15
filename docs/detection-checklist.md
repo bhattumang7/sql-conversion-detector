@@ -4,6 +4,12 @@ The complete, gated candidate list of SQL Server query-level performance
 problems this tool could detect. This is the working backlog — work items one
 by one, check them off, and prune sections when they stop being useful.
 
+Competitor tools are referenced generically throughout ("a commercial
+schema-bound analyzer," "one small T-SQL type-checker") rather than by name —
+deliberate, so nothing about a specific vendor lands in a public commit. The
+real identities are recorded locally in `vendor/tool-references.md`
+(gitignored, never committed) if a name is ever needed again.
+
 Context that shapes the whole list: no living static tool does type-aware,
 direction-aware, lineage-aware analysis; the tools that ever bound types flag
 mismatches symmetrically and are dead or niche, while the purely syntactic
@@ -121,11 +127,29 @@ precision bar exists to prevent, and it is in the stream Tier 1 §4 builds on.
       Both exist in code with rule IDs in `SarifRuleCatalog`. A backlog that
       under-reports what shipped is the same rot the narrative plan file died
       of; record them with the same detail as the other four entries.
+- [ ] **Fix the checklist's own numbering before it misleads anyone.** Section
+      numbers are insertion-order accidents, not stable IDs — `### 13` doesn't
+      exist anywhere in the file (12 jumps straight to 14), and there's nothing
+      here equivalent to the stable identity shipped rules get
+      (`SargabilityFindingKind`, `TvfFenceFindingKind`, `ScalarUdfFindingKind`,
+      each backed by a real SARIF rule ID). "Do item 13" or "priority is items
+      3–10" currently doesn't resolve to anything reliable. Two open questions
+      to settle when this is picked up, not decided here: (a) renumber
+      sequentially with no gaps, or drop numbers for slug-style anchors that
+      survive future insertions/deletions the way the numbers can't; (b) fold
+      the "Candidates from the incumbent rule catalogs" and "Candidates from
+      the wider product landscape" sections into the actual Tier 1/2/3
+      structure — they currently sit outside it, so their priority relative to
+      the numbered Tier 1/2 items is undefined. Most items in those two
+      sections read as Tier 1 or Tier 2 by the same criteria (precision,
+      catalog requirement, base rate) used everywhere else; a few of the
+      "afternoon-sized" ones belong folded into the existing small-adds section
+      instead of standing alone.
 - [ ] **Record the runtime incumbent in `detection-reference.md`** as
       Appendix 7 §7.7, in the same anonymized style as the other entries: a
-      multi-platform commercial response-time analyzer, read at source
-      2026-08-16 from a decompiled tree held locally and deliberately not in
-      the repo, so the appendix has to stand on its own without it.
+      multi-platform commercial response-time analyzer, read at source from a
+      decompiled tree held locally and deliberately not in the repo, so the
+      appendix has to stand on its own without it.
       Load-bearing detail: its entire SQL Server plan-advice surface is two
       XPath queries — `//MissingIndexes/MissingIndexGroup` and
       `//UnmatchedIndexes/Parameterization/Object`, matching the whole of its
@@ -271,6 +295,26 @@ code, high precision.
       is incremental.
 - [ ] `EXEC(string)` where sp_executesql with params was possible (only when
       the taint analysis shows a parameterizable value) — report, don't guess.
+- [ ] **Temp-table shape mismatch across a proc-call boundary** — one small
+      T-SQL type-checker in the wider tool landscape checks a version of this;
+      ours would be catalog+plan-backed, not a type-inference heuristic. T-SQL
+      scoping means a `#temp` table created by a calling proc stays visible to
+      a proc it calls during that call, and `INSERT INTO #temp EXEC OtherProc`
+      assumes the executed proc's result-set shape matches `#temp`'s declared
+      columns — silently wrong column count/order/type is either a runtime
+      error or, worse, a silent per-column implicit conversion that our
+      existing conversion stream would never see because it never runs on the
+      `EXEC`'d proc's own SELECT list against the caller's temp-table DDL. This
+      is squarely in-scope by CLAUDE.md's own boundary: temp tables created
+      inside proc bodies are explicitly one of the module-body objects we
+      already parser-model (the engine doesn't expose them). Ground truth for
+      the executed proc's actual shape: `sys.dm_exec_describe_first_result_set`
+      (compile-only, same guarantee the `scan-db` describe-only path already
+      relies on) rather than re-deriving it from the proc's own SELECT list.
+      Verdict: column-position type mismatch between the temp table's DDL and
+      the executed proc's described result set. Oracle: compile-only probe of
+      the `INSERT ... EXEC` batch under SHOWPLAN_XML, same discipline as the
+      shipped streams.
 
 ### 14. Schema-scan UDF and computed-column findings (found on completeness audit)
 Distinct trigger from #1's plan-based UDF findings: these fire from catalog
@@ -324,29 +368,28 @@ get an oracle fixture for the serial-plan consequence).
       leaves locks held indefinitely. Both are control-flow/dataflow checks
       over the AST, no catalog needed.
 
-### 18. Candidates from the incumbent survey (2026-08-16)
+### 18. Candidates from the incumbent rule catalogs
 ~638 rules across six analyzers, extracted in full to
 `detection-reference.md` Appendix 7 (read that before adding anything here —
 the complete lists are there, including the categories we don't play in).
-
-- [ ] **Pre-publication gate: measure the second type-binding incumbent's
-      conversion rule against our direction fixtures.** The 2026-08-16 web
-      sweep found the commercial schema-bound analyzer previously recorded as
-      dead is in fact alive, and its cross-type-operator rule is genuinely
-      connection-bound. Its docs read as symmetric, but that's an unverified
-      negative (vendor site defeats fetching). Trial-install it and run the
-      same three-case demo used against `SRP0016`; the study cannot claim
-      "nothing is direction-aware" in public until this is measured.
 Most of it is syntax-only and already covered or already skipped. These are the
 items that need our catalog and that nobody does properly. Several sit under
 the incumbents' *Design* or *Execution-issue* headings, not Performance, which
 is why a performance-tagged-only reading missed them.
 
+- [ ] **Pre-publication gate: measure the second type-binding incumbent's
+      conversion rule against our direction fixtures.** The commercial
+      schema-bound analyzer previously recorded as dead is in fact alive, and
+      its cross-type-operator rule is genuinely connection-bound. Its docs
+      read as symmetric, but that's an unverified negative (vendor site
+      defeats fetching). Trial-install it and run the same three-case demo
+      used against `SRP0016`; the study cannot claim "nothing is
+      direction-aware" in public until this is measured.
 - [ ] **Join predicate incomplete vs. the backing foreign key** — a join
       missing a backing FK entirely, or joining on fewer columns than a
       composite FK defines. The partial-composite case is a real correctness
       *and* plan defect (silent row multiplication) and is pure catalog work.
-      Strongest single find of the sweep; nobody resolves it properly.
+      Strongest single find of the catalog read; nobody resolves it properly.
 - [ ] **Temp-table / table-variable collation vs. database and tempdb
       collation** — a conversion *seed* on every join between a temp object and
       a user table, and the classic cause of collation-conflict errors. We are
@@ -358,6 +401,25 @@ is why a performance-tagged-only reading missed them.
       actual consequence is plan-shape, and it is catalog-verifiable per module
       (`sys.sql_modules.uses_quoted_identifier`/`uses_ansi_nulls`), not a
       guess. Precise, cheap, and mis-framed everywhere else.
+    - **ARITHABORT is a related but structurally different case — verified
+      against `sys.all_columns` on `sys.sql_modules`: it is NOT one
+      of the baked-in settings (only `uses_ansi_nulls` and
+      `uses_quoted_identifier` are).** ARITHABORT is purely a connection/session
+      setting, invisible to catalog inspection of the object itself — so this
+      cannot be a catalog fact the way the QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT
+      finding is. The only static surface is an explicit `SET ARITHABORT OFF`
+      statement in the T-SQL text (syntax-only, same shape as the already-shipped
+      FORCEPLAN/deprecated-SET-option rules). Real-world story worth the
+      afternoon: SSMS defaults the setting ON, most driver/app connections
+      default it OFF, so the *same* proc gets different cached plans depending
+      on which kind of connection first compiled it — a classic "fast in SSMS,
+      slow from the app" symptom. To clear the precision bar this needs a
+      guard: only fire when the module's dependency graph actually touches a
+      table with a filtered index or an indexed view (catalog-derivable via the
+      same dependency walk the schema-scan UDF stream already does) — an
+      explicit `SET ARITHABORT OFF` in a module that never touches either is
+      noise. Oracle: compile/connect with ARITHABORT ON vs OFF against a query
+      touching a filtered index and diff the plan or the plan-cache entry.
 - [ ] **Hint validity against the catalog** — every surveyed tool flags
       `INDEX`/`JOIN`/`TABLE`/`QUERY` hints as a *style* smell ("avoid hints").
       The catalog-requiring version nobody does: an `INDEX(...)` hint naming an
@@ -380,6 +442,47 @@ is why a performance-tagged-only reading missed them.
 - [ ] **`IF` statements containing queries inside a procedure** — estimation
       and recompile consequences; nobody frames it as a performance finding.
 
+### 19. Candidates from the wider product landscape
+Found while independently answering "does anyone else detect this" beyond the
+six repos — a check across distribution channels (marketplaces, NuGet, GitHub
+topics) and curated indexes (curated tool directories, awesome-lists, the
+official commercial SonarQube-ecosystem T-SQL rule set — now access-gated
+behind a paid edition and its public docs taken down — plus academic
+literature). Confirms the conversion-direction niche is still unclaimed;
+nothing found does direction/collation/lineage-aware detection. Two items
+worth pulling in:
+
+- [ ] **Open scope question, not decided — CHECK-constraint-as-enum dead
+      predicate.** One tool found — a small, PoC-labeled T-SQL
+      type-checker doing a different bug class from ours (null-safety/join-key/
+      temp-table-shape, not sargability) — treats a `CHECK (col IN (...))`-style
+      constraint as defining an implicit enum and flags code that compares the
+      column against a value outside it. Catalog-derivable for us the same way
+      `SchemaDependencyScanner` already reads constraint definition text: parse
+      `sys.check_constraints` definitions for an `IN`-list or OR-chain-of-equality
+      shape, then flag a predicate elsewhere comparing that column against a
+      literal proven outside the set — the predicate can never be true, so the
+      query (or branch) is dead. **Unresolved:** this is fundamentally a
+      correctness finding (always-false predicate), the same family as the
+      incumbents' "comparison always evaluates to TRUE/FALSE" rule, which they
+      file under Design, not Performance. Tier 2 item #8 (NOT IN over a nullable
+      subquery column) was kept specifically because it has a real perf angle
+      beyond the correctness bug (an expensive null-aware anti-semi-join); this
+      candidate doesn't obviously have an equivalent extra angle. Needs a
+      decision, not a default accept — record the reasoning here when it's
+      made either way.
+- [ ] **Follow-up gate, same shape as the pre-publication gate above: two new
+      tools found need a closer look before being ruled out.** One
+      (Rust, WASM-delivered, ~103 T-SQL rules, actually issues `SET PARSEONLY`
+      and rollback-plan probes — the closest oracle discipline to ours found
+      anywhere; actively maintained) and one distributed via
+      NuGet (169 rules across security/correctness/performance/convention,
+      actively published). Docs for both show no implicit-conversion hit on a
+      grep, but that's from docs, not a source read — same caveat class as the
+      pre-publication gate item. Lower priority than that one since neither
+      claims schema-binding, but cheap to close: read their rule source before
+      the study cites "nothing else exists" as settled.
+
 Reporting ideas worth stealing (not detections):
 - [ ] **Confidence tiers as a first-class output axis** — one surveyed tool
       gates findings Proven/Contextual/Advisory with a CI-safe default. Maps
@@ -393,8 +496,8 @@ Reporting ideas worth stealing (not detections):
       SARIF `rules` block — keeps documentation and code from drifting apart.
 
 **Security, compliance, and correctness-only rules are a live open question,
-not a decided skip.** The sweep found a substantial security axis in the
-incumbents (one tool devotes 61 rules to it — its second-largest category —
+not a decided skip.** The incumbent catalogs carry a substantial security axis
+(one tool devotes 61 rules to it — its second-largest category —
 and the actively-developed DacFx pack ships a SQL-injection rule). Nothing has
 been decided here; the full lists are in Appendix 7 §7.4 so the decision can be
 made from the actual rules rather than from a category label. Note the one
@@ -453,8 +556,8 @@ surface as a side effect.
   join/order hint frequency) — inherently a runtime aggregate (counts since
   last restart), not a per-query static fact; the static form is already
   covered by the hard-coded-hints skip above.
-- **SonarQube T-SQL rule coverage** — *resolved 2026-08-16, no longer open.*
-  The only SonarQube T-SQL path is a community plugin, read at source: 16
+- **SonarQube T-SQL rule coverage** — *resolved, no longer open.*
+  The free-tier SonarQube T-SQL path is a community plugin, read at source: 16
   enabled T-SQL rules, all declarative ANTLR parse-tree shape matches, dormant
   since 2024, no implicit-conversion rule of any kind. Its non-sargability rule
   is `BETA` with no ground truth. The CI-gate niche is effectively unoccupied.
