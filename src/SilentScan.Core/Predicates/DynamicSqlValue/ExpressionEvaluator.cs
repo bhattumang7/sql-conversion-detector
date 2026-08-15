@@ -73,7 +73,7 @@ public static class ExpressionEvaluator
                     && string.Equals(sourceRef.Name, lenArgRef.Name, StringComparison.OrdinalIgnoreCase)
                     && FoldInteger(startExpr, state, sourcePath, cap, out var substringStart)
                     && substringStart >= 1
-                    && TryTrimLeadingCharacters(Fold(sourceRef, state, sourcePath, cap, catalog), substringStart - 1) is { } trimmedFromStart:
+                    && TryTrimThroughAlternatives(Fold(sourceRef, state, sourcePath, cap, catalog), substringStart - 1, TryTrimLeadingCharacters) is { } trimmedFromStart:
                 // SUBSTRING(x, n, LEN(x)) is a common "drop a fixed prefix" idiom (e.g. trimming a
                 // leading " AND " off a predicate string built by repeated concatenation) - and,
                 // crucially, it never actually needs x's own LENGTH to be known: SQL Server clamps
@@ -102,7 +102,7 @@ public static class ExpressionEvaluator
                     && trailingStart == 1
                     && FoldInteger(trimCountExpr, state, sourcePath, cap, out var trimCount)
                     && trimCount >= 0
-                    && TryTrimTrailingCharacters(Fold(trailingSourceRef, state, sourcePath, cap, catalog), trimCount) is { } trimmedFromEnd:
+                    && TryTrimThroughAlternatives(Fold(trailingSourceRef, state, sourcePath, cap, catalog), trimCount, TryTrimTrailingCharacters) is { } trimmedFromEnd:
                 // SUBSTRING(x, 1, LEN(x) - K) is the mirror-image "drop a fixed trailing
                 // separator" idiom (e.g. stripping a trailing ',' left by repeated
                 // `@select = @select + '...,'` concatenation). Unlike the leading-trim case
@@ -899,6 +899,46 @@ public static class ExpressionEvaluator
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Applies a leading/trailing trim helper (<see cref="TryTrimLeadingCharacters"/> or
+    /// <see cref="TryTrimTrailingCharacters"/>) through a <see cref="SqlTextValue.Tainted"/>
+    /// source's own <see cref="SqlTextValue.GuardedAlternatives"/> instead of giving up the moment
+    /// <paramref name="value"/> isn't a plain <see cref="SqlTextValue.Template"/> - a real corpus
+    /// shape (e.g. <c>SUBSTRING(@select, 1, LEN(@select) - 1)</c> stripping a trailing separator
+    /// off a column list built by several EARLIER IF-guarded appends elsewhere in the same batch)
+    /// reaches this trim with @select ALREADY Tainted from something upstream, its own per-branch
+    /// known values preserved only as alternatives. Each alternative is independently trimmed and
+    /// kept ONLY if the underlying trim helper proves it can be (never a guess per-alternative,
+    /// same soundness rule the helper itself already enforces) - an alternative whose own trim
+    /// fails is simply dropped, not treated as poisoning the others: unlike a single value's own
+    /// Choice cross-product (where every alternative is a real possibility for the SAME concrete
+    /// execution, so one bad path taints the whole thing), each GuardedAlternative here belongs to
+    /// a MUTUALLY EXCLUSIVE guard condition - a different, independent execution - so one failing
+    /// to trim says nothing about whether the others are valid. Returns null (declines) only when
+    /// NONE of the alternatives could be trimmed, matching the plain-Template case's own "nothing
+    /// recoverable" outcome.
+    /// </summary>
+    private static SqlTextValue? TryTrimThroughAlternatives(SqlTextValue value, int count, Func<SqlTextValue, int, SqlTextValue?> trim)
+    {
+        if (trim(value, count) is { } direct)
+        {
+            return direct;
+        }
+
+        if (value is not SqlTextValue.Tainted { GuardedAlternatives: { Count: > 0 } alternatives } tainted)
+        {
+            return null;
+        }
+
+        var trimmedAlternatives = alternatives
+            .Select(alt => trim(alt.Value, count) is SqlTextValue.Template trimmed ? alt with { Value = trimmed } : null)
+            .Where(alt => alt is not null)
+            .Select(alt => alt!)
+            .ToList();
+
+        return trimmedAlternatives.Count > 0 ? tainted with { GuardedAlternatives = trimmedAlternatives } : null;
     }
 
     private static SourceSpan Span(string sourcePath, TSqlFragment fragment) => new(sourcePath, fragment.StartLine, fragment.StartColumn);

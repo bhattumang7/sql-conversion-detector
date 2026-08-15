@@ -169,6 +169,34 @@ public abstract record SqlTextValue
     }
 
     /// <summary>
+    /// Folds <paramref name="b"/>'s own <see cref="GuardedAlternatives"/> into <paramref name="a"/>'s
+    /// rather than <see cref="Join"/>'s both-Tainted case silently keeping only <paramref name="a"/>'s
+    /// - needed for a join that follows ANOTHER join under the same lineage of guards (e.g.
+    /// `IF g1 SET @x = @x + lit ELSE SET @x = unfoldable()` immediately followed by
+    /// `IF g2 SET @x = f(@x)`): if <c>f</c>'s own fold itself declines but still recovers a
+    /// refined alternative for guard g1 (see <c>ExpressionEvaluator.TryTrimThroughAlternatives</c>),
+    /// that refined value must not be thrown away just because the unconditional (g2-false) path
+    /// is ALSO tainted. On a guard-text collision, <paramref name="a"/>'s own value wins, never
+    /// <paramref name="b"/>'s - `a` is <see cref="DynamicSqlCfg"/>'s own THEN-branch predecessor
+    /// (its own <c>MergeStateInto</c> always folds the then-side state in first, becoming this
+    /// join's `a`), the branch that ran the ADDITIONAL transfer function (e.g. the trim above) on
+    /// top of whatever produced the shared ancestor guard's alternative - so it is strictly more
+    /// refined/up to date for that guard than `b`'s (the unconditional/ELSE-side) own stale copy,
+    /// mirroring the "first operand's own fact wins" convention <see cref="Concat"/> already uses.
+    /// </summary>
+    private static Tainted MergeAlternatives(Tainted a, Tainted b)
+    {
+        var merged = (SqlTextValue)a;
+        var ownGuards = new HashSet<string>((a.GuardedAlternatives ?? []).Select(alt => alt.GuardText), StringComparer.Ordinal);
+        foreach (var alt in (b.GuardedAlternatives ?? []).Where(alt => ownGuards.Add(alt.GuardText)))
+        {
+            merged = WithGuardedAlternative(merged, alt.GuardText, alt.Value);
+        }
+
+        return (Tainted)merged;
+    }
+
+    /// <summary>
     /// The depth invariant that keeps the guarded-alternatives side channel bounded: a value
     /// stored AS an alternative never carries alternatives of its own. Without it,
     /// concatenating two alternative-bearing <see cref="Template"/>s nests each side's
@@ -262,7 +290,7 @@ public abstract record SqlTextValue
         {
             (Tainted onlyA, Template bOnly) => WithGuardedAlternative(onlyA with { DeclaredType = carriedType }, guardText, bOnly),
             (Template aOnly, Tainted onlyB) => WithGuardedAlternative(onlyB with { DeclaredType = carriedType }, guardText, aOnly),
-            (Tainted bothTaintedA, Tainted) => bothTaintedA with { DeclaredType = carriedType },
+            (Tainted bothTaintedA, Tainted bothTaintedB) => MergeAlternatives(bothTaintedA with { DeclaredType = carriedType }, bothTaintedB),
             _ => new Tainted(DivergesInControlFlowGraphReason, at) { DeclaredType = carriedType }, // defensive: unreachable given today's two-subtype lattice
         };
     }
@@ -309,10 +337,41 @@ public abstract record SqlTextValue
     /// </summary>
     public static bool StructurallyEqual(SqlTextValue a, SqlTextValue b) => (a, b) switch
     {
-        (Tainted x, Tainted y) => x.Reason == y.Reason && x.Location.Equals(y.Location) && x.DeclaredType == y.DeclaredType,
-        (Template x, Template y) => x.DeclaredType == y.DeclaredType && PiecesEqual(x.Pieces, y.Pieces),
+        (Tainted x, Tainted y) => x.Reason == y.Reason && x.Location.Equals(y.Location) && x.DeclaredType == y.DeclaredType && GuardedAlternativesEqual(x.GuardedAlternatives, y.GuardedAlternatives),
+        (Template x, Template y) => x.DeclaredType == y.DeclaredType && PiecesEqual(x.Pieces, y.Pieces) && GuardedAlternativesEqual(x.GuardedAlternatives, y.GuardedAlternatives),
         _ => false,
     };
+
+    /// <summary>
+    /// Order-independent equality over the <see cref="GuardedAlternatives"/> side channel, keyed
+    /// by <see cref="GuardedAlternative.GuardText"/> (the same key <see cref="WithGuardedAlternative"/>
+    /// dedupes by, so two lists containing the same (guardText, value) pairs in different orders -
+    /// an artifact of which side of a join happened to process a guard first - are still equal).
+    /// Missing entirely on both sides is the common case and short-circuits without allocating.
+    /// This closes a real gap in <see cref="StructurallyEqual"/>'s own OLD behavior (comparing
+    /// only Reason/Location/DeclaredType for Tainted, ignoring this field outright): two Tainted
+    /// values that share the same cause but were refined to carry DIFFERENT known alternatives
+    /// (e.g. one further narrowed by a later transfer function - see
+    /// <c>ExpressionEvaluator.TryTrimThroughAlternatives</c>) were treated as identical, silently
+    /// discarding whichever side's alternatives <see cref="Join"/>'s own equal-shortcut, or
+    /// <see cref="DynamicSqlCfg"/>'s <c>ApplyGuardedAlternativeFixup</c> early-continue, happened
+    /// not to keep.
+    /// </summary>
+    private static bool GuardedAlternativesEqual(IReadOnlyList<GuardedAlternative>? a, IReadOnlyList<GuardedAlternative>? b)
+    {
+        if (a is null or { Count: 0 } && b is null or { Count: 0 })
+        {
+            return true;
+        }
+
+        if (a is null || b is null || a.Count != b.Count)
+        {
+            return false;
+        }
+
+        var byGuardTextA = a.ToDictionary(alt => alt.GuardText, alt => alt.Value, StringComparer.Ordinal);
+        return b.All(altB => byGuardTextA.TryGetValue(altB.GuardText, out var valueA) && StructurallyEqual(valueA, altB.Value));
+    }
 
     private static bool PiecesEqual(IReadOnlyList<TemplatePiece> a, IReadOnlyList<TemplatePiece> b) =>
         a.Count == b.Count && a.Zip(b, PieceEqual).All(equal => equal);

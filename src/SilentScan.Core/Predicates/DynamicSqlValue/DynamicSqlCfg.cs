@@ -234,8 +234,16 @@ public sealed class DynamicSqlCfg
                 current = SqlTextValue.WithGuardedAlternative(current, guardText, thenTemplateBothResolved);
             }
 
-            current = PropagateNestedGuardedAlternatives(current, thenValue);
+            // elseValue's own nested alternatives apply FIRST, thenValue's SECOND (so thenValue
+            // wins a guard-text collision) - the common real shape motivating this ordering is an
+            // unconditional-no-else `IF g SET @x = f(@x)` where BOTH branches trace back to the
+            // SAME ancestor guard's alternative (elseValue = the pre-@x-assignment snapshot,
+            // thenValue = that snapshot after f's own transfer function ran on top of it, e.g. a
+            // trim - see ExpressionEvaluator.TryTrimThroughAlternatives): thenValue's copy is
+            // strictly more refined/up to date for that guard, never less correct, so it must not
+            // be clobbered back to the pre-transfer value by applying elseValue's copy last.
             current = PropagateNestedGuardedAlternatives(current, elseValue);
+            current = PropagateNestedGuardedAlternatives(current, thenValue);
             working[key] = current;
         }
     }

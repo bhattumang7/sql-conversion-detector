@@ -204,6 +204,38 @@ public sealed class DynamicSqlScannerTests
         Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__$", script.InnerText);
     }
 
+    [Fact]
+    public void Scan_SubstringTrimOfVariableAlreadyTaintedWithAGuardedAlternative_StillAnalyzesRatherThanBreakingParse()
+    {
+        // A real corpus shape (dbo.spRIL_FRTrips, found via scan-db --fetch-sql-from-tables
+        // against a restored production database): @select is built by an EARLIER IF/ELSE (one
+        // side folds, the other doesn't) before this trim ever runs, then the trim itself is
+        // ALSO guarded by its own IF (`IF LEN(@select) > 0 ...`, no ELSE - the idiom's real
+        // shape everywhere it's been seen). Both the trimmed (THEN) and un-trimmed (ELSE/
+        // unchanged) paths reaching the trim's own join are Tainted with the SAME underlying
+        // reason but DIFFERENT known alternatives - StructurallyEqual's own Tainted case used to
+        // compare only Reason/Location/DeclaredType, so it treated these as identical and Join's
+        // equal-shortcut (and DynamicSqlCfg's own early-continue) silently kept whichever side it
+        // happened to see first, discarding the OTHER side's alternative outright. Once
+        // StructurallyEqual also compares GuardedAlternatives, the two paths correctly resolve as
+        // DIFFERENT, and @select's declared type lets the join recover a generic typed hole
+        // instead - never the specific literal (the two alternatives, trimmed vs not, no longer
+        // structurally agree on ONE text), but a real, sound, parseable script instead of the
+        // OLD outcome: the untrimmed alternative's own trailing comma surviving into "SELECT
+        // ColA, FROM ..." and breaking the reparse outright (symbolic-value-broke-parse /
+        // InnerParseFailed on production procs shaped exactly like this).
+        var result = Scan(
+            "DECLARE @select VARCHAR(MAX) = ''; " +
+            "IF 1 = 1 BEGIN SET @select = @select + 'ColA,'; END " +
+            "ELSE BEGIN SET @select = FORMAT(2, N'N'); END " +
+            "IF LEN(@select) > 0 SET @select = SUBSTRING(@select, 1, LEN(@select) - 1); " +
+            "EXEC('SELECT ' + @select);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
     /// <summary>A fake ILiveRowValueFetcher for unit tests - no database involved, just a fixed lookup table keyed exactly like the real fetcher's own contract, plus a call log so a test can assert it was (or wasn't) invoked.</summary>
     private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, string Column, string KeyColumn, string KeyValue), IReadOnlyList<string>> filteredValues, IReadOnlyDictionary<(string Table, string Column), IReadOnlyList<string>>? unfilteredValues = null) : ILiveRowValueFetcher
     {
