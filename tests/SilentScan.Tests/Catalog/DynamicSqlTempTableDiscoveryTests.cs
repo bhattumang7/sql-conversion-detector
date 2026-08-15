@@ -92,4 +92,49 @@ public sealed class DynamicSqlTempTableDiscoveryTests
 
         Assert.Empty(catalog.Tables);
     }
+
+    [Fact]
+    public void MergeFileModeExtras_DiscoveredSyntheticWrapperHasNoParameters_DoesNotClobberTheRealProcedureSCatalogedParameters()
+    {
+        // A real corpus bug (found via scan-db --fetch-sql-from-tables against a restored
+        // production database, dbo.spRIL_TripInformation and others): a procedure that declares
+        // real formal parameters AND ALSO builds a dynamic-SQL CREATE TABLE statement somewhere
+        // in its own body. LiveScanRunner's own pipeline runs TWO catalog passes over the SAME
+        // procedure, in this order: (1) CatalogBuilder.Build's real, static pass registers the
+        // procedure's true parameter list from its own CREATE PROCEDURE syntax; (2)
+        // DynamicSqlTempTableDiscovery.Discover wraps the folded CREATE TABLE text in a
+        // SYNTHETIC `CREATE PROCEDURE [schema].[name] AS BEGIN ... END` (by construction, NEVER
+        // carrying the real parameter list), and MergeFileModeExtras merges ITS OWN (empty)
+        // parameter registration for the SAME qualified name back into the main catalog -
+        // silently discarding the real 8-parameter registration down to zero. Every later EXEC
+        // call-graph edge into this procedure then fails to match ANY argument to ANY formal
+        // (DynamicSqlTransfer.BuildParameterSeed sees 0 formal parameters), leaving every one of
+        // the procedure's own real parameters completely absent from dynamic-SQL constant
+        // tracking - surfacing as widespread, spurious "variable-not-in-scope" findings for
+        // genuinely well-declared parameters.
+        var procSql = """
+            CREATE PROCEDURE dbo.usp_BuildRuns @RunDate DATE, @Flag INT AS
+            BEGIN
+                DECLARE @ddl NVARCHAR(MAX) = ''
+                SET @ddl = @ddl + 'CREATE TABLE #Runs ('
+                SET @ddl = @ddl + 'RunID INT NOT NULL'
+                SET @ddl = @ddl + ')'
+                EXEC (@ddl)
+            END
+            """;
+        var procResult = SqlScriptParser.ParseText("test.sql", procSql);
+        Assert.False(procResult.HasErrors, string.Join("; ", procResult.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([procResult]);
+        Assert.True(catalog.TryGetProcedureParameters("dbo.usp_BuildRuns", out var beforeMerge));
+        Assert.Equal(2, beforeMerge.Count);
+
+        var discovered = DynamicSqlTempTableDiscovery.Discover([procResult]);
+        catalog.MergeFileModeExtras(discovered);
+
+        Assert.True(catalog.TryGetProcedureParameters("dbo.usp_BuildRuns", out var afterMerge));
+        Assert.Equal(2, afterMerge.Count);
+        Assert.Equal("@RunDate", afterMerge[0].Name);
+        Assert.Equal("@Flag", afterMerge[1].Name);
+    }
 }

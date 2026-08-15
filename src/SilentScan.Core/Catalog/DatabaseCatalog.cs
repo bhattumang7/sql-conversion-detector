@@ -69,8 +69,30 @@ public sealed class DatabaseCatalog
     /// parameter is deliberately excluded here - it has no scalar SqlType to seed anything with,
     /// and is already registered separately as a scoped table (<see cref="AddOrReplace(CatalogTable, string?)"/>).
     /// </summary>
-    public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters) =>
+    /// <summary>
+    /// A parameterless registration never overwrites an ALREADY-registered non-empty one for the
+    /// same qualified name - real corpus shape (<see cref="DynamicSqlTempTableDiscovery"/>): its
+    /// own synthetic <c>CREATE PROCEDURE [schema].[name] AS BEGIN ... END</c> wrapper, reusing a
+    /// REAL procedure's own qualified name/scope so a dynamic-SQL-constructed temp table resolves
+    /// under the right scope, is built with NO parameter list at all (it only ever wraps a folded
+    /// CREATE TABLE snippet) and runs through this same CatalogBuilder pass a second time, AFTER
+    /// the real procedure's own full body already registered its true parameter list correctly -
+    /// without this guard, that second, parameter-less pass silently clobbers every later EXEC
+    /// call-graph edge's own argument-to-formal matching down to zero formals, discarding the
+    /// procedure's real parameters entirely (surfaced as widespread false "variable-not-in-scope"
+    /// findings for genuine, correctly-declared parameters). A GENUINE parameterless procedure
+    /// registering 0 params for the first time, or re-registering the SAME 0, is unaffected -
+    /// this only ever blocks a 0-length list from replacing a already-known non-0-length one.
+    /// </summary>
+    public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters)
+    {
+        if (parameters.Count == 0 && _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out var existing) && existing.Count > 0)
+        {
+            return;
+        }
+
         _procedureParametersByQualifiedName[qualifiedName] = parameters;
+    }
 
     /// <summary>True only when a CREATE/ALTER PROCEDURE with this qualified name was seen - an unregistered/unresolvable callee (a system proc, or a name this scan never saw) returns false rather than an empty list, so a caller can tell "no parameters" apart from "unknown procedure".</summary>
     public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
@@ -230,7 +252,7 @@ public sealed class DatabaseCatalog
 
         foreach (var (qualifiedName, parameters) in fileModeCatalog._procedureParametersByQualifiedName)
         {
-            _procedureParametersByQualifiedName[qualifiedName] = parameters;
+            AddProcedureParameters(qualifiedName, parameters);
         }
     }
 }
