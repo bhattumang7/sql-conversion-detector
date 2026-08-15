@@ -800,11 +800,14 @@ public static class ExpressionEvaluator
     /// an already-resolved integer literal (see <see cref="TryLiteralAsInteger"/> - populated by
     /// <c>DynamicSqlTransfer.FoldByDeclaredType</c> for a DECLARE/SET into an INTEGER-family
     /// variable, itself routed through this same method so a straight-line chain of int
-    /// variables resolves end to end), +/- of two such foldable integers (a "strip the trailing
-    /// delimiter" idiom, e.g. <c>LEN(@x) - LEN(@y)</c>, or ordinary int variable arithmetic like
-    /// <c>@start + 1</c>), or <c>LEN(...)</c> over a string this evaluator already folds to a
-    /// single concrete value. Anything else (an unsupported function, a column reference, a
-    /// variable whose own value isn't itself a resolved integer) declines rather than guessing.
+    /// variables resolves end to end), +/-/&amp;/|/^ of two such foldable integers (a "strip the
+    /// trailing delimiter" idiom, e.g. <c>LEN(@x) - LEN(@y)</c>, ordinary int variable arithmetic
+    /// like <c>@start + 1</c>, or the bitmask-flag idiom real corpus report procs use everywhere
+    /// - <c>@RowControlBits &amp; @RCB_MASK_X</c> - both operands local, DECLARE'd integer
+    /// constants and a caller-seeded bitmask parameter), or <c>LEN(...)</c> over a string this
+    /// evaluator already folds to a single concrete value. Anything else (an unsupported
+    /// function, a column reference, a variable whose own value isn't itself a resolved integer)
+    /// declines rather than guessing.
     /// </summary>
     public static bool FoldInteger(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
@@ -827,10 +830,21 @@ public static class ExpressionEvaluator
             case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
                 return FoldInteger(unary.Expression, state, sourcePath, cap, out value);
 
-            case BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add or BinaryExpressionType.Subtract } binary
+            case BinaryExpression
+            {
+                BinaryExpressionType: BinaryExpressionType.Add or BinaryExpressionType.Subtract
+                    or BinaryExpressionType.BitwiseAnd or BinaryExpressionType.BitwiseOr or BinaryExpressionType.BitwiseXor,
+            } binary
                 when FoldInteger(binary.FirstExpression, state, sourcePath, cap, out var left)
                     && FoldInteger(binary.SecondExpression, state, sourcePath, cap, out var right):
-                value = binary.BinaryExpressionType == BinaryExpressionType.Add ? left + right : left - right;
+                value = binary.BinaryExpressionType switch
+                {
+                    BinaryExpressionType.Add => left + right,
+                    BinaryExpressionType.Subtract => left - right,
+                    BinaryExpressionType.BitwiseAnd => left & right,
+                    BinaryExpressionType.BitwiseOr => left | right,
+                    _ => left ^ right,
+                };
                 return true;
 
             case FunctionCall { FunctionName.Value: var functionName } lenCall

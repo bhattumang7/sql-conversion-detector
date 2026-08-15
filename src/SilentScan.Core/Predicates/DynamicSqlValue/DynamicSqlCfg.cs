@@ -42,10 +42,13 @@ public sealed class DynamicSqlCfg
     private readonly string _sourcePath;
     private readonly int _cap;
     private readonly Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> _compileLeaf;
+    private readonly IReadOnlySet<string> _callerSeededVariableNames;
     private static readonly string[] NoActiveGuards = [];
+    private static readonly HashSet<string> NoCallerSeededVariableNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Block> _blocks = [];
     private readonly Dictionary<string, int> _labelBlocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, string> _guardTextByJoinBlock = [];
+    private readonly Dictionary<int, BooleanExpression> _conditionByJoinBlock = [];
     private readonly Dictionary<int, int> _thenPredecessorByJoinBlock = [];
     private readonly Dictionary<int, int> _elsePredecessorByJoinBlock = [];
     private readonly Dictionary<int, SourceSpan> _blockSpan = [];
@@ -54,11 +57,28 @@ public sealed class DynamicSqlCfg
     /// <param name="sourcePath">The file this scope's statements came from - used to build a <see cref="SourceSpan"/> for a block whose own triggering statement isn't otherwise available.</param>
     /// <param name="cap">The per-join assembly cap forwarded to every <see cref="SqlTextValue.Join"/> call - the same <c>MaxAssembliesPerVariable</c> the old scanner used.</param>
     /// <param name="compileLeaf">Compiles one non-control-flow statement into a step - invoked with <c>emit: false</c> during the fixpoint (side effects like EXEC emission suppressed) and once more with <c>emit: true</c> once state has stabilized.</param>
-    public DynamicSqlCfg(string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf)
+    /// <param name="callerSeededVariableNames">
+    /// Formal parameter names this scope's OWN seed populated from a genuine caller-supplied
+    /// literal argument (<see cref="DynamicSqlTransfer.SeedFromSingleEdge"/> - never a local
+    /// DECLARE initializer, a default value, or test scaffolding). The ONLY thing this set gates:
+    /// <see cref="ApplyConstantConditionPruning"/> refuses to prune an IF whose condition doesn't
+    /// reference at least one of these names, even when the condition is otherwise fully provable
+    /// (e.g. <c>IF 1 = 1</c>, or <c>DECLARE @mode INT = 0; IF @mode = 0</c>) - both are real,
+    /// sound, always-true facts about THIS proc's own code, but proving them isn't this feature's
+    /// job: real corpus code uses that exact idiom as deliberate always-run wrapper boilerplate,
+    /// and pruning it changes behavior for a huge, untargeted swath of ordinary branches having
+    /// nothing to do with the caller-driven bitmask-flag idiom this feature actually targets.
+    /// Defaults to empty (a trigger body, or any scope with no formal parameters at all, never
+    /// prunes anything - unchanged from before this feature existed).
+    /// </param>
+    public DynamicSqlCfg(
+        string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf,
+        IReadOnlySet<string>? callerSeededVariableNames = null)
     {
         _sourcePath = sourcePath;
         _cap = cap;
         _compileLeaf = compileLeaf;
+        _callerSeededVariableNames = callerSeededVariableNames ?? NoCallerSeededVariableNames;
     }
 
     /// <summary>
@@ -145,6 +165,7 @@ public sealed class DynamicSqlCfg
         if (emit && _guardTextByJoinBlock.ContainsKey(index))
         {
             ApplyGuardedAlternativeFixup(index, working, outStates);
+            ApplyConstantConditionPruning(index, working, outStates);
         }
 
         foreach (var step in _blocks[index].Steps)
@@ -253,6 +274,137 @@ public sealed class DynamicSqlCfg
         branchValue?.GuardedAlternatives is { Count: > 0 } nested
             ? nested.Aggregate(current, (value, alt) => SqlTextValue.WithGuardedAlternative(value, alt.GuardText, alt.Value))
             : current;
+
+    /// <summary>
+    /// The real-corpus counterpart to <see cref="ApplyGuardedAlternativeFixup"/>: report procs
+    /// across this whole corpus gate huge swaths of their own dynamic-SQL construction behind a
+    /// bitmask-flag guard fed by a genuine caller argument - <c>IF (@RowControlBits &amp;
+    /// @RCB_MASK_X) = @RCB_MASK_X</c> - where @RowControlBits is a caller-seeded literal (see
+    /// <see cref="DynamicSqlTransfer.SeedFromSingleEdge"/>) and @RCB_MASK_X a local DECLARE'd
+    /// integer constant. Unlike a value-level guard (which only ever gets a recoverable
+    /// ALTERNATIVE via the fixup above, still leaving the merged Join a widened Choice/Tainted
+    /// for anything the branches actually disagree on), a condition this engine can PROVE true or
+    /// false is a much stronger fact: only ONE branch is a real runtime outcome at all, so the
+    /// OTHER branch's contribution to the ordinary Join is not a genuine alternative to preserve.
+    /// Gated on <see cref="_callerSeededVariableNames"/> (<see cref="ConditionReferencesACallerSeededVariable"/>)
+    /// on purpose: proving <c>IF 1 = 1</c> or a purely local <c>DECLARE @mode INT = 0; IF @mode =
+    /// 0</c> is equally sound in isolation, but real code (and this project's own test suite)
+    /// uses exactly that idiom as deliberate always-run wrapper boilerplate having nothing to do
+    /// with a real caller-driven branch - pruning those too would change behavior for a huge,
+    /// untargeted swath of ordinary branches for no real gain. When
+    /// <see cref="TryFoldBooleanCondition"/> proves the predicate's value AND the corresponding
+    /// branch actually has a live predecessor (an always-RETURNing THEN with the condition proven
+    /// true correctly declines here too, matching <see cref="TryBuildEqualityGuardedReturnNarrowingStep"/>'s
+    /// same reasoning), every variable's value is overwritten with EXACTLY that one predecessor's
+    /// own raw state, discarding the other side's contribution entirely rather than merging it.
+    /// </summary>
+    private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
+    {
+        if (!_conditionByJoinBlock.TryGetValue(joinBlock, out var condition)
+            || !ConditionReferencesACallerSeededVariable(condition)
+            || TryFoldBooleanCondition(condition, working) is not { } conditionValue)
+        {
+            return;
+        }
+
+        int? takenPredecessor = null;
+        if (conditionValue && _thenPredecessorByJoinBlock.TryGetValue(joinBlock, out var thenPredecessor))
+        {
+            takenPredecessor = thenPredecessor;
+        }
+        else if (!conditionValue && _elsePredecessorByJoinBlock.TryGetValue(joinBlock, out var elsePredecessor))
+        {
+            takenPredecessor = elsePredecessor;
+        }
+
+        if (takenPredecessor is not { } predecessor || outStates[predecessor] is not { } takenState)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in takenState)
+        {
+            working[key] = value;
+        }
+    }
+
+    /// <summary>
+    /// True the moment ANY <see cref="VariableReference"/> anywhere in <paramref name="condition"/>
+    /// names a formal parameter this scope's own seed populated from a genuine caller-supplied
+    /// literal argument - see <see cref="ApplyConstantConditionPruning"/>'s own doc comment for
+    /// why this gate exists at all. A condition mixing a caller-seeded variable with a purely
+    /// local one (the real corpus idiom: <c>@RowControlBits &amp; @RCB_MASK_X</c>) still counts -
+    /// only ONE operand needs to trace back to the caller for the whole branch to be a genuine,
+    /// caller-driven decision rather than boilerplate.
+    /// </summary>
+    private bool ConditionReferencesACallerSeededVariable(BooleanExpression condition)
+    {
+        if (_callerSeededVariableNames.Count == 0)
+        {
+            return false;
+        }
+
+        var collector = new VariableReferenceCollector();
+        condition.Accept(collector);
+        return collector.Names.Any(_callerSeededVariableNames.Contains);
+    }
+
+    /// <summary>
+    /// Evaluates a boolean condition to a definite true/false using ONLY
+    /// <see cref="ExpressionEvaluator.FoldInteger"/>-provable operands - AND/OR combine their two
+    /// sides with proper short-circuit soundness (an AND is provably false the instant EITHER
+    /// side is provably false, even if the other side can't be evaluated at all; symmetrically
+    /// for OR and true), so a condition with one foldable and one genuinely-unknown side can still
+    /// resolve when that's enough to decide the whole thing. Returns null - never a guess -
+    /// the moment neither of those short-circuit rules applies and something remains unresolved.
+    /// </summary>
+    private bool? TryFoldBooleanCondition(BooleanExpression predicate, Dictionary<string, SqlTextValue> state) => predicate switch
+    {
+        BooleanParenthesisExpression paren => TryFoldBooleanCondition(paren.Expression, state),
+        BooleanNotExpression not when TryFoldBooleanCondition(not.Expression, state) is { } inner => !inner,
+        BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and => CombineAnd(
+            TryFoldBooleanCondition(and.FirstExpression, state), TryFoldBooleanCondition(and.SecondExpression, state)),
+        BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.Or } or => CombineOr(
+            TryFoldBooleanCondition(or.FirstExpression, state), TryFoldBooleanCondition(or.SecondExpression, state)),
+        BooleanComparisonExpression cmp
+            when ExpressionEvaluator.FoldInteger(cmp.FirstExpression, state, _sourcePath, _cap, out var left)
+                && ExpressionEvaluator.FoldInteger(cmp.SecondExpression, state, _sourcePath, _cap, out var right)
+            => EvaluateComparison(cmp.ComparisonType, left, right),
+        _ => null,
+    };
+
+    private static bool? CombineAnd(bool? left, bool? right)
+    {
+        if (left == false || right == false)
+        {
+            return false;
+        }
+
+        return left is true && right is true ? true : null;
+    }
+
+    private static bool? CombineOr(bool? left, bool? right)
+    {
+        if (left == true || right == true)
+        {
+            return true;
+        }
+
+        return left is false && right is false ? false : null;
+    }
+
+    private static bool? EvaluateComparison(BooleanComparisonType comparisonType, int left, int right) => comparisonType switch
+    {
+        BooleanComparisonType.Equals => left == right,
+        BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation => left != right,
+        BooleanComparisonType.GreaterThan => left > right,
+        BooleanComparisonType.GreaterThanOrEqualTo => left >= right,
+        BooleanComparisonType.LessThan => left < right,
+        BooleanComparisonType.LessThanOrEqualTo => left <= right,
+        BooleanComparisonType.NotGreaterThan => left <= right,
+        BooleanComparisonType.NotLessThan => left >= right,
+        _ => null,
+    };
 
     private void RunFixpoint(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates)
     {
@@ -726,6 +878,7 @@ public sealed class DynamicSqlCfg
         var join = NewBlock();
         _blockSpan[join] = Span(ifStatement);
         _guardTextByJoinBlock[join] = guardText;
+        _conditionByJoinBlock[join] = ifStatement.Predicate;
 
         if (thenExit is { } te)
         {

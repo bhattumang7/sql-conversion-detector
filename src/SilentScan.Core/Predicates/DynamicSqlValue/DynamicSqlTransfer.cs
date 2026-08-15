@@ -95,12 +95,13 @@ public static class DynamicSqlTransfer
         var nestedScope = qualifiedName is null ? context.Scope : new DynamicSqlScope(qualifiedName, context.Scope.TriggerTarget);
         var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
 
+        var callerSeededNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seed = qualifiedName is not null && formalParameters is { Count: > 0 }
-            ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext)
+            ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext, callerSeededNames)
             : new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
         SeedBatchDeclaredVariables(procOrFunc.StatementList!.Statements, nestedContext, seed);
 
-        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext));
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext), callerSeededNames);
         var folded = cfg.Solve(procOrFunc.StatementList!.Statements, seed);
 
         if (qualifiedName is not null && formalParameters is { Count: > 0 })
@@ -120,8 +121,15 @@ public static class DynamicSqlTransfer
     /// real T-SQL guarantee regardless of who calls it) rather than left fully untracked - the
     /// old scanner's <c>SeedSymbolicOrTaint</c>. Every branch here mirrors the old scanner's
     /// <c>BuildParameterSeed</c>/<c>SeedFromSingleEdge</c>/<c>SeedFromMultipleEdges</c> exactly.
+    /// <paramref name="callerSeededNames"/> is populated as a side effect with every formal
+    /// parameter name seeded from a genuine caller-supplied literal argument (never a default
+    /// value or a symbolic/typed-hole fallback) - <see cref="DynamicSqlCfg"/>'s own
+    /// constant-condition pruning uses this to distinguish a real caller-driven branch from
+    /// ordinary always-run boilerplate; see <see cref="DynamicSqlCfg.ApplyConstantConditionPruning"/>'s
+    /// own doc comment for why.
     /// </summary>
-    private static Dictionary<string, SqlTextValue> BuildParameterSeed(string qualifiedName, IList<ProcedureParameter> formalParameters, TransferContext context)
+    private static Dictionary<string, SqlTextValue> BuildParameterSeed(
+        string qualifiedName, IList<ProcedureParameter> formalParameters, TransferContext context, HashSet<string> callerSeededNames)
     {
         var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
         if (context.CallGraph is null)
@@ -142,7 +150,7 @@ public static class DynamicSqlTransfer
 
         if (edges.Count == 1)
         {
-            SeedFromSingleEdge(edges[0], formalParameters, seed, context);
+            SeedFromSingleEdge(edges[0], formalParameters, seed, context, callerSeededNames);
             return seed;
         }
 
@@ -163,7 +171,8 @@ public static class DynamicSqlTransfer
             : new SqlTextValue.Template([new TemplatePiece.Hole(type, location, HoleKind.UntypedParameter)]) { DeclaredType = type };
     }
 
-    private static void SeedFromSingleEdge(ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> seed, TransferContext context)
+    private static void SeedFromSingleEdge(
+        ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> seed, TransferContext context, HashSet<string> callerSeededNames)
     {
         foreach (var formal in formalParameters)
         {
@@ -195,10 +204,15 @@ public static class DynamicSqlTransfer
                 continue;
             }
 
-            seed[paramName] = argument.LiteralArgument is { } literalArgument
-                ? new SqlTextValue.Template([new TemplatePiece.Lit(
-                    literalArgument.Value, new SourceSpan(literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn), literalArgument.PrefixLength)])
-                : SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller", context);
+            if (argument.LiteralArgument is not { } literalArgument)
+            {
+                seed[paramName] = SeedSymbolicOrTaint(formal, "parameter-not-seeded:non-literal-caller", context);
+                continue;
+            }
+
+            seed[paramName] = new SqlTextValue.Template([new TemplatePiece.Lit(
+                literalArgument.Value, new SourceSpan(literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn), literalArgument.PrefixLength)]);
+            callerSeededNames.Add(paramName);
         }
     }
 

@@ -694,6 +694,115 @@ public sealed class DynamicSqlScannerTests
         Assert.DoesNotContain(extraction.Findings, f => f.Reason == "non-literal-expression:sql-loaded-from-table");
     }
 
+    [Fact]
+    public void Scan_IfConditionOnACallerSeededBitmaskProvablyTrue_ResolvesOnlyTheThenBranch()
+    {
+        // A real corpus idiom (found across nearly every spRIL_* report proc in a restored
+        // production database): a caller-seeded literal bitmask parameter gates which of many
+        // dynamic-SQL-building branches actually runs - "IF (@Bits & @Mask) = @Mask ... ELSE ..."
+        // - where @Mask is a local DECLARE'd constant and @Bits is seeded from the proc's own
+        // (single) real caller via the call graph. When both operands are provably known
+        // integers AND the condition references that caller-seeded parameter, the ELSE side is
+        // not a genuine alternative outcome for THIS call graph - it must not survive into the
+        // merged value as a Choice/Tainted.
+        var callGraph = new ProcCallGraph([new ProcCallEdge(
+            null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
+            [new ProcCallArgument("@Bits", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("2", "caller.sql", 1, 1, 0))])]);
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE PROCEDURE dbo.usp_Test (@Bits INT) AS
+            BEGIN
+                DECLARE @Mask INT = 2;
+                IF (@Bits & @Mask) = @Mask BEGIN SET @x = 'A'; END ELSE BEGIN SET @x = 'B'; END
+                EXEC('SELECT ' + @x);
+            END
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: callGraph);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT A", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_IfConditionOnACallerSeededBitmaskProvablyFalse_ResolvesOnlyTheElseBranch()
+    {
+        var callGraph = new ProcCallGraph([new ProcCallEdge(
+            null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
+            [new ProcCallArgument("@Bits", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("5", "caller.sql", 1, 1, 0))])]);
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE PROCEDURE dbo.usp_Test (@Bits INT) AS
+            BEGIN
+                DECLARE @Mask INT = 2;
+                IF (@Bits & @Mask) = @Mask BEGIN SET @x = 'A'; END ELSE BEGIN SET @x = 'B'; END
+                EXEC('SELECT ' + @x);
+            END
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: callGraph);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT B", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_AndConditionOnACallerSeededBitmaskWithOneProvablyFalseSideAndOneUnresolvedSide_StillPrunesByShortCircuit()
+    {
+        // Real corpus shape (spRIL_FMStopInformation and others): "IF (@Bits1 & @Mask1) = @Mask1
+        // AND (@Bits2 & @Mask2) = @Mask2" - a multi-flag guard. Proving just ONE conjunct false is
+        // enough to prove the whole AND false, even when @Bits2 is never seeded and its own half
+        // can't be evaluated at all.
+        var callGraph = new ProcCallGraph([new ProcCallEdge(
+            null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
+            [new ProcCallArgument("@Bits1", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("5", "caller.sql", 1, 1, 0))])]);
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE PROCEDURE dbo.usp_Test (@Bits1 INT, @Bits2 INT) AS
+            BEGIN
+                DECLARE @Mask1 INT = 2;
+                DECLARE @Mask2 INT = 4;
+                IF (@Bits1 & @Mask1) = @Mask1 AND (@Bits2 & @Mask2) = @Mask2 BEGIN SET @x = 'A'; END ELSE BEGIN SET @x = 'B'; END
+                EXEC('SELECT ' + @x);
+            END
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: callGraph);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT B", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_IfConditionWithNoCallerSeededVariableAtAll_NeverPrunesEvenWhenProvable()
+    {
+        // Deliberate boilerplate-safety regression guard: "IF 1 = 1" and a purely local
+        // "DECLARE @mode INT = 0; IF @mode = 0" are both mathematically provable, but real corpus
+        // code (and this project's own test suite) uses exactly that idiom as an always-run
+        // wrapper having nothing to do with a genuine caller-driven branch - pruning it would
+        // change behavior for ordinary branches everywhere, not just the bitmask-flag idiom this
+        // feature targets. No caller-seeded variable anywhere in the condition -> never prune,
+        // regardless of how "obviously" true it looks.
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @mode INT = 0;
+                IF @mode = 0 BEGIN SET @x = 'A'; END ELSE BEGIN SET @x = 'B'; END
+                EXEC('SELECT ' + @x);
+            END
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]));
+
+        Assert.Empty(extraction.Findings);
+        var texts = extraction.AnalyzableScripts.Select(s => s.InnerText).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(["SELECT A", "SELECT B"], texts);
+    }
+
     private static DynamicSqlExtractionResult Scan(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
