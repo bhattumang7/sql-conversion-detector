@@ -438,12 +438,13 @@ public static class CatalogBuilder
 
         /// <summary>
         /// <c>DROP FUNCTION</c> - the registry counterpart to <see cref="VisitFunctionBody"/>'s
-        /// <c>AddScalarFunctionReturnType</c>/<c>AddTableValuedFunctionKind</c> calls, in the same
-        /// <c>ApplyEverythingElse</c> phase so create/drop ordering within one pass stays consistent.
-        /// A dropped TVF's resolved COLUMN shape lives in <see cref="Lineage.ViewDefinitionExtractor"/>'s
-        /// own view/TVF registry, not here; what this removes is the scalar return type and the
-        /// inline-vs-multi-statement kind. Removing a name that was never registered under either
-        /// is a harmless no-op on a dictionary that never had the key.
+        /// <c>AddScalarFunctionReturnType</c>/<c>AddTableValuedFunctionKind</c>/<c>AddScalarUdfInfo</c>
+        /// calls, in the same <c>ApplyEverythingElse</c> phase so create/drop ordering within one
+        /// pass stays consistent. A dropped TVF's resolved COLUMN shape lives in
+        /// <see cref="Lineage.ViewDefinitionExtractor"/>'s own view/TVF registry, not here; what
+        /// this removes is the scalar return type, the inline-vs-multi-statement kind, and the
+        /// scalar-UDF stream's own metadata. Removing a name that was never registered under any
+        /// of them is a harmless no-op on a dictionary that never had the key.
         /// </summary>
         public override void ExplicitVisit(DropFunctionStatement node)
         {
@@ -454,6 +455,7 @@ public static class CatalogBuilder
                     var qualifiedName = SchemaObjectNameHelper.Qualify(target);
                     catalog.RemoveScalarFunctionReturnType(qualifiedName);
                     catalog.RemoveTableValuedFunctionKind(qualifiedName);
+                    catalog.RemoveScalarUdfInfo(qualifiedName);
                 }
             }
 
@@ -689,7 +691,7 @@ public static class CatalogBuilder
         /// false) - nothing to register under, and its EXTERNAL NAME body could never reference one
         /// anyway, so that case is skipped rather than guessed at.
         /// </summary>
-        private void VisitFunctionBody(TSqlFragment node, SchemaObjectName name, FunctionReturnType returnType)
+        private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name, FunctionReturnType returnType)
         {
             if (phase == BuildPhase.ApplyEverythingElse && returnType is ScalarFunctionReturnType scalarReturn)
             {
@@ -699,7 +701,9 @@ public static class CatalogBuilder
                     resolvedType = resolvedType with { Collation = catalog.DefaultCollation };
                 }
 
-                catalog.AddScalarFunctionReturnType(SchemaObjectNameHelper.Qualify(name), resolvedType);
+                var qualifiedName = SchemaObjectNameHelper.Qualify(name);
+                catalog.AddScalarFunctionReturnType(qualifiedName, resolvedType);
+                RegisterScalarUdfInfo(node, qualifiedName);
             }
 
             // The RETURNS clause is the only place the three table-valued flavours differ: an
@@ -743,6 +747,31 @@ public static class CatalogBuilder
             }
 
             VisitScopedBody(node, name);
+        }
+
+        /// <summary>
+        /// A scalar UDF's own stream-specific catalog entry: T-SQL vs CLR (<see
+        /// cref="MethodSpecifier"/> presence - EXTERNAL NAME has no StatementList to blocker-scan),
+        /// <c>WITH SCHEMABINDING</c> (<see cref="FunctionOptionKind.SchemaBinding"/>), and the
+        /// static inlineability blocker scan (<see cref="ScalarUdfInlineabilityScanner"/>) run over
+        /// the body text this scan actually has. Engine-only fields (EngineIsInlineable,
+        /// ClrDataAccess) stay null here - file mode has no engine to ask; live mode overlays them
+        /// on merge (<see cref="DatabaseCatalog.MergeFileModeExtras"/>).
+        /// </summary>
+        private void RegisterScalarUdfInfo(FunctionStatementBody node, string qualifiedName)
+        {
+            var isClr = node.MethodSpecifier is not null;
+            var isSchemaBound = node.Options.Any(option => option.OptionKind == FunctionOptionKind.SchemaBinding);
+            var blocker = isClr ? null : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog);
+
+            catalog.AddScalarUdfInfo(
+                qualifiedName,
+                new ScalarUdfInfo(
+                    Kind: isClr ? ScalarUdfKind.Clr : ScalarUdfKind.TSql,
+                    IsSchemaBound: isSchemaBound,
+                    EngineIsInlineable: null,
+                    InlineabilityBlocker: blocker,
+                    ClrDataAccess: null));
         }
 
         private void VisitCreateTypeAlias(CreateTypeUddtStatement createType)

@@ -20,6 +20,9 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, TableValuedFunctionKind> _tableValuedFunctionKindsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, ScalarUdfInfo> _scalarUdfInfoByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -86,6 +89,32 @@ public sealed class DatabaseCatalog
     /// </summary>
     public bool TryGetTableValuedFunctionKind(string qualifiedName, out TableValuedFunctionKind kind) =>
         _tableValuedFunctionKindsByQualifiedName.TryGetValue(qualifiedName, out kind);
+
+    /// <summary>
+    /// The scalar-UDF stream's own metadata for a function - T-SQL vs CLR, schemabinding,
+    /// engine-reported inlineability, a static blocker-scan explanation, and CLR data access.
+    /// Independent of, and merged separately from, <see cref="AddScalarFunctionReturnType"/>
+    /// (the return-type registry has its own older consumers this one must not disturb). A live
+    /// re-registration (e.g. a later merge overlaying engine-authoritative flags) replaces the
+    /// whole record rather than patching individual fields, since <see cref="MergeFileModeExtras"/>
+    /// only ever contributes a record for a name live mode never independently populated.
+    /// </summary>
+    public void AddScalarUdfInfo(string qualifiedName, ScalarUdfInfo info) =>
+        _scalarUdfInfoByQualifiedName[qualifiedName] = info;
+
+    /// <summary>DROP FUNCTION on a scalar UDF - the counterpart to <see cref="AddScalarUdfInfo"/>.</summary>
+    public void RemoveScalarUdfInfo(string qualifiedName) =>
+        _scalarUdfInfoByQualifiedName.Remove(qualifiedName);
+
+    /// <summary>
+    /// True only when a scalar UDF with this qualified name was seen. False covers both a
+    /// table-valued function and a name this scan never read DDL for - never treated as "not a
+    /// UDF at all, therefore safe to ignore" by a caller that already knows it's looking at a
+    /// function call, since a genuine miss here just means "this scan doesn't know", not "this
+    /// isn't a scalar UDF".
+    /// </summary>
+    public bool TryGetScalarUdfInfo(string qualifiedName, out ScalarUdfInfo? info) =>
+        _scalarUdfInfoByQualifiedName.TryGetValue(qualifiedName, out info);
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the
@@ -293,7 +322,9 @@ public sealed class DatabaseCatalog
     /// Merges exactly what a <see cref="CatalogBuilder"/> pass over those SAME parsed module
     /// bodies can contribute that engine metadata cannot: <see cref="CatalogTableKind.TemporaryTable"/>/
     /// <see cref="CatalogTableKind.TableVariable"/>/<see cref="CatalogTableKind.TableType"/>
-    /// entries, scalar-UDF return types, and procedure parameter lists (the roadmap "trace
+    /// entries, scalar-UDF return types, scalar-UDF metadata (schemabinding/inlineability/CLR
+    /// data access, field-merged rather than replaced - see the loop below), and procedure
+    /// parameter lists (the roadmap "trace
     /// provably-constant dynamic SQL across proc-call edges" item's own
     /// <see cref="Predicates.ProcCallGraphBuilder"/> depends entirely on
     /// <see cref="TryGetProcedureParameters"/> to match an EXEC call site's arguments against a
@@ -333,6 +364,24 @@ public sealed class DatabaseCatalog
         foreach (var (qualifiedName, kind) in fileModeCatalog._tableValuedFunctionKindsByQualifiedName)
         {
             _tableValuedFunctionKindsByQualifiedName.TryAdd(qualifiedName, kind);
+        }
+
+        // Unlike the TVF-kind merge above, this is a field-level merge, not a whole-record
+        // TryAdd: by the time this runs, `this` (the live catalog) may ALREADY hold an entry for
+        // the same name, registered straight from sys.sql_modules/OBJECTPROPERTYEX (engine-only
+        // fields: IsSchemaBound, EngineIsInlineable, ClrDataAccess) - but that live reader never
+        // parses a body, so it never populates InlineabilityBlocker. fileModeCatalog is exactly
+        // the reparse of that same module's text through CatalogBuilder (LiveModuleReader feeds
+        // FN bodies through it like any other module) and is the ONLY source of the blocker scan.
+        // So: keep every engine-sourced field from the live entry (it is strictly stronger truth
+        // than anything a text reparse could derive), but backfill Kind/InlineabilityBlocker from
+        // the file-mode entry when the live side never set them. A name live mode never
+        // independently touched is added as-is.
+        foreach (var (qualifiedName, fileInfo) in fileModeCatalog._scalarUdfInfoByQualifiedName)
+        {
+            _scalarUdfInfoByQualifiedName[qualifiedName] = _scalarUdfInfoByQualifiedName.TryGetValue(qualifiedName, out var liveInfo)
+                ? liveInfo with { InlineabilityBlocker = liveInfo.InlineabilityBlocker ?? fileInfo.InlineabilityBlocker }
+                : fileInfo;
         }
     }
 }
