@@ -111,7 +111,7 @@ public static class VerifyCorpusCommand
 
         var context = new VerifyContext(
             new DatabaseProvisioner(sqlOptions), new CorpusFindingVerifier(sqlOptions), new CollationConflictVerifier(sqlOptions),
-            new Tier1Verifier(sqlOptions), new ExpressionDerivedVerifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
+            new Tier1Verifier(sqlOptions), new ExpressionDerivedVerifier(sqlOptions), new TvfFenceVerifier(sqlOptions), new LineageParityChecker(sqlOptions), sqlOptions);
         var summaries = new SortedDictionary<string, RepoVerificationSummary>(StringComparer.Ordinal);
         var hadMissingRepo = false;
 
@@ -162,7 +162,7 @@ public static class VerifyCorpusCommand
 
     private sealed record VerifyContext(
         DatabaseProvisioner Provisioner, CorpusFindingVerifier Verifier, CollationConflictVerifier CollationConflictVerifier,
-        Tier1Verifier Tier1Verifier, ExpressionDerivedVerifier ExpressionDerivedVerifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
+        Tier1Verifier Tier1Verifier, ExpressionDerivedVerifier ExpressionDerivedVerifier, TvfFenceVerifier TvfFenceVerifier, LineageParityChecker ParityChecker, SqlServerOptions SqlOptions);
 
     private static async Task<RepoVerificationSummary> VerifyRepoAsync(
         CorpusRepoEntry repo,
@@ -251,6 +251,12 @@ public static class VerifyCorpusCommand
                 expressionDerivedResults.Add(await context.ExpressionDerivedVerifier.VerifyAsync(databaseName, finding, cancellationToken));
             }
 
+            var tvfFenceResults = new List<TvfFenceResult>();
+            foreach (var finding in report.TvfFenceFindings)
+            {
+                tvfFenceResults.Add(await context.TvfFenceVerifier.VerifyAsync(databaseName, finding, cancellationToken));
+            }
+
             return new RepoVerificationSummary(
                 TotalDdlFiles: ddlFiles.Count,
                 DeploymentErrors: deploymentErrors,
@@ -277,6 +283,10 @@ public static class VerifyCorpusCommand
                 ExpressionDerivedNotProbeable: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.NotProbeable)],
                 ExpressionDerivedProbeFailed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.ProbeFailed)],
                 ExpressionDerivedConfirmedUnindexed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.ConfirmedUnindexed)],
+                TvfFenceConfirmed: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.Confirmed)],
+                TvfFenceNotConfirmed: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.NotConfirmed)],
+                TvfFenceNotProbeable: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.NotProbeable)],
+                TvfFenceProbeFailed: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.ProbeFailed)],
                 DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
                 ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
@@ -323,6 +333,10 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedNotProbeable,
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedProbeFailed,
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedConfirmedUnindexed,
+    IReadOnlyList<TvfFenceResult> TvfFenceConfirmed,
+    IReadOnlyList<TvfFenceResult> TvfFenceNotConfirmed,
+    IReadOnlyList<TvfFenceResult> TvfFenceNotProbeable,
+    IReadOnlyList<TvfFenceResult> TvfFenceProbeFailed,
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,
@@ -353,6 +367,8 @@ public sealed record RepoVerificationSummary(
     public ConfidenceTally ExpressionDerivedConfirmedUnindexedByConfidence => ConfidenceTally.Of(ExpressionDerivedConfirmedUnindexed, r => r.Finding.Confidence);
 
     public ConfidenceTally CollationConflictConfirmedByConfidence => ConfidenceTally.Of(CollationConflictConfirmed, r => r.Finding.Confidence);
+
+    public ConfidenceTally TvfFenceConfirmedByConfidence => ConfidenceTally.Of(TvfFenceConfirmed, r => r.Finding.Confidence);
 }
 
 /// <summary>

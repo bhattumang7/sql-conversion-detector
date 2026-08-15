@@ -46,6 +46,10 @@ public sealed class RepoVerificationSummaryConfidenceTests
         ExpressionDerivedNotProbeable: [],
         ExpressionDerivedProbeFailed: [],
         ExpressionDerivedConfirmedUnindexed: [],
+        TvfFenceConfirmed: [],
+        TvfFenceNotConfirmed: [],
+        TvfFenceNotProbeable: [],
+        TvfFenceProbeFailed: [],
         DynamicSql: new DynamicSqlSummary(0, 0, 0, 0, new Dictionary<string, int>()),
         PassesDialectSniffing: true,
         ParseSuccessRate: 1.0);

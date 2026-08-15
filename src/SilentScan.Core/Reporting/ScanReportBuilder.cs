@@ -304,13 +304,14 @@ public static class ScanReportBuilder
         // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/
         // sp_executesql arguments through the same pipeline and fold their findings in,
         // remapped back to their true source location.
-        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, callerScopeByCalleeScope);
+        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, tvfFenceMap, callerScopeByCalleeScope);
         dynamicSqlFindings = [.. dynamicSqlFindings, .. dynamicSqlResult.Findings];
         tier1Findings = [.. tier1Findings, .. dynamicSqlResult.Tier1Findings];
         typedFindings = [.. typedFindings, .. dynamicSqlResult.TypedFindings];
         expressionDerivedFindings = [.. expressionDerivedFindings, .. dynamicSqlResult.ExpressionDerivedFindings];
         collationConflictFindings = [.. collationConflictFindings, .. dynamicSqlResult.CollationConflictFindings];
         writeLossFindings = [.. writeLossFindings, .. dynamicSqlResult.WriteLossFindings];
+        tvfFenceFindings = [.. tvfFenceFindings, .. dynamicSqlResult.TvfFenceFindings];
         skippedConstructs.AddRange(dynamicSqlResult.SkippedConstructs);
 
         // Captured before SeekPreserved findings are dropped below - the report's only

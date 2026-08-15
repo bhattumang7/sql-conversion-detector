@@ -93,14 +93,32 @@ fixture pair (`NESTED_UNDER_VIEW_OR_TVF_via_inline_tvf_{fires,clean}.sql`).
       (`TvfFenceFindingKind.Standalone`.)
 - [x] `INSERT ... EXEC` materialization (same family: forced full
       materialization to a worktable; cannot nest). (`TvfFenceFindingKind.InsertExec`.)
-- [ ] Dynamic-SQL integration (fold a provably-constant EXEC/sp_executesql
-      argument through this stream too, remapped to its true source line, the
-      way `NonSargablePredicateScanner`/`TypedPredicateExtractor` already do
-      via `DynamicSqlPipeline`) — deliberately deferred rather than bolted on
-      shallow; static-source detection ships first.
-- [ ] Verify-corpus oracle wiring (`SilentScan.Verify.Oracle` probe builder +
-      verifier) — deferred alongside dynamic-SQL integration; the marker
-      below is recorded so it's ready to implement.
+- [x] Dynamic-SQL integration: a provably-constant EXEC/sp_executesql
+      argument folds through this stream too, remapped to its true source
+      line, the same way `NonSargablePredicateScanner`/`TypedPredicateExtractor`
+      already do via `DynamicSqlPipeline`. Covered end to end (call-site line
+      vs. true fence-reference line, both direct and nested-through-inline-TVF
+      cases) by `DynamicSqlTvfFenceTests`, Docker-free.
+- [x] Verify-corpus oracle wiring (`TvfFenceProbeBuilder` + `TvfFenceVerifier`,
+      wired into `verify-corpus` exactly like Tier-1/typed/expression-derived).
+      Marker oracle-verified directly against the local Docker instance before
+      being hardcoded: a multi-statement/CLR TVF reference produces
+      `PhysicalOp="Table-valued function"` (with the fixed cardinality guess
+      as its own `EstimateRows`); an inline TVF reference dissolves into base
+      operators and never produces that node. `INSERT ... EXEC` has its own
+      marker, `StatementType="INSERT EXEC"`, also oracle-verified directly.
+      Every function-call probe uses a fresh dummy `CAST(NULL AS type)`
+      argument list (never the finding's own correlated arguments, which
+      reference an outer row the probe has no scope for) - this also means
+      the probe checks the underlying function's own fence-ness, independent
+      of how any one call site invokes it. `INSERT ... EXEC`'s probe
+      describes the procedure's real first result set via
+      `sys.dm_exec_describe_first_result_set` (compile-only, CLAUDE.md's own
+      sanctioned technique) to build a matching receiving table variable,
+      since SQL Server validates column count at compile time regardless of
+      what values ever flow through it. Locked in as regression tests
+      (`TvfFenceVerifierTests`, 6 cases including two negative controls) —
+      the marker was hand-verified once, this stream keeps it verified.
 - Guards: iTVFs never fire (oracle-verified against `sys.objects.type='IF'`
   on the local test DB: 889 IF vs 41 TF vs 8 FT); severity graded by usage
   context; engine version mitigations noted at the finding-kind level

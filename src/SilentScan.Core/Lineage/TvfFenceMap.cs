@@ -1,3 +1,4 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Lineage;
@@ -24,27 +25,29 @@ public static class TvfFenceMap
             viewsByName[view.QualifiedName] = view;
         }
 
-        var resolved = new Dictionary<string, TvfFenceOrigin?>(StringComparer.OrdinalIgnoreCase);
-        var inProgress = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var context = new ResolutionContext(
+            viewsByName, catalog, new Dictionary<string, TvfFenceOrigin?>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
         foreach (var view in viewsByName.Values)
         {
-            Resolve(view, viewsByName, catalog, resolved, inProgress);
+            Resolve(view, context);
         }
 
-        return resolved
+        return context.Resolved
             .Where(kv => kv.Value is not null)
             .ToDictionary(kv => kv.Key, kv => kv.Value!, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static TvfFenceOrigin? Resolve(
-        ViewDefinition view,
-        IReadOnlyDictionary<string, ViewDefinition> viewsByName,
-        DatabaseCatalog catalog,
-        Dictionary<string, TvfFenceOrigin?> resolved,
-        HashSet<string> inProgress)
+    /// <summary>Bundles the context threaded through every recursive <see cref="Resolve"/> call - kept as one record so a helper split off to reduce cognitive complexity doesn't just turn into another long parameter list.</summary>
+    private readonly record struct ResolutionContext(
+        IReadOnlyDictionary<string, ViewDefinition> ViewsByName,
+        DatabaseCatalog Catalog,
+        Dictionary<string, TvfFenceOrigin?> Resolved,
+        HashSet<string> InProgress);
+
+    private static TvfFenceOrigin? Resolve(ViewDefinition view, ResolutionContext context)
     {
-        if (resolved.TryGetValue(view.QualifiedName, out var cached))
+        if (context.Resolved.TryGetValue(view.QualifiedName, out var cached))
         {
             return cached;
         }
@@ -52,64 +55,47 @@ public static class TvfFenceMap
         // A cyclic view dependency resolves to no fence here rather than looping -
         // ViewDependencyGraph's own cyclic-view handling already reports the cycle itself as a
         // lineage problem; this map doesn't need to report it a second time.
-        if (!inProgress.Add(view.QualifiedName))
+        if (!context.InProgress.Add(view.QualifiedName))
         {
             return null;
         }
 
         var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
+        var found = functionRefs.Select(f => TryResolveFunctionReference(view, f, context)).FirstOrDefault(o => o is not null)
+            ?? namedRefs.Select(n => TryResolveNamedReference(n, context)).FirstOrDefault(o => o is not null);
 
-        TvfFenceOrigin? found = null;
-
-        foreach (var functionRef in functionRefs)
-        {
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(functionRef.Reference.SchemaObject));
-            if (!catalog.TryGetTableValuedFunctionKind(qualifiedName, out var kind))
-            {
-                continue;
-            }
-
-            if (kind is TableValuedFunctionKind.MultiStatement or TableValuedFunctionKind.Clr)
-            {
-                found = new TvfFenceOrigin(qualifiedName, kind, view.SourcePath, functionRef.Reference.StartLine, Depth: 1);
-                break;
-            }
-
-            // kind == Inline: no fence of its own, but it's a view-shaped definition just like
-            // any NamedTableReference target, so it still needs to be walked for an inherited
-            // fence below.
-            if (viewsByName.TryGetValue(qualifiedName, out var inlineTvfDefinition))
-            {
-                var inherited = Resolve(inlineTvfDefinition, viewsByName, catalog, resolved, inProgress);
-                if (inherited is not null)
-                {
-                    found = inherited with { Depth = inherited.Depth + 1 };
-                    break;
-                }
-            }
-        }
-
-        if (found is null)
-        {
-            foreach (var namedRef in namedRefs)
-            {
-                var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedRef.SchemaObject));
-                if (!viewsByName.TryGetValue(qualifiedName, out var referencedView))
-                {
-                    continue;
-                }
-
-                var inherited = Resolve(referencedView, viewsByName, catalog, resolved, inProgress);
-                if (inherited is not null)
-                {
-                    found = inherited with { Depth = inherited.Depth + 1 };
-                    break;
-                }
-            }
-        }
-
-        inProgress.Remove(view.QualifiedName);
-        resolved[view.QualifiedName] = found;
+        context.InProgress.Remove(view.QualifiedName);
+        context.Resolved[view.QualifiedName] = found;
         return found;
     }
+
+    /// <summary>A direct MSTVF/CLR reference fences immediately (depth 1, origin here); an inline TVF reference has no fence of its own but is itself a view-shaped definition, so it's walked recursively for one it might inherit. Null when the name doesn't resolve to a known table-valued function at all.</summary>
+    private static TvfFenceOrigin? TryResolveFunctionReference(ViewDefinition view, TvfLeafReference functionRef, ResolutionContext context)
+    {
+        var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(functionRef.Reference.SchemaObject));
+        if (!context.Catalog.TryGetTableValuedFunctionKind(qualifiedName, out var kind))
+        {
+            return null;
+        }
+
+        if (kind is TableValuedFunctionKind.MultiStatement or TableValuedFunctionKind.Clr)
+        {
+            return new TvfFenceOrigin(qualifiedName, kind, view.SourcePath, functionRef.Reference.StartLine, Depth: 1);
+        }
+
+        return context.ViewsByName.TryGetValue(qualifiedName, out var inlineTvfDefinition)
+            ? Inherit(Resolve(inlineTvfDefinition, context))
+            : null;
+    }
+
+    /// <summary>A plain table-name reference only ever inherits a fence (it can never BE one) - null when the name isn't a known view/iTVF, or that view/iTVF carries no fence of its own.</summary>
+    private static TvfFenceOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
+    {
+        var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedRef.SchemaObject));
+        return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
+            ? Inherit(Resolve(referencedView, context))
+            : null;
+    }
+
+    private static TvfFenceOrigin? Inherit(TvfFenceOrigin? origin) => origin is null ? null : origin with { Depth = origin.Depth + 1 };
 }
