@@ -132,6 +132,18 @@ public sealed class DatabaseCatalog
         return current;
     }
 
+    /// <summary>
+    /// The name of the database this catalog was actually built against - set by
+    /// <c>LiveCatalogReader</c> from the live connection's own <c>SqlConnection.Database</c> for
+    /// a <c>scan-db</c> run; left null for a file-mode/corpus scan, where there is no single
+    /// "current database" the parsed DDL was deployed under in the same sense. Used only to
+    /// recognize a THREE-PART reference that names THIS SAME database by its own full name
+    /// (<see cref="Find(string)"/>) - never to resolve a reference to a genuinely different
+    /// database, which stays correctly unresolvable (no second connection, per CLAUDE.md hard
+    /// scope).
+    /// </summary>
+    public string? CurrentDatabaseName { get; set; }
+
     public Collation? DefaultCollation { get; set; }
 
     /// <summary>
@@ -170,9 +182,29 @@ public sealed class DatabaseCatalog
     public void AddOrReplace(CatalogTable table, string? scope) =>
         _tablesByQualifiedName[Key(table.QualifiedName, scope)] = table;
 
-    /// <summary>Looks up a real table by its bare qualified name - never scoped.</summary>
-    public CatalogTable? Find(string qualifiedName) =>
-        _tablesByQualifiedName.GetValueOrDefault(qualifiedName);
+    /// <summary>
+    /// Looks up a real table by its bare qualified name - never scoped. When the direct lookup
+    /// misses and <paramref name="qualifiedName"/> carries a three-part database prefix that
+    /// case-insensitively matches <see cref="CurrentDatabaseName"/> (e.g. real corpus code
+    /// self-referencing its own database by full name - <c>SchemaObjectNameHelper.Qualify</c>
+    /// always keeps a database qualifier distinct from a bare name, since db.dbo.T and dbo.T
+    /// must never collapse into the same catalog key for a GENUINELY different database), retries
+    /// with that prefix stripped - the underlying table IS this same catalog's own entry, just
+    /// named more explicitly than usual. A prefix that does NOT match stays unresolved: this is
+    /// deliberately never a heuristic "assume it's probably us" - only an exact, known match to
+    /// the database this catalog was actually built against ever gets stripped.
+    /// </summary>
+    public CatalogTable? Find(string qualifiedName)
+    {
+        if (_tablesByQualifiedName.TryGetValue(qualifiedName, out var table))
+        {
+            return table;
+        }
+
+        return TryStripSelfReferencingDatabasePrefix(qualifiedName) is { } normalized
+            ? _tablesByQualifiedName.GetValueOrDefault(normalized)
+            : null;
+    }
 
     /// <summary>
     /// Looks up a temp table/table variable, trying <paramref name="scope"/>-qualified first
@@ -188,6 +220,17 @@ public sealed class DatabaseCatalog
         }
 
         return Find(qualifiedName);
+    }
+
+    private string? TryStripSelfReferencingDatabasePrefix(string qualifiedName)
+    {
+        if (CurrentDatabaseName is not { Length: > 0 } currentDatabaseName)
+        {
+            return null;
+        }
+
+        var prefix = currentDatabaseName + ".";
+        return qualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? qualifiedName[prefix.Length..] : null;
     }
 
     /// <summary>

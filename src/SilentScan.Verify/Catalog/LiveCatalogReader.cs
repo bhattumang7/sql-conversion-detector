@@ -34,6 +34,7 @@ public sealed class LiveCatalogReader
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
+        catalog.CurrentDatabaseName = connection.Database;
         catalog.DefaultCollation = await ReadDatabaseDefaultCollationAsync(connection, cancellationToken);
 
         foreach (var (qualifiedName, underlyingType) in await ReadTypeAliasesAsync(connection, cancellationToken))

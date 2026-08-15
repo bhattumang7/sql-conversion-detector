@@ -623,6 +623,77 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
     }
 
+    [Fact]
+    public void Scan_SetAssignmentAsScalarSubqueryFilteredByTheSameVariableItAssigns_ResolvesToATypedHoleNotADecline()
+    {
+        // A real corpus shape (dbo.spTripCoordinationRequestReturnTripFromProvider): the WHERE
+        // clause filters by the SAME variable the subquery assigns (self-referential, its OWN
+        // prior/caller-supplied value) alongside a second unresolved parameter - neither WHERE
+        // key is a literal, so nothing is pushable and no live fetch narrows it, but the single-
+        // table/no-JOIN/one-scalar-column shape TryFoldScalarSubqueryFromSingleKnownTable
+        // recognizes should still hold: this must resolve to a typed RowDependentColumn hole
+        // (known column type, unknown row) via the structural splice, NOT decline outright to
+        // Tainted("sql-loaded-from-table") the way an actually-unresolvable JOIN/multi-table
+        // shape correctly does.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.tblTrips (Reservation INT NOT NULL, CoordinatedReservation INT NULL, TripDate DATETIME NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE PROCEDURE dbo.usp_Test (@Reservation INT, @TripDate DATETIME) AS
+            BEGIN
+                SET @Reservation = (SELECT CoordinatedReservation FROM dbo.tblTrips t WHERE t.Reservation = @Reservation AND TripDate = @TripDate);
+                EXEC sp_executesql N'SELECT @Reservation', N'@Reservation INT', @Reservation;
+            END
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: null);
+
+        Assert.DoesNotContain(extraction.Findings, f => f.Reason == "non-literal-expression:sql-loaded-from-table");
+    }
+
+    [Fact]
+    public void Scan_SetAssignmentFromSingleKnownTableWhereClauseIsAnUnfoldableNestedSubquery_ResolvesToATypedHoleNotADecline()
+    {
+        // A real corpus shape (dbo.spTripCoordinationRequestReturnTripFromProvider): the OUTER
+        // query is single-table/no-JOIN (matches TryFoldScalarSubqueryFromSingleKnownTable's own
+        // shape), but its WHERE clause's only equality key is itself a JOIN-shaped nested
+        // subquery, not a literal - TryExtractLiteralEqualityKeys can't push THAT down, but per
+        // the "no pinning WHERE required" policy elsewhere in this engine, an unpushable key
+        // should just be dropped (fetch unfiltered / fall back to the structural splice), never
+        // block the OUTER query's own otherwise-resolvable single-table shape.
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", """
+            CREATE TABLE dbo.tblCoordinatingAgencies (AgencyRegisteredName VARCHAR(255) NOT NULL, DatabaseName VARCHAR(50) NOT NULL);
+            CREATE TABLE dbo.tblCoordinatedTripAgencies (CoordinatedAgencyID INT NOT NULL, AgencyID INT NOT NULL);
+            CREATE TABLE dbo.tblTrips (Reservation INT NOT NULL, CoordinatedProviderAgencyID INT NOT NULL, AgencyID INT NOT NULL);
+            """);
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE PROCEDURE dbo.usp_Test (@Reservation INT) AS
+            BEGIN
+                DECLARE @DatabaseName VARCHAR(50);
+                SET @DatabaseName = (
+                    SELECT DatabaseName
+                    FROM dbo.tblCoordinatingAgencies
+                    WHERE AgencyRegisteredName = (
+                        SELECT AgencyRegisteredName FROM dbo.tblCoordinatedTripAgencies cta
+                        INNER JOIN dbo.tblTrips t ON cta.CoordinatedAgencyID = t.CoordinatedProviderAgencyID AND t.AgencyID = cta.AgencyID
+                        WHERE t.Reservation = @Reservation
+                    )
+                );
+                EXEC sp_executesql N'SELECT @DatabaseName', N'@DatabaseName VARCHAR(50)', @DatabaseName;
+            END
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: null);
+
+        Assert.DoesNotContain(extraction.Findings, f => f.Reason == "non-literal-expression:sql-loaded-from-table");
+    }
+
     private static DynamicSqlExtractionResult Scan(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
