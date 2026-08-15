@@ -87,7 +87,151 @@ public sealed class LiveCatalogReader
             catalog.AddTableValuedFunctionKind(qualifiedName, kind);
         }
 
+        foreach (var (qualifiedName, info) in await ReadScalarUdfInfoAsync(connection, cancellationToken))
+        {
+            catalog.AddScalarUdfInfo(qualifiedName, info);
+        }
+
         return catalog;
+    }
+
+    /// <summary>
+    /// T-SQL scalar UDFs (<c>sys.objects.type = 'FN'</c>): <c>is_schema_bound</c> and (2019+ only)
+    /// <c>is_inlineable</c>, both straight from <c>sys.sql_modules</c> - the engine's own
+    /// authoritative answer, always preferred over the static blocker scan
+    /// (<see cref="Core.Catalog.ScalarUdfInlineabilityScanner"/>) that runs later, in file mode,
+    /// over this same function's reparsed body text (<c>LiveModuleReader</c> already fetches an
+    /// 'FN' object's <c>sys.sql_modules.definition</c>). <c>is_inlineable</c> doesn't exist on
+    /// pre-2019 engines - queried first WITH it, falling back to a query WITHOUT it on "invalid
+    /// column name" (error 207) rather than a version-number check, so this stays correct against
+    /// whatever the connected engine actually exposes rather than an assumption about it.
+    /// </summary>
+    private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadScalarUdfInfoAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const int InvalidColumnNameErrorNumber = 207;
+
+        const string sqlWithInlineable = """
+            SELECT s.name AS schema_name, o.name AS function_name, m.is_schema_bound, m.is_inlineable
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            JOIN sys.sql_modules m ON m.object_id = o.object_id
+            WHERE o.type = 'FN' AND o.is_ms_shipped = 0;
+            """;
+
+        const string sqlWithoutInlineable = """
+            SELECT s.name AS schema_name, o.name AS function_name, m.is_schema_bound
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            JOIN sys.sql_modules m ON m.object_id = o.object_id
+            WHERE o.type = 'FN' AND o.is_ms_shipped = 0;
+            """;
+
+        var tSqlUdfs = new List<(string, ScalarUdfInfo)>();
+
+        try
+        {
+            await using var command = connection.CreateReadOnlyCommand(sqlWithInlineable);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+                var isSchemaBound = reader.GetBoolean(2);
+                var isInlineable = await reader.IsDBNullAsync(3, cancellationToken) ? (bool?)null : reader.GetBoolean(3);
+                tSqlUdfs.Add((qualifiedName, new ScalarUdfInfo(ScalarUdfKind.TSql, isSchemaBound, isInlineable, InlineabilityBlocker: null, ClrDataAccess: null)));
+            }
+        }
+        catch (SqlException ex) when (ex.Number == InvalidColumnNameErrorNumber)
+        {
+            tSqlUdfs.Clear();
+            await using var command = connection.CreateReadOnlyCommand(sqlWithoutInlineable);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+                var isSchemaBound = reader.GetBoolean(2);
+                tSqlUdfs.Add((qualifiedName, new ScalarUdfInfo(ScalarUdfKind.TSql, isSchemaBound, EngineIsInlineable: null, InlineabilityBlocker: null, ClrDataAccess: null)));
+            }
+        }
+
+        var clrUdfs = await ReadClrScalarUdfInfoAsync(connection, cancellationToken);
+
+        return [.. tSqlUdfs, .. clrUdfs];
+    }
+
+    /// <summary>
+    /// CLR scalar UDFs (<c>sys.objects.type = 'FS'</c>): never inlined, so what matters is
+    /// whether the assembly method touches data - <c>OBJECTPROPERTYEX(..., 'UserDataAccess')</c>/
+    /// <c>'SystemDataAccess'</c> report the <c>DataAccessKind</c> the method was registered with
+    /// (either true forces the same serial-plan consequence a T-SQL UDF's non-inlineability does).
+    /// Queried ONE FUNCTION AT A TIME rather than in the single bulk SELECT every other reader in
+    /// this file uses - oracle-verified against the local production copy's real EXTERNAL_ACCESS
+    /// assemblies (CLAUDE.md never waits for permission to run this check): calling
+    /// <c>OBJECTPROPERTYEX</c> on a function whose assembly cannot currently be loaded (blocked
+    /// permission set, missing/changed assembly, etc.) throws SqlException 10342 and aborts the
+    /// WHOLE batch, not just that one row - a single such function in a real corpus would
+    /// otherwise blank out every OTHER CLR scalar UDF's data-access info too. A per-function
+    /// failure is recorded as ClrDataAccess = null (unknown), never guessed, and never allowed to
+    /// take down the rest of the read.
+    /// </summary>
+    private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadClrScalarUdfInfoAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string namesSql = """
+            SELECT o.object_id, s.name AS schema_name, o.name AS function_name
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            WHERE o.type = 'FS' AND o.is_ms_shipped = 0;
+            """;
+
+        var functions = new List<(int ObjectId, string QualifiedName)>();
+        await using (var command = connection.CreateReadOnlyCommand(namesSql))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                functions.Add((reader.GetInt32(0), $"{reader.GetString(1)}.{reader.GetString(2)}"));
+            }
+        }
+
+        var clrUdfs = new List<(string, ScalarUdfInfo)>();
+        foreach (var (objectId, qualifiedName) in functions)
+        {
+            var dataAccess = await TryReadClrDataAccessAsync(connection, objectId, cancellationToken);
+            clrUdfs.Add((qualifiedName, new ScalarUdfInfo(ScalarUdfKind.Clr, IsSchemaBound: null, EngineIsInlineable: null, InlineabilityBlocker: null, dataAccess)));
+        }
+
+        return clrUdfs;
+    }
+
+    private static async Task<bool?> TryReadClrDataAccessAsync(SqlConnection connection, int objectId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT OBJECTPROPERTYEX(@objectId, 'UserDataAccess') AS user_data_access,
+                   OBJECTPROPERTYEX(@objectId, 'SystemDataAccess') AS system_data_access;
+            """;
+
+        try
+        {
+            await using var command = connection.CreateReadOnlyCommand(sql);
+            command.Parameters.AddWithValue("@objectId", objectId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            var userDataAccess = await reader.IsDBNullAsync(0, cancellationToken) ? (bool?)null : reader.GetInt32(0) != 0;
+            var systemDataAccess = await reader.IsDBNullAsync(1, cancellationToken) ? (bool?)null : reader.GetInt32(1) != 0;
+
+            return userDataAccess is null && systemDataAccess is null
+                ? null
+                : (userDataAccess ?? false) || (systemDataAccess ?? false);
+        }
+        catch (SqlException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
