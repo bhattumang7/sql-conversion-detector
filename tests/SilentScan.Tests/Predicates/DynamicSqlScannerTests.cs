@@ -299,6 +299,68 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal("SELECT ColA", script.InnerText);
     }
 
+    [Fact]
+    public void Scan_ParameterValidatedAgainstLiteralWithRaiserrorAndReturnOnMismatch_NarrowsToThatLiteralAfterward()
+    {
+        // A real corpus shape (dbo.spRelationshipReconcileSharedTripByOdometer): a guard-clause
+        // idiom rejecting any input other than one specific literal - "IF @p <> 'literal' BEGIN
+        // RAISERROR(...) RETURN ... END" - before using @p to build dynamic SQL further down.
+        // DynamicSqlCfg's own reachability computation (BuildIf's own thenExit=null, since the
+        // THEN branch unconditionally RETURNs) already proves the guard's THEN branch never
+        // reaches anything past the IF - so the ONLY way execution continues is via the guard
+        // being false, meaning @p provably EQUALS 'literal' from that point on, a hard fact this
+        // scanner can use rather than leaving @p an unresolved parameter hole for the rest of the
+        // routine.
+        var result = Scan(
+            "CREATE PROCEDURE dbo.usp_Test (@SourceTable VARCHAR(50)) AS BEGIN " +
+            "IF @SourceTable <> 'tblTripsActual' BEGIN " +
+            "RAISERROR('bad value', 16, 1); RETURN -1; END " +
+            "EXEC('SELECT * FROM ' + @SourceTable); " +
+            "END");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM tblTripsActual", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ParameterValidatedAgainstLiteralWithLiteralOnTheLeft_StillNarrows()
+    {
+        // Same idiom as above with the literal and variable operands swapped ('literal' <> @p) -
+        // a real corpus author's equally common phrasing of the identical guard-clause check.
+        var result = Scan(
+            "CREATE PROCEDURE dbo.usp_Test (@SourceTable VARCHAR(50)) AS BEGIN " +
+            "IF 'tblTripsActual' <> @SourceTable BEGIN " +
+            "RAISERROR('bad value', 16, 1); RETURN -1; END " +
+            "EXEC('SELECT * FROM ' + @SourceTable); " +
+            "END");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM tblTripsActual", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_InequalityGuardWithoutAnUnconditionalReturnInThen_DoesNotNarrow()
+    {
+        // The THEN branch here does NOT unconditionally exit (no RETURN at all) - execution can
+        // fall through to the EXEC either way, so @SourceTable is NOT provably 'tblTripsActual'
+        // downstream. Must stay an ordinary unresolved parameter, never a guessed narrowing - it
+        // resolves exactly as it would have with no IF at all (this bare unit-test harness, unlike
+        // the full call-graph-seeded pipeline, leaves an untouched parameter reference as
+        // "variable-not-in-scope" rather than a typed placeholder hole).
+        var result = Scan(
+            "CREATE PROCEDURE dbo.usp_Test (@SourceTable VARCHAR(50)) AS BEGIN " +
+            "IF @SourceTable <> 'tblTripsActual' BEGIN " +
+            "PRINT 'unexpected value'; END " +
+            "EXEC('SELECT * FROM ' + @SourceTable); " +
+            "END");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal("variable-not-in-scope", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
     /// <summary>A fake ILiveRowValueFetcher for unit tests - no database involved, just a fixed lookup table keyed exactly like the real fetcher's own contract, plus a call log so a test can assert it was (or wasn't) invoked.</summary>
     private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, string Column, string KeyColumn, string KeyValue), IReadOnlyList<string>> filteredValues, IReadOnlyDictionary<(string Table, string Column), IReadOnlyList<string>>? unfilteredValues = null) : ILiveRowValueFetcher
     {

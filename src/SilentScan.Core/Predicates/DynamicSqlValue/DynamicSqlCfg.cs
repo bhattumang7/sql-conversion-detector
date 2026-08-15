@@ -519,6 +519,69 @@ public sealed class DynamicSqlCfg
         _ => false,
     };
 
+    private static readonly Dictionary<string, SqlTextValue> EmptyLiteralFoldState = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Recognizes the "parameter validation" idiom real corpus procs use to narrow an input
+    /// parameter to one exact, known literal for the rest of the routine: <c>IF x &lt;&gt; 'literal'
+    /// BEGIN RAISERROR(...) RETURN ... END</c> (a guard clause rejecting any other value, found
+    /// via dbo.spRelationshipReconcileSharedTripByOdometer's own <c>@SourceTable</c> validation).
+    /// Ordinarily this scanner never narrows a variable's value from a comparison - a T-SQL IF
+    /// doesn't literally assign anything - but THIS shape is different: <see cref="BuildIf"/>'s
+    /// own reachability computation (not re-derived here - read directly off
+    /// <see cref="_thenPredecessorByJoinBlock"/>, the exact ground truth it already computed) can
+    /// prove the THEN branch never reaches the join at all (it always exits the routine via
+    /// RETURN), so the ONLY way execution reaches anything AFTER the IF is via the guard's
+    /// predicate being FALSE - which for <c>x &lt;&gt; 'literal'</c> means x provably EQUALS
+    /// 'literal' downstream, a hard fact, not a guess. Applies regardless of whether an explicit
+    /// ELSE exists (same argument holds either way) or which operand order the literal appears in.
+    /// Deliberately does NOT re-run <see cref="BuildSequence"/> on the THEN body itself to check
+    /// this (that would double-register its blocks/labels) - it reads the fact BuildIf already
+    /// established as a side effect of building the real branch.
+    /// </summary>
+    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildEqualityGuardedReturnNarrowingStep(IfStatement ifStatement, int joinBlock)
+    {
+        if (!_thenPredecessorByJoinBlock.ContainsKey(joinBlock)
+            && TryGetSelfEqualityGuard(ifStatement.Predicate, out var variableName, out var literalExpression))
+        {
+            var literalValue = ExpressionEvaluator.Fold(literalExpression, EmptyLiteralFoldState, _sourcePath, _cap);
+            return (state, _) =>
+            {
+                var declaredType = state.GetValueOrDefault(variableName)?.DeclaredType;
+                state[variableName] = literalValue with { DeclaredType = declaredType };
+            };
+        }
+
+        return null;
+    }
+
+    private static bool TryGetSelfEqualityGuard(BooleanExpression predicate, out string variableName, out ScalarExpression literalExpression)
+    {
+        if (predicate is BooleanComparisonExpression
+            {
+                ComparisonType: BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation,
+            } comparison)
+        {
+            if (comparison.FirstExpression is VariableReference variable && comparison.SecondExpression is StringLiteral secondLiteral)
+            {
+                variableName = variable.Name;
+                literalExpression = secondLiteral;
+                return true;
+            }
+
+            if (comparison.SecondExpression is VariableReference variable2 && comparison.FirstExpression is StringLiteral firstLiteral)
+            {
+                variableName = variable2.Name;
+                literalExpression = firstLiteral;
+                return true;
+            }
+        }
+
+        variableName = string.Empty;
+        literalExpression = null!;
+        return false;
+    }
+
     /// <summary>
     /// Links <paramref name="statements"/> into the block graph starting at <paramref
     /// name="current"/>, returning the block execution falls through to afterward, or null when
@@ -583,15 +646,7 @@ public sealed class DynamicSqlCfg
                     break;
 
                 case IfStatement ifStatement:
-                    if (TryBuildSelfTrimBypassStep(ifStatement, activeGuards) is { } bypassStep)
-                    {
-                        _blocks[current].Steps.Add(bypassStep);
-                    }
-                    else
-                    {
-                        current = BuildIf(ifStatement, current, exitBlocks, loopStack, activeGuards);
-                    }
-
+                    current = BuildIfWithNarrowingBypasses(ifStatement, current, exitBlocks, loopStack, activeGuards);
                     break;
 
                 case WhileStatement whileStatement:
@@ -620,6 +675,32 @@ public sealed class DynamicSqlCfg
         }
 
         return reachable ? current : null;
+    }
+
+    /// <summary>
+    /// Wraps <see cref="BuildIf"/> with the two narrow, self-contained recognizers that bypass or
+    /// augment its ordinary branch/join construction - <see cref="TryBuildSelfTrimBypassStep"/>
+    /// (compiles a self-guarded SUBSTRING trim as one unconditional step instead of a real
+    /// branch) and <see cref="TryBuildEqualityGuardedReturnNarrowingStep"/> (adds a value-
+    /// narrowing step after an ordinary guard-clause IF whose THEN branch always RETURNs).
+    /// Factored out of <see cref="BuildSequence"/>'s own switch purely to keep that method's
+    /// cognitive complexity within the Sonar gate - no behavioral difference from inlining it.
+    /// </summary>
+    private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    {
+        if (TryBuildSelfTrimBypassStep(ifStatement, activeGuards) is { } bypassStep)
+        {
+            _blocks[current].Steps.Add(bypassStep);
+            return current;
+        }
+
+        var join = BuildIf(ifStatement, current, exitBlocks, loopStack, activeGuards);
+        if (TryBuildEqualityGuardedReturnNarrowingStep(ifStatement, join) is { } narrowingStep)
+        {
+            _blocks[join].Steps.Add(narrowingStep);
+        }
+
+        return join;
     }
 
     private int BuildIf(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
