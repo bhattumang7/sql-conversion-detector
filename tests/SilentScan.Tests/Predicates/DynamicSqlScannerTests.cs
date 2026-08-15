@@ -182,6 +182,27 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_SubstringOfVariableWithStartZeroToLen_TrimsExactlyOneTrailingCharacter()
+    {
+        // SUBSTRING(x, 0, LEN(x)) is a THIRD real-world spelling of the trailing-trim idiom
+        // (alongside SUBSTRING(x, 1, LEN(x) - 1)), found verbatim in production code - oracle-
+        // verified (SUBSTRING('Hello', 0, 5) = 'Hell'): a start below 1 begins one position
+        // before the string, consuming one character of the length budget on that non-existent
+        // position, so a length of exactly LEN(x) returns LEN(x) - 1 real characters.
+        var result = Scan("""
+            DECLARE @Name VARCHAR(50)
+            DECLARE @select VARCHAR(MAX) = ''
+            SET @select = @select + @Name + 'ABC,'
+            SET @select = SUBSTRING(@select, 0, LEN(@select))
+            EXEC ('SELECT ' + @select)
+            """);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__ABC$", script.InnerText);
+    }
+
+    [Fact]
     public void Scan_SubstringOfVariableFromOneToLenMinusConstant_TrailingLiteralShorterThanTrim_FoldsToDeclaredTypeHole()
     {
         // The trailing literal piece is only 1 character ('C'), but the idiom asks to trim 2 -

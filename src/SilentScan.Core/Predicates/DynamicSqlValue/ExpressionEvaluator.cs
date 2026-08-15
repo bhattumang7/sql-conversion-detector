@@ -115,6 +115,25 @@ public static class ExpressionEvaluator
 
             case FunctionCall
             {
+                FunctionName.Value: var zeroStartSubstringName,
+                Parameters: [VariableReference zeroStartSourceRef, var zeroStartExpr, FunctionCall { FunctionName.Value: var zeroStartLenName, Parameters: [VariableReference zeroStartLenArgRef] }],
+            }
+                when string.Equals(zeroStartSubstringName, FnSubstring, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(zeroStartLenName, "LEN", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(zeroStartSourceRef.Name, zeroStartLenArgRef.Name, StringComparison.OrdinalIgnoreCase)
+                    && FoldInteger(zeroStartExpr, state, sourcePath, cap, out var zeroStart)
+                    && zeroStart == 0
+                    && TryTrimThroughAlternatives(Fold(zeroStartSourceRef, state, sourcePath, cap, catalog), 1, TryTrimTrailingCharacters) is { } trimmedForZeroStart:
+                // SUBSTRING(x, 0, LEN(x)) - oracle-verified (SUBSTRING('Hello', 0, 5) = 'Hell'):
+                // T-SQL treats a start below 1 as "begin one position before the string", which
+                // consumes one character of the length budget on that non-existent position - so
+                // a length of exactly LEN(x) returns LEN(x) - 1 REAL characters, i.e. everything
+                // except the LAST character. A real corpus idiom (alongside the more common
+                // SUBSTRING(x, 1, LEN(x) - 1)) for stripping exactly one trailing character.
+                return trimmedForZeroStart;
+
+            case FunctionCall
+            {
                 FunctionName.Value: var trailingSubstringName,
                 Parameters: [VariableReference trailingSourceRef, var trailingStartExpr, BinaryExpression
                 {
