@@ -839,23 +839,65 @@ public static class ExpressionEvaluator
             return null;
         }
 
-        // Concat does not guarantee adjacent Lit pieces are merged into one (e.g. an empty ''
-        // initializer contributes its own empty Lit piece ahead of the real text) - so the chars
-        // to trim may need to be consumed across SEVERAL leading Lit pieces, not just the first.
+        return TrimLeadingFromPieces(template.Pieces, count) is { } trimmedPieces
+            ? new SqlTextValue.Template(trimmedPieces)
+            : null;
+    }
+
+    /// <summary>
+    /// Consumes <paramref name="count"/> characters across however many LEADING
+    /// <see cref="TemplatePiece.Lit"/> pieces it takes (Concat does not guarantee adjacent Lit
+    /// pieces are merged into one - e.g. an empty <c>''</c> initializer contributes its own empty
+    /// Lit piece ahead of the real text). If the walk instead reaches a leading
+    /// <see cref="TemplatePiece.Choice"/> with characters still owed, recurses into EACH of its
+    /// own alternatives (a real corpus shape: several independently-guarded optional column-list
+    /// prefixes concatenated before the fixed literal text this trim targets) and rebuilds a
+    /// Choice with the SAME <see cref="TemplatePiece.Choice.GuardText"/> but trimmed alternatives
+    /// - never a cross-product, the exact same structure-preserving policy
+    /// <see cref="FoldReplaceOverPiecesPreservingChoices"/> already uses. Unlike that policy's
+    /// "one bad alternative taints everything" rule, an alternative that can't prove it has
+    /// enough characters here is simply DROPPED from the rebuilt Choice rather than failing the
+    /// whole trim - the real idiom this targets always guards the whole SUBSTRING call behind its
+    /// own <c>IF LEN(x) > 0</c> (e.g. real corpus shape: several independently-guarded optional
+    /// column-list fragments, THEN one shared trailing-comma trim - see
+    /// dbo.spRIL_NTD/dbo.spRIL_TripsActualInformation2), so the alternative combination that
+    /// leaves x too short to trim is exactly the one where that guard is FALSE and this statement
+    /// never actually runs; dropping it keeps every OTHER, genuinely reachable alternative
+    /// analyzed instead of losing all of them to one structurally-impossible-to-trim case.
+    /// Declines outright (returns null) only when NO alternative can prove enough length, or the
+    /// piece isn't a Lit/Choice at all (a Hole - never sliced into unknown content).
+    /// </summary>
+    private static List<TemplatePiece>? TrimLeadingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
+    {
         var remaining = count;
         var index = 0;
-        while (index < template.Pieces.Count && template.Pieces[index] is TemplatePiece.Lit lit)
+        while (index < pieces.Count && pieces[index] is TemplatePiece.Lit lit)
         {
             if (lit.Text.Length >= remaining)
             {
                 var trimmedText = lit.Text[remaining..];
-                var tail = template.Pieces.Skip(index + 1);
-                var pieces = (trimmedText.Length == 0 ? tail : tail.Prepend(new TemplatePiece.Lit(trimmedText, lit.Origin, PrefixLength: 0))).ToList();
-                return new SqlTextValue.Template(pieces);
+                var tail = pieces.Skip(index + 1);
+                return (trimmedText.Length == 0 ? tail : tail.Prepend(new TemplatePiece.Lit(trimmedText, lit.Origin, PrefixLength: 0))).ToList();
             }
 
             remaining -= lit.Text.Length;
             index++;
+        }
+
+        if (index < pieces.Count && pieces[index] is TemplatePiece.Choice choice)
+        {
+            var trimmedAlternatives = choice.Alternatives
+                .Select(alternative => TrimLeadingFromPieces(alternative.Pieces, remaining))
+                .Where(trimmedAlternativePieces => trimmedAlternativePieces is not null)
+                .Select(trimmedAlternativePieces => new SqlTextValue.Template(trimmedAlternativePieces!))
+                .ToList();
+
+            if (trimmedAlternatives.Count == 0)
+            {
+                return null;
+            }
+
+            return pieces.Skip(index + 1).Prepend(new TemplatePiece.Choice(choice.GuardText, trimmedAlternatives)).ToList();
         }
 
         return null;
@@ -882,20 +924,58 @@ public static class ExpressionEvaluator
             return null;
         }
 
+        return TrimTrailingFromPieces(template.Pieces, count) is { } trimmedPieces
+            ? new SqlTextValue.Template(trimmedPieces)
+            : null;
+    }
+
+    /// <summary>
+    /// The mirror image of <see cref="TrimLeadingFromPieces"/>: walks backward from the END of
+    /// <paramref name="pieces"/>, consuming <paramref name="count"/> characters across however
+    /// many trailing <see cref="TemplatePiece.Lit"/> pieces it takes, then - if it instead reaches
+    /// a trailing <see cref="TemplatePiece.Choice"/> with characters still owed - recurses into
+    /// EACH of its own alternatives and rebuilds a Choice with the SAME GuardText but trimmed
+    /// alternatives (a real corpus shape: several independently-guarded optional column-list
+    /// fragments concatenated, THEN one shared trailing-comma trim - see
+    /// dbo.spRIL_NTD/dbo.spRIL_TripsActualInformation2). An alternative that can't prove enough
+    /// trailing length (e.g. the "every optional fragment was skipped, x stayed empty" case) is
+    /// DROPPED rather than failing the whole trim - see <see cref="TrimLeadingFromPieces"/>'s own
+    /// doc comment for why that's sound here specifically (the real idiom always guards the whole
+    /// SUBSTRING call behind its own <c>IF LEN(x) > 0</c>, so the too-short combination is exactly
+    /// the one where that guard is false and this statement never actually runs). Declines
+    /// outright only when NO alternative can prove enough length.
+    /// </summary>
+    private static List<TemplatePiece>? TrimTrailingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
+    {
         var remaining = count;
-        var index = template.Pieces.Count - 1;
-        while (index >= 0 && template.Pieces[index] is TemplatePiece.Lit lit)
+        var index = pieces.Count - 1;
+        while (index >= 0 && pieces[index] is TemplatePiece.Lit lit)
         {
             if (lit.Text.Length >= remaining)
             {
                 var trimmedText = lit.Text[..^remaining];
-                var head = template.Pieces.Take(index);
-                var pieces = (trimmedText.Length == 0 ? head : head.Append(new TemplatePiece.Lit(trimmedText, lit.Origin, lit.PrefixLength))).ToList();
-                return new SqlTextValue.Template(pieces);
+                var head = pieces.Take(index);
+                return (trimmedText.Length == 0 ? head : head.Append(new TemplatePiece.Lit(trimmedText, lit.Origin, lit.PrefixLength))).ToList();
             }
 
             remaining -= lit.Text.Length;
             index--;
+        }
+
+        if (index >= 0 && pieces[index] is TemplatePiece.Choice choice)
+        {
+            var trimmedAlternatives = choice.Alternatives
+                .Select(alternative => TrimTrailingFromPieces(alternative.Pieces, remaining))
+                .Where(trimmedAlternativePieces => trimmedAlternativePieces is not null)
+                .Select(trimmedAlternativePieces => new SqlTextValue.Template(trimmedAlternativePieces!))
+                .ToList();
+
+            if (trimmedAlternatives.Count == 0)
+            {
+                return null;
+            }
+
+            return pieces.Take(index).Append(new TemplatePiece.Choice(choice.GuardText, trimmedAlternatives)).ToList();
         }
 
         return null;

@@ -205,6 +205,37 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_SubstringTrimOfVariableWithSeveralIndependentOptionalColumnGroups_TrimsThroughTheNestedChoice()
+    {
+        // A real corpus shape (dbo.spRIL_NTD, found via scan-db --fetch-sql-from-tables against a
+        // restored production database): @select is built from SEVERAL independent optional
+        // column-list appends (each its own IF, no ELSE), producing a NESTED Choice - then one
+        // shared `IF LEN(@select) > 0 SET @select = SUBSTRING(@select, 1, LEN(@select) - 1)` trims
+        // the trailing comma before EXEC. Before this existed, the trim's own trailing-piece walk
+        // only ever looked at TOP-level Lit pieces, declining the instant it hit the Choice
+        // (rather than the literal comma it was hiding) - collapsing the ENTIRE otherwise-known
+        // column list into one opaque placeholder for every combination, or (after the earlier
+        // GuardedAlternatives/StructurallyEqual fixes in this same area) leaving the untrimmed
+        // comma to break the reparse. Trimming now recurses through the Choice's own alternatives,
+        // dropping only the ones that can't prove enough length (the all-flags-false case, where
+        // @select stays empty - exactly the case the source's own IF LEN(@select) > 0 guard
+        // exists to route around, so it never actually reaches this SUBSTRING call for real) -
+        // every genuinely reachable combination now resolves to real, parseable SQL text.
+        var result = Scan(
+            "DECLARE @select VARCHAR(MAX) = ''; " +
+            "IF @F1 = 1 BEGIN SET @select = @select + 'ColA,'; END; " +
+            "IF @F2 = 1 BEGIN SET @select = @select + 'ColB,'; END; " +
+            "IF LEN(@select) > 0 SET @select = SUBSTRING(@select, 1, LEN(@select) - 1); " +
+            "EXEC('SELECT ' + @select);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("SELECT ColA", texts);
+        Assert.Contains("SELECT ColB", texts);
+        Assert.Contains("SELECT ColA,ColB", texts);
+    }
+
+    [Fact]
     public void Scan_SubstringTrimOfVariableAlreadyTaintedWithAGuardedAlternative_StillAnalyzesRatherThanBreakingParse()
     {
         // A real corpus shape (dbo.spRIL_FRTrips, found via scan-db --fetch-sql-from-tables
