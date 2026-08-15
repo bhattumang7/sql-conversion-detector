@@ -219,6 +219,28 @@ public sealed class ReadableScanReportWriterTests
         Assert.DoesNotContain("  lication/shop.sql", rendered, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ExpressionDerivedFindings_TheOnesWithARealIndexUnderneathComeFirst()
+    {
+        // Both findings sort later than each other by SourcePath alone (b before a) - if the
+        // section were still just SourcePath/Line ordered, "b.sql" (no index underneath) would
+        // print first. Indexed-first must override that.
+        var indexed = new ExpressionDerivedFinding(
+            "Col", "a.sql", 10, 1, [], [new UnderlyingBaseColumn("dbo.T1", "Col1", Indexed: true)]);
+        var notIndexed = new ExpressionDerivedFinding(
+            "Col", "b.sql", 5, 1, [], [new UnderlyingBaseColumn("dbo.T2", "Col2", Indexed: false)]);
+
+        var report = new ScanReport(
+            new ParseHealthReport([]), [], [], [], [notIndexed, indexed], [], [], [],
+            SkippedConstructSummary.From([]), TypedPredicateSummary.From([]), DynamicSqlSummary.From([]));
+
+        var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
+
+        Assert.True(
+            rendered.IndexOf("a.sql:10", StringComparison.Ordinal) < rendered.IndexOf("b.sql:5", StringComparison.Ordinal),
+            "the finding with a real index underneath its expression must print before the one with none, regardless of source order");
+    }
+
     /// <summary>
     /// A minimal, hand-built report carrying one ScanForced finding at <paramref name="sourcePath"/>
     /// - the path-trimming behavior under test lives entirely in

@@ -215,10 +215,15 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Expression-derived columns in predicates ({report.ExpressionDerivedFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "By the time these columns reach the predicate they are the result of an expression a view or function computed, not a stored column. An index on whatever feeds them cannot be seeked through that expression.");
+            "By the time these columns reach the predicate they are the result of an expression a view or function computed, not a stored column. An index on whatever feeds them cannot be seeked through that expression. " +
+            "The ones that DO have a real index sitting underneath the expression - the cases actually worth rewriting the predicate for - are listed first.");
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Computed by", "Underlying base columns"],
-            [.. report.ExpressionDerivedFindings.Select(f => new List<string>
+            [.. report.ExpressionDerivedFindings
+                .OrderByDescending(f => f.UnderlyingBaseColumns.Any(bc => bc.Indexed))
+                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
                 f.ColumnName,
