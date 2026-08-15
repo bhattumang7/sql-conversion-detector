@@ -160,7 +160,7 @@ public static class ScalarUdfScanner
             var context = ResolveContext(node);
             var kind = context.IsPredicate() ? ScalarUdfFindingKind.PredicateInvocation : ScalarUdfFindingKind.ProjectionInvocation;
 
-            var (inlineability, blocker) = ClassifyInlineability(info);
+            var (inlineability, blocker) = ScalarUdfInlineabilityClassifier.Classify(info);
             var constantArgumentsNotFolded = info.IsSchemaBound == false && node.Parameters.Count > 0 && node.Parameters.All(p => p is Literal);
 
             Findings.Add(new ScalarUdfFinding(
@@ -200,27 +200,6 @@ public static class ScalarUdfScanner
             return best?.Context ?? ScalarUdfContext.Other;
         }
 
-        private static (ScalarUdfInlineability, string?) ClassifyInlineability(ScalarUdfInfo info)
-        {
-            if (info.Kind == ScalarUdfKind.Clr)
-            {
-                return (ScalarUdfInlineability.NotInlineable, "CLR scalar UDFs are never inlined");
-            }
-
-            if (info.EngineIsInlineable is true)
-            {
-                return (ScalarUdfInlineability.Inlineable, null);
-            }
-
-            if (info.EngineIsInlineable is false)
-            {
-                return (ScalarUdfInlineability.NotInlineable, info.InlineabilityBlocker);
-            }
-
-            return info.InlineabilityBlocker is { Length: > 0 } blocker
-                ? (ScalarUdfInlineability.NotInlineable, blocker)
-                : (ScalarUdfInlineability.Unknown, null);
-        }
 
         private void ClaimNestedFunctionCalls(FunctionCall node)
         {

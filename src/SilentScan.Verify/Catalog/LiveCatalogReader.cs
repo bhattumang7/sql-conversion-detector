@@ -92,6 +92,11 @@ public sealed class LiveCatalogReader
             catalog.AddScalarUdfInfo(qualifiedName, info);
         }
 
+        foreach (var reference in await ReadSchemaExpressionsAsync(connection, cancellationToken))
+        {
+            catalog.AddSchemaExpression(reference);
+        }
+
         return catalog;
     }
 
@@ -274,6 +279,72 @@ public sealed class LiveCatalogReader
         }
 
         return kinds;
+    }
+
+    /// <summary>
+    /// A real table's own computed-column/DEFAULT/CHECK definitions, straight from
+    /// <c>sys.computed_columns</c>/<c>sys.default_constraints</c>/<c>sys.check_constraints</c> -
+    /// the live-authoritative source for the scalar-UDF SchemaDependency stream
+    /// (<see cref="SilentScan.Core.Predicates.SchemaDependencyScanner"/>), which reparses each
+    /// definition's own text the same way regardless of whether it arrived from here or from
+    /// <see cref="SchemaExpressionCollector"/>'s file-mode capture. Table-level CHECK
+    /// constraints (no single owning column) are queried separately from column-level ones, since
+    /// <c>sys.check_constraints.parent_column_id</c> is 0 for a table-level constraint and this
+    /// reader reports that case with a null column name rather than a meaningless "column 0".
+    /// </summary>
+    private static async Task<List<SchemaExpressionReference>> ReadSchemaExpressionsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name,
+                   'ComputedColumn' AS kind, cc.definition AS definition_text
+            FROM sys.computed_columns cc
+            JOIN sys.tables t ON t.object_id = cc.object_id
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            JOIN sys.columns c ON c.object_id = cc.object_id AND c.column_id = cc.column_id
+            WHERE t.is_ms_shipped = 0
+            UNION ALL
+            SELECT s.name, t.name, c.name, 'DefaultConstraint', dc.definition
+            FROM sys.default_constraints dc
+            JOIN sys.tables t ON t.object_id = dc.parent_object_id
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+            WHERE t.is_ms_shipped = 0
+            UNION ALL
+            SELECT s.name, t.name, c.name, 'CheckConstraint', ck.definition
+            FROM sys.check_constraints ck
+            JOIN sys.tables t ON t.object_id = ck.parent_object_id
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            LEFT JOIN sys.columns c ON c.object_id = ck.parent_object_id AND c.column_id = ck.parent_column_id
+            WHERE t.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var references = new List<SchemaExpressionReference>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var schemaName = reader.GetString(0);
+            var tableName = reader.GetString(1);
+            var columnName = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
+            var kind = reader.GetString(3) switch
+            {
+                "ComputedColumn" => SchemaDependencyKind.ComputedColumn,
+                "DefaultConstraint" => SchemaDependencyKind.DefaultConstraint,
+                _ => SchemaDependencyKind.CheckConstraint,
+            };
+            var definitionText = await reader.IsDBNullAsync(4, cancellationToken) ? null : reader.GetString(4);
+            if (definitionText is null)
+            {
+                continue;
+            }
+
+            var qualifiedName = $"{schemaName}.{tableName}";
+            references.Add(new SchemaExpressionReference(kind, qualifiedName, columnName, definitionText, qualifiedName, Line: 0));
+        }
+
+        return references;
     }
 
     /// <summary>

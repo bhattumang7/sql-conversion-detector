@@ -23,6 +23,8 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, ScalarUdfInfo> _scalarUdfInfoByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly List<SchemaExpressionReference> _schemaExpressions = [];
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -115,6 +117,18 @@ public sealed class DatabaseCatalog
     /// </summary>
     public bool TryGetScalarUdfInfo(string qualifiedName, out ScalarUdfInfo? info) =>
         _scalarUdfInfoByQualifiedName.TryGetValue(qualifiedName, out info);
+
+    /// <summary>
+    /// Records one computed column/DEFAULT/CHECK constraint's own definition text, keyed by
+    /// nothing but appended to a flat list - unlike every other registry here, this one is never
+    /// looked up by name; a single post-catalog pass (<see cref="Predicates.SchemaDependencyScanner"/>)
+    /// walks every entry once, after every scalar UDF in the whole catalog is known, exactly
+    /// mirroring how live mode reads these definitions as plain text with no earlier phase to
+    /// register into.
+    /// </summary>
+    public void AddSchemaExpression(SchemaExpressionReference reference) => _schemaExpressions.Add(reference);
+
+    public IReadOnlyList<SchemaExpressionReference> SchemaExpressions => _schemaExpressions;
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the

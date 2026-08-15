@@ -293,6 +293,13 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        using (var schemaDependencyStage = progress.Begin("scanning schema-level scalar UDF dependencies"))
+        {
+            var schemaDependencyFindings = SchemaDependencyScanner.Scan(catalog);
+            scalarUdfFindings.AddRange(schemaDependencyFindings);
+            schemaDependencyStage.Complete($"{schemaDependencyFindings.Count:N0} findings");
+        }
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {

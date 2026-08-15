@@ -1100,6 +1100,18 @@ public static class CatalogBuilder
             // it's just as invisible outside that procedure. A batch-level temp table (declared
             // in an ad-hoc script, not inside any proc) has no scope, matching pre-fix behavior.
             catalog.AddOrReplace(table, isTemp ? _currentScope : null);
+
+            // Only a real persistent table's own computed-column/DEFAULT/CHECK definitions feed
+            // the scalar-UDF SchemaDependency stream - a #temp table's shape is query-local, not
+            // schema every consumer of the real table pays for.
+            if (!isTemp)
+            {
+                var qualifiedName = SchemaObjectNameHelper.Qualify(createTable.SchemaObjectName);
+                foreach (var reference in SchemaExpressionCollector.Collect(createTable.Definition, qualifiedName, sourcePath))
+                {
+                    catalog.AddSchemaExpression(reference);
+                }
+            }
         }
 
         private void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable)
@@ -1134,6 +1146,14 @@ public static class CatalogBuilder
                     Indexes = mergedIndexes,
                 },
                 WriteScopeFor(existing));
+
+            if (existing.Kind == CatalogTableKind.Table)
+            {
+                foreach (var reference in SchemaExpressionCollector.Collect(alterTable.Definition, qualifiedName, sourcePath))
+                {
+                    catalog.AddSchemaExpression(reference);
+                }
+            }
         }
 
         /// <summary>The scope key an already-cataloged table must be re-stored under after an in-place update - only a temp table/table variable was ever stored scoped; a real table always lives at the unscoped key regardless of where the statement altering it appears.</summary>

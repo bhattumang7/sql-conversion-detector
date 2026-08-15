@@ -50,6 +50,20 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
         BEGIN
             RETURN GETDATE();
         END;
+        GO
+        CREATE FUNCTION dbo.fn_ForSchema (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            RETURN @x + 1;
+        END;
+        GO
+        CREATE TABLE dbo.SchemaDependent (
+            Id INT NOT NULL,
+            Computed AS dbo.fn_ForSchema(Id),
+            Code INT NOT NULL DEFAULT (dbo.fn_ForSchema(0)),
+            CONSTRAINT CK_SchemaDependent CHECK (dbo.fn_ForSchema(Id) > 0)
+        );
         """;
 
     [Fact]
@@ -108,5 +122,17 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
         Assert.True(liveCatalog.TryGetScalarUdfInfo("dbo.fn_NotInlineable", out var info));
         Assert.False(info!.EngineIsInlineable);
         Assert.Contains("GETDATE", info.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadAsync_ComputedColumnDefaultAndCheckConstraint_AllReportScalarUdfDependency()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var references = catalog.SchemaExpressions.Where(r => r.TableQualifiedName == "dbo.SchemaDependent").ToList();
+
+        Assert.Contains(references, r => r.Kind == SchemaDependencyKind.ComputedColumn && r.DefinitionText.Contains("fn_ForSchema", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(references, r => r.Kind == SchemaDependencyKind.DefaultConstraint && r.DefinitionText.Contains("fn_ForSchema", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(references, r => r.Kind == SchemaDependencyKind.CheckConstraint && r.DefinitionText.Contains("fn_ForSchema", StringComparison.OrdinalIgnoreCase));
     }
 }
