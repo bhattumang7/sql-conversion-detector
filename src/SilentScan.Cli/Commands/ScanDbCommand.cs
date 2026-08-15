@@ -64,6 +64,12 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => false,
         };
 
+        var verbosityOption = new Option<string>("--verbosity")
+        {
+            Description = ReportOutput.VerbosityOptionDescription,
+            DefaultValueFactory = _ => "brief",
+        };
+
         var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for sargability findings.")
         {
             connectionStringArgument,
@@ -71,6 +77,7 @@ public static class ScanDbCommand
             planCacheEvidenceOption,
             confidenceOption,
             fetchSqlFromTablesOption,
+            verbosityOption,
             outputOption,
         };
 
@@ -82,7 +89,8 @@ public static class ScanDbCommand
             var options = new ReportOptions(
                 parseResult.GetValue(formatOption)!,
                 parseResult.GetValue(confidenceOption)!,
-                parseResult.GetValue(outputOption));
+                parseResult.GetValue(outputOption),
+                parseResult.GetValue(verbosityOption)!);
             return await RunAsync(connectionString, planCacheEvidence, fetchSqlFromTables, options, Console.Out, Console.Error, cancellationToken);
         });
 
@@ -101,6 +109,12 @@ public static class ScanDbCommand
         if (!ReportOutput.TryParseConfidence(options.Confidence, out var minimumConfidence))
         {
             await stderr.WriteLineAsync(ReportOutput.UnknownConfidenceMessage(options.Confidence));
+            return 1;
+        }
+
+        if (!ReportOutput.TryParseVerbosity(options.Verbosity, out var verbosity))
+        {
+            await stderr.WriteLineAsync(ReportOutput.UnknownVerbosityMessage(options.Verbosity));
             return 1;
         }
 
@@ -133,7 +147,7 @@ public static class ScanDbCommand
             {
                 ReportFormat.Sarif => SarifReportWriter.Write(result.Report),
                 ReportFormat.Json => JsonSerializer.Serialize(result, JsonOptions),
-                _ => ReadableLiveScanWriter.Write(result, ReadableLiveScanWriter.DescribeTarget(connectionString), ReportOutput.ToStyle(reportFormat)),
+                _ => ReadableLiveScanWriter.Write(result, ReadableLiveScanWriter.DescribeTarget(connectionString), ReportOutput.ToStyle(reportFormat), verbosity),
             };
             renderStage.Complete($"{options.Format}, {content.Length:N0} chars");
         }

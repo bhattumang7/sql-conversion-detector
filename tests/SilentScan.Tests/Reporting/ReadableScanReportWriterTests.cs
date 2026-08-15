@@ -49,7 +49,7 @@ public sealed class ReadableScanReportWriterTests
         EngineAuthoritativeScan.ScanAsync(sql, collation);
 
     private static string Render(ScanReport report) =>
-        ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text)
+        ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text, verbosity: ReadableVerbosity.Full)
             .ReplaceLineEndings("\n");
 
     [Fact]
@@ -106,6 +106,56 @@ public sealed class ReadableScanReportWriterTests
         Assert.Contains("Files with parse errors (1)", rendered, StringComparison.Ordinal);
         Assert.Contains("broken.sql", rendered, StringComparison.Ordinal);
         Assert.Contains("line 1:", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DefaultVerbosity_IsBrief_ButNeverGatesARealFinding()
+    {
+        var report = await Build(LayeredSql);
+
+        // No verbosity argument - the real default. A ScanForced finding is the entire point of
+        // this tool, so brief mode must never touch it, unlike the coverage/caveat sections.
+        var rendered = ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text)
+            .ReplaceLineEndings("\n");
+
+        var row = Assert.Single(
+            rendered.Split('\n'),
+            line => line.Contains("dbo.Orders.OrderCode", StringComparison.Ordinal) && line.Contains("dbo.usp_FindOrder:", StringComparison.Ordinal));
+
+        Assert.Contains("Implicit conversions that force a scan (1)", rendered, StringComparison.Ordinal);
+        Assert.Contains("2 view layers via dbo.vw_OrdersOuter.OrderCode", row, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DefaultVerbosity_IsBrief_ParseFailuresStateCountWithoutPerFileDetail()
+    {
+        var parsed = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
+        Assert.True(parsed.HasErrors);
+        var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
+
+        // No verbosity argument at all - exercises the real default a caller who never heard of
+        // the flag gets, not an explicit Brief request.
+        var rendered = ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text)
+            .ReplaceLineEndings("\n");
+
+        Assert.Contains("Files with parse errors (1)", rendered, StringComparison.Ordinal);
+        Assert.Contains("re-run with --verbosity full", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("broken.sql", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("line 1:", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FullVerbosity_RestoresParseFailurePerFileDetail()
+    {
+        var parsed = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
+        var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
+
+        var rendered = ReadableScanReportWriter.Write(report, "SilentScan - test", ReadableStyle.Text, verbosity: ReadableVerbosity.Full)
+            .ReplaceLineEndings("\n");
+
+        Assert.Contains("broken.sql", rendered, StringComparison.Ordinal);
+        Assert.Contains("line 1:", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("re-run with --verbosity full", rendered, StringComparison.Ordinal);
     }
 
     [Fact]

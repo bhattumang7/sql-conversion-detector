@@ -25,17 +25,17 @@ public static class ReadableScanReportWriter
     /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string ColumnHeader = "Column";
 
-    public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null) =>
-        ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase), style);
+    public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief) =>
+        ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase, verbosity), style);
 
     /// <summary>
     /// Builds the document for a whole scan, title included. Corpus reports embed a repo's
     /// sections into a larger document instead - see <see cref="BuildSections"/>.
     /// </summary>
-    public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null)
+    public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         List<ReadableBlock> blocks = [new ReadableBlock.Heading(1, title)];
-        blocks.AddRange(BuildSections(report, 2, pathBase));
+        blocks.AddRange(BuildSections(report, 2, pathBase, verbosity));
         return new ReadableDocument(blocks);
     }
 
@@ -43,7 +43,7 @@ public static class ReadableScanReportWriter
     /// The report body without a title, at a caller-chosen heading level, so one repo's report
     /// can sit under a corpus-wide heading without its sections outranking it.
     /// </summary>
-    public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null)
+    public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         ArgumentNullException.ThrowIfNull(report);
 
@@ -64,17 +64,26 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
-            "Something the verdict rules need was missing or ambiguous - most often a collation that no DDL in the scan pinned down. These are neither clean nor flagged; they are unanswered, and they are listed rather than dropped so the counts above cannot be read as covering them."));
+            "Something the verdict rules need was missing or ambiguous - most often a collation that no DDL in the scan pinned down. These are neither clean nor flagged; they are unanswered, and they are listed rather than dropped so the counts above cannot be read as covering them.",
+            verbosity));
         blocks.AddRange(TypedSection(
             report, Verdict.OperandClash, headingLevel, pathBase,
             "Comparisons between genuinely incompatible types",
             "The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all (e.g. TIME vs a date-family type, or a GUID vs a string) - distinct from an unclassified comparison above: this one has a definitive answer, and the answer is that the comparison itself cannot run as written."));
-        blocks.AddRange(DynamicSql(report, headingLevel, pathBase));
-        blocks.AddRange(ParseFailures(report, headingLevel, pathBase));
+        blocks.AddRange(DynamicSql(report, headingLevel, pathBase, verbosity));
+        blocks.AddRange(ParseFailures(report, headingLevel, pathBase, verbosity));
         blocks.AddRange(SkippedConstructs(report, headingLevel));
 
         return blocks;
     }
+
+    /// <summary>
+    /// The pointer line a gated coverage/caveat section renders instead of its row table under
+    /// <see cref="ReadableVerbosity.Brief"/> - always names the exact count (never "some", never
+    /// omitted) so brief mode states less DETAIL, never a less honest COUNT.
+    /// </summary>
+    private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
+        new($"{Count(count, noun)} - not listed individually here; re-run with --verbosity full to see each one.");
 
     private static IEnumerable<ReadableBlock> Summary(ScanReport report, int level)
     {
@@ -133,7 +142,8 @@ public static class ReadableScanReportWriter
     }
 
     private static IEnumerable<ReadableBlock> TypedSection(
-        ScanReport report, Verdict verdict, int level, string? pathBase, string title, string explanation)
+        ScanReport report, Verdict verdict, int level, string? pathBase, string title, string explanation,
+        ReadableVerbosity verbosity = ReadableVerbosity.Full)
     {
         var findings = report.TypedFindings.Where(f => f.Verdict == verdict).ToList();
         if (findings.Count == 0)
@@ -143,6 +153,13 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"{title} ({findings.Count})");
         yield return new ReadableBlock.Paragraph(explanation);
+
+        if (verbosity == ReadableVerbosity.Brief)
+        {
+            yield return BriefPointer(findings.Count, "comparison");
+            yield break;
+        }
+
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Column type", "Compared with", "Indexed", "Introduced by"],
             [.. findings.Select(f => TypedRow(f, pathBase))]);
@@ -303,7 +320,7 @@ public static class ReadableScanReportWriter
             "The pattern is a variable or expression, so the plan cannot be built around a known prefix; the engine has to assume the worst at compile time.",
     };
 
-    private static IEnumerable<ReadableBlock> DynamicSql(ScanReport report, int level, string? pathBase)
+    private static IEnumerable<ReadableBlock> DynamicSql(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
     {
         var unresolved = report.DynamicSqlFindings
             .Where(f => f.Outcome != DynamicSqlOutcome.AnalyzedLiteral)
@@ -319,6 +336,13 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             $"{summary.AnalyzedCount} of {Count(summary.TotalCallSites, "dynamic SQL call site")} had a provably-constant argument and were analyzed like ordinary SQL. " +
             "The rest are listed here rather than counted as clean: whatever wasn't examined - the whole argument, or (for a partially-analyzed site) just the elided fragment - is never silently assumed safe.");
+
+        if (verbosity == ReadableVerbosity.Brief)
+        {
+            yield return BriefPointer(unresolved.Count, "call site");
+            yield break;
+        }
+
         yield return new ReadableBlock.Table(
             [WhereHeader, "Outcome", "Reason"],
             [.. unresolved.Select(f => new List<string>
@@ -336,7 +360,7 @@ public static class ReadableScanReportWriter
         _ => "not provably constant",
     };
 
-    private static IEnumerable<ReadableBlock> ParseFailures(ScanReport report, int level, string? pathBase)
+    private static IEnumerable<ReadableBlock> ParseFailures(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
     {
         var failed = report.ParseHealth.Files.Where(f => f.Errors.Count > 0).ToList();
         if (failed.Count == 0)
@@ -347,6 +371,13 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Heading(level, $"Files with parse errors ({failed.Count})");
         yield return new ReadableBlock.Paragraph(
             "A batch containing a syntax error is dropped, not the whole file, so these files still contributed whatever else they contained. What the failing batches held was never analyzed - if the rate here is high, the files are likely not T-SQL at all.");
+
+        if (verbosity == ReadableVerbosity.Brief)
+        {
+            yield return BriefPointer(failed.Count, "file");
+            yield break;
+        }
+
         yield return new ReadableBlock.Table(
             ["File", "Errors", "Batches kept", "First error"],
             [.. failed.Select(f => new List<string>

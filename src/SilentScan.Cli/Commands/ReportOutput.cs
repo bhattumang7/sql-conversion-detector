@@ -18,7 +18,7 @@ internal enum ReportFormat
 }
 
 /// <summary>The report-shaping flags every scan command's own <c>RunAsync</c> takes together - bundled into one value so a caller doesn't add a bare parameter for every new flag (format, then confidence, then whatever comes next) and blow through Sonar's per-method parameter budget.</summary>
-internal readonly record struct ReportOptions(string Format, string Confidence, string? OutputPath);
+internal readonly record struct ReportOptions(string Format, string Confidence, string? OutputPath, string Verbosity);
 
 internal static class ReportOutput
 {
@@ -29,6 +29,9 @@ internal static class ReportOutput
         "Write the report to this file instead of standard output. The parent directory must exist.";
 
     internal const string ConfidenceOptionDescription = FindingConfidenceParsing.OptionDescription;
+
+    internal const string VerbosityOptionDescription =
+        "How much detail the text/markdown report gives for sections about what could NOT be established (parse errors, unresolvable dynamic SQL, ambiguous types, stale metadata): brief (default - each such section states its count only) or full (every row, as the JSON carries it). Never affects json/sarif output, and never hides an actual finding - only these coverage/caveat sections.";
 
     internal static bool TryParseConfidence(string confidence, out FindingConfidence parsed) =>
         FindingConfidenceParsing.TryParse(confidence, out parsed);
@@ -63,6 +66,25 @@ internal static class ReportOutput
 
     internal static ReadableStyle ToStyle(ReportFormat format) =>
         format == ReportFormat.Markdown ? ReadableStyle.Markdown : ReadableStyle.Text;
+
+    internal static bool TryParseVerbosity(string verbosity, out ReadableVerbosity parsed)
+    {
+        switch (verbosity)
+        {
+            case "brief":
+                parsed = ReadableVerbosity.Brief;
+                return true;
+            case "full":
+                parsed = ReadableVerbosity.Full;
+                return true;
+            default:
+                parsed = ReadableVerbosity.Brief;
+                return false;
+        }
+    }
+
+    internal static string UnknownVerbosityMessage(string verbosity) =>
+        $"error: unknown --verbosity '{verbosity}' (expected 'brief' or 'full')";
 
     /// <summary>
     /// Sends a rendered report to its destination. Returns false, having explained itself on

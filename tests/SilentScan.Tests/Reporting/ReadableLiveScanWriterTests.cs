@@ -64,11 +64,43 @@ public sealed class ReadableLiveScanWriterTests
                 new UnanalyzableModule("dbo", "fn_Clr", "FS", UnanalyzableModuleReason.ClrAssemblyModule),
             ]),
             "srv/shop",
-            ReadableStyle.Text);
+            ReadableStyle.Text,
+            ReadableVerbosity.Full);
 
         Assert.Contains("Modules with no readable T-SQL body (2)", rendered, StringComparison.Ordinal);
         Assert.Contains("encrypted (WITH ENCRYPTION)", rendered, StringComparison.Ordinal);
         Assert.Contains("backed by a CLR assembly", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DefaultVerbosity_IsBrief_UnanalyzableModulesStateCountWithoutPerModuleDetail()
+    {
+        var rendered = ReadableLiveScanWriter.Write(
+            await Result(unanalyzable: [
+                new UnanalyzableModule("dbo", "usp_Secret", "P", UnanalyzableModuleReason.Encrypted),
+                new UnanalyzableModule("dbo", "fn_Clr", "FS", UnanalyzableModuleReason.ClrAssemblyModule),
+            ]),
+            "srv/shop",
+            ReadableStyle.Text);
+
+        Assert.Contains("Modules with no readable T-SQL body (2)", rendered, StringComparison.Ordinal);
+        Assert.Contains("re-run with --verbosity full", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("usp_Secret", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("backed by a CLR assembly", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DefaultVerbosity_IsBrief_ButNeverGatesTheLineageParityBug()
+    {
+        var rendered = ReadableLiveScanWriter.Write(
+            await Result([new LiveLineageParityMismatch("dbo.vw_Orders", "OrderCode", "type", "varchar(20)", "nvarchar(20)")]),
+            "srv/shop",
+            ReadableStyle.Text);
+
+        // A genuine inference bug in THIS tool, not a coverage caveat about the scanned
+        // database - never gated by verbosity, in either mode.
+        Assert.Contains("Column types this tool got wrong (1)", rendered, StringComparison.Ordinal);
+        Assert.Contains("dbo.vw_Orders.OrderCode", rendered, StringComparison.Ordinal);
     }
 
     [Theory]

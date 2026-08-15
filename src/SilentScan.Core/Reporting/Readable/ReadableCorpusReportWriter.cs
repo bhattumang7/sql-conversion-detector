@@ -20,7 +20,8 @@ public static class ReadableCorpusReportWriter
     public static string Write(
         IReadOnlyList<ReadableCorpusRepo> repos,
         IReadOnlyList<string> reposWithoutClones,
-        ReadableStyle style)
+        ReadableStyle style,
+        ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         ArgumentNullException.ThrowIfNull(repos);
         ArgumentNullException.ThrowIfNull(reposWithoutClones);
@@ -59,7 +60,7 @@ public static class ReadableCorpusReportWriter
         foreach (var repo in repos)
         {
             blocks.Add(new ReadableBlock.Heading(2, repo.Name));
-            blocks.AddRange(ReadableScanReportWriter.BuildSections(repo.Report, 3, repo.PathBase));
+            blocks.AddRange(ReadableScanReportWriter.BuildSections(repo.Report, 3, repo.PathBase, verbosity));
         }
 
         return ReadableDocumentRenderer.Render(new ReadableDocument(blocks), style);

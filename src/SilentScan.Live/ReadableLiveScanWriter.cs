@@ -43,21 +43,25 @@ public static class ReadableLiveScanWriter
         }
     }
 
-    public static string Write(LiveScanResult result, string databaseLabel, ReadableStyle style)
+    public static string Write(LiveScanResult result, string databaseLabel, ReadableStyle style, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         ArgumentNullException.ThrowIfNull(result);
 
         List<ReadableBlock> blocks = [new ReadableBlock.Heading(1, $"SilentScan live scan - {databaseLabel}")];
         blocks.AddRange(Connection(result));
-        blocks.AddRange(LineageParity(result));
+        blocks.AddRange(LineageParity(result, verbosity));
         blocks.AddRange(PlanCacheEvidence(result));
         blocks.AddRange(WorkloadFindings(result));
 
-        blocks.AddRange(ReadableScanReportWriter.BuildSections(result.Report, headingLevel: 2));
-        blocks.AddRange(UnanalyzableModules(result));
+        blocks.AddRange(ReadableScanReportWriter.BuildSections(result.Report, headingLevel: 2, verbosity: verbosity));
+        blocks.AddRange(UnanalyzableModules(result, verbosity));
 
         return ReadableDocumentRenderer.Render(new ReadableDocument(blocks), style);
     }
+
+    /// <summary>Mirrors <c>ReadableScanReportWriter</c>'s own brief-mode pointer line - same wording contract, kept local since this writer's gated sections are live-scan-specific.</summary>
+    private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
+        new($"{count.ToString(CultureInfo.InvariantCulture)} {noun}{(count == 1 ? string.Empty : "s")} - not listed individually here; re-run with --verbosity full to see each one.");
 
     private static IEnumerable<ReadableBlock> Connection(LiveScanResult result)
     {
@@ -77,12 +81,15 @@ public static class ReadableLiveScanWriter
             ]]);
     }
 
-    private static IEnumerable<ReadableBlock> LineageParity(LiveScanResult result)
+    private static IEnumerable<ReadableBlock> LineageParity(LiveScanResult result, ReadableVerbosity verbosity)
     {
         var parity = result.LineageParity;
 
         if (parity.Mismatches.Count > 0)
         {
+            // Never gated by verbosity, even in Brief - this is a P0 bug in THIS tool's own
+            // inference, not a coverage caveat about the scanned database, and it is the only
+            // category that fails the scan (see the exit-code comment in ScanDbCommand).
             yield return new ReadableBlock.Heading(2, $"Column types this tool got wrong ({parity.Mismatches.Count})");
             yield return new ReadableBlock.Paragraph(
                 "Verified against the type the server computes for this object right now (sys.dm_exec_describe_first_result_set), not against its cached sys.columns metadata, so this is a genuine inference bug in this tool. Every finding below that touches one of these columns rests on a type the pipeline got wrong - read them as suspect until this is fixed. This is the only category that fails the scan.");
@@ -96,9 +103,16 @@ public static class ReadableLiveScanWriter
             yield return new ReadableBlock.Heading(2, $"Objects the server cannot compile ({parity.UncompilableObjects.Count})");
             yield return new ReadableBlock.Paragraph(
                 "These views/functions do not currently compile - most often they reference something that no longer exists - so the server itself cannot describe them and nothing in this report covers their columns. That is a condition of the scanned database, not a bug in this tool, so it does not fail the scan. Their cached sys.columns metadata is a fossil from when they last compiled successfully.");
-            yield return new ReadableBlock.Table(
-                ["Object", "Error", "Message"],
-                [.. parity.UncompilableObjects.Select(u => new List<string> { u.QualifiedViewName, u.ErrorNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), u.ErrorMessage })]);
+            if (verbosity == ReadableVerbosity.Brief)
+            {
+                yield return BriefPointer(parity.UncompilableObjects.Count, "object");
+            }
+            else
+            {
+                yield return new ReadableBlock.Table(
+                    ["Object", "Error", "Message"],
+                    [.. parity.UncompilableObjects.Select(u => new List<string> { u.QualifiedViewName, u.ErrorNumber.ToString(System.Globalization.CultureInfo.InvariantCulture), u.ErrorMessage })]);
+            }
         }
 
         if (parity.StaleCachedMetadata.Count > 0)
@@ -106,9 +120,16 @@ public static class ReadableLiveScanWriter
             yield return new ReadableBlock.Heading(2, $"Objects whose cached metadata is out of date ({parity.StaleCachedMetadata.Count})");
             yield return new ReadableBlock.Paragraph(
                 "The server's cached column metadata for these objects disagrees with what it computes for them now - a base column's type changed after the object was created, and SQL Server does not refresh a view's or function's own cached metadata when that happens. This tool's inference agrees with the live answer, so nothing here is a finding - it is a maintenance signal for whoever owns the database (sp_refreshview / sp_refreshsqlmodule). Anything else reading these objects' metadata rather than querying them directly will see the stale type.");
-            yield return new ReadableBlock.Table(
-                [ColumnHeading, "Facet", "Cached", "Live"],
-                [.. parity.StaleCachedMetadata.Select(s => new List<string> { $"{s.QualifiedViewName}.{s.ColumnName}", s.Facet, s.CachedValue, s.LiveValue })]);
+            if (verbosity == ReadableVerbosity.Brief)
+            {
+                yield return BriefPointer(parity.StaleCachedMetadata.Count, "object");
+            }
+            else
+            {
+                yield return new ReadableBlock.Table(
+                    [ColumnHeading, "Facet", "Cached", "Live"],
+                    [.. parity.StaleCachedMetadata.Select(s => new List<string> { $"{s.QualifiedViewName}.{s.ColumnName}", s.Facet, s.CachedValue, s.LiveValue })]);
+            }
         }
 
         if (parity.Unverified.Count > 0)
@@ -116,9 +137,16 @@ public static class ReadableLiveScanWriter
             yield return new ReadableBlock.Heading(2, $"Columns that could not be live-verified ({parity.Unverified.Count})");
             yield return new ReadableBlock.Paragraph(
                 "This tool's inference disagrees with the object's cached sys.columns metadata, but the object could not be verified against a live answer - listed rather than dropped so nothing above is read as covering them.");
-            yield return new ReadableBlock.Table(
-                [ColumnHeading, "Why", "Inferred", "Cached"],
-                [.. parity.Unverified.Select(u => new List<string> { $"{u.QualifiedViewName}.{u.ColumnName}", u.Reason, u.InferredValue, u.CachedValue })]);
+            if (verbosity == ReadableVerbosity.Brief)
+            {
+                yield return BriefPointer(parity.Unverified.Count, "column");
+            }
+            else
+            {
+                yield return new ReadableBlock.Table(
+                    [ColumnHeading, "Why", "Inferred", "Cached"],
+                    [.. parity.Unverified.Select(u => new List<string> { $"{u.QualifiedViewName}.{u.ColumnName}", u.Reason, u.InferredValue, u.CachedValue })]);
+            }
         }
     }
 
@@ -191,7 +219,7 @@ public static class ReadableLiveScanWriter
                 })]);
     }
 
-    private static IEnumerable<ReadableBlock> UnanalyzableModules(LiveScanResult result)
+    private static IEnumerable<ReadableBlock> UnanalyzableModules(LiveScanResult result, ReadableVerbosity verbosity)
     {
         if (result.UnanalyzableModules.Count == 0)
         {
@@ -201,6 +229,13 @@ public static class ReadableLiveScanWriter
         yield return new ReadableBlock.Heading(2, $"Modules with no readable T-SQL body ({result.UnanalyzableModules.Count})");
         yield return new ReadableBlock.Paragraph(
             "These exist in the database and were deliberately not analyzed - there is no T-SQL text to analyze. They are listed rather than dropped so nothing above is read as covering them.");
+
+        if (verbosity == ReadableVerbosity.Brief)
+        {
+            yield return BriefPointer(result.UnanalyzableModules.Count, "module");
+            yield break;
+        }
+
         yield return new ReadableBlock.Table(
             ["Module", "Type", "Why"],
             [.. result.UnanalyzableModules.Select(m => new List<string>

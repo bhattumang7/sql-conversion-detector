@@ -59,6 +59,12 @@ public static class ScanCorpusLiveCommand
             DefaultValueFactory = _ => "high",
         };
 
+        var verbosityOption = new Option<string>("--verbosity")
+        {
+            Description = ReportOutput.VerbosityOptionDescription,
+            DefaultValueFactory = _ => "brief",
+        };
+
         var command = new Command(
             "scan-corpus-live",
             "Deploy every repo declared in the corpus manifest to the disposable Docker oracle, read its catalog and module text back from the engine, and report per-repo findings.")
@@ -67,6 +73,7 @@ public static class ScanCorpusLiveCommand
             clonesRootOption,
             formatOption,
             confidenceOption,
+            verbosityOption,
             outputOption,
         };
 
@@ -77,7 +84,8 @@ public static class ScanCorpusLiveCommand
             var options = new ReportOptions(
                 parseResult.GetValue(formatOption)!,
                 parseResult.GetValue(confidenceOption)!,
-                parseResult.GetValue(outputOption));
+                parseResult.GetValue(outputOption),
+                parseResult.GetValue(verbosityOption)!);
             return await RunAsync(manifestPath, clonesRoot, Console.Out, Console.Error, options, cancellationToken);
         });
 
@@ -108,6 +116,12 @@ public static class ScanCorpusLiveCommand
         if (!ReportOutput.TryParseConfidence(options.Confidence, out var minimumConfidence))
         {
             await stderr.WriteLineAsync(ReportOutput.UnknownConfidenceMessage(options.Confidence));
+            return 1;
+        }
+
+        if (!ReportOutput.TryParseVerbosity(options.Verbosity, out var verbosity))
+        {
+            await stderr.WriteLineAsync(ReportOutput.UnknownVerbosityMessage(options.Verbosity));
             return 1;
         }
 
@@ -153,7 +167,8 @@ public static class ScanCorpusLiveCommand
             : ReadableCorpusReportWriter.Write(
                 [.. readableRepos.OrderBy(r => r.Name, StringComparer.Ordinal)],
                 [.. missingRepos.OrderBy(name => name, StringComparer.Ordinal)],
-                ReportOutput.ToStyle(reportFormat));
+                ReportOutput.ToStyle(reportFormat),
+                verbosity);
 
         if (!ReportOutput.Emit(content, options.OutputPath, stdout, stderr))
         {
