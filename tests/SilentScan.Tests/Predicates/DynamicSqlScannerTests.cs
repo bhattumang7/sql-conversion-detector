@@ -761,14 +761,87 @@ public sealed class DynamicSqlScannerTests
     {
         // A subquery with its own FROM clause is the recognizable "SQL text stored in a table"
         // shape - see Scan_ExecOfSqlTextLoadedViaSubqueryFromRealTable_ReportsDistinctReason for
-        // the full rationale. The generic "non-literal-expression:subquery" reason still applies
-        // to a FROM-less scalar subquery (e.g. a correlated EXISTS-style expression), untested
-        // here but unaffected by this split.
+        // the full rationale. A FROM-less scalar subquery is a DIFFERENT shape entirely - see
+        // Scan_ExecOfVariableAssignedFromFromLessScalarSubquery_UnwrapsAndFoldsTheInnerExpression
+        // just below.
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = (SELECT TOP 1 SomeColumn FROM dbo.T); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
         Assert.Equal("non-literal-expression:sql-loaded-from-table", finding.Reason);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromFromLessScalarSubquery_UnwrapsAndFoldsTheInnerExpression()
+    {
+        // `(SELECT expr)` with no FROM at all is a common T-SQL idiom for parenthesizing a single
+        // scalar expression - real corpus shapes (found via scan-db --fetch-sql-from-tables
+        // against a restored production database): `(SELECT @@TRANCOUNT)`,
+        // `(SELECT CAST(SCOPE_IDENTITY() AS INT))`, `(SELECT REPLACE(@x, ...))`. T-SQL requires a
+        // real table source for WHERE/GROUP BY/HAVING/ORDER BY, so FromClause being null already
+        // rules those out - the subquery contributes nothing beyond the parentheses, so unwrapping
+        // and folding the inner CASE expression through the ordinary recursion is exact. CASE
+        // folding itself conservatively unions BOTH branches (existing behavior, unrelated to
+        // this fix) rather than evaluating the always-true condition, so this yields two real,
+        // fully-known scripts - proving the subquery wrapper was unwrapped down to real text, not
+        // collapsed to a generic hole.
+        var result = Scan(
+            "DECLARE @sql NVARCHAR(MAX) = (SELECT CASE WHEN 1 = 1 THEN N'SELECT 1' ELSE N'SELECT 2' END); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(["SELECT 1", "SELECT 2"], texts);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromMultiColumnFromLessSubquery_StillDeclinesAsSubquery()
+    {
+        // More than one select element is a row-constructor-shaped subquery (e.g. building an
+        // XML/JSON-ish row), never a genuine single scalar value - the unwrap only ever applies
+        // to EXACTLY one select element, so this still declines with the generic reason.
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = (SELECT 1 AS a, 2 AS b); EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:subquery", finding.Reason);
+    }
+
+    [Theory]
+    [InlineData("@@TRANCOUNT")]
+    [InlineData("@@ROWCOUNT")]
+    [InlineData("@@ERROR")]
+    [InlineData("@@IDENTITY")]
+    [InlineData("@@NESTLEVEL")]
+    [InlineData("@@SPID")]
+    [InlineData("@@FETCH_STATUS")]
+    public void Scan_ExecOfVariableAssignedFromKnownSystemGlobalVariable_FoldsToEnvironmentDependentHole(string globalVariable)
+    {
+        // Every T-SQL system global variable's own return TYPE is a fixed language guarantee
+        // (oracle-verified against the Docker instance, sys.dm_exec_describe_first_result_set,
+        // compat 160) regardless of session state - only its VALUE depends on runtime execution
+        // state this scanner can never know statically, the same EnvironmentDependent treatment
+        // SERVERPROPERTY/DB_NAME already get. Real corpus shape: `(SELECT @@TRANCOUNT)`.
+        var result = Scan($"DECLARE @sql NVARCHAR(MAX) = 'SELECT ' + CAST({globalVariable} AS VARCHAR); EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ExecOfVariableAssignedFromUnknownSystemGlobalVariable_Declines()
+    {
+        // A global variable this evaluator doesn't recognize (not in the curated, oracle-verified
+        // list) - never a guess at its type, declines with the same generic reason any other
+        // unhandled expression shape gets. @@VERSION is itself NVARCHAR, so this assigns directly
+        // with no CAST involved (CAST's own source-type passthrough would otherwise mask an
+        // unresolved source behind a generic hole, defeating the point of this test).
+        var result = Scan("DECLARE @sql NVARCHAR(MAX) = @@VERSION; EXEC(@sql);");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("non-literal-expression:other", finding.Reason);
     }
 
     // CASE/IIF and CAST/CONVERT are no longer unconditional declines - see the "CASE/IIF folding"

@@ -23,6 +23,25 @@ public static class ExpressionEvaluator
     private const string FnSubstring = "SUBSTRING";
     private const string NonLiteralOther = "non-literal-expression:other";
 
+    /// <summary>
+    /// Every T-SQL system global variable's own return type this evaluator recognizes, each
+    /// oracle-verified (sys.dm_exec_describe_first_result_set, compat 160) rather than assumed
+    /// from documentation - real corpus shapes surfaced via scan-db --fetch-sql-from-tables
+    /// against a restored production database (`(SELECT @@TRANCOUNT)` chief among them). Not
+    /// exhaustive of every T-SQL global variable that exists - only the ones actually observed,
+    /// widened again if a future scan surfaces another.
+    /// </summary>
+    private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["@@TRANCOUNT"] = new SqlType(SqlTypeCategory.Int),
+        ["@@ROWCOUNT"] = new SqlType(SqlTypeCategory.Int),
+        ["@@ERROR"] = new SqlType(SqlTypeCategory.Int),
+        ["@@IDENTITY"] = new SqlType(SqlTypeCategory.Decimal, Precision: 38, Scale: 0),
+        ["@@NESTLEVEL"] = new SqlType(SqlTypeCategory.Int),
+        ["@@SPID"] = new SqlType(SqlTypeCategory.SmallInt),
+        ["@@FETCH_STATUS"] = new SqlType(SqlTypeCategory.Int),
+    };
+
     /// <summary>Folds a scalar expression to its <see cref="SqlTextValue"/> - a <see cref="SqlTextValue.Template"/> (possibly with holes/choices) or <see cref="SqlTextValue.Tainted"/> with a machine-readable reason, never a guess. <paramref name="catalog"/>, when supplied, lets a call to a user-defined scalar function this scanner does not itself model still resolve to a typed hole from that function's own catalog-read RETURNS clause (see <see cref="TryFoldUserScalarFunction"/>) instead of declining outright.</summary>
     public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
     {
@@ -39,6 +58,15 @@ public static class ExpressionEvaluator
 
             case ParenthesisExpression paren:
                 return Fold(paren.Expression, state, sourcePath, cap, catalog);
+
+            case GlobalVariableExpression { Name: { } globalName } when GlobalVariableTypes.TryGetValue(globalName, out var globalType):
+                // A T-SQL system global variable (@@TRANCOUNT, @@ROWCOUNT, ...) - its own TYPE is
+                // a fixed language guarantee (oracle-verified via sys.dm_exec_describe_first_result_set,
+                // compat 160) regardless of session state, but its VALUE depends on runtime
+                // execution state (transaction depth, the previous statement's own row count,
+                // ...) this scanner can never know statically - the same EnvironmentDependent
+                // treatment SERVERPROPERTY/DB_NAME already get.
+                return new SqlTextValue.Template([new TemplatePiece.Hole(globalType, Span(sourcePath, expression), HoleKind.EnvironmentDependent)]);
 
             // ScriptDOM can wrap an operand in a UnaryExpression carrying UnaryExpressionType.Positive
             // purely as an artifact of how it resolves adjacent tokens. Unary plus has no real effect
@@ -140,6 +168,25 @@ public static class ExpressionEvaluator
                 // not anywhere in the source file - this can never fold without reading real
                 // table data (forbidden for corpus code, CLAUDE.md).
                 return new SqlTextValue.Tainted("non-literal-expression:sql-loaded-from-table", Span(sourcePath, expression));
+
+            case ScalarSubquery
+            {
+                QueryExpression: QuerySpecification
+                {
+                    FromClause: null,
+                    SelectElements: [SelectScalarExpression { Expression: { } wrappedExpression }],
+                },
+            }:
+                // `(SELECT expr)` with no FROM at all is a common T-SQL idiom for evaluating a
+                // single scalar expression (real corpus shapes: `(SELECT @@TRANCOUNT)`,
+                // `(SELECT CAST(SCOPE_IDENTITY() AS INT))`, `(SELECT REPLACE(@x, ...))`,
+                // `(SELECT CASE WHEN ... END)`) - T-SQL requires a real table source for WHERE/
+                // GROUP BY/HAVING/ORDER BY, so FromClause being null already guarantees none of
+                // those exist either; the subquery contributes NOTHING beyond parenthesizing the
+                // one wrapped expression, whose value doesn't depend on any database row. Simply
+                // folding that inner expression through the SAME recursion reuses every existing
+                // builtin/CASE/user-function rule rather than reinventing a second copy of them.
+                return Fold(wrappedExpression, state, sourcePath, cap, catalog);
 
             case ScalarSubquery:
                 return new SqlTextValue.Tainted("non-literal-expression:subquery", Span(sourcePath, expression));
