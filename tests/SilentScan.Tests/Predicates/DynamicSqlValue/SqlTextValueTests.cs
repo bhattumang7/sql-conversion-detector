@@ -68,6 +68,60 @@ public sealed class SqlTextValueTests
     }
 
     [Fact]
+    public void Concat_TaintedRightOperandWithDeclaredType_DemotesToHavocWriteHoleAndKeepsLeftLiteral()
+    {
+        var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = NVarChar50 };
+
+        var result = (SqlTextValue.Template)SqlTextValue.Concat(Lit("WHERE (a.ID = 1) AND "), tainted);
+
+        Assert.Equal(2, result.Pieces.Count);
+        Assert.Equal("WHERE (a.ID = 1) AND ", ((TemplatePiece.Lit)result.Pieces[0]).Text);
+        var hole = Assert.IsType<TemplatePiece.Hole>(result.Pieces[1]);
+        Assert.Equal(NVarChar50, hole.Type);
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+    }
+
+    [Fact]
+    public void Concat_TaintedLeftOperandWithDeclaredType_DemotesToHavocWriteHoleAndKeepsRightLiteral()
+    {
+        var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = NVarChar50 };
+
+        var result = (SqlTextValue.Template)SqlTextValue.Concat(tainted, Lit(" ORDER BY a.ID"));
+
+        Assert.Equal(2, result.Pieces.Count);
+        var hole = Assert.IsType<TemplatePiece.Hole>(result.Pieces[0]);
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+        Assert.Equal(" ORDER BY a.ID", ((TemplatePiece.Lit)result.Pieces[1]).Text);
+    }
+
+    [Fact]
+    public void Concat_TaintedOperandWithNoDeclaredType_StillAbsorbsWithoutBecomingAHole()
+    {
+        // Same shape as Concat_TaintedRightOperandWithDeclaredType_* but no DeclaredType at all -
+        // there is nothing to attribute a typed Hole to, so this must keep today's behavior
+        // (whole-value absorption) rather than manufacturing a type.
+        var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin);
+
+        var result = SqlTextValue.Concat(Lit("WHERE (a.ID = 1) AND "), tainted);
+
+        Assert.IsType<SqlTextValue.Tainted>(result);
+    }
+
+    [Fact]
+    public void Concat_TaintedOperandAgainstAnEmptyStartingTemplate_StillAbsorbsWithoutBecomingAHole()
+    {
+        // The shape a bare EXEC(@sql) Concats through internally (DynamicSqlTransfer.CompileStringList
+        // starts from an empty Template) - there is no real literal content on the Template side to
+        // preserve, so demoting to a whole-statement Hole here would recover nothing while turning a
+        // clean, specific Unanalyzable finding into indirection. Must keep today's behavior.
+        var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = NVarChar50 };
+        var empty = new SqlTextValue.Template([]);
+
+        Assert.IsType<SqlTextValue.Tainted>(SqlTextValue.Concat(empty, tainted));
+        Assert.IsType<SqlTextValue.Tainted>(SqlTextValue.Concat(tainted, empty));
+    }
+
+    [Fact]
     public void Concat_TwoTemplatesWithChoicePiece_NeverDistributesTheChoice()
     {
         var choice = new SqlTextValue.Template([new TemplatePiece.Choice("guard", [Lit("A"), Lit("B")])]);

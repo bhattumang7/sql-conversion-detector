@@ -67,6 +67,37 @@ public abstract record SqlTextValue
     /// <see cref="DynamicSqlTransfer.CompileStringList"/>) still see @sql's own guard tags rather
     /// than losing them the moment they pass through a no-op concatenation. The result is a fresh
     /// value, not itself a declared variable, so <see cref="DeclaredType"/> is always null.
+    ///
+    /// When neither of those two more-precise recoveries applies but the Tainted operand DOES
+    /// carry its own <see cref="DeclaredType"/> (the common shape: a declared
+    /// <c>VARCHAR(MAX)</c>/<c>NVARCHAR(MAX)</c> accumulator that became unresolvable partway
+    /// through its OWN construction, then gets concatenated onto a sibling accumulator that still
+    /// has real literal content - the dominant real-corpus idiom this was traced against:
+    /// <c>SET @where = @where + @dynamicFragment</c> chains building a WHERE clause from many
+    /// `IF @col = 'x' SET @dynamicFragment = '...'` branches), the taint is demoted from "the
+    /// whole concatenated value is unknowable" to "exactly ONE identifiable span of it is
+    /// unknowable": a single <see cref="TemplatePiece.Hole"/> tagged <see cref="HoleKind.HavocWrite"/>
+    /// (a typed value of unmodeled origin - deliberately NOT <see cref="HoleKind.OptionalFragment"/>,
+    /// which <see cref="TemplateRenderer"/> renders straight to a bare space with no retry: correct
+    /// only when blank-filling is already known to leave valid grammar behind, never provable here -
+    /// an appended <c>AND fragment</c> left blank is itself invalid syntax. HavocWrite instead renders
+    /// as an ordinary identifier-shaped placeholder token first and, only if THAT breaks the parse,
+    /// falls through to <see cref="DynamicSqlPipeline"/>'s own existing grammar-neutral filler retry
+    /// - the same recovery an unfoldable scalar already gets) takes the tainted operand's place in
+    /// the piece sequence, and the OTHER operand's real literal/hole pieces survive around it
+    /// instead of being discarded outright. This can only ever RECOVER analysis of the surviving
+    /// literal text (the base SELECT/FROM/an unrelated real predicate) - it never fabricates the
+    /// unresolvable fragment's own content, which stays exactly as unknown as it always was. No
+    /// type at all on the Tainted side (a
+    /// taint with nothing to attribute a Hole to) keeps today's behavior unchanged - the whole
+    /// result stays Tainted, exactly as before this method could do anything more precise. Same
+    /// for an EMPTY Template side (no <see cref="TemplatePiece"/> at all - the starting value a
+    /// plain <c>EXEC(@sql)</c> Concats @sql onto, per <see cref="DynamicSqlTransfer.CompileStringList"/>'s
+    /// own doc comment above): manufacturing a single whole-statement Hole there would recover
+    /// NOTHING (there is no real literal content on the other side to preserve) while silently
+    /// changing a bare "this call site's entire SQL text is unknowable" case from an immediate,
+    /// specific Unanalyzable finding into extra pipeline indirection for no gain - so this demotion
+    /// only fires when the surviving Template side already has at least one real piece.
     /// </summary>
     public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
     {
@@ -80,6 +111,11 @@ public abstract record SqlTextValue
                 // here would break the depth invariant that helper documents.
                 var extended = alternatives.Select(alt => alt with { Value = WithoutOwnAlternatives((Template)Concat(alt.Value, b)) }).ToList();
                 return taintedA with { GuardedAlternatives = extended };
+            }
+
+            if (b is Template { Pieces.Count: > 0 } bTemplateForHole && taintedA.DeclaredType is { } typeA)
+            {
+                return new Template([new TemplatePiece.Hole(typeA, taintedA.Location, HoleKind.HavocWrite), .. bTemplateForHole.Pieces]);
             }
 
             return a;
@@ -100,6 +136,11 @@ public abstract record SqlTextValue
                 // SQL text.
                 var extended = alternativesB.Select(alt => alt with { Value = WithoutOwnAlternatives((Template)Concat(a, alt.Value)) }).ToList();
                 return taintedB with { GuardedAlternatives = extended };
+            }
+
+            if (a is Template { Pieces.Count: > 0 } aTemplateForHole && taintedB.DeclaredType is { } typeB)
+            {
+                return new Template([.. aTemplateForHole.Pieces, new TemplatePiece.Hole(typeB, taintedB.Location, HoleKind.HavocWrite)]);
             }
 
             return b;

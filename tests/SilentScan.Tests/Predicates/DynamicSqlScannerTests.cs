@@ -4563,6 +4563,39 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_UnfoldableFragmentConcatenatedOntoALiteralWhereClause_PreservesTheSurroundingLiteralAsPartiallyAnalyzed()
+    {
+        // The dominant real-corpus shape this targets: a declared VARCHAR(MAX) accumulator built
+        // by many `IF @col = 'x' SET @frag = '...'` branches keyed off a caller-supplied column
+        // name, so @frag itself is genuinely unresolvable - but it is then concatenated onto a
+        // SIBLING accumulator that already holds real, literal WHERE-clause text (a base-table
+        // predicate that has nothing to do with @frag at all). Before SqlTextValue.Concat could
+        // demote a typed Tainted operand to an OptionalFragment hole instead of absorbing the
+        // whole value, this entire call site - including the unrelated literal predicate - was
+        // reported Unanalyzable outright.
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @Frag VARCHAR(MAX)
+                DECLARE @sql VARCHAR(MAX)
+
+                SET @Frag = FORMAT(1, N'N')
+                SET @sql = 'SELECT * FROM dbo.Address a WHERE (a.ID = 1) AND ' + @Frag
+
+                EXEC(@sql)
+            END
+            """);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Contains("SELECT * FROM dbo.Address a WHERE (a.ID = 1) AND ", script.InnerText, StringComparison.Ordinal);
+        Assert.Contains("__silentscan_sym_", script.InnerText, StringComparison.Ordinal);
+
+        var finding = Assert.Single(pipeline.Findings);
+        Assert.Equal(DynamicSqlOutcome.PartiallyAnalyzed, finding.Outcome);
+    }
+
+    [Fact]
     public void Scan_SelectAssignmentSelfAppendWithUninitializedPriorValue_ConcatenatesTwoHolesSoundly()
     {
         // @x's own PRIOR value is itself an uninitialized-DECLARE hole, not literal text - self-
