@@ -1,4 +1,4 @@
--- Real shape found on the local test database (RM_AZ_ValleyMetro, not disclosed here per the
+-- Real shape found on the local test database (not disclosed here per the
 -- schema-leak rule beyond its shape): an inline TVF's own body directly names a multi-statement
 -- TVF, and a stored procedure elsewhere references the inline TVF via ordinary function-call
 -- syntax (FROM dbo.itvf(@x)) - textually indistinguishable from calling the fencing MSTVF

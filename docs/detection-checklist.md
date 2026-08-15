@@ -28,6 +28,16 @@ signal, not findings; no schema details recorded here).
 - [x] Tier-1 syntactic non-sargability stream (`SargabilityFindingKind`):
       function-wrapped column, CAST/CONVERT on column, column arithmetic,
       leading-wildcard LIKE, non-literal LIKE pattern.
+- [x] MSTVF-as-fence stream (`TvfFenceFindingKind`): direct FROM/JOIN,
+      correlated `CROSS/OUTER APPLY` (ranked first — no engine version
+      mitigation rescues it), fence inherited through a view/iTVF layer
+      (`Lineage.TvfFenceMap`, including the inline-TVF-function-call-syntax
+      case), standalone reference, `INSERT ... EXEC`. Dynamic-SQL folding and
+      verify-corpus oracle confirmation both wired in
+      (`TvfFenceProbeBuilder`/`TvfFenceVerifier`; marker:
+      `PhysicalOp="Table-valued function"` / `StatementType="INSERT EXEC"`,
+      oracle-verified directly). iTVFs never fire — oracle-verified against
+      `sys.objects.type='IF'` on the local test DB.
 
 ---
 
@@ -61,70 +71,6 @@ inlining spreads into every caller — a lineage-only detection no other tool ha
 - Guards: distinguish predicate vs projection context; report inlined-in-2019+
   cases at reduced severity only when the blocker scan proves inlineable.
 - Oracle: plan shows UDF reference / `NonParallelPlanReason`; compile-only.
-
-### 2. MSTVF-as-fence stream
-41 MSTVFs in the production copy but 126 references (98 from procs, 20 from
-other TVFs — nested fences). Call-site text is identical to harmless iTVFs;
-only the catalog (`sys.objects.type` = 'TF' vs 'IF') can tell them apart.
-Live-scanned against the local test DB after shipping: 1,675 findings
-(1,337 standalone, 187 direct FROM/JOIN, 92 correlated APPLY, 48 INSERT...EXEC,
-11 nested through a view/iTVF layer). A first pass of the nested check only
-looked at bare `NamedTableReference`s and missed a fence hidden behind an
-**inline TVF** called with function-call syntax (`FROM dbo.SomeInlineTvf(@x)`
-— textually identical to calling the fencing MSTVF directly, a distinct
-ScriptDom node from a plain view reference) — caught by this same live run
-(0 nested findings before the fix, 11 after, matching two real cases traced
-by hand against the DB: `dbo.SplitExcludeLiterals`,
-`dbo.TripsReservedByDateRangeAndFundingSource`); fixed and covered by a
-fixture pair (`NESTED_UNDER_VIEW_OR_TVF_via_inline_tvf_{fires,clean}.sql`).
-
-- [x] MSTVF in FROM/JOIN: optimization fence, no statistics, fixed 1/100-row
-      estimate poisoning the surrounding plan. (`TvfFenceFindingKind.FromOrJoin`.)
-- [x] **Correlated `CROSS/OUTER APPLY dbo.fn(t.col)`** — executes per outer
-      row; interleaved execution (2017+) explicitly does not rescue this.
-      Ranked first. (`TvfFenceFindingKind.CorrelatedApply`.)
-- [x] MSTVF hidden under a view / another TVF — lineage depth + origin
-      (the "permissions function wrapped in a view" case).
-      (`Lineage.TvfFenceMap`, `TvfFenceFindingKind.NestedUnderViewOrTvf`.)
-- [x] Standalone `SELECT ... FROM dbo.fn(@x)` — re-litigated from
-      "informational tier only" to a full finding (2026-08-15, Umang's call):
-      the fence and its fabricated estimate are both genuinely present, so
-      precision doesn't require demoting it; only its RANK is last.
-      (`TvfFenceFindingKind.Standalone`.)
-- [x] `INSERT ... EXEC` materialization (same family: forced full
-      materialization to a worktable; cannot nest). (`TvfFenceFindingKind.InsertExec`.)
-- [x] Dynamic-SQL integration: a provably-constant EXEC/sp_executesql
-      argument folds through this stream too, remapped to its true source
-      line, the same way `NonSargablePredicateScanner`/`TypedPredicateExtractor`
-      already do via `DynamicSqlPipeline`. Covered end to end (call-site line
-      vs. true fence-reference line, both direct and nested-through-inline-TVF
-      cases) by `DynamicSqlTvfFenceTests`, Docker-free.
-- [x] Verify-corpus oracle wiring (`TvfFenceProbeBuilder` + `TvfFenceVerifier`,
-      wired into `verify-corpus` exactly like Tier-1/typed/expression-derived).
-      Marker oracle-verified directly against the local Docker instance before
-      being hardcoded: a multi-statement/CLR TVF reference produces
-      `PhysicalOp="Table-valued function"` (with the fixed cardinality guess
-      as its own `EstimateRows`); an inline TVF reference dissolves into base
-      operators and never produces that node. `INSERT ... EXEC` has its own
-      marker, `StatementType="INSERT EXEC"`, also oracle-verified directly.
-      Every function-call probe uses a fresh dummy `CAST(NULL AS type)`
-      argument list (never the finding's own correlated arguments, which
-      reference an outer row the probe has no scope for) - this also means
-      the probe checks the underlying function's own fence-ness, independent
-      of how any one call site invokes it. `INSERT ... EXEC`'s probe
-      describes the procedure's real first result set via
-      `sys.dm_exec_describe_first_result_set` (compile-only, CLAUDE.md's own
-      sanctioned technique) to build a matching receiving table variable,
-      since SQL Server validates column count at compile time regardless of
-      what values ever flow through it. Locked in as regression tests
-      (`TvfFenceVerifierTests`, 6 cases including two negative controls) —
-      the marker was hand-verified once, this stream keeps it verified.
-- Guards: iTVFs never fire (oracle-verified against `sys.objects.type='IF'`
-  on the local test DB: 889 IF vs 41 TF vs 8 FT); severity graded by usage
-  context; engine version mitigations noted at the finding-kind level
-  (interleaved execution applies to uncorrelated APPLY references only).
-- Oracle: plan shows Table Valued Function operator with fixed estimate vs
-  iTVF dissolving into base operators.
 
 ### 3. Join-key and cross-object type/collation mismatch
 Direct reuse of the precedence matrix on new predicate sites. Production copy:
@@ -231,9 +177,10 @@ code, high precision.
 - [ ] The finite serial-forcing intrinsics list (IDENT_CURRENT, ERROR_NUMBER,
       @@TRANCOUNT, OBJECT_ID, ...) in queries — encodable, documented.
 - [ ] Serial-zone constructs as informational: TOP row goals, recursive CTEs,
-      MSTVF refs (covered by #2), global scalar aggregates.
-- Note: several of these fold naturally into streams #1/#2 rather than
-  standing alone — decide at design time.
+      MSTVF refs (already shipped — MSTVF-as-fence stream), global scalar aggregates.
+- Note: several of these fold naturally into the scalar UDF stream (#1) or
+  the already-shipped MSTVF-as-fence stream rather than standing alone —
+  decide at design time.
 
 ### 11. Lineage-metric findings (cheap adds on existing passes)
 - [ ] Nested-view depth report — we already compute topo order; emit depth ≥ N
