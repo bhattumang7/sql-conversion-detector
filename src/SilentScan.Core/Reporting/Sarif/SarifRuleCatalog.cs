@@ -21,6 +21,10 @@ public static class SarifRuleCatalog
     public const string TvfFenceFromOrJoinRuleId = "silentscan/tvf-fence/from-or-join";
     public const string TvfFenceInsertExecRuleId = "silentscan/tvf-fence/insert-exec";
     public const string TvfFenceStandaloneRuleId = "silentscan/tvf-fence/standalone";
+    public const string ScalarUdfPredicateInvocationRuleId = "silentscan/scalar-udf/in-predicate";
+    public const string ScalarUdfNestedUnderViewOrTvfRuleId = "silentscan/scalar-udf/nested-under-view-or-tvf";
+    public const string ScalarUdfSchemaDependencyRuleId = "silentscan/scalar-udf/in-computed-column-or-constraint";
+    public const string ScalarUdfProjectionInvocationRuleId = "silentscan/scalar-udf/in-select-or-expression";
 
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {
@@ -30,6 +34,15 @@ public static class SarifRuleCatalog
         TvfFenceFindingKind.InsertExec => TvfFenceInsertExecRuleId,
         TvfFenceFindingKind.Standalone => TvfFenceStandaloneRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled TvfFenceFindingKind."),
+    };
+
+    public static string ScalarUdfRuleId(ScalarUdfFindingKind kind) => kind switch
+    {
+        ScalarUdfFindingKind.PredicateInvocation => ScalarUdfPredicateInvocationRuleId,
+        ScalarUdfFindingKind.NestedUnderViewOrTvf => ScalarUdfNestedUnderViewOrTvfRuleId,
+        ScalarUdfFindingKind.SchemaDependency => ScalarUdfSchemaDependencyRuleId,
+        ScalarUdfFindingKind.ProjectionInvocation => ScalarUdfProjectionInvocationRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ScalarUdfFindingKind."),
     };
 
     public static string WriteLossRuleId(WriteLossKind kind) => kind switch
@@ -132,6 +145,10 @@ public static class SarifRuleCatalog
             Rule(TvfFenceFromOrJoinRuleId, "A FROM/JOIN references a multi-statement/CLR table-valued function directly - the optimizer cannot see into its body, so the reference carries a fixed cardinality estimate (1 row legacy CE / 100 rows 2014+ CE) that propagates into the surrounding plan."),
             Rule(TvfFenceInsertExecRuleId, "An INSERT ... EXEC forces the executed procedure's entire result set to be spooled to a worktable before insertion - the same fence family, reached from a procedure call rather than a function reference."),
             Rule(TvfFenceStandaloneRuleId, "A standalone SELECT references a multi-statement/CLR table-valued function with nothing else in the FROM clause - the fence and its fixed estimate are real, but there is no surrounding plan for the estimate to poison."),
+            Rule(ScalarUdfPredicateInvocationRuleId, "A scalar UDF is called in a WHERE/JOIN ON/HAVING/MERGE ON predicate - per-row execution, non-sargable, and (pre-2019, or on any engine when the UDF proves non-inlineable) forces the whole plan serial. Distinct from a syntactic function-wrapped-column finding on the same predicate: this claim is catalog-proven per-row/serial cost, not sargability loss, and the two are reported independently by design."),
+            Rule(ScalarUdfNestedUnderViewOrTvfRuleId, "A view or inline TVF referenced here calls a scalar UDF, transitively, somewhere in its own definition - the per-row cost (and, pre-2019, forced-serial plan) is inherited invisibly through however many layers sit between. Pre-2019 an inline TVF's expansion spreads the UDF into every caller; 2019+ a scalar-UDF call inside an iTVF is itself a FROID inlining-blocker interaction."),
+            Rule(ScalarUdfSchemaDependencyRuleId, "A computed column, DEFAULT, or CHECK constraint definition calls a scalar UDF - this poisons every query that touches the table with per-row/serial cost, even one that never names the column, and is detected from the catalog alone."),
+            Rule(ScalarUdfProjectionInvocationRuleId, "A scalar UDF is called outside any predicate (SELECT list, ORDER BY, GROUP BY, SET/variable assignment) - per-row execution and (pre-2019, or non-inlineable) a forced-serial plan, but sargability is unaffected."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

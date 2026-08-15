@@ -45,16 +45,19 @@ public static partial class DynamicSqlPipeline
 
     private static readonly IReadOnlyDictionary<string, TvfFenceOrigin> NoTvfFenceMap = new Dictionary<string, TvfFenceOrigin>();
 
-    /// <summary>Bundles everything a script needs from OUTSIDE its own recursion (the catalog/lineage/fence-map every level shares, plus the proc-call-graph scoping) - kept as one record so splitting ProcessScript/AnalyzeNested into smaller pieces to reduce cognitive complexity doesn't just turn into another long parameter list (Sonar S107).</summary>
+    private static readonly IReadOnlyDictionary<string, ScalarUdfOrigin> NoScalarUdfMap = new Dictionary<string, ScalarUdfOrigin>();
+
+    /// <summary>Bundles everything a script needs from OUTSIDE its own recursion (the catalog/lineage/fence-maps every level shares, plus the proc-call-graph scoping) - kept as one record so splitting ProcessScript/AnalyzeNested into smaller pieces to reduce cognitive complexity doesn't just turn into another long parameter list (Sonar S107).</summary>
     private readonly record struct PipelineContext(
         DatabaseCatalog Catalog,
         LineageCatalog Lineage,
         IReadOnlyDictionary<string, TvfFenceOrigin> TvfFenceMap,
+        IReadOnlyDictionary<string, ScalarUdfOrigin> ScalarUdfMap,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? CallerScopeByCalleeScope);
 
     public static DynamicSqlPipelineResult Analyze(
         IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
-        Analyze(scripts, new PipelineContext(catalog, lineage, NoTvfFenceMap, callerScopeByCalleeScope), depth: 1, seeds: null);
+        Analyze(scripts, new PipelineContext(catalog, lineage, NoTvfFenceMap, NoScalarUdfMap, callerScopeByCalleeScope), depth: 1, seeds: null);
 
     /// <summary>
     /// Same as the overload above, but also folds provably-constant dynamic SQL through the
@@ -67,7 +70,16 @@ public static partial class DynamicSqlPipeline
     /// </summary>
     public static DynamicSqlPipelineResult Analyze(
         IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, TvfFenceOrigin> tvfFenceMap, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
-        Analyze(scripts, new PipelineContext(catalog, lineage, tvfFenceMap, callerScopeByCalleeScope), depth: 1, seeds: null);
+        Analyze(scripts, catalog, lineage, tvfFenceMap, NoScalarUdfMap, callerScopeByCalleeScope);
+
+    /// <summary>
+    /// Same as the overload above, but also folds provably-constant dynamic SQL through the
+    /// scalar-UDF stream (docs/detection-checklist.md Tier 1 #1) - <paramref name="scalarUdfMap"/>
+    /// is <see cref="Lineage.ScalarUdfMap"/>'s corpus-wide output, built once by the caller.
+    /// </summary>
+    public static DynamicSqlPipelineResult Analyze(
+        IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, TvfFenceOrigin> tvfFenceMap, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
+        Analyze(scripts, new PipelineContext(catalog, lineage, tvfFenceMap, scalarUdfMap, callerScopeByCalleeScope), depth: 1, seeds: null);
 
     /// <summary>
     /// <paramref name="seeds"/> supplies, for a nested script whose own declared-parameter text
@@ -108,6 +120,7 @@ public static partial class DynamicSqlPipeline
             accumulator.CollationConflicts.AddRange(DedupeCollationConflicts(PreferBestConfidencePerKey(perCallSite.CollationConflicts, CollationConflictKey, f => f.Confidence)));
             accumulator.WriteLoss.AddRange(DedupeWriteLoss(PreferBestConfidencePerKey(perCallSite.WriteLoss, WriteLossKey, f => f.Confidence)));
             accumulator.TvfFence.AddRange(DedupeTvfFence(PreferBestConfidencePerKey(perCallSite.TvfFence, TvfFenceKey, f => f.Confidence)));
+            accumulator.ScalarUdf.AddRange(DedupeScalarUdf(PreferBestConfidencePerKey(perCallSite.ScalarUdf, ScalarUdfKey, f => f.Confidence)));
         }
 
         return accumulator.ToResult();
@@ -181,6 +194,15 @@ public static partial class DynamicSqlPipeline
     private static (TvfFenceFindingKind, string?, string?) TvfFenceKey(TvfFenceFinding finding) =>
         (finding.Kind, finding.FunctionQualifiedName, finding.ReferencedObjectQualifiedName);
 
+    private static List<ScalarUdfFinding> DedupeScalarUdf(List<ScalarUdfFinding> findings)
+    {
+        var seen = new HashSet<(ScalarUdfFindingKind, string, string, ScalarUdfContext)>();
+        return findings.Where(finding => seen.Add(ScalarUdfKey(finding))).ToList();
+    }
+
+    private static (ScalarUdfFindingKind, string, string, ScalarUdfContext) ScalarUdfKey(ScalarUdfFinding finding) =>
+        (finding.Kind, finding.FunctionQualifiedName, finding.ReferencedObjectQualifiedName, finding.Context);
+
     /// <summary>
     /// Reorders <paramref name="findings"/> so that, within any set sharing the same
     /// <paramref name="key"/>, the BEST (numerically lowest) <see cref="FindingConfidence"/> sorts
@@ -213,10 +235,12 @@ public static partial class DynamicSqlPipeline
 
         public List<TvfFenceFinding> TvfFence { get; } = [];
 
+        public List<ScalarUdfFinding> ScalarUdf { get; } = [];
+
         public List<SkippedConstruct> Skipped { get; } = [];
 
         public DynamicSqlPipelineResult ToResult() =>
-            new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, WriteLoss, TvfFence, Skipped);
+            new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, WriteLoss, TvfFence, ScalarUdf, Skipped);
     }
 
     /// <summary>
@@ -610,6 +634,11 @@ public static partial class DynamicSqlPipeline
             accumulator.TvfFence.Add(Remap(tvfFenceFinding, script, map));
         }
 
+        foreach (var scalarUdfFinding in ScalarUdfScanner.Scan(innerParseResult, context.Catalog, context.ScalarUdfMap))
+        {
+            accumulator.ScalarUdf.Add(Remap(scalarUdfFinding, script, map));
+        }
+
         var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
             ? DynamicSqlParameterDeclarations.TryParse(declarationText, context.Catalog.TypeAliases) ?? NoDeclaredParameters
             : NoDeclaredParameters;
@@ -659,6 +688,7 @@ public static partial class DynamicSqlPipeline
         accumulator.CollationConflicts.AddRange(nested.CollationConflictFindings);
         accumulator.WriteLoss.AddRange(nested.WriteLossFindings);
         accumulator.TvfFence.AddRange(nested.TvfFenceFindings);
+        accumulator.ScalarUdf.AddRange(nested.ScalarUdfFindings);
         accumulator.Skipped.AddRange(nested.SkippedConstructs);
     }
 
@@ -679,7 +709,7 @@ public static partial class DynamicSqlPipeline
 
         if (nestedExtraction.AnalyzableScripts.Count == 0)
         {
-            return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], []);
+            return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], [], []);
         }
 
         if (depth >= MaxNestingDepth)
@@ -690,7 +720,7 @@ public static partial class DynamicSqlPipeline
                 .Select(nestedScript => script.SegmentMap.Map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
                 .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "max-nesting-depth-exceeded")));
 
-            return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], []);
+            return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], [], []);
         }
 
         var seeds = BuildArgumentBindingSeeds(nestedExtraction.AnalyzableScripts, outerDeclaredParameters);
@@ -705,6 +735,7 @@ public static partial class DynamicSqlPipeline
             [.. nestedResult.CollationConflictFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.WriteLossFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.TvfFenceFindings.Select(f => RemapNested(f, script))],
+            [.. nestedResult.ScalarUdfFindings.Select(f => RemapNested(f, script))],
             [.. nestedResult.SkippedConstructs.Select(s => Remap(s, script))]);
     }
 
@@ -724,7 +755,7 @@ public static partial class DynamicSqlPipeline
             .Select(nestedScript => map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
             .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "nested-dynamic-sql-inside-symbolic-value")));
 
-        return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], []);
+        return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], [], []);
     }
 
     /// <summary>Whether every character of <paramref name="innerText"/> outside <paramref name="occurrences"/>' own spans is blank - <c>EXEC(@sym)</c> itself, or the equivalent after folding, where there is no real SQL text left to reparse at all.</summary>
@@ -847,6 +878,12 @@ public static partial class DynamicSqlPipeline
         return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
     }
 
+    private static ScalarUdfFinding Remap(ScalarUdfFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
+    {
+        var span = map(finding.Line, finding.Column);
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
+    }
+
     private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script) =>
         Remap(entry, script.SegmentMap.Map);
 
@@ -898,6 +935,12 @@ public static partial class DynamicSqlPipeline
         var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
     }
+
+    private static ScalarUdfFinding RemapNested(ScalarUdfFinding finding, DynamicSqlScript outerScript)
+    {
+        var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
+        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
+    }
 }
 
 /// <summary>Findings produced by reparsing and analyzing the dynamic SQL scripts of one scan, including any found nested inside them.</summary>
@@ -909,4 +952,5 @@ public sealed record DynamicSqlPipelineResult(
     IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
     IReadOnlyList<WriteLossFinding> WriteLossFindings,
     IReadOnlyList<TvfFenceFinding> TvfFenceFindings,
+    IReadOnlyList<ScalarUdfFinding> ScalarUdfFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs);

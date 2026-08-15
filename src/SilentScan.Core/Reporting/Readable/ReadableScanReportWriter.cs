@@ -62,6 +62,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(WriteLoss(report, headingLevel, pathBase));
         blocks.AddRange(Tier1(report, headingLevel, pathBase));
         blocks.AddRange(TvfFence(report, headingLevel, pathBase));
+        blocks.AddRange(ScalarUdf(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -105,6 +106,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "INSERT/UPDATE assignments risking silent data loss", report.WriteLossFindings.Count);
         AddCount(counts, "Non-sargable predicate patterns", report.Tier1Findings.Count);
         AddCount(counts, "Multi-statement/CLR TVF references acting as optimization fences", report.TvfFenceFindings.Count);
+        AddCount(counts, "Scalar UDF calls (per-row cost, non-sargable when predicate-context)", report.ScalarUdfFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -373,6 +375,79 @@ public static class ReadableScanReportWriter
         TvfFenceFindingKind.InsertExec => "INSERT ... EXEC (forced worktable materialization)",
         _ => "Standalone reference (fence present, nothing to poison)",
     };
+
+    private static IEnumerable<ReadableBlock> ScalarUdf(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ScalarUdfFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Scalar UDF calls ({report.ScalarUdfFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A scalar UDF executes once per row wherever it's called; pre-2019 (or on any engine when it proves non-inlineable) it also forces the whole plan serial. A predicate-context call additionally loses sargability, and a call reached through a view/iTVF's own expansion inherits the same cost invisibly at every consumer. Predicate-context and lineage-inherited calls are listed first; a call the engine itself inlines (2019+ FROID) is noted but ranked no higher than Unknown/NotInlineable ones.");
+
+        foreach (var group in report.ScalarUdfFindings
+            .GroupBy(f => f.Kind)
+            .OrderBy(g => g.Key))
+        {
+            var ordered = group
+                .OrderByDescending(f => f.Depth)
+                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ToList();
+
+            yield return new ReadableBlock.Heading(level + 1, $"{ScalarUdfTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Function", "Context", "Inlineable", "Depth", "Origin", "Detail"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
+                    $"{f.FunctionQualifiedName} ({f.UdfKind})",
+                    f.Context.ToString(),
+                    ScalarUdfInlineabilityDisplay(f),
+                    f.Depth.ToString(CultureInfo.InvariantCulture),
+                    f.OriginSourcePath is { } origin ? $"{Relative(origin, pathBase)}:{f.OriginLine.ToString(CultureInfo.InvariantCulture)}" : "-",
+                    ScalarUdfDetail(f),
+                })]);
+        }
+    }
+
+    private static string ScalarUdfTitle(ScalarUdfFindingKind kind) => kind switch
+    {
+        ScalarUdfFindingKind.PredicateInvocation => "Called in a predicate (non-sargable, per-row)",
+        ScalarUdfFindingKind.NestedUnderViewOrTvf => "Reached through a view/iTVF layer",
+        ScalarUdfFindingKind.SchemaDependency => "Called from a computed column/DEFAULT/CHECK constraint",
+        _ => "Called outside a predicate (per-row, sargability unaffected)",
+    };
+
+    private static string ScalarUdfInlineabilityDisplay(ScalarUdfFinding finding) => finding.Inlineability switch
+    {
+        ScalarUdfInlineability.Inlineable => "yes (2019+ FROID)",
+        ScalarUdfInlineability.NotInlineable => "no",
+        _ => "unknown",
+    };
+
+    private static string ScalarUdfDetail(ScalarUdfFinding finding)
+    {
+        var parts = new List<string>();
+        if (finding.InlineabilityBlocker is { Length: > 0 } blocker)
+        {
+            parts.Add(blocker);
+        }
+
+        if (finding.ConstantArgumentsNotFolded)
+        {
+            parts.Add("non-schemabound, literal arguments not constant-folded");
+        }
+
+        if (finding.UdfKind == ScalarUdfKind.Clr && finding.ClrDataAccess is { } dataAccess)
+        {
+            parts.Add(dataAccess ? "CLR, data access" : "CLR, no data access");
+        }
+
+        return parts.Count == 0 ? finding.ReferenceFragmentText ?? "-" : string.Join("; ", parts);
+    }
 
     private static IEnumerable<ReadableBlock> DynamicSql(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
     {

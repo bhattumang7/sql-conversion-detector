@@ -12,6 +12,7 @@ public sealed record ScanReport(
     IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
     IReadOnlyList<WriteLossFinding> WriteLossFindings,
     IReadOnlyList<TvfFenceFinding> TvfFenceFindings,
+    IReadOnlyList<ScalarUdfFinding> ScalarUdfFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -28,7 +29,8 @@ public sealed record ScanReport(
     /// and defaulted to High, but a consumer that only checked schema version to decide whether
     /// a new field might exist deserves the same signal any other new field gets. Bumped to 5
     /// for the new <see cref="TvfFenceFindings"/> stream (docs/detection-checklist.md Tier 1
-    /// #2, MSTVF-as-fence).
+    /// #2, MSTVF-as-fence). Bumped to 6 for the new <see cref="ScalarUdfFindings"/> stream
+    /// (docs/detection-checklist.md Tier 1 #1, scalar UDF).
     /// </summary>
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 }

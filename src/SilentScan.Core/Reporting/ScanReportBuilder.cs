@@ -122,11 +122,13 @@ public static class ScanReportBuilder
         // doesn't expose the ViewDefinition list it builds internally, and re-deriving it here
         // is cheap next to the passes either side of it.
         IReadOnlyDictionary<string, Lineage.TvfFenceOrigin> tvfFenceMap;
-        using (var fenceMapStage = progress.Begin("mapping TVF fences"))
+        IReadOnlyDictionary<string, Lineage.ScalarUdfOrigin> scalarUdfMap;
+        using (var fenceMapStage = progress.Begin("mapping TVF fences and scalar UDFs"))
         {
             var (views, _) = Lineage.ViewDefinitionExtractor.Extract(usableParseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
             tvfFenceMap = Lineage.TvfFenceMap.Build(views, catalog);
-            fenceMapStage.Complete($"{tvfFenceMap.Count:N0} view/TVF layers inherit a fence");
+            scalarUdfMap = Lineage.ScalarUdfMap.Build(views, catalog);
+            fenceMapStage.Complete($"{tvfFenceMap.Count:N0} view/TVF layers inherit a fence, {scalarUdfMap.Count:N0} inherit a scalar UDF");
         }
 
         var callGraphLedger = new SkipLedger();
@@ -276,6 +278,21 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<ScalarUdfFinding> scalarUdfFindings;
+        using (var scalarUdfStage = progress.Begin("scanning scalar UDFs", usableCount))
+        {
+            scalarUdfFindings = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = ScalarUdfScanner.Scan(r, catalog, scalarUdfMap);
+                    scalarUdfStage.Advance();
+                    return findings;
+                })
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -304,7 +321,7 @@ public static class ScanReportBuilder
         // Tier A of the dynamic SQL policy (CLAUDE.md): reparse provably-constant EXEC/
         // sp_executesql arguments through the same pipeline and fold their findings in,
         // remapped back to their true source location.
-        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, tvfFenceMap, callerScopeByCalleeScope);
+        var dynamicSqlResult = DynamicSqlPipeline.Analyze(dynamicSqlScripts, catalog, lineage, tvfFenceMap, scalarUdfMap, callerScopeByCalleeScope);
         dynamicSqlFindings = [.. dynamicSqlFindings, .. dynamicSqlResult.Findings];
         tier1Findings = [.. tier1Findings, .. dynamicSqlResult.Tier1Findings];
         typedFindings = [.. typedFindings, .. dynamicSqlResult.TypedFindings];
@@ -312,6 +329,7 @@ public static class ScanReportBuilder
         collationConflictFindings = [.. collationConflictFindings, .. dynamicSqlResult.CollationConflictFindings];
         writeLossFindings = [.. writeLossFindings, .. dynamicSqlResult.WriteLossFindings];
         tvfFenceFindings = [.. tvfFenceFindings, .. dynamicSqlResult.TvfFenceFindings];
+        scalarUdfFindings = [.. scalarUdfFindings, .. dynamicSqlResult.ScalarUdfFindings];
         skippedConstructs.AddRange(dynamicSqlResult.SkippedConstructs);
 
         // Captured before SeekPreserved findings are dropped below - the report's only
@@ -332,6 +350,7 @@ public static class ScanReportBuilder
         collationConflictFindings = [.. collationConflictFindings.Where(f => f.Confidence <= minimumConfidence)];
         writeLossFindings = [.. writeLossFindings.Where(f => f.Confidence <= minimumConfidence)];
         tvfFenceFindings = [.. tvfFenceFindings.Where(f => f.Confidence <= minimumConfidence)];
+        scalarUdfFindings = [.. scalarUdfFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
         // SCAN_FORCED + indexed + depth>=1 first.
@@ -358,6 +377,22 @@ public static class ScanReportBuilder
             .ThenByDescending(f => f.Depth)
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
             .ThenBy(f => f.Line)];
+
+        // docs/detection-checklist.md's own rank for this stream: predicate-context invocation
+        // first (the maximal claim - non-sargable AND per-row AND, pre-2019 or non-inlineable,
+        // serial), then reached-through-lineage (depth is the number no text-matching tool can
+        // produce), then a schema-level dependency, then a plain projection-context invocation
+        // last - the declared order of ScalarUdfFindingKind's own enum members. Within a kind,
+        // NotInlineable ranks above Unknown above Inlineable - the severity-downgrade guard
+        // expressed as ordering, matching the checklist's "report inlined-in-2019+ cases at
+        // reduced severity".
+        scalarUdfFindings = [.. scalarUdfFindings
+            .OrderBy(f => f.Kind)
+            .ThenBy(f => InlineabilityRank(f.Inlineability))
+            .ThenByDescending(f => f.Depth)
+            .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+            .ThenBy(f => f.Line)
+            .ThenBy(f => f.Column)];
         var orderedSkippedConstructs = skippedConstructs
             .OrderBy(s => s.Pass)
             .ThenBy(s => s.SourcePath, StringComparer.Ordinal)
@@ -367,7 +402,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
-            tvfFenceFindings,
+            tvfFenceFindings, scalarUdfFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
@@ -377,5 +412,12 @@ public static class ScanReportBuilder
         Verdict.RangeSeek => 1,
         Verdict.Unknown => 2,
         _ => 3,
+    };
+
+    private static int InlineabilityRank(ScalarUdfInlineability inlineability) => inlineability switch
+    {
+        ScalarUdfInlineability.NotInlineable => 0,
+        ScalarUdfInlineability.Unknown => 1,
+        _ => 2,
     };
 }

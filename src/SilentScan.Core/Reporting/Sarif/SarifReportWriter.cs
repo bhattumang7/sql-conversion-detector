@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
@@ -43,6 +44,7 @@ public static class SarifReportWriter
         results.AddRange(report.CollationConflictFindings.Select(ToResult));
         results.AddRange(report.WriteLossFindings.Select(ToResult));
         results.AddRange(report.TvfFenceFindings.Select(ToResult));
+        results.AddRange(report.ScalarUdfFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -176,6 +178,58 @@ public static class SarifReportWriter
             TvfFenceFindingKind.Standalone =>
                 $"'{finding.FunctionQualifiedName}' ({finding.FunctionKind}) is referenced standalone - the fence is real but nothing surrounds it for the fixed estimate to poison.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled TvfFenceFindingKind."),
+        };
+        message += DynamicSqlOriginNote(finding.DynamicSqlCallSite);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(ScalarUdfFinding finding)
+    {
+        // Predicate-context and reached-through-lineage are the two cases where the claim is
+        // strongest (non-sargable AND per-row AND, pre-2019/non-inlineable, serial); a schema
+        // dependency poisons every query touching the table but has no query-site call to point
+        // at; a plain projection-context call is real per-row cost with no sargability impact.
+        var level = finding.Kind switch
+        {
+            ScalarUdfFindingKind.PredicateInvocation or ScalarUdfFindingKind.NestedUnderViewOrTvf => LevelError,
+            ScalarUdfFindingKind.SchemaDependency => LevelWarning,
+            ScalarUdfFindingKind.ProjectionInvocation => LevelNote,
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled ScalarUdfFindingKind."),
+        };
+
+        // A scalar UDF the engine itself inlines (2019+) dissolves into the calling plan at
+        // compile time - real, but no longer the maximal claim the base level asserts.
+        if (finding.Inlineability == ScalarUdfInlineability.Inlineable)
+        {
+            level = DowngradeOneLevel(level);
+        }
+
+        level = FloorLevelForConfidence(level, finding.Confidence);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ScalarUdfRuleId(finding.Kind), finding.Confidence);
+
+        var inlineNote = finding.Inlineability switch
+        {
+            ScalarUdfInlineability.Inlineable => " (inlined under SQL 2019+ FROID)",
+            ScalarUdfInlineability.NotInlineable => finding.InlineabilityBlocker is { } blocker ? $" (not inlineable: {blocker})" : " (not inlineable)",
+            _ => string.Empty,
+        };
+        var clrNote = finding.UdfKind == ScalarUdfKind.Clr
+            ? finding.ClrDataAccess switch { true => " [CLR, data access]", false => " [CLR, no data access]", _ => " [CLR]" }
+            : string.Empty;
+        var foldNote = finding.ConstantArgumentsNotFolded ? " - non-schemabound, so even literal arguments are not constant-folded" : string.Empty;
+
+        var message = finding.Kind switch
+        {
+            ScalarUdfFindingKind.PredicateInvocation =>
+                $"Scalar UDF '{finding.FunctionQualifiedName}' is called in a {finding.Context} predicate - per-row execution, non-sargable{inlineNote}{clrNote}{foldNote}.",
+            ScalarUdfFindingKind.NestedUnderViewOrTvf =>
+                $"'{finding.ReferencedObjectQualifiedName}' inherits scalar UDF '{finding.FunctionQualifiedName}' {finding.Depth} layer(s) down, introduced at {finding.OriginSourcePath}:{finding.OriginLine} ({finding.Context}).",
+            ScalarUdfFindingKind.SchemaDependency =>
+                $"'{finding.ReferencedObjectQualifiedName}' has a {finding.SchemaDependencyKind} whose definition calls scalar UDF '{finding.FunctionQualifiedName}' - every query touching the table pays this cost{inlineNote}{clrNote}.",
+            ScalarUdfFindingKind.ProjectionInvocation =>
+                $"Scalar UDF '{finding.FunctionQualifiedName}' is called in {finding.Context} - per-row execution{inlineNote}{clrNote}{foldNote}.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled ScalarUdfFindingKind."),
         };
         message += DynamicSqlOriginNote(finding.DynamicSqlCallSite);
 
