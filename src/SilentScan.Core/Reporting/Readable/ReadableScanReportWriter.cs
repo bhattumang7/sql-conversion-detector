@@ -25,6 +25,9 @@ public static class ReadableScanReportWriter
     /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string ColumnHeader = "Column";
 
+    /// <summary>Shared across every "we don't have a name for this" fallback string.</summary>
+    private const string UnknownDisplay = "unknown";
+
     public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief) =>
         ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase, verbosity), style);
 
@@ -232,7 +235,7 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
                 f.ColumnName,
                 f.TransformationChain.Count == 0
-                    ? "unknown"
+                    ? UnknownDisplay
                     : string.Join(" <- ", f.TransformationChain.Select(site => DescribeTransformationSite(site, pathBase))),
                 f.UnderlyingBaseColumns.Count == 0
                     ? "none traceable"
@@ -425,7 +428,7 @@ public static class ReadableScanReportWriter
     {
         ScalarUdfInlineability.Inlineable => "yes (2019+ FROID)",
         ScalarUdfInlineability.NotInlineable => "no",
-        _ => "unknown",
+        _ => UnknownDisplay,
     };
 
     private static string ScalarUdfDetail(ScalarUdfFinding finding)
@@ -596,14 +599,14 @@ public static class ReadableScanReportWriter
             ? site.Description
             : $"{site.Description} at {Relative(site.SourcePath, pathBase)}:{site.Line.ToString(CultureInfo.InvariantCulture)}";
 
-    private static string DescribeType(SqlType? type) => type?.ToString() ?? "unknown";
+    private static string DescribeType(SqlType? type) => type?.ToString() ?? UnknownDisplay;
 
     private static string DescribeOperand(PredicateOperand operand) => operand switch
     {
         PredicateOperand.Column column => $"{column.TableQualifiedName}.{column.ColumnName} ({DescribeType(column.Type)})",
         PredicateOperand.Value { IsLiteral: true, LiteralText: { } text } value => $"{text} ({DescribeType(value.Type)})",
         PredicateOperand.Value value => DescribeType(value.Type),
-        _ => "unknown",
+        _ => UnknownDisplay,
     };
 
     /// <summary>

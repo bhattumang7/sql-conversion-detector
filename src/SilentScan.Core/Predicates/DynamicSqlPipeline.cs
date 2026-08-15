@@ -629,15 +629,7 @@ public static partial class DynamicSqlPipeline
             accumulator.Skipped.Add(Remap(tier1Skipped, map));
         }
 
-        foreach (var tvfFenceFinding in TvfFenceScanner.Scan(innerParseResult, context.Catalog, context.TvfFenceMap))
-        {
-            accumulator.TvfFence.Add(Remap(tvfFenceFinding, script, map));
-        }
-
-        foreach (var scalarUdfFinding in ScalarUdfScanner.Scan(innerParseResult, context.Catalog, context.ScalarUdfMap))
-        {
-            accumulator.ScalarUdf.Add(Remap(scalarUdfFinding, script, map));
-        }
+        FoldFenceAndScalarUdfFindings(innerParseResult, context, script, map, accumulator);
 
         var ownDeclaredParameters = script.ParameterDeclarationText is { } declarationText
             ? DynamicSqlParameterDeclarations.TryParse(declarationText, context.Catalog.TypeAliases) ?? NoDeclaredParameters
@@ -690,6 +682,21 @@ public static partial class DynamicSqlPipeline
         accumulator.TvfFence.AddRange(nested.TvfFenceFindings);
         accumulator.ScalarUdf.AddRange(nested.ScalarUdfFindings);
         accumulator.Skipped.AddRange(nested.SkippedConstructs);
+    }
+
+    /// <summary>Split out of <see cref="ProcessScript"/> purely to keep its own cognitive complexity under the Sonar threshold (Sonar S3776) - both scans share the same reparsed script/map/accumulator, so there is nothing else to parameterize.</summary>
+    private static void FoldFenceAndScalarUdfFindings(
+        SqlParseResult innerParseResult, PipelineContext context, DynamicSqlScript script, Func<int, int, SourceSpan> map, ResultAccumulator accumulator)
+    {
+        foreach (var tvfFenceFinding in TvfFenceScanner.Scan(innerParseResult, context.Catalog, context.TvfFenceMap))
+        {
+            accumulator.TvfFence.Add(Remap(tvfFenceFinding, script, map));
+        }
+
+        foreach (var scalarUdfFinding in ScalarUdfScanner.Scan(innerParseResult, context.Catalog, context.ScalarUdfMap))
+        {
+            accumulator.ScalarUdf.Add(Remap(scalarUdfFinding, script, map));
+        }
     }
 
     private static DynamicSqlPipelineResult AnalyzeNested(

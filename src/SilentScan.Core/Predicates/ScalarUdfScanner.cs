@@ -56,16 +56,6 @@ public static class ScalarUdfScanner
 
         public override void ExplicitVisit(SetVariableStatement node) => ClaimRegion(node.Expression, node, ScalarUdfContext.VariableAssignment);
 
-        private void ClaimRegion(TSqlFragment? region, TSqlFragment node, ScalarUdfContext context)
-        {
-            if (region is not null)
-            {
-                _regions.Add((region.StartOffset, region.StartOffset + region.FragmentLength, context));
-            }
-
-            node.AcceptChildren(this);
-        }
-
         public override void ExplicitVisit(FromClause node)
         {
             foreach (var tableReference in node.TableReferences)
@@ -74,6 +64,37 @@ public static class ScalarUdfScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(FunctionCall node)
+        {
+            if (_claimed.Contains(node))
+            {
+                base.ExplicitVisit(node);
+                return;
+            }
+
+            if (node.CallTarget is MultiPartIdentifierCallTarget)
+            {
+                var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.QualifyFunctionCall(node));
+                if (catalog.TryGetScalarUdfInfo(qualifiedName, out var info) && info is not null)
+                {
+                    Emit(node, qualifiedName, info);
+                    ClaimNestedFunctionCalls(node);
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private void ClaimRegion(TSqlFragment? region, TSqlFragment node, ScalarUdfContext context)
+        {
+            if (region is not null)
+            {
+                _regions.Add((region.StartOffset, region.StartOffset + region.FragmentLength, context));
+            }
+
+            node.AcceptChildren(this);
         }
 
         private void Flatten(TableReference tableReference)
@@ -132,27 +153,6 @@ public static class ScalarUdfScanner
                 OriginSourcePath: origin.OriginSourcePath,
                 OriginLine: origin.OriginLine,
                 ReferenceFragmentText: fragmentText));
-        }
-
-        public override void ExplicitVisit(FunctionCall node)
-        {
-            if (_claimed.Contains(node))
-            {
-                base.ExplicitVisit(node);
-                return;
-            }
-
-            if (node.CallTarget is MultiPartIdentifierCallTarget)
-            {
-                var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.QualifyFunctionCall(node));
-                if (catalog.TryGetScalarUdfInfo(qualifiedName, out var info) && info is not null)
-                {
-                    Emit(node, qualifiedName, info);
-                    ClaimNestedFunctionCalls(node);
-                }
-            }
-
-            base.ExplicitVisit(node);
         }
 
         private void Emit(FunctionCall node, string qualifiedName, ScalarUdfInfo info)

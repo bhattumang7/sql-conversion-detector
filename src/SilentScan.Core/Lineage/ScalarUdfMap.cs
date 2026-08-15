@@ -139,16 +139,6 @@ public static class ScalarUdfMap
 
         public override void ExplicitVisit(GroupByClause node) => ClaimRegion(node, node, ScalarUdfContext.GroupBy);
 
-        private void ClaimRegion(TSqlFragment? region, TSqlFragment node, ScalarUdfContext context)
-        {
-            if (region is not null)
-            {
-                _regions.Add((region.StartOffset, region.StartOffset + region.FragmentLength, context));
-            }
-
-            node.AcceptChildren(this);
-        }
-
         public override void ExplicitVisit(FunctionCall node)
         {
             if (node.CallTarget is MultiPartIdentifierCallTarget)
@@ -169,6 +159,16 @@ public static class ScalarUdfMap
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private void ClaimRegion(TSqlFragment? region, TSqlFragment node, ScalarUdfContext context)
+        {
+            if (region is not null)
+            {
+                _regions.Add((region.StartOffset, region.StartOffset + region.FragmentLength, context));
+            }
+
+            node.AcceptChildren(this);
         }
 
         private ScalarUdfContext ResolveContext(FunctionCall node)
@@ -192,12 +192,12 @@ public static class ScalarUdfMap
 
         private static ScalarUdfOrigin? WorseOf(ScalarUdfOrigin? existing, ScalarUdfOrigin candidate)
         {
-            if (existing is null)
+            if (existing is null || (!existing.OriginContext.IsPredicate() && candidate.OriginContext.IsPredicate()))
             {
                 return candidate;
             }
 
-            return existing.OriginContext.IsPredicate() ? existing : candidate.OriginContext.IsPredicate() ? candidate : existing;
+            return existing;
         }
     }
 }
