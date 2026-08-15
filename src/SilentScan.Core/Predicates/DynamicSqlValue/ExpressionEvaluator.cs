@@ -435,16 +435,25 @@ public static class ExpressionEvaluator
     /// splicing) per LITERAL segment of the source, leaving every existing Hole piece completely
     /// untouched and in place (opaque - REPLACE never searches inside an already-unknown value,
     /// the same treatment a Hole gets everywhere else in this scanner). The source MAY also carry
-    /// a single embedded <see cref="TemplatePiece.Choice"/> alongside Lit/Hole pieces (the SAME
-    /// call chain accumulating both an earlier REPLACE's hole-splice AND a real IF-branch
-    /// divergence, seen in sp_BlitzIndex.sql) - handled by cross-producting over the Choice's own
-    /// alternatives first (mirroring <see cref="TryFoldCrossProduct"/>'s own policy: one bad
-    /// alternative taints the whole result, since a Choice means "one of these really happens"),
-    /// then running the per-Lit-segment splice on each materialized candidate. More than one
-    /// Choice piece is deliberately left declining, same reasoning as
-    /// <see cref="TryFoldCrossProduct"/>'s own multi-choice policy. Only engages when the source
-    /// genuinely carries at least one Hole or Choice piece; a single-piece or all-literal
-    /// multi-piece source is already handled by the ordinary paths below.
+    /// one or more embedded <see cref="TemplatePiece.Choice"/> pieces, at any nesting depth,
+    /// alongside Lit/Hole pieces (a real corpus shape: several independently-guarded IF-appended
+    /// column-list fragments concatenated together, THEN passed through one shared
+    /// <c>REPLACE(@sql, '$dbname$', @DB_Name)</c> call) - handled by
+    /// <see cref="FoldReplaceOverPiecesPreservingChoices"/>, a STRUCTURAL tree transform (never a
+    /// cross-product): every Choice's own branching shape is kept exactly as-is, only each LEAF
+    /// Lit segment is spliced - unlike <see cref="TryFoldCrossProduct"/>'s own multi-choice
+    /// restriction (which exists because THAT mechanism enumerates concrete combinations across
+    /// MULTIPLE ARGUMENT positions, where composing independently-guarded choices risks
+    /// reporting combinations that can never co-occur), REPLACE's own substitution is IDENTICAL
+    /// regardless of which alternative is active - it never needs to know which combination of
+    /// guards produced the source text, only to touch each leaf's own known literal content, so
+    /// preserving the ORIGINAL branch structure (rather than materializing every combination) is
+    /// both cheaper and exactly as sound. A pattern spanning a Lit/Hole or Lit/Choice boundary in
+    /// some hypothetical combination is never found (no guessing across piece boundaries) - the
+    /// same conservative, under-report-never-fabricate behavior every other splice here uses.
+    /// Only engages when the source genuinely carries at least one Hole or Choice piece; a
+    /// single-piece or all-literal multi-piece source is already handled by the ordinary paths
+    /// below.
     /// </summary>
     private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
@@ -455,7 +464,6 @@ public static class ExpressionEvaluator
         }
 
         if (foldedArguments[0] is not SqlTextValue.Template { Pieces.Count: > 1 } sourceTemplate
-            || sourceTemplate.Pieces.Count(p => p is TemplatePiece.Choice) > 1
             || !sourceTemplate.Pieces.All(p => p is TemplatePiece.Lit or TemplatePiece.Hole or TemplatePiece.Choice)
             || !sourceTemplate.Pieces.Any(p => p is TemplatePiece.Hole or TemplatePiece.Choice))
         {
@@ -465,70 +473,62 @@ public static class ExpressionEvaluator
         var patternArgument = ToBuiltinArgument(foldedArguments[1] ?? new SqlTextValue.Tainted(NonLiteralOther, context.Site));
         var replacementArgument = ToBuiltinArgument(foldedArguments[2] ?? new SqlTextValue.Tainted(NonLiteralOther, context.Site));
 
-        var choice = sourceTemplate.Pieces.OfType<TemplatePiece.Choice>().FirstOrDefault();
-        if (choice is null)
-        {
-            result = FoldReplaceOverPieces(sourceTemplate.Pieces, patternArgument, replacementArgument, context.Site);
-            return true;
-        }
-
-        SqlTextValue? union = null;
-        foreach (var alternative in choice.Alternatives)
-        {
-            var candidate = SubstituteChoicePiece(sourceTemplate.Pieces, choice, alternative.Pieces);
-            var folded = FoldReplaceOverPieces(candidate, patternArgument, replacementArgument, context.Site);
-            if (folded is SqlTextValue.Tainted)
-            {
-                result = folded;
-                return true;
-            }
-
-            union = union is null ? folded : SqlTextValue.Join(union, folded, choice.GuardText, context.Cap, context.Site);
-        }
-
-        result = union!;
+        result = FoldReplaceOverPiecesPreservingChoices(sourceTemplate.Pieces, patternArgument, replacementArgument, context.Site);
         return true;
     }
 
-    /// <summary>Materializes one alternative of a mixed source's embedded Choice by replacing that ONE Choice piece with <paramref name="replacement"/>'s own pieces, keeping every other piece (Lit/Hole) exactly where it was.</summary>
-    private static List<TemplatePiece> SubstituteChoicePiece(IReadOnlyList<TemplatePiece> pieces, TemplatePiece.Choice choice, IReadOnlyList<TemplatePiece> replacement)
-    {
-        var result = new List<TemplatePiece>(pieces.Count - 1 + replacement.Count);
-        foreach (var piece in pieces)
-        {
-            if (ReferenceEquals(piece, choice))
-            {
-                result.AddRange(replacement);
-            }
-            else
-            {
-                result.Add(piece);
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>Runs REPLACE across every <see cref="TemplatePiece.Lit"/> piece of <paramref name="pieces"/> independently (reusing <see cref="BuiltinRegistry.Fold"/>'s own REPLACE logic verbatim), leaving every other piece (a Hole - opaque, never searched inside) untouched and in place.</summary>
-    private static SqlTextValue FoldReplaceOverPieces(IReadOnlyList<TemplatePiece> pieces, BuiltinArgument patternArgument, BuiltinArgument replacementArgument, SourceSpan site)
+    /// <summary>
+    /// Runs REPLACE across every <see cref="TemplatePiece.Lit"/> piece of <paramref name="pieces"/>
+    /// independently (reusing <see cref="BuiltinRegistry.Fold"/>'s own REPLACE logic verbatim,
+    /// including its collation-sensitivity check), leaving every <see cref="TemplatePiece.Hole"/>
+    /// untouched and in place. A <see cref="TemplatePiece.Choice"/> is never expanded - this
+    /// recurses into EACH of its own alternatives (itself a <see cref="SqlTextValue.Template"/>,
+    /// so a NESTED Choice recurses again) and rebuilds a Choice with the SAME
+    /// <see cref="TemplatePiece.Choice.GuardText"/> but transformed alternatives, so the result
+    /// has the identical branching SHAPE as the input, just spliced at every leaf. Matches
+    /// <see cref="TryFoldCrossProduct"/>'s own "one bad path taints the whole thing" policy: a
+    /// Choice means "one of these really happens", so a single alternative that can't complete
+    /// the splice (a collation-sensitive segment, an empty pattern) taints the ENTIRE result, not
+    /// just that branch - never a partial union that silently drops a real possibility.
+    /// </summary>
+    private static SqlTextValue FoldReplaceOverPiecesPreservingChoices(IReadOnlyList<TemplatePiece> pieces, BuiltinArgument patternArgument, BuiltinArgument replacementArgument, SourceSpan site)
     {
         var newPieces = new List<TemplatePiece>();
         foreach (var piece in pieces)
         {
-            if (piece is not TemplatePiece.Lit lit)
+            switch (piece)
             {
-                newPieces.Add(piece);
-                continue;
-            }
+                case TemplatePiece.Lit lit:
+                    var segmentCall = new BuiltinCall("REPLACE", [new BuiltinArgument.Text(lit.Text), patternArgument, replacementArgument], site);
+                    var segmentResult = BuiltinRegistry.Fold(segmentCall);
+                    if (segmentResult is BuiltinFoldResult.Fail fail)
+                    {
+                        return new SqlTextValue.Tainted(fail.Reason, site);
+                    }
 
-            var segmentCall = new BuiltinCall("REPLACE", [new BuiltinArgument.Text(lit.Text), patternArgument, replacementArgument], site);
-            var segmentResult = BuiltinRegistry.Fold(segmentCall);
-            if (segmentResult is BuiltinFoldResult.Fail fail)
-            {
-                return new SqlTextValue.Tainted(fail.Reason, site);
-            }
+                    newPieces.AddRange(((BuiltinFoldResult.Ok)segmentResult).Pieces);
+                    break;
 
-            newPieces.AddRange(((BuiltinFoldResult.Ok)segmentResult).Pieces);
+                case TemplatePiece.Choice choice:
+                    var transformedAlternatives = new List<SqlTextValue.Template>();
+                    foreach (var alternative in choice.Alternatives)
+                    {
+                        var transformedAlternative = FoldReplaceOverPiecesPreservingChoices(alternative.Pieces, patternArgument, replacementArgument, site);
+                        if (transformedAlternative is SqlTextValue.Tainted taintedAlternative)
+                        {
+                            return taintedAlternative;
+                        }
+
+                        transformedAlternatives.Add((SqlTextValue.Template)transformedAlternative);
+                    }
+
+                    newPieces.Add(new TemplatePiece.Choice(choice.GuardText, transformedAlternatives));
+                    break;
+
+                default:
+                    newPieces.Add(piece);
+                    break;
+            }
         }
 
         return new SqlTextValue.Template(newPieces);

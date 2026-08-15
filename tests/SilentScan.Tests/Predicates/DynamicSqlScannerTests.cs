@@ -2662,13 +2662,14 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ReplaceSourceMixingChoiceAndHole_CrossProductsOverChoiceThenSplicesHole()
+    public void Scan_ReplaceSourceMixingChoiceAndHole_PreservesChoiceStructureThenSplicesEachLeaf()
     {
         // A source Template can accumulate BOTH an earlier REPLACE's own hole-splice AND a real
-        // IF-branch divergence (a genuine corpus shape, sp_BlitzIndex.sql) - the embedded Choice
-        // is resolved first (one alternative at a time, exactly like TryFoldCrossProduct), then
-        // each materialized candidate gets the SAME per-Lit-segment REPLACE splice already
-        // proven for the pure Hole-only mixed case.
+        // IF-branch divergence (a genuine corpus shape, sp_BlitzIndex.sql) - the embedded Choice's
+        // own branching structure survives the splice UNCHANGED (each of its alternatives gets
+        // the same per-Lit-segment REPLACE applied independently, never cross-producted here),
+        // and the ordinary EXEC-time Expand still enumerates it into one script per alternative,
+        // exactly as if REPLACE had never touched it.
         var result = Scan(
             "DECLARE @TableName NVARCHAR(128); " + // unresolved -> typed Hole
             "DECLARE @sql NVARCHAR(MAX) = N'CREATE TABLE @@@Table@@@ (a INT'; " +
@@ -2682,6 +2683,35 @@ public sealed class DynamicSqlScannerTests
         Assert.Equal(2, texts.Count);
         Assert.Matches(@"^CREATE TABLE __silentscan_sym_L\d+C\d+__ \(a INT\)$", texts[0]);
         Assert.Matches(@"^CREATE TABLE __silentscan_sym_L\d+C\d+__ \(a INT, b INT\)$", texts[1]);
+    }
+
+    [Fact]
+    public void Scan_ReplaceSourceWithTwoIndependentChoices_NoLongerDeclinesOutright()
+    {
+        // A real corpus shape (multiple spRIL_* procs, found via scan-db --fetch-sql-from-tables
+        // against a restored production database): a shared @sql variable is assembled from
+        // SEVERAL independently-guarded concatenated pieces (each its own optional IF-append,
+        // contributing its own Choice), THEN one REPLACE(@sql, '$dbname$', @DB_Name) call
+        // substitutes a routing token before EXEC. Before this existed, TWO OR MORE Choice
+        // pieces in the source made the whole REPLACE decline outright (the old
+        // TryFoldCrossProduct-style restriction), collapsing the entire otherwise-known @sql
+        // text into one opaque placeholder. FoldReplaceOverPiecesPreservingChoices never needs to
+        // cross-product independent choices at all - it just splices every literal leaf while
+        // keeping each Choice's own branching shape intact - so this analyzes fully now.
+        var result = Scan(
+            "DECLARE @DB_Name NVARCHAR(50); " +
+            "DECLARE @a NVARCHAR(MAX) = N''; " +
+            "DECLARE @b NVARCHAR(MAX) = N''; " +
+            "IF @Flag1 = 1 BEGIN SET @a = N'ColA,'; END; " +
+            "IF @Flag2 = 1 BEGIN SET @b = N'ColB,'; END; " +
+            "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + @a + @b + N'* FROM $dbname$.dbo.T'; " +
+            "SET @sql = REPLACE(@sql, N'$dbname$', @DB_Name); " +
+            "EXEC(@sql);");
+
+        Assert.Empty(result.Findings);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.Equal(4, texts.Count);
+        Assert.All(texts, t => Assert.Matches(@"^SELECT (ColA,)?(ColB,)?\* FROM __silentscan_sym_L\d+C\d+__\.dbo\.T$", t));
     }
 
     // ------------------------------------------------------------------
