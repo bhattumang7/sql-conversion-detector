@@ -12,13 +12,13 @@ namespace SilentScan.Cli.Commands;
 /// `silentscan scan-db &lt;connection-string&gt;` — connects to a live SQL Server database,
 /// builds its catalog directly from engine metadata (<c>sys.tables</c>/<c>sys.columns</c>/
 /// <c>sys.indexes</c>) rather than inferring it from DDL text, and runs every readable module
-/// body (views/procs/functions/triggers, from <c>sys.sql_modules</c>) through the same
-/// Lineage/Predicates/Rules pipeline <c>scan</c> uses against parsed files. Types, per-column
-/// collations, and the indexed flag are all facts read from the engine, not guesses. Issues
-/// <c>SELECT</c>s only - never DDL/DML, nothing else is ever executed against the connected
-/// database; with <c>--fetch-sql-from-tables</c>, some of those SELECTs read real row content
-/// (not just catalog metadata), still read-only.
-/// Renders as readable text (default) or markdown, or as JSON or SARIF, matching <c>scan</c>'s surface.
+/// body (views/procs/functions/triggers, from <c>sys.sql_modules</c>) through the full
+/// Lineage/Predicates/Rules pipeline - implicit conversions, MSTVF-as-fence references, and
+/// scalar UDF cost, all in one pass. Types, per-column collations, and the indexed flag are all
+/// facts read from the engine, not guesses. Issues <c>SELECT</c>s only - never DDL/DML, nothing
+/// else is ever executed against the connected database; with <c>--fetch-sql-from-tables</c>,
+/// some of those SELECTs read real row content (not just catalog metadata), still read-only.
+/// Renders as readable text (default) or markdown, or as JSON or SARIF.
 /// </summary>
 public static class ScanDbCommand
 {
@@ -70,7 +70,7 @@ public static class ScanDbCommand
             DefaultValueFactory = _ => "brief",
         };
 
-        var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for sargability findings.")
+        var command = new Command("scan-db", "Connect to a live SQL Server database, read its catalog from engine metadata, and scan every readable module for implicit-conversion, MSTVF-as-fence, and scalar-UDF findings.")
         {
             connectionStringArgument,
             formatOption,
