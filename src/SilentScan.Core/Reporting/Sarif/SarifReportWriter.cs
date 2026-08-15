@@ -42,6 +42,7 @@ public static class SarifReportWriter
         results.AddRange(report.ExpressionDerivedFindings.Select(ToResult));
         results.AddRange(report.CollationConflictFindings.Select(ToResult));
         results.AddRange(report.WriteLossFindings.Select(ToResult));
+        results.AddRange(report.TvfFenceFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -144,6 +145,41 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TargetType}) is assigned a {finding.SourceType} value - {DescribeWriteLossKind(finding.Kind)}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+    }
+
+    private static SarifResult ToResult(TvfFenceFinding finding)
+    {
+        // Correlated APPLY and a fence inherited invisibly through a view/TVF layer are the two
+        // cases no engine-version mitigation and no text-matching tool rescue, so both stay at
+        // error; a direct FROM/JOIN reference and INSERT...EXEC are real but ordinary fences
+        // (warning); a standalone reference is genuine but has no surrounding plan to poison.
+        var level = finding.Kind switch
+        {
+            TvfFenceFindingKind.CorrelatedApply or TvfFenceFindingKind.NestedUnderViewOrTvf => LevelError,
+            TvfFenceFindingKind.FromOrJoin or TvfFenceFindingKind.InsertExec => LevelWarning,
+            TvfFenceFindingKind.Standalone => LevelNote,
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled TvfFenceFindingKind."),
+        };
+        level = FloorLevelForConfidence(level, finding.Confidence);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TvfFenceRuleId(finding.Kind), finding.Confidence);
+
+        var message = finding.Kind switch
+        {
+            TvfFenceFindingKind.CorrelatedApply =>
+                $"'{finding.FunctionQualifiedName}' ({finding.FunctionKind}) is CROSS/OUTER APPLYed with an argument correlated to {string.Join(", ", finding.CorrelatedOuterColumns ?? [])} - the body re-executes once per outer row; interleaved execution does not rescue this.",
+            TvfFenceFindingKind.NestedUnderViewOrTvf =>
+                $"'{finding.ReferencedObjectQualifiedName}' inherits an optimization fence from '{finding.FunctionQualifiedName}' ({finding.FunctionKind}) {finding.Depth} layer(s) down, introduced at {finding.OriginSourcePath}:{finding.OriginLine}.",
+            TvfFenceFindingKind.FromOrJoin =>
+                $"'{finding.FunctionQualifiedName}' ({finding.FunctionKind}) is referenced directly in FROM/JOIN - the optimizer cannot see into its body and estimates a fixed row count.",
+            TvfFenceFindingKind.InsertExec =>
+                $"INSERT ... EXEC '{finding.ReferencedObjectQualifiedName}' forces the procedure's entire result set to be spooled to a worktable before insertion.",
+            TvfFenceFindingKind.Standalone =>
+                $"'{finding.FunctionQualifiedName}' ({finding.FunctionKind}) is referenced standalone - the fence is real but nothing surrounds it for the fixed estimate to poison.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled TvfFenceFindingKind."),
+        };
+        message += DynamicSqlOriginNote(finding.DynamicSqlCallSite);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(DynamicSqlFinding finding)

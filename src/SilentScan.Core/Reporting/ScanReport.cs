@@ -11,6 +11,7 @@ public sealed record ScanReport(
     IReadOnlyList<ExpressionDerivedFinding> ExpressionDerivedFindings,
     IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
     IReadOnlyList<WriteLossFinding> WriteLossFindings,
+    IReadOnlyList<TvfFenceFinding> TvfFenceFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -25,7 +26,9 @@ public sealed record ScanReport(
     /// new WriteLossFindings stream (roadmap Phase E1). Bumped to 4 for the
     /// <see cref="Predicates.FindingConfidence"/> field added to every finding record - additive
     /// and defaulted to High, but a consumer that only checked schema version to decide whether
-    /// a new field might exist deserves the same signal any other new field gets.
+    /// a new field might exist deserves the same signal any other new field gets. Bumped to 5
+    /// for the new <see cref="TvfFenceFindings"/> stream (docs/detection-checklist.md Tier 1
+    /// #2, MSTVF-as-fence).
     /// </summary>
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 }

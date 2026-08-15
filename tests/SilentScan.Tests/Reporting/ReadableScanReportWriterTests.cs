@@ -231,7 +231,8 @@ public sealed class ReadableScanReportWriterTests
             "Col", "b.sql", 5, 1, [], [new UnderlyingBaseColumn("dbo.T2", "Col2", Indexed: false)]);
 
         var report = new ScanReport(
-            new ParseHealthReport([]), [], [], [], [notIndexed, indexed], [], [], [],
+            new ParseHealthReport([]), [], [], [], [notIndexed, indexed], [], [],
+            [], [],
             SkippedConstructSummary.From([]), TypedPredicateSummary.From([]), DynamicSqlSummary.From([]));
 
         var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
@@ -261,6 +262,7 @@ public sealed class ReadableScanReportWriterTests
             sourcePath,
             1,
             1)],
+        [],
         [],
         [],
         [],

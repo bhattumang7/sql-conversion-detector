@@ -16,6 +16,21 @@ public static class SarifRuleCatalog
     public const string WriteLossApproximateTruncationRuleId = "silentscan/write-loss/approximate-to-exact-truncation";
     public const string WriteLossNumericScaleNarrowingRuleId = "silentscan/write-loss/numeric-scale-narrowing";
     public const string WriteLossTemporalPrecisionLossRuleId = "silentscan/write-loss/temporal-precision-loss";
+    public const string TvfFenceCorrelatedApplyRuleId = "silentscan/tvf-fence/correlated-apply";
+    public const string TvfFenceNestedUnderViewOrTvfRuleId = "silentscan/tvf-fence/nested-under-view-or-tvf";
+    public const string TvfFenceFromOrJoinRuleId = "silentscan/tvf-fence/from-or-join";
+    public const string TvfFenceInsertExecRuleId = "silentscan/tvf-fence/insert-exec";
+    public const string TvfFenceStandaloneRuleId = "silentscan/tvf-fence/standalone";
+
+    public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
+    {
+        TvfFenceFindingKind.CorrelatedApply => TvfFenceCorrelatedApplyRuleId,
+        TvfFenceFindingKind.NestedUnderViewOrTvf => TvfFenceNestedUnderViewOrTvfRuleId,
+        TvfFenceFindingKind.FromOrJoin => TvfFenceFromOrJoinRuleId,
+        TvfFenceFindingKind.InsertExec => TvfFenceInsertExecRuleId,
+        TvfFenceFindingKind.Standalone => TvfFenceStandaloneRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled TvfFenceFindingKind."),
+    };
 
     public static string WriteLossRuleId(WriteLossKind kind) => kind switch
     {
@@ -112,6 +127,11 @@ public static class SarifRuleCatalog
             Rule(WriteLossApproximateTruncationRuleId, "An INSERT/UPDATE assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target - the fractional part is silently dropped, with no error."),
             Rule(WriteLossNumericScaleNarrowingRuleId, "An INSERT/UPDATE assigns a DECIMAL/NUMERIC value to a target with a smaller scale - digits past the target's scale are silently rounded away, with no error."),
             Rule(WriteLossTemporalPrecisionLossRuleId, "An INSERT/UPDATE assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target - the time-of-day component is silently dropped, with no error."),
+            Rule(TvfFenceCorrelatedApplyRuleId, "A CROSS/OUTER APPLY calls a multi-statement or CLR table-valued function with an argument correlated to an outer row - the whole function body re-executes once per outer row, and interleaved execution (2017+) does not rescue this."),
+            Rule(TvfFenceNestedUnderViewOrTvfRuleId, "A view or inline TVF referenced here is itself, transitively, built over a multi-statement/CLR TVF - the fence and its fabricated cardinality estimate are inherited invisibly through however many layers sit between."),
+            Rule(TvfFenceFromOrJoinRuleId, "A FROM/JOIN references a multi-statement/CLR table-valued function directly - the optimizer cannot see into its body, so the reference carries a fixed cardinality estimate (1 row legacy CE / 100 rows 2014+ CE) that propagates into the surrounding plan."),
+            Rule(TvfFenceInsertExecRuleId, "An INSERT ... EXEC forces the executed procedure's entire result set to be spooled to a worktable before insertion - the same fence family, reached from a procedure call rather than a function reference."),
+            Rule(TvfFenceStandaloneRuleId, "A standalone SELECT references a multi-statement/CLR table-valued function with nothing else in the FROM clause - the fence and its fixed estimate are real, but there is no surrounding plan for the estimate to poison."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

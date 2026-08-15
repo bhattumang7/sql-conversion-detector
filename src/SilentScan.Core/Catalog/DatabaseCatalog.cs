@@ -17,6 +17,9 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, SqlType?> _scalarFunctionReturnTypesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, TableValuedFunctionKind> _tableValuedFunctionKindsByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -58,6 +61,31 @@ public sealed class DatabaseCatalog
     /// <summary>True only when a CREATE/ALTER FUNCTION with this qualified name was seen with a scalar (non-table) return type - a table-valued function or an unseen name both return false, so a caller can distinguish "not a scalar UDF" from "a scalar UDF whose type didn't resolve".</summary>
     public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
+
+    /// <summary>
+    /// Records which flavour of table-valued function a qualified name is - the one fact the
+    /// MSTVF-as-fence stream cannot get from the call site, since <c>FROM dbo.fn(@x)</c> reads
+    /// identically for an inline TVF (harmless, expanded like a view) and a multi-statement one
+    /// (an optimization fence with a fabricated cardinality estimate). Absence is meaningful and
+    /// must stay absent: a name this scan never saw as a function is NOT reported as anything,
+    /// per the "never guess" rule - see <see cref="TryGetTableValuedFunctionKind"/>.
+    /// </summary>
+    public void AddTableValuedFunctionKind(string qualifiedName, TableValuedFunctionKind kind) =>
+        _tableValuedFunctionKindsByQualifiedName[qualifiedName] = kind;
+
+    /// <summary>DROP FUNCTION on a TVF - the counterpart to <see cref="AddTableValuedFunctionKind"/>, so a dropped-and-never-recreated function stops claiming a kind for any later reference that happens to reuse its name.</summary>
+    public void RemoveTableValuedFunctionKind(string qualifiedName) =>
+        _tableValuedFunctionKindsByQualifiedName.Remove(qualifiedName);
+
+    /// <summary>
+    /// True only when a table-valued function with this qualified name was seen (live:
+    /// <c>sys.objects.type</c> in <c>('IF','TF','FT')</c>; file mode: its parsed <c>RETURNS</c>
+    /// clause). False means "this scan does not know that name to be a TVF" - which covers both a
+    /// scalar UDF and a name whose DDL was never read, and must never be treated as "therefore
+    /// inline, therefore harmless."
+    /// </summary>
+    public bool TryGetTableValuedFunctionKind(string qualifiedName, out TableValuedFunctionKind kind) =>
+        _tableValuedFunctionKindsByQualifiedName.TryGetValue(qualifiedName, out kind);
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the
@@ -296,6 +324,15 @@ public sealed class DatabaseCatalog
         foreach (var (qualifiedName, parameters) in fileModeCatalog._procedureParametersByQualifiedName)
         {
             AddProcedureParameters(qualifiedName, parameters);
+        }
+
+        // TryAdd, not assignment: unlike the entries above, live mode DOES read TVF kinds
+        // straight from sys.objects, and that answer is authoritative. A parsed RETURNS clause
+        // only ever fills a name the engine never reported (a module body's own text in a
+        // file-mode-only scan), and must never overwrite the engine's own classification.
+        foreach (var (qualifiedName, kind) in fileModeCatalog._tableValuedFunctionKindsByQualifiedName)
+        {
+            _tableValuedFunctionKindsByQualifiedName.TryAdd(qualifiedName, kind);
         }
     }
 }

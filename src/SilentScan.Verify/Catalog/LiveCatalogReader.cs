@@ -82,7 +82,54 @@ public sealed class LiveCatalogReader
             catalog.AddScalarFunctionReturnType(qualifiedName, returnType);
         }
 
+        foreach (var (qualifiedName, kind) in await ReadTableValuedFunctionKindsAsync(connection, cancellationToken))
+        {
+            catalog.AddTableValuedFunctionKind(qualifiedName, kind);
+        }
+
         return catalog;
+    }
+
+    /// <summary>
+    /// Which flavour each user table-valued function is, straight from <c>sys.objects.type</c>.
+    /// This is the engine's own classification and the only authoritative source for it: a call
+    /// site (<c>FROM dbo.fn(@x)</c>) is textually identical for an inline TVF and a
+    /// multi-statement one, and the MSTVF-as-fence stream depends entirely on telling them
+    /// apart. A type code this method does not recognise is skipped rather than defaulted, so
+    /// an unmapped future object type can never be reported as either flavour.
+    /// </summary>
+    private static async Task<List<(string QualifiedName, TableValuedFunctionKind Kind)>> ReadTableValuedFunctionKindsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, o.name AS function_name, o.type
+            FROM sys.objects o
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            WHERE o.type IN ('IF', 'TF', 'FT') AND o.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var kinds = new List<(string, TableValuedFunctionKind)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var kind = reader.GetString(2).Trim() switch
+            {
+                "IF" => (TableValuedFunctionKind?)TableValuedFunctionKind.Inline,
+                "TF" => TableValuedFunctionKind.MultiStatement,
+                "FT" => TableValuedFunctionKind.Clr,
+                _ => null,
+            };
+
+            if (kind is { } resolvedKind)
+            {
+                kinds.Add((qualifiedName, resolvedKind));
+            }
+        }
+
+        return kinds;
     }
 
     /// <summary>

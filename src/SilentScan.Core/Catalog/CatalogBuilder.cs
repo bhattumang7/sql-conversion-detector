@@ -437,13 +437,13 @@ public static class CatalogBuilder
         }
 
         /// <summary>
-        /// <c>DROP FUNCTION</c> on a scalar UDF - the registry counterpart to
-        /// <see cref="VisitFunctionBody"/>'s <c>AddScalarFunctionReturnType</c> call, in the same
+        /// <c>DROP FUNCTION</c> - the registry counterpart to <see cref="VisitFunctionBody"/>'s
+        /// <c>AddScalarFunctionReturnType</c>/<c>AddTableValuedFunctionKind</c> calls, in the same
         /// <c>ApplyEverythingElse</c> phase so create/drop ordering within one pass stays consistent.
-        /// A dropped inline-TVF/MSTVF's entry lives in <see cref="Lineage.ViewDefinitionExtractor"/>'s
-        /// own view/TVF registry, not here - this only ever removes a scalar return-type entry, and
-        /// removing a name that was never a scalar UDF (e.g. it was a TVF, or unseen entirely) is a
-        /// harmless no-op on a dictionary that never had the key.
+        /// A dropped TVF's resolved COLUMN shape lives in <see cref="Lineage.ViewDefinitionExtractor"/>'s
+        /// own view/TVF registry, not here; what this removes is the scalar return type and the
+        /// inline-vs-multi-statement kind. Removing a name that was never registered under either
+        /// is a harmless no-op on a dictionary that never had the key.
         /// </summary>
         public override void ExplicitVisit(DropFunctionStatement node)
         {
@@ -451,7 +451,9 @@ public static class CatalogBuilder
             {
                 foreach (var target in node.Objects)
                 {
-                    catalog.RemoveScalarFunctionReturnType(SchemaObjectNameHelper.Qualify(target));
+                    var qualifiedName = SchemaObjectNameHelper.Qualify(target);
+                    catalog.RemoveScalarFunctionReturnType(qualifiedName);
+                    catalog.RemoveTableValuedFunctionKind(qualifiedName);
                 }
             }
 
@@ -698,6 +700,28 @@ public static class CatalogBuilder
                 }
 
                 catalog.AddScalarFunctionReturnType(SchemaObjectNameHelper.Qualify(name), resolvedType);
+            }
+
+            // The RETURNS clause is the only place the three table-valued flavours differ: an
+            // inline TVF returns a SELECT (SelectFunctionReturnType), a multi-statement one
+            // declares the @variable it materializes into, and a CLR one has the same
+            // TableValuedFunctionReturnType shape with no @variable at all (its body is EXTERNAL
+            // NAME). Live mode reads this straight from sys.objects and wins on merge; this path
+            // only ever covers a function whose DDL text is all this scan has.
+            if (phase == BuildPhase.ApplyEverythingElse && returnType is not ScalarFunctionReturnType)
+            {
+                var tvfKind = returnType switch
+                {
+                    SelectFunctionReturnType => (TableValuedFunctionKind?)TableValuedFunctionKind.Inline,
+                    TableValuedFunctionReturnType { DeclareTableVariableBody.VariableName: not null } => TableValuedFunctionKind.MultiStatement,
+                    TableValuedFunctionReturnType => TableValuedFunctionKind.Clr,
+                    _ => null,
+                };
+
+                if (tvfKind is { } resolvedKind)
+                {
+                    catalog.AddTableValuedFunctionKind(SchemaObjectNameHelper.Qualify(name), resolvedKind);
+                }
             }
 
             if (phase == BuildPhase.ApplyEverythingElse

@@ -116,6 +116,19 @@ public static class ScanReportBuilder
             lineageStage.Complete($"{lineage.AllRelations.Count:N0} relations");
         }
 
+        // MSTVF-as-fence stream (docs/detection-checklist.md Tier 1 #2): which view/inline-TVF
+        // definitions inherit a multi-statement/CLR TVF fence from somewhere inside their own
+        // body. A second, small extraction pass over the same parse results - LineageResolver
+        // doesn't expose the ViewDefinition list it builds internally, and re-deriving it here
+        // is cheap next to the passes either side of it.
+        IReadOnlyDictionary<string, Lineage.TvfFenceOrigin> tvfFenceMap;
+        using (var fenceMapStage = progress.Begin("mapping TVF fences"))
+        {
+            var (views, _) = Lineage.ViewDefinitionExtractor.Extract(usableParseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
+            tvfFenceMap = Lineage.TvfFenceMap.Build(views, catalog);
+            fenceMapStage.Complete($"{tvfFenceMap.Count:N0} view/TVF layers inherit a fence");
+        }
+
         var callGraphLedger = new SkipLedger();
         ProcCallGraph procCallGraph;
         using (var callGraphStage = progress.Begin("building call graph"))
@@ -248,6 +261,21 @@ public static class ScanReportBuilder
         var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<TvfFenceFinding> tvfFenceFindings;
+        using (var tvfFenceStage = progress.Begin("scanning TVF fences", usableCount))
+        {
+            tvfFenceFindings = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = TvfFenceScanner.Scan(r, catalog, tvfFenceMap);
+                    tvfFenceStage.Advance();
+                    return findings;
+                })
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -302,6 +330,7 @@ public static class ScanReportBuilder
         expressionDerivedFindings = [.. expressionDerivedFindings.Where(f => f.Confidence <= minimumConfidence)];
         collationConflictFindings = [.. collationConflictFindings.Where(f => f.Confidence <= minimumConfidence)];
         writeLossFindings = [.. writeLossFindings.Where(f => f.Confidence <= minimumConfidence)];
+        tvfFenceFindings = [.. tvfFenceFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
         // SCAN_FORCED + indexed + depth>=1 first.
@@ -316,6 +345,18 @@ public static class ScanReportBuilder
         expressionDerivedFindings = [.. expressionDerivedFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
         collationConflictFindings = [.. collationConflictFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
         writeLossFindings = [.. writeLossFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
+
+        // docs/detection-checklist.md's own rank for this stream: correlated APPLY first (no
+        // engine version rescues it), then a fence inherited invisibly through a view/TVF layer
+        // (ranked by how many layers deep - the number no text-matching tool can produce), then
+        // a direct FROM/JOIN reference, then INSERT...EXEC, then a standalone reference last
+        // (real, but nothing around it to poison) - exactly the declared order of
+        // TvfFenceFindingKind's own enum members.
+        tvfFenceFindings = [.. tvfFenceFindings
+            .OrderBy(f => f.Kind)
+            .ThenByDescending(f => f.Depth)
+            .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+            .ThenBy(f => f.Line)];
         var orderedSkippedConstructs = skippedConstructs
             .OrderBy(s => s.Pass)
             .ThenBy(s => s.SourcePath, StringComparer.Ordinal)
@@ -325,6 +366,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
+            tvfFenceFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

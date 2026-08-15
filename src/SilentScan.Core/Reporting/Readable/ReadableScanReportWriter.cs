@@ -61,6 +61,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ExpressionDerived(report, headingLevel, pathBase));
         blocks.AddRange(WriteLoss(report, headingLevel, pathBase));
         blocks.AddRange(Tier1(report, headingLevel, pathBase));
+        blocks.AddRange(TvfFence(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -103,6 +104,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Expression-derived columns in predicates", report.ExpressionDerivedFindings.Count);
         AddCount(counts, "INSERT/UPDATE assignments risking silent data loss", report.WriteLossFindings.Count);
         AddCount(counts, "Non-sargable predicate patterns", report.Tier1Findings.Count);
+        AddCount(counts, "Multi-statement/CLR TVF references acting as optimization fences", report.TvfFenceFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -323,6 +325,53 @@ public static class ReadableScanReportWriter
             "A pattern starting with % has no known prefix, and a b-tree can only seek on a prefix - the whole index or table is read.",
         _ =>
             "The pattern is a variable or expression, so the plan cannot be built around a known prefix; the engine has to assume the worst at compile time.",
+    };
+
+    private static IEnumerable<ReadableBlock> TvfFence(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TvfFenceFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Multi-statement/CLR TVF references acting as optimization fences ({report.TvfFenceFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A multi-statement or CLR table-valued function's body is opaque to the optimizer: its result is materialized into a statistics-less worktable and the reference carries a fixed cardinality guess (1 row under the legacy CE, 100 under 2014+), which propagates into the surrounding plan's join order, join types and memory grant. The call site reads identically to a harmless inline TVF - only the catalog tells them apart. Correlated APPLY references and fences inherited invisibly through a view/TVF layer are listed first: no engine-version mitigation rescues either.");
+
+        foreach (var group in report.TvfFenceFindings
+            .GroupBy(f => f.Kind)
+            .OrderBy(g => g.Key))
+        {
+            var ordered = group
+                .OrderByDescending(f => f.Depth)
+                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ToList();
+
+            yield return new ReadableBlock.Heading(level + 1, $"{TvfFenceTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Referenced", "Fence function", "Depth", "Origin", "Detail"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
+                    f.ReferencedObjectQualifiedName ?? "-",
+                    f.FunctionQualifiedName is { } fn ? $"{fn} ({f.FunctionKind})" : "-",
+                    f.Depth.ToString(CultureInfo.InvariantCulture),
+                    f.OriginSourcePath is { } origin ? $"{Relative(origin, pathBase)}:{f.OriginLine.ToString(CultureInfo.InvariantCulture)}" : "-",
+                    f.Kind == TvfFenceFindingKind.CorrelatedApply && f.CorrelatedOuterColumns is { Count: > 0 } cols
+                        ? $"correlated on {string.Join(", ", cols)}"
+                        : f.ReferenceFragmentText ?? "-",
+                })]);
+        }
+    }
+
+    private static string TvfFenceTitle(TvfFenceFindingKind kind) => kind switch
+    {
+        TvfFenceFindingKind.CorrelatedApply => "Correlated CROSS/OUTER APPLY (re-executes per outer row)",
+        TvfFenceFindingKind.NestedUnderViewOrTvf => "Fence inherited through a view/TVF layer",
+        TvfFenceFindingKind.FromOrJoin => "Direct FROM/JOIN reference",
+        TvfFenceFindingKind.InsertExec => "INSERT ... EXEC (forced worktable materialization)",
+        _ => "Standalone reference (fence present, nothing to poison)",
     };
 
     private static IEnumerable<ReadableBlock> DynamicSql(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)

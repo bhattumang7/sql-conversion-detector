@@ -66,21 +66,45 @@ inlining spreads into every caller — a lineage-only detection no other tool ha
 41 MSTVFs in the production copy but 126 references (98 from procs, 20 from
 other TVFs — nested fences). Call-site text is identical to harmless iTVFs;
 only the catalog (`sys.objects.type` = 'TF' vs 'IF') can tell them apart.
+Live-scanned against the local test DB after shipping: 1,675 findings
+(1,337 standalone, 187 direct FROM/JOIN, 92 correlated APPLY, 48 INSERT...EXEC,
+11 nested through a view/iTVF layer). A first pass of the nested check only
+looked at bare `NamedTableReference`s and missed a fence hidden behind an
+**inline TVF** called with function-call syntax (`FROM dbo.SomeInlineTvf(@x)`
+— textually identical to calling the fencing MSTVF directly, a distinct
+ScriptDom node from a plain view reference) — caught by this same live run
+(0 nested findings before the fix, 11 after, matching two real cases traced
+by hand against the DB: `dbo.SplitExcludeLiterals`,
+`dbo.TripsReservedByDateRangeAndFundingSource`); fixed and covered by a
+fixture pair (`NESTED_UNDER_VIEW_OR_TVF_via_inline_tvf_{fires,clean}.sql`).
 
-- [ ] MSTVF in FROM/JOIN: optimization fence, no statistics, fixed 1/100-row
-      estimate poisoning the surrounding plan.
-- [ ] **Correlated `CROSS/OUTER APPLY dbo.fn(t.col)`** — executes per outer
+- [x] MSTVF in FROM/JOIN: optimization fence, no statistics, fixed 1/100-row
+      estimate poisoning the surrounding plan. (`TvfFenceFindingKind.FromOrJoin`.)
+- [x] **Correlated `CROSS/OUTER APPLY dbo.fn(t.col)`** — executes per outer
       row; interleaved execution (2017+) explicitly does not rescue this.
-      Rank first.
-- [ ] MSTVF hidden under a view / another TVF — lineage depth + origin
+      Ranked first. (`TvfFenceFindingKind.CorrelatedApply`.)
+- [x] MSTVF hidden under a view / another TVF — lineage depth + origin
       (the "permissions function wrapped in a view" case).
-- [ ] Standalone `SELECT ... FROM dbo.fn(@x)` — informational tier only
-      (fence exists, nothing around it to poison); precision guard against
-      over-reporting.
-- [ ] `INSERT ... EXEC` materialization (same family: forced full
-      materialization to a worktable; cannot nest).
-- Guards: iTVFs never fire; severity graded by usage context; note engine
-  version mitigations (interleaved execution applies to uncorrelated only).
+      (`Lineage.TvfFenceMap`, `TvfFenceFindingKind.NestedUnderViewOrTvf`.)
+- [x] Standalone `SELECT ... FROM dbo.fn(@x)` — re-litigated from
+      "informational tier only" to a full finding (2026-08-15, Umang's call):
+      the fence and its fabricated estimate are both genuinely present, so
+      precision doesn't require demoting it; only its RANK is last.
+      (`TvfFenceFindingKind.Standalone`.)
+- [x] `INSERT ... EXEC` materialization (same family: forced full
+      materialization to a worktable; cannot nest). (`TvfFenceFindingKind.InsertExec`.)
+- [ ] Dynamic-SQL integration (fold a provably-constant EXEC/sp_executesql
+      argument through this stream too, remapped to its true source line, the
+      way `NonSargablePredicateScanner`/`TypedPredicateExtractor` already do
+      via `DynamicSqlPipeline`) — deliberately deferred rather than bolted on
+      shallow; static-source detection ships first.
+- [ ] Verify-corpus oracle wiring (`SilentScan.Verify.Oracle` probe builder +
+      verifier) — deferred alongside dynamic-SQL integration; the marker
+      below is recorded so it's ready to implement.
+- Guards: iTVFs never fire (oracle-verified against `sys.objects.type='IF'`
+  on the local test DB: 889 IF vs 41 TF vs 8 FT); severity graded by usage
+  context; engine version mitigations noted at the finding-kind level
+  (interleaved execution applies to uncorrelated APPLY references only).
 - Oracle: plan shows Table Valued Function operator with fixed estimate vs
   iTVF dissolving into base operators.
 
