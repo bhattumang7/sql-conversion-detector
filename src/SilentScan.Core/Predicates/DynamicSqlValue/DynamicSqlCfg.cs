@@ -418,6 +418,108 @@ public sealed class DynamicSqlCfg
         statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
 
     /// <summary>
+    /// Recognizes the narrow, no-ELSE <c>IF LEN(x) &gt; 0 SET x = SUBSTRING(x, ...)</c> idiom (a
+    /// common "strip a fixed number of characters, but only when there's enough length to do so"
+    /// guard wrapped around one of <see cref="ExpressionEvaluator"/>'s own already-sound trim
+    /// folds - e.g. stripping a trailing separator left by repeated concatenation) and compiles
+    /// it as ONE unconditional step instead of a real branch. This is necessary because
+    /// <see cref="BuildIf"/>'s ordinary join unions the THEN branch's (correctly trimmed) result
+    /// with the implicit ELSE branch's (x's own UNCHANGED, still-untrimmed) result - sound in
+    /// general (both are real, independently-possible runtime outcomes), but NOT here: the exact
+    /// same "does x have enough trailing/leading literal content" test decides BOTH whether the
+    /// guard is true AND whether the trim fold itself succeeds (see
+    /// <see cref="ExpressionEvaluator.TryTrimThroughAlternatives"/>'s own "drop-too-short-
+    /// alternative" policy), so joining them produces stale untrimmed duplicates of every
+    /// already-correctly-trimmed candidate rather than two genuinely different outcomes -
+    /// confirmed against a real corpus site where this collapsed 31 candidate scripts (16
+    /// still carrying the untrimmed trailing comma, all failing to parse) down to the 15 that
+    /// were already correct.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to x's own PRIOR value - never inventing a value, never assuming the guard was
+    /// true when the trim fold itself can't prove it - whenever that fold declines, which keeps
+    /// this sound even when the trim can't be resolved (x stays exactly what it would have been
+    /// had this whole IF been skipped, matching the guard-false outcome). Deliberately narrow:
+    /// the THEN statement must be exactly one <c>SET</c> assigning a <c>SUBSTRING(x, ..., LEN(x)
+    /// [-k])</c> call BACK onto the SAME variable x that the guard's own <c>LEN(...)</c> tests -
+    /// this is what guarantees the trim-succeeds/guard-true correlation this bypass relies on.
+    /// Anything else (an ELSE branch, a BEGIN/END body with more than one statement, a different
+    /// RHS shape, a guard testing a different variable) returns null and falls back to the
+    /// ordinary branch/join construction, completely unchanged.
+    /// </remarks>
+    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<string> activeGuards)
+    {
+        if (ifStatement.ElseStatement is not null
+            || NormalizeToStatementList(ifStatement.ThenStatement) is not [SetVariableStatement setVar]
+            || setVar.Expression is not FunctionCall { FunctionName.Value: var functionName, Parameters: [VariableReference sourceRef, var startExpr, var thirdArg] }
+            || !string.Equals(functionName, "SUBSTRING", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(sourceRef.Name, setVar.Variable.Name, StringComparison.OrdinalIgnoreCase)
+            || !MatchesRecognizedTrimShape(startExpr, thirdArg, sourceRef.Name)
+            || !IsPositiveLengthGuard(ifStatement.Predicate, setVar.Variable.Name))
+        {
+            return null;
+        }
+
+        var name = setVar.Variable.Name;
+        var compiledStep = _compileLeaf(setVar, activeGuards);
+        return (state, emit) =>
+        {
+            var prior = state.GetValueOrDefault(name);
+            compiledStep(state, emit);
+
+            // Only revert a genuine LOSS: a fully-known prior Template collapsing to a Tainted
+            // decline (the trim couldn't find any literal content to trim, i.e. x's prior value
+            // was already empty - matching the guard-false outcome exactly). When prior was
+            // ALREADY Tainted, the compiled step's own TryTrimThroughAlternatives fallback (which
+            // also trims through a Tainted value's own GuardedAlternatives) may have refined it -
+            // e.g. narrowing a stale untrimmed GuardedAlternative to a trimmed one - and that
+            // refinement must be kept, not discarded back to the stale prior.
+            if (prior is SqlTextValue.Template && state.TryGetValue(name, out var after) && after is SqlTextValue.Tainted)
+            {
+                state[name] = prior;
+            }
+        };
+    }
+
+    /// <summary>
+    /// True for exactly the three SUBSTRING(x, start, length) shapes <see cref="ExpressionEvaluator.Fold"/>
+    /// already recognizes as sound self-trims of <paramref name="variableName"/>: <c>SUBSTRING(x, n, LEN(x))</c>
+    /// (leading trim, n &gt;= 1), <c>SUBSTRING(x, 0, LEN(x))</c> (drop the last character), and
+    /// <c>SUBSTRING(x, 1, LEN(x) - k)</c> (trailing trim - the idiom real corpus code overwhelmingly
+    /// uses to strip a trailing separator). Deliberately checks only the STRUCTURAL shape, not the
+    /// concrete start/count values - <see cref="ExpressionEvaluator"/>'s own fold re-validates those
+    /// (e.g. that <c>n &gt;= 1</c>) when the compiled step actually runs, and any shape it declines
+    /// falls back to x's prior value exactly like every other decline this bypass handles.
+    /// </summary>
+    private static bool MatchesRecognizedTrimShape(ScalarExpression startExpr, ScalarExpression thirdArg, string variableName) =>
+        IsSelfLenReference(thirdArg, variableName)
+        || (thirdArg is BinaryExpression { BinaryExpressionType: BinaryExpressionType.Subtract, FirstExpression: var lenSide }
+            && IsSelfLenReference(lenSide, variableName)
+            && startExpr is IntegerLiteral { Value: "1" });
+
+    private static bool IsSelfLenReference(ScalarExpression expression, string variableName) =>
+        expression is FunctionCall { FunctionName.Value: var lenName, Parameters: [VariableReference lenArgRef] }
+        && string.Equals(lenName, "LEN", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(lenArgRef.Name, variableName, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPositiveLengthGuard(BooleanExpression predicate, string variableName) => predicate switch
+    {
+        BooleanComparisonExpression
+        {
+            ComparisonType: BooleanComparisonType.GreaterThan,
+            FirstExpression: FunctionCall { FunctionName.Value: var lenName, Parameters: [VariableReference lenRef] },
+            SecondExpression: IntegerLiteral { Value: "0" },
+        } => string.Equals(lenName, "LEN", StringComparison.OrdinalIgnoreCase) && string.Equals(lenRef.Name, variableName, StringComparison.OrdinalIgnoreCase),
+        BooleanComparisonExpression
+        {
+            ComparisonType: BooleanComparisonType.GreaterThanOrEqualTo,
+            FirstExpression: FunctionCall { FunctionName.Value: var lenName, Parameters: [VariableReference lenRef] },
+            SecondExpression: IntegerLiteral { Value: "1" },
+        } => string.Equals(lenName, "LEN", StringComparison.OrdinalIgnoreCase) && string.Equals(lenRef.Name, variableName, StringComparison.OrdinalIgnoreCase),
+        _ => false,
+    };
+
+    /// <summary>
     /// Links <paramref name="statements"/> into the block graph starting at <paramref
     /// name="current"/>, returning the block execution falls through to afterward, or null when
     /// this sequence can never fall through (RETURN, an unconditional GOTO, or every branch of
@@ -481,7 +583,15 @@ public sealed class DynamicSqlCfg
                     break;
 
                 case IfStatement ifStatement:
-                    current = BuildIf(ifStatement, current, exitBlocks, loopStack, activeGuards);
+                    if (TryBuildSelfTrimBypassStep(ifStatement, activeGuards) is { } bypassStep)
+                    {
+                        _blocks[current].Steps.Add(bypassStep);
+                    }
+                    else
+                    {
+                        current = BuildIf(ifStatement, current, exitBlocks, loopStack, activeGuards);
+                    }
+
                     break;
 
                 case WhileStatement whileStatement:

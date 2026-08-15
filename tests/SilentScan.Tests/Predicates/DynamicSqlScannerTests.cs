@@ -254,6 +254,16 @@ public sealed class DynamicSqlScannerTests
         Assert.Contains("SELECT ColA", texts);
         Assert.Contains("SELECT ColB", texts);
         Assert.Contains("SELECT ColA,ColB", texts);
+
+        // The trim's own guard (`IF LEN(@select) > 0 SET @select = SUBSTRING(...)`) is compiled
+        // as one unconditional step rather than a real CFG branch (DynamicSqlCfg's own
+        // TryBuildSelfTrimBypassStep) - without that, BuildIf's ordinary join would union the
+        // correctly-trimmed THEN result with the implicit ELSE (unchanged, still comma-
+        // terminated) result, producing a STALE untrimmed duplicate script alongside every
+        // already-correct one. None of those may appear.
+        Assert.DoesNotContain("SELECT ColA,", texts);
+        Assert.DoesNotContain("SELECT ColB,", texts);
+        Assert.DoesNotContain("SELECT ColA,ColB,", texts);
     }
 
     [Fact]
@@ -263,19 +273,20 @@ public sealed class DynamicSqlScannerTests
         // against a restored production database): @select is built by an EARLIER IF/ELSE (one
         // side folds, the other doesn't) before this trim ever runs, then the trim itself is
         // ALSO guarded by its own IF (`IF LEN(@select) > 0 ...`, no ELSE - the idiom's real
-        // shape everywhere it's been seen). Both the trimmed (THEN) and un-trimmed (ELSE/
-        // unchanged) paths reaching the trim's own join are Tainted with the SAME underlying
-        // reason but DIFFERENT known alternatives - StructurallyEqual's own Tainted case used to
-        // compare only Reason/Location/DeclaredType, so it treated these as identical and Join's
-        // equal-shortcut (and DynamicSqlCfg's own early-continue) silently kept whichever side it
-        // happened to see first, discarding the OTHER side's alternative outright. Once
-        // StructurallyEqual also compares GuardedAlternatives, the two paths correctly resolve as
-        // DIFFERENT, and @select's declared type lets the join recover a generic typed hole
-        // instead - never the specific literal (the two alternatives, trimmed vs not, no longer
-        // structurally agree on ONE text), but a real, sound, parseable script instead of the
-        // OLD outcome: the untrimmed alternative's own trailing comma surviving into "SELECT
-        // ColA, FROM ..." and breaking the reparse outright (symbolic-value-broke-parse /
-        // InnerParseFailed on production procs shaped exactly like this).
+        // shape everywhere it's been seen). @select is Tainted (the ELSE side never folds) with
+        // its one live THEN-side outcome carried only as a GuardedAlternative ("ColA,") by the
+        // time the trim runs. DynamicSqlCfg's TryBuildSelfTrimBypassStep compiles the trim as one
+        // unconditional step rather than a real branch, so the value reaching it is trimmed
+        // in place (via ExpressionEvaluator.TryTrimThroughAlternatives' own "trim through a
+        // Tainted value's own GuardedAlternatives" fallback: "ColA," -> "ColA") WITHOUT first
+        // being widened to a generic typed hole by an ordinary join - the trim-guard IF's own
+        // (redundant, since it's testing the SAME variable it reassigns) branch/join would have
+        // done exactly that widening, discarding the alternative's real text entirely before the
+        // EXEC ever saw it (a live Template no longer counts as Tainted at the EXEC's own
+        // alternative-recovery check, EmitScriptsOrFinding). Bypassing that redundant join keeps
+        // @select genuinely Tainted with its now-correctly-trimmed alternative, so the EXEC
+        // recovers the exact known text ("SELECT ColA") instead of falling back to an opaque
+        // placeholder.
         var result = Scan(
             "DECLARE @select VARCHAR(MAX) = ''; " +
             "IF 1 = 1 BEGIN SET @select = @select + 'ColA,'; END " +
@@ -285,7 +296,7 @@ public sealed class DynamicSqlScannerTests
 
         Assert.Empty(result.Findings);
         var script = Assert.Single(result.AnalyzableScripts);
-        Assert.Matches(@"^SELECT __silentscan_sym_L\d+C\d+__$", script.InnerText);
+        Assert.Equal("SELECT ColA", script.InnerText);
     }
 
     /// <summary>A fake ILiveRowValueFetcher for unit tests - no database involved, just a fixed lookup table keyed exactly like the real fetcher's own contract, plus a call log so a test can assert it was (or wasn't) invoked.</summary>
