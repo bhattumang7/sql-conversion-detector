@@ -70,6 +70,80 @@ signal, not findings; no schema details recorded here).
 
 ---
 
+## Corrections to shipped work (clear before starting a new stream)
+
+One confirmed false positive, one decision to re-examine, two omissions. No
+new detections here. The false positive outranks every Tier 1 item: a shipped
+rule that fires on a predicate the engine seeks is exactly the failure the
+precision bar exists to prevent, and it is in the stream Tier 1 §4 builds on.
+
+- [ ] **`JSON_VALUE(col, '$.path')` false-positives the shipped
+      function-wrapped-column rule** (`silentscan/tier1/function-wrapped-column`,
+      `Predicates/NonSargablePredicateScanner.cs`). Since 2016 the engine can
+      match a `JSON_VALUE` expression to an indexed computed column with an
+      identical definition and seek on it, so the blanket "function call wraps
+      the column → non-sargable" test is wrong there. Fix: before firing on a
+      `JSON_VALUE`/`JSON_QUERY`-wrapped column, look up a computed column whose
+      definition matches the same expression and suppress the finding when a
+      supporting index exists on it. Ships with a fire fixture (no matching
+      computed column), a near-miss that must NOT fire (matching indexed
+      computed column), and an oracle probe confirming the seek — the
+      near-miss is the whole point of the fix, so it is not optional.
+      Previously recorded only as a guard note inside Tier 1 §4, which
+      understated it: this is a live defect in shipped output, not a
+      constraint on future work.
+- [ ] **Re-examine whole-plan `GetRangeThroughConvert` attribution in the
+      plan-cache path.** `src/SilentScan.Live/Catalog/LivePlanCacheReader.cs:212`
+      sets `hasRangeSeek` from `planXml.Contains("GetRangeThroughConvert")`
+      and applies it to every conversion the detector finds in that plan.
+      **This is deliberate, not an oversight** — the code comment states the
+      marker is read plan-wide to match how `TypeMatrixGenerator`'s oracle
+      probe reads the same signal, and `WorkloadVerdict`'s own doc comment
+      discloses it. The reason to revisit: in the matrix generator each probe
+      is a single authored predicate, so plan-wide and per-node are the same
+      thing there, whereas a cached plan from real application SQL can carry
+      several conversions at once — and the marker actually sits inside one
+      specific seek predicate's `ScalarString`. Where those differ, a plan
+      with one range-seek conversion marks its genuinely `ScanForced`
+      siblings `RangeSeek` too. Decide with evidence rather than by argument:
+      find (or author, in the standing Docker instance) a plan carrying a
+      range-seek conversion and a scan-forcing conversion together, and see
+      whether the misattribution is real. If it is, resolve the marker
+      against the conversion node `ConvertImplicitDetector` already located.
+      If multi-conversion plans can't actually arise here, record that and
+      close the item — the current behavior is then correct as written.
+- [ ] **Two shipped streams are missing from "Already shipped" above** — the
+      write-loss stream (`silentscan/write-loss/*`: unicode-to-non-unicode,
+      approximate-to-exact truncation, numeric scale narrowing, temporal
+      precision loss) and collation conflict
+      (`silentscan/verdict/collation-conflict`, Msg 468, two real string
+      columns with differing resolved collations and no explicit `COLLATE`).
+      Both exist in code with rule IDs in `SarifRuleCatalog`. A backlog that
+      under-reports what shipped is the same rot the narrative plan file died
+      of; record them with the same detail as the other four entries.
+- [ ] **Record the runtime incumbent in `detection-reference.md`** as
+      Appendix 7 §7.7, in the same anonymized style as the other entries: a
+      multi-platform commercial response-time analyzer, read at source
+      2026-08-16 from a decompiled tree held locally and deliberately not in
+      the repo, so the appendix has to stand on its own without it.
+      Load-bearing detail: its entire SQL Server plan-advice surface is two
+      XPath queries — `//MissingIndexes/MissingIndexGroup` and
+      `//UnmatchedIndexes/Parameterization/Object`, matching the whole of its
+      advice-type enum (missing index, unmatched index) — and it *does*
+      detect implicit conversions, as a substring test for `CONVERT_IMPLICIT`
+      over a plan step's predicate text, yielding one boolean per step with
+      no notion of which side converted. That makes it a real shipping
+      instance of the failure mode the reference currently poses only
+      hypothetically ("even a plan-reading tool that greps for the marker
+      without checking which side it wraps reproduces both errors"), so cite
+      it there too. Its remaining analyses are all runtime aggregates (wait
+      events, blocking, plan stability, execution counts) or specific to
+      another DBMS entirely — so it opens no detection gap on our side, and
+      §J plus the Tier 3 index-advisor skip already cover every SQL Server
+      capability it has.
+
+---
+
 ## Tier 1 — build next (high precision, needs our machinery, high base rate)
 
 ### 3. Join-key and cross-object type/collation mismatch
@@ -110,16 +184,12 @@ in WHERE clauses; 96 with RTRIM-family wrappers; 54 with leading wildcards.
       predicate on an unindexed column is noise; on an indexed column it's a
       lost seek (we already rank expression findings by underlying index —
       extend to the whole stream).
-- **Mandatory precision guard, applies to the shipped function-wrapped-column
-  rule too, not just new ones:** `JSON_VALUE(col, '$.path')` can match an
-  indexed computed column with an identical definition and use that index —
-  the engine has done this since 2016. A blanket "function call wraps the
-  column → non-sargable" rule misfires here. Before firing on a
-  `JSON_VALUE`/`JSON_QUERY`-wrapped column, check the catalog for a computed
-  column whose definition matches the same expression; suppress if a
-  supporting index exists on it. This is a real false-positive risk against
-  our own precision rule, not just an enhancement — verify it's fixed before
-  the next release that touches sargability rules.
+- **Mandatory precision guard for every rule in this section:** a function
+  wrapping a column does not imply a lost seek when an indexed computed column
+  matches the same expression. Tracked as a live defect against the
+  already-shipped function-wrapped-column rule in "Corrections to shipped work"
+  above, with the fix and its fixtures; land that first, then hold each new
+  rule here to the same guard rather than re-deriving it.
 - Oracle: seek-vs-scan probes; for the collation rule, CS vs CI fixtures.
 
 ### 5. Oversized and MAX-typed parameters
