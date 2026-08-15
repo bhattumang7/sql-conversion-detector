@@ -22,7 +22,9 @@ checklist Tier 3); Shipped = already implemented.
   and one is dead (docs recoverable only from web archives) while the other is
   a niche community project. Direction-aware conversion detection otherwise
   exists **only at runtime** (plan-XML convert warnings, the 2022 anti-pattern
-  event).
+  event). **Named and re-verified from source 2026-08-16 — see "Named
+  incumbents" below.** The claim survives intact; the type-binding analyzer is
+  `SqlServer.Rules` (`SRP0016`), and it is symmetric exactly as described.
 - Microsoft's official static rule set is ~16 rules, ~6 performance-relevant:
   SELECT * in a batch, unindexed column in IN, leading-wildcard LIKE,
   non-sargable expression on a column, varchar(1)/(2), data-loss cast,
@@ -44,6 +46,79 @@ checklist Tier 3); Shipped = already implemented.
   distinguish column-side (seek-killing) from value-side (harmless)
   conversions. Our precedence-direction analysis is strictly finer-grained
   than everything surveyed.
+
+### Named incumbents (cloned and read at source level, 2026-08-16)
+
+Six analyzers surveyed. Two are out of scope by dialect or seriousness; the
+rest set the competitive floor. **None resolves conversion direction,
+collation, or lineage, and none has any plan oracle** — every finding any of
+them emits is an unverified static claim.
+
+| Tool | Type-aware? | Status | Conversion rule |
+|---|---|---|---|
+| `SqlServer.Rules` (DacFx; dormant original + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric |
+| SonarQube T-SQL plugin (ANTLR `grammars-v4`) | No | Dormant since 2024 | none |
+| Oracle PL/SQL analyzer | No (block-scope symbol table, no catalog) | Active | none; **no T-SQL support at all** |
+| Rust multi-dialect linter, 282 rules | Parses DDL types into a field it **never reads** | Active | declared stub, never fires |
+| DacFx rule sample, 9 rules | No | Abandoned 2017 | none |
+| WinForms regex scorer, 9 regexes | No | Toy, 0 stars | none |
+
+**`SRP0016` is the entire incumbent state of the art**, and its verdict is one
+line: `if (!Comparer.Equals(datatype1, datatype2)) → problem`. No data-type
+precedence table exists anywhere in that codebase. Limits, all read from source:
+
+* **Symmetric** — `varchar` col vs `N'x'` (seek lost) and `nvarchar` col vs
+  `'x'` (harmless) report identically, at identical severity.
+* **No collation field exists** in its type carrier — the `RangeSeek` vs
+  `ScanForced` split has no counterpart.
+* **Lineage architecturally excluded** — the column-type lookup is hardcoded to
+  the model's *table* schema, so views/TVFs resolve to nothing and the check is
+  silently skipped. A sibling rule carries the comment
+  `// most likely the base is a view.... /sigh`.
+* **Not index-aware** — it cannot say whether the converting column is indexed,
+  i.e. whether the conversion costs anything at all.
+* **WHERE clauses of SELECT statements only** — JOIN `ON` type mismatch
+  (checklist T1-3) is undetected, despite its own doc text claiming joins.
+* **Literal typing is wrong**: integer literals are typed by *magnitude*
+  (`0..255 → tinyint`), but SQL Server types an unsuffixed integer literal as
+  `int`/`bigint`. `WHERE IntCol = 1` is a shipped false positive, locked in by
+  that repo's own committed test expectations.
+* Resolution failures are swallowed by a bare `catch` carrying a literal
+  `// TODO: PROPERLY LOG THIS ERROR`, yielding silent zero findings.
+
+**Our oracle, run 2026-08-16** (SQL 2022, `SQL_Latin1_General_CP1_CI_AS`, all
+three columns indexed, compile-only SHOWPLAN_XML) across the three cases
+`SRP0016` cannot tell apart. It fires on **all three** and is right about
+**one**:
+
+| Predicate | Plan marker | Result | `SRP0016` |
+|---|---|---|---|
+| `IntCol = 1` | `CONVERT_IMPLICIT(int,[@1],0)` — on the autoparameterized **literal** | Index Seek | fires — **FP** |
+| `NvarCol = 'x'` | `CONVERT_IMPLICIT(nvarchar(4000),[@1],0)` — on the **literal** | Index Seek | fires — **FP** |
+| `VarCol = N'x'` | `CONVERT_IMPLICIT(nvarchar(50),[…].[VarCol],0)=[@1]` — on the **column** | Index Scan | fires — TP |
+
+The canonical three-case demo for the study: incumbent precision on its own
+flagship rule is 1/3, and the discriminator is exactly the column-side marker
+our oracle already keys on. Note both false positives still emit a real
+`CONVERT_IMPLICIT` — so even a plan-reading tool that greps for the marker
+without checking *which side* it wraps reproduces both errors. Side-of-the-
+conversion is the whole game.
+
+**Most citable line found**, from the 282-rule Rust linter's own source, at the
+stub where its implicit-conversion rule should be — an actively developed,
+multi-dialect analyzer declaring the detection infeasible without a catalog:
+
+> *"Implicit type conversion detection requires schema knowledge. Without
+> actual column type information, heuristic detection produces false
+> positives."*
+
+**Field-confirmed anti-patterns that validate our own gates:** the SonarQube
+plugin calls `removeErrorListeners()` on both lexer and parser and never
+consults `numberOfSyntaxErrors`, so a file its grammar cannot parse is analyzed
+against ANTLR's error-recovery tree and **reported clean** — direct evidence for
+why `ParseHealthReport.PassesDialectSniffing` must fail loudly. Its
+non-sargability rule ships as `BETA` with no oracle and no near-miss, and its
+own "compliant" example is invalid T-SQL.
 
 ---
 
@@ -396,3 +471,331 @@ bookkeeping, no pattern implications.
 170) extended Parameter Sensitive Plan optimization to DML statements and
 tempdb tables — recorded in Appendix 4 as a caveat for the study's
 `ScanForced` narrative on compat-170 targets, not as something to detect.
+
+---
+
+## Appendix 7 — Complete incumbent rule inventory (survey of 2026-08-16)
+
+The full un-filtered rule catalogs of every surveyed analyzer, extracted
+mechanically from source (rule-id constants, display-name strings, and shipped
+rule-metadata files), not from prose summaries. This exists so the "what else
+do they detect?" question is answered from data rather than re-surveyed, and so
+nothing is lost to a summariser's judgement about what looked relevant. **Every
+rule is listed, including whole categories out of our scope.** Disposition
+notes are opinions; the lists are facts.
+
+Totals: `SqlServer.Rules` (DacFx) 120 · SQL Code Guard (T-SQL, imported by the
+SonarQube plugin) 148 · Rust multi-dialect linter 282 · SonarQube plugin's own
+22 (16 enabled for T-SQL) · Oracle PL/SQL analyzer 57 · DacFx sample 9.
+**~638 rules total.** None of them resolves conversion direction, collation, or
+lineage; none has a plan oracle.
+
+### 7.1 What the full sweep changed
+
+Re-reading the *complete* catalogs (rather than the performance-tagged subset)
+surfaced candidates the first pass missed, because they sit under Design or
+Execution-Issue headings rather than Performance:
+
+* **Join predicate incomplete vs. the backing foreign key** (`SRD0020`) — join
+  missing a backing FK, or joining on fewer columns than the FK defines. The
+  partial-composite-FK case is a genuine correctness-and-plan defect and is
+  **pure catalog work**, which is our machinery exactly. Strongest single find
+  of the sweep.
+* **Argument-vs-parameter type mismatch on procedure calls** (`EI001`
+  variable, `EI002` literal) — the conversion stream's sibling on the call
+  boundary. Already queued at T1-3; the sweep confirms an incumbent attempts it
+  from *parsed DDL*, which is the wheel CLAUDE.md says not to rebuild. Resolved
+  from `sys.parameters` we would be strictly better for near-zero extra cost.
+* **Temp-table collation vs. tempdb/database collation** (`SRD0062`,
+  `PE`-adjacent) — a conversion *seed* on every join between a temp table and a
+  user table. We are the collation-aware tool; nobody treats this as a
+  conversion source. Pairs with the already-queued "column collation ≠ database
+  collation".
+* **SET options that silently disable plan features** (`SRD0088`
+  NUMERIC_ROUNDABORT OFF, `SRD0089` QUOTED_IDENTIFIER ON) — framed everywhere
+  as hygiene, but the actual consequence is *indexed views and filtered indexes
+  cannot be used*. That is a plan-shape consequence, catalog-verifiable
+  (`sys.sql_modules.uses_quoted_identifier`), and materially different from the
+  style rule it's usually filed as.
+* **`TOP(100) PERCENT` is ignored by the optimizer** (`SRD0081`) — commonly
+  written to "force" ordering in a view; the optimizer discards it. Syntactic,
+  near-zero FP.
+* **`ORDER BY` in a view or inline TVF** (`EI030`) — same family: the ordering
+  is not guaranteed and the sort may still be paid for.
+* **`ISNULL`/`COALESCE` arguments of differing datatypes** (`SRD0043`) — feeds
+  directly into the queued T1-4 COALESCE result-type inference work.
+* **`IF` statements containing queries inside procedures** (`SRD0063`) — an
+  estimation/recompile concern nobody frames as such.
+
+### 7.2 `SqlServer.Rules` (DacFx) — all 120
+
+**Performance (28).** SRP0001 nested views · SRP0002 leading-wildcard LIKE ·
+SRP0003 DISTINCT inside aggregate · SRP0004 results returned from trigger ·
+SRP0005 SET NOCOUNT ON missing · SRP0006 `<>`/`!=` in WHERE · SRP0007 cursor
+not closed · SRP0008 cursor not deallocated · SRP0009 function wrapping column
+in WHERE · SRP0010 UDF in UPDATE/INSERT/DELETE (Halloween) · SRP0011 NOT IN ·
+SRP0012 un-indexed column in IN predicate · SRP0013 OUTER JOIN used for
+existence test · SRP0014 table variable in JOIN · SRP0015 column arithmetic in
+WHERE · **SRP0016 mismatched types either side of an equality (the incumbent
+conversion rule)** · SRP0017 UPDATE of primary-key column · SRP0018 high join
+count · SRP0020 table missing clustered index · SRP0021 parameter modified
+before use · SRP0022 WITH RECOMPILE vs OPTION(RECOMPILE) · SRP0023 COUNT used
+for existence · SRP0024 correlated subquery · SRP0025 SELECT * in EXISTS ·
+SRP0026 cross-server join · **SRP0027 explicit CAST/CONVERT on column** ·
+SRP0028 explicit RANGE window frame · SRP0029 implicit RANGE window frame ·
+SRP0030 cursor without FAST_FORWARD.
+
+**Design (88).** SRD0001 no natural key · SRD0002 no primary key · SRD0003 wide
+/GUID PK · **SRD0004 both sides of an FK should be indexed** · SRD0005 (n)char
+misuse · SRD0006 SELECT * · SRD0009 multi-statement action without transaction ·
+SRD0011 `= NULL` comparison · SRD0012 variable declared never used · SRD0013
+missing TRY/CATCH · SRD0014 TOP without ORDER BY · SRD0015 INSERT without
+column list · SRD0016 unused parameter · SRD0017 DELETE without row limit ·
+SRD0018 UPDATE without row limit · SRD0019 joining tables with views ·
+**SRD0020 join missing backing FK or missing FK columns** · SRD0021 EXISTS
+instead of IN · SRD0024 EXEC with string literal · SRD0025 ORDER BY ordinal ·
+SRD0026 var-length type without length · SRD0027 DECIMAL without precision ·
+SRD0028 unprefixed column names · SRD0030 avoid hints · SRD0031 CHARINDEX in
+WHERE · SRD0032 OR in WHERE (sargable) · SRD0033 avoid cursors · SRD0034 NOLOCK
+· SRD0035 WAITFOR in module · SRD0036 SET ROWCOUNT · SRD0038 alias all sources ·
+SRD0039 fully-qualified names · SRD0041 SELECT INTO · **SRD0043 ISNULL/COALESCE
+args of differing type** · SRD0044 RAISERROR ≥18 needs WITH LOG · SRD0045 too
+many indexes · SRD0046 real/float columns · **SRD0047 same-name columns of
+differing type/size** · SRD0050 always-TRUE/FALSE comparison · SRD0051
+TEXT/NTEXT/IMAGE · **SRD0052 duplicate/overlapping index** · **SRD0053 object
+collation differs from database** · SRD0055 object created with invalid options
+· SRD0056 @@IDENTITY vs SCOPE_IDENTITY · SRD0057 DDL mixed with DML · SRD0058
+named parameters on proc calls · SRD0060 procedure grants itself permissions ·
+SRD0061 invalid database options · **SRD0062 temp-table collation vs tempdb** ·
+**SRD0063 IF containing queries in a proc** · SRD0064 cache repeated
+GETDATE/SYSDATETIME · SRD0065 NotForReplication · SRD0066 BEGIN/END in
+conditionals · SRD0067 keyword casing · SRD0068 statement semicolons · SRD0069
+XACT_ABORT with explicit transactions · SRD0071 CASE without ELSE · SRD0072
+self-assignment · SRD0073 repeated NOT · SRD0074 weak hashing (MD5/SHA1) ·
+SRD0075 hard-coded credentials · SRD0076 identical expressions either side of a
+comparison · SRD0077 FETCH variable count mismatch · SRD0078 single-char alias ·
+SRD0079 single-char variable · SRD0080 TOP expression parenthesisation ·
+**SRD0081 TOP(100) PERCENT ignored by optimizer** · **SRD0091 derived-table
+ORDER BY does not guarantee ordering** · SRD0082 DATEFORMAT changed · SRD0083
+DATEFIRST changed · SRD0084 CONCAT_NULL_YIELDS_NULL ON · SRD0085 ANSI_NULLS ON ·
+SRD0086 ANSI_PADDING ON · SRD0087 ANSI_WARNINGS ON · **SRD0088
+NUMERIC_ROUNDABORT OFF — required for indexed views** · **SRD0089
+QUOTED_IDENTIFIER ON — required for indexed views and filtered indexes** ·
+SRD0090 SET FORCEPLAN OFF · SRD0092-0095 named constraints on temp tables (PK/
+DEFAULT/FK/CHECK) · **SRD0096 potential SQL injection** · SRD0700-0706 project-
+file/database settings (PAGE_VERIFY, Query Store state and capture mode, target
+recovery time, AUTO_CLOSE, AUTO_SHRINK).
+
+**Naming (4).** SRN0001-0004 — object-name prefix conventions.
+
+### 7.3 SQL Code Guard (T-SQL) — all 148
+
+The richest T-SQL catalog found. Imported as metadata by the SonarQube plugin;
+the engine itself is closed-source Redgate software, so detection quality is
+unverified.
+
+**Performance, `PE` (23).** PE001 proc schema not specified · PE002 table/view
+schema not specified · PE003 SELECT INTO · PE004 INDEX HINT · PE005 JOIN HINT ·
+PE006 TABLE HINT · PE007 QUERY HINT · PE008 SET NOCOUNT OFF · PE009 no SET
+NOCOUNT ON before DML · PE010 interleaved DDL and DML · PE011 PRINT in trigger ·
+**PE012 settings causing procedure recompilation** · PE013 COUNT instead of
+EXISTS · PE014 SET FORCEPLAN · PE015 cursor not forward-only despite no
+FETCH FIRST/LAST/PRIOR · PE016 cursor opened not deallocated · **PE017
+incorrect usage of const UDF** · PE018 cursor not readonly · PE019 EXISTS
+instead of IN · PE020 INSERT INTO with ORDER BY · PE021 WITH RECOMPILE ·
+**PE022 foreign key is not trusted** · PE023 DDL without schema name.
+
+**Execution issues, `EI` (33).** **EI001 incompatible variable type for
+procedure call** · **EI002 incompatible literal type for procedure call** ·
+EI003 non-scalar subquery used as scalar · EI004 extra parameter passed · EI005
+unnamed call after named call · EI006 required parameter not passed · EI007/
+EI008 OUTPUT parameter mismatch · EI009 too many parameters · EI010-EI013
+OPEN/FETCH/CLOSE/DEALLOCATE of undefined cursor · EI014 FETCH from cursor with
+`*` (uncheckable) · EI015 incorrect fetch-variable count · EI016 proc reference
+in other database · EI017 hard-coded current database name · EI018 missing
+parameter names · EI019 BEGIN TRAN without ROLLBACK · EI020 ROLLBACK without
+BEGIN · EI021 close of unopened cursor · EI022 fetch from unopened cursor ·
+EI023 cursor update/delete but not declared updatable · EI024 `sp_` prefix ·
+EI025 proc executed without collecting result · EI026 function reference in
+other database · EI027 table/view reference in other database · EI028 NOT NULL
+column added without default · EI029 ISNUMERIC() · **EI030 ORDER BY in view or
+inline TVF** · **EI031 relying on INSERT…EXEC** · EI032 xp_cmdshell · EI033
+dynamic SQL without EXECUTE AS.
+
+**Best practice, `BP` (24).** BP001 index type unspecified · BP002 ORDER BY
+constants · BP003 SELECT in trigger · BP004 INSERT without column list · BP005
+SELECT * · BP006 TOP without ORDER BY · **BP007 var-length type without
+explicit length** · **BP008 CAST/CONVERT to var type without length** · BP009
+var types of length 1-2 · BP010 @@IDENTITY · BP011 NULL comparison/arithmetic ·
+BP012 CASE without ELSE · BP013 EXECUTE('script') · BP014 NULL option
+unspecified · BP015 cursor scope unspecified · BP016 RETURN without result code
+· BP017 DELETE without WHERE/INNER JOIN · BP018 UPDATE without WHERE/INNER JOIN
+· **BP019 foreign key is disabled** · **BP020 column created with ANSI_PADDING
+OFF** · BP021 table without clustered index · BP022 money/smallmoney · BP023
+float/real · **BP024 sql_variant**.
+
+**Deprecated, `DEP` (26).** DEP001 table hint without WITH · DEP002 WRITETEXT/
+UPDATETEXT/READTEXT · DEP003 GROUP BY ALL · **DEP004 COMPUTE / COMPUTE BY** ·
+DEP005 FASTFIRSTROW hint · DEP006 SETUSER · DEP007 TAPE backup device · DEP008
+BACKUP/RESTORE passwords · DEP009-DEP012 DBCC DBREINDEX / CONCURRENCYVIOLATION
+/ INDEXDEFRAG / SHOWCONTIG · DEP013 deprecated SET options · DEP014 SET
+ROWCOUNT · DEP015 READONLY/READWRITE · DEP016 TORN_PAGE_DETECTION · **DEP017
+non-ANSI `*=` / `=*` join** · DEP018 ALL in GRANT/DENY/REVOKE · DEP019
+deprecated system table/view · DEP020 numbered procedures · DEP021 string
+literal column aliases · DEP025 deprecated system stored procedure · DEP026
+three/four-part column references in SELECT list · DEP027 deprecated system
+function · **DEP028 module created with ANSI_NULLS/QUOTED_IDENTIFIER OFF**.
+
+**Misc, `MI` (8).** MI001 unused table variable · MI002 unused temp table ·
+MI003 unqualified column name · MI004 sp_executesql usage · MI005 unused
+variable · MI006 unused parameter · MI007 WAITFOR DELAY/TIME · MI008
+QUOTED_IDENTIFIER inside a module.
+
+**Style/naming/script, `ST`/`SC`/`NC`/`CGUNP` (34).** ST001 old-style comma
+join · ST002 old-style `=` alias · ST003 proc body without BEGIN/END · ST004
+SQL-92 cursor declaration · ST005 IF/ELSE without BEGIN/END · ST006 old-style
+TOP · ST007 cursor name reused · ST008 non-named parameter style · ST009 GOTO ·
+ST010 alias all table sources · **ST011 consider table variable instead of temp
+table** · **ST012 consider temp table instead of table variable** · ST013 `!=`
+· ST014-ST015 proc-name patterns · ST016 `fn_` prefix · ST017 digits in table
+names · SC001-SC006 script hygiene (trailing GO, trailing newline, USE in
+batch, TODO comments, self-granting procedure, CRLF) · NC001A/NC001D
+transaction-name allow/deny lists · **CGUNP unparsed SQL** (the incumbent's
+parse-health signal, sourced from the external tool's report).
+
+### 7.4 Rust multi-dialect linter — all 282
+
+Every rule is a regex over raw query text (`query.raw` appears 343 times in
+`src/rules`; no rule touches the AST). Multi-dialect, so a large fraction is
+irrelevant to T-SQL. At least 11 rules are unconditional stubs that never fire,
+including its implicit-conversion rule.
+
+**Performance (73).** PERF-SCAN-001 SELECT * · -002 unbounded DML · -003
+unbounded SELECT · -004 NOT IN subquery · -005 expensive DISTINCT ·
+PERF-IDX-001 function on indexed column · -002 leading wildcard · **-003
+implicit type conversion on indexed column (STUB — never fires)** · -004 OR in
+WHERE · -005 deep offset pagination · **-006 composite index column-order
+violation** · -007 non-SARGable OR · **-008 COALESCE/ISNULL/NVL on indexed
+column** · -009 negation on indexed column · PERF-JOIN-001 cross join · -002
+excessive joins · -003 LEFT JOIN with IS NOT NULL · PERF-AGG-001 unfiltered
+aggregation · -002 ORDER BY in subquery · -003 HAVING without GROUP BY ·
+PERF-LOCK-001 table lock hint · -002 NOLOCK · -003 long transaction · -004
+missing isolation level · PERF-CURSOR-001 cursor · -002 WHILE loop · -003
+nested-loop hint · PERF-MEM-001 large IN list · -002 unbounded temp table ·
+-003 ORDER BY without LIMIT in subquery · -004 GROUP BY on high-cardinality
+expression · PERF-HINT-001 optimizer hint · -002 index hint · -003 parallel
+hint · **PERF-SCALAR-001 scalar UDF in SELECT/WHERE** · -002 correlated
+subquery · PERF-SORT-001 ORDER BY on non-indexed column · PERF-BATCH-001/002
+unbatched operations · PERF-NET-001 excessive column count · -002 LOB column in
+unfiltered query · PERF-TSQL-001 missing SET NOCOUNT ON · **-002 SELECT INTO
+temp table without index** · **-003 implicit conversion in JOIN predicate
+(regex for CAST/CONVERT near JOIN)** · -004 WAITFOR DELAY · SCHEMA-IDX-001
+missing index on WHERE column (stub). Remainder are PostgreSQL/MySQL/Oracle/
+Snowflake/BigQuery/Redshift/ClickHouse/DuckDB/Presto/Spark/SQLite specific.
+
+**Security (61)** — the largest non-performance block, spanning injection (18),
+data exposure (13), authentication (10), access control (6), cryptography (4),
+denial of service (3), authorization (3), session (2), logging (2). T-SQL
+relevant: SEC-INJ-001 concatenation-based injection · SEC-INJ-002 dynamic SQL
+execution · SEC-INJ-003 tautological OR · SEC-INJ-004 time-based blind
+injection (WAITFOR DELAY) · SEC-INJ-005 second-order injection · SEC-INJ-006
+LIKE wildcard injection (framed as a DoS/scan vector) · SEC-CMD-001
+xp_cmdshell · SEC-CFG-001 sp_configure enabling xp_cmdshell / OLE Automation /
+CLR / Ad Hoc Distributed Queries · SEC-DATA-001 BULK INSERT and file-operation
+exfiltration · SEC-DATA-002 OPENROWSET/OPENDATASOURCE/OPENQUERY · SEC-TSQL-001
+OPENROWSET/OPENDATASOURCE · SEC-TSQL-002 sp_OACreate · SEC-PRIV-001 EXECUTE AS
+elevation · SEC-AUTH-001..005 hardcoded passwords, GRANT ALL, GRANT to PUBLIC,
+user without password, CHECK_POLICY/CHECK_EXPIRATION OFF · SEC-CRYPTO-001..004
+weak hashing/plaintext passwords/hardcoded keys/weak ciphers · SEC-AUTHZ-001..003
+role-grant escalation, ownership transfer, missing tenant filter · SEC-LOG-001
+sensitive data in RAISERROR/THROW/PRINT · SEC-LOG-002 audit-trail tampering ·
+SEC-SESSION-001/002 session token storage and expiry · **SEC-DOS-001 recursive
+CTE without MAXRECURSION** · SEC-DOS-002 ReDoS · SEC-INFO-001..004 version and
+schema disclosure, timing attacks, verbose errors · SEC-PATH-001/002 path
+traversal and local file inclusion · SEC-SSRF-001 database-issued HTTP requests
+· SEC-CONFIG-001..004 hardcoded credentials, weak TLS, default credentials,
+permissive access. Remaining SEC-PG/ORA/MYSQL/SQLITE/RS/CH/SF rules are other
+dialects. **SEC-INJ-007..011 (LDAP, NoSQL, XPath, template, JSON injection) are
+regex rules for languages that are not SQL** — a good illustration of the
+catalog's breadth-over-precision posture.
+
+**Reliability (44).** REL-DATA-001 catastrophic data-loss risk · -002 TRUNCATE
+without transaction · -003 ALTER TABLE without backup signal · -004 destructive
+DROP · REL-TXN-001 missing rollback handler · -002 autocommit disabled · -003
+empty transaction block · REL-ERR-001 swallowed exception · REL-REC-001 missing
+savepoint · REL-IDEM-001/002 non-idempotent INSERT/UPDATE · **REL-RACE-001
+read-modify-write without lock** · **-002 TOCTOU** · REL-FK-001 orphan record
+risk · **-002 cascade delete risk** · **REL-DEAD-001 deadlock pattern** · -002
+lock escalation risk · REL-TIMEOUT-001 long-running query · REL-STALE-001 stale
+read · REL-RETRY-001 missing retry · **REL-TSQL-001 @@IDENTITY vs
+SCOPE_IDENTITY** · **REL-TSQL-002 MERGE without HOLDLOCK** · **REL-TSQL-003
+TRUNCATE in TRY without CATCH** · SCHEMA-TBL-001/COL-001 non-existent table/
+column (the only schema-aware checks that actually run). Remainder
+dialect-specific.
+
+**Cost (33).** COST-COMPUTE-001 full scan on large table · -002 unpartitioned
+window functions · COST-STORAGE-001 SELECT * in ETL/CTAS · COST-IO-001
+redundant ORDER BY in subquery · COST-PAGE-001..003 OFFSET pagination without
+index, deep pagination, COUNT(*) for totals · **COST-IDX-001 duplicate index** ·
+-002 over-indexed table · **-003 missing covering index / key lookup** · **-004
+redundant index column order** · COST-CROSS-001..003 cross-database join,
+multi-region latency, distributed transaction overhead · COST-TSQL-001 cursor
+without FAST_FORWARD · COST-PARTITION-001 large table without partitioning
+(stub) · COST-ARCHIVE-001, COST-COMPRESS-001, COST-NETWORK-001,
+COST-SERVERLESS-001/002 · remainder cloud-warehouse specific.
+
+**Quality (51).** QUAL-NULL-001 incorrect NULL comparison · QUAL-MODERN-001
+implicit join syntax · -002 hardcoded date literal in filter · -003 UNION
+without ALL · -004 CASE without ELSE · QUAL-STYLE-001..005 · QUAL-DRY-001
+duplicate WHERE condition · QUAL-COMPLEX-001..005 nesting, god query,
+cyclomatic complexity, length · QUAL-NAME-001..004 · QUAL-DOC-001..003 ·
+**QUAL-SCHEMA-001 missing primary key** · **-002 implicit foreign key** ·
+**-003 missing index on foreign key** · **-004 float for currency** ·
+QUAL-TEST-001 non-deterministic query · **-002 pagination without ORDER BY** ·
+-003 hardcoded test data · QUAL-DEBT-001/002 · **QUAL-DEAD-001 unused database
+object (stub)** · -002 unreachable code · -003 duplicate query (stub) ·
+QUAL-TSQL-001 SET ANSI_NULLS OFF · QUAL-TSQL-002 SET QUOTED_IDENTIFIER OFF ·
+QUAL-DBT-001/002 (stubs) · remainder dialect-specific.
+
+**Compliance (18).** COMP-GDPR-001..006, COMP-HIPAA-001..003, COMP-PCI-001..003,
+COMP-SOX-001/002, COMP-CCPA-001, COMP-SEC-001, COMP-RET-001, COMP-AUD-001 —
+PII/PHI/PAN detection, consent, retention, segregation of duties, audit trails.
+Entirely regex-over-column-names; listed for completeness only.
+
+**Schema/migration (2).** SCH-BRK-001 cross-file breaking change · MIG-BRK-001
+breaking schema change.
+
+### 7.5 SonarQube plugin's own rules — 22 (16 enabled for T-SQL)
+
+C001 WAITFOR/SLEEP · C002 SELECT * · C003 INSERT without column list · C004
+ORDER BY ordinal · C005 EXEC dynamic query · C006 non-schema-qualified name /
+cursor lifecycle · C007 NOLOCK / multiple cursor declarations · C008 cursor
+closed in different control statement · **C009 non-sargable statement (BETA —
+function-wrapped column, plus leading-wildcard LIKE)** · C010/C011/C013 PK/FK/
+index naming conventions · C011 variable declared not set (disabled for T-SQL) ·
+C012 `= NULL` comparison · C014 OR in WHERE · C015 UNION used · C016 IN/NOT IN
+with subquery · C017 ORDER BY without ASC/DESC · C018 file too large · C020
+hint used · C021 missing COMMIT · C022 non-materialized view · C023 cartesian
+join · C024 implicit column reference (disabled for T-SQL) · C030 missing file
+header comment.
+
+### 7.6 Out-of-scope catalogs (recorded so they are not re-surveyed)
+
+* **Oracle PL/SQL analyzer — 57 checks.** Confirmed no T-SQL support of any
+  kind. Has a real symbol table, but for PL/SQL block/variable scope only —
+  never a database catalog. Checks cover correctness (comparison with NULL/
+  boolean, concatenation with NULL, identical expressions, duplicate
+  conditions, dead code, unhandled exceptions, TOO_MANY_ROWS, TO_DATE without
+  format), unused declarations, style, and two test-related checks. Nothing
+  conversion-, sargability-, or index-related beyond `ToCharInOrderBy`,
+  `UnnecessaryLike`, and `SelectAllColumns`.
+* **DacFx sample — 9 rules.** SRD0001 table without PK · SRP0001 WAITFOR DELAY ·
+  SRN0001-0007 naming conventions. Abandoned 2017. Its README additionally
+  documents *Microsoft's* built-in SR0001-SR0016 set, of which the
+  conversion-adjacent one is **SR0014 "Maintain compatibility between data
+  types"** — closed-source, behaviour unverified, and the most likely source of
+  a "SSDT already does this" objection. Worth an empirical check against a
+  dacpac build before publication.
+* **WinForms regex scorer — 9 regexes.** SELECT *, `= NULL`, `!=`/`<>`, leading
+  wildcard, NOT IN, COUNT(col), TOP without ORDER BY, IN predicate, OR
+  operator. Toy repo; recorded only to close it out.

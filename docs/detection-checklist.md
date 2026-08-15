@@ -254,6 +254,75 @@ get an oracle fixture for the serial-plan consequence).
       leaves locks held indefinitely. Both are control-flow/dataflow checks
       over the AST, no catalog needed.
 
+### 18. Candidates from the incumbent survey (2026-08-16)
+~638 rules across six analyzers, extracted in full to
+`detection-reference.md` Appendix 7 (read that before adding anything here —
+the complete lists are there, including the categories we don't play in).
+Most of it is syntax-only and already covered or already skipped. These are the
+items that need our catalog and that nobody does properly. Several sit under
+the incumbents' *Design* or *Execution-issue* headings, not Performance, which
+is why a performance-tagged-only reading missed them.
+
+- [ ] **Join predicate incomplete vs. the backing foreign key** — a join
+      missing a backing FK entirely, or joining on fewer columns than a
+      composite FK defines. The partial-composite case is a real correctness
+      *and* plan defect (silent row multiplication) and is pure catalog work.
+      Strongest single find of the sweep; nobody resolves it properly.
+- [ ] **Temp-table / table-variable collation vs. database and tempdb
+      collation** — a conversion *seed* on every join between a temp object and
+      a user table, and the classic cause of collation-conflict errors. We are
+      the collation-aware tool and this is squarely ours; pairs with the
+      already-queued "column collation ≠ database collation" in #3.
+- [ ] **SET options that silently disable plan features** — QUOTED_IDENTIFIER
+      OFF and NUMERIC_ROUNDABORT ON mean **indexed views and filtered indexes
+      cannot be used** by that module. Universally filed as style hygiene; the
+      actual consequence is plan-shape, and it is catalog-verifiable per module
+      (`sys.sql_modules.uses_quoted_identifier`/`uses_ansi_nulls`), not a
+      guess. Precise, cheap, and mis-framed everywhere else.
+- [ ] **Hint validity against the catalog** — every surveyed tool flags
+      `INDEX`/`JOIN`/`TABLE`/`QUERY` hints as a *style* smell ("avoid hints").
+      The catalog-requiring version nobody does: an `INDEX(...)` hint naming an
+      index that **no longer exists**, or pinning an index the predicate cannot
+      seek anyway, so the hint forces a scan of the wrong index.
+- [ ] **Composite index leading-column violation** — predicate filters a
+      non-leading key column while the leading column is unconstrained. One
+      surveyed tool has this as a regex; against real index key ordering it
+      becomes precise. Scope it as a *predicate* finding ("this query cannot
+      seek this index"), never as an index recommendation, or it drifts into
+      the index-advisor skip.
+- [ ] **`ISNULL`/`COALESCE` arguments of differing datatypes** — folds into the
+      T1-4 COALESCE result-type inference work rather than standing alone; the
+      incumbent rule flags the mismatch but never computes the result type, so
+      it cannot say whether a conversion lands on the column.
+- [ ] **`TOP(100) PERCENT` ignored by the optimizer** and **`ORDER BY` in a
+      view / inline TVF** — same family, both commonly written to "force"
+      ordering that is not guaranteed. Syntactic, near-zero FP, afternoon-sized
+      (belongs with #17 if picked up).
+- [ ] **`IF` statements containing queries inside a procedure** — estimation
+      and recompile consequences; nobody frames it as a performance finding.
+
+Reporting ideas worth stealing (not detections):
+- [ ] **Confidence tiers as a first-class output axis** — one surveyed tool
+      gates findings Proven/Contextual/Advisory with a CI-safe default. Maps
+      onto our `Verdict` + `Unknown` split and the "static-only findings go in
+      an appendix" rule; would make the SARIF export a safer CI gate.
+- [ ] **Source-context classification** (migration/deployment script vs
+      hot-path module) used to filter before reporting — a one-off deployment
+      script legitimately does things a proc must not.
+- [ ] **Machine-readable rule catalog generated from the rule types**, carrying
+      id/severity/rationale/examples/fix-guidance, feeding both docs and the
+      SARIF `rules` block — keeps documentation and code from drifting apart.
+
+**Security, compliance, and correctness-only rules are a live open question,
+not a decided skip.** The sweep found a substantial security axis in the
+incumbents (one tool devotes 61 rules to it — its second-largest category —
+and the actively-developed DacFx pack ships a SQL-injection rule). Nothing has
+been decided here; the full lists are in Appendix 7 §7.4 so the decision can be
+made from the actual rules rather than from a category label. Note the one
+genuine overlap already on the backlog: `EXEC(string)` where `sp_executesql`
+was possible (T2-12) is admitted on plan-cache grounds, with the injection
+surface as a side effect.
+
 ---
 
 ## Tier 3 — deliberate skips (decided; don't re-litigate without new evidence)
@@ -305,10 +374,12 @@ get an oracle fixture for the serial-plan consequence).
   join/order hint frequency) — inherently a runtime aggregate (counts since
   last restart), not a per-query static fact; the static form is already
   covered by the hard-coded-hints skip above.
-- **SonarQube T-SQL rule coverage** — last verification pass couldn't reach
-  rules.sonarsource.com to confirm the performance-tagged rule list is
-  current; treat prior Sonar coverage claims as unconfirmed, not complete,
-  until re-checked from an environment that can reach the site.
+- **SonarQube T-SQL rule coverage** — *resolved 2026-08-16, no longer open.*
+  The only SonarQube T-SQL path is a community plugin, read at source: 16
+  enabled T-SQL rules, all declarative ANTLR parse-tree shape matches, dormant
+  since 2024, no implicit-conversion rule of any kind. Its non-sargability rule
+  is `BETA` with no ground truth. The CI-gate niche is effectively unoccupied.
+  Details in `detection-reference.md` → "Named incumbents".
 
 ---
 
