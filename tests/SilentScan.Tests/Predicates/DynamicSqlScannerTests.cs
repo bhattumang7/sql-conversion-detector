@@ -1687,6 +1687,9 @@ public sealed class DynamicSqlScannerTests
     private static ProcCallGraph SingleCallerGraph(ProcCallArgument argument) =>
         new([new ProcCallEdge(null, CalleeProcName, new SourceSpan("caller.sql", 10, 5), [argument])]);
 
+    private static ProcCallGraph SingleCallerGraph() =>
+        new([new ProcCallEdge(null, CalleeProcName, new SourceSpan("caller.sql", 10, 5), [])]);
+
     private static DynamicSqlExtractionResult ScanWithCallGraph(string sql, ProcCallGraph callGraph)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
@@ -1983,11 +1986,15 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_OutputParamNeverSeededEvenWithSingleLiteralLookingCaller()
+    public void Scan_OutputParamNeverSeededFromTheCallerSArgument_ButStillFoldsToASymbolicPlaceholder()
     {
         // FormalParameterIsOutput true means the argument flows callee-to-caller, never the
-        // other direction - seeding it from anything would be backwards, so it must stay
-        // unseeded (falls back to "variable-not-in-scope" exactly like a genuinely unknown one).
+        // other direction - the CALLER's own (literal-looking) argument value must never be used
+        // to seed it, that would be backwards. But it must not be left OUT of `seed` entirely
+        // either (that reads as "never declared" to any later reference) - a real corpus shape
+        // reads an OUTPUT parameter before ever writing to it (uninitialized, but genuinely in
+        // scope), which used to surface as a spurious "variable-not-in-scope" rather than the
+        // honest typed-Hole/Medium-confidence placeholder every other unresolved parameter gets.
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var argument = new ProcCallArgument("@Status", null, FormalParameterIsOutput: true, null, true, literal);
         var graph = SingleCallerGraph(argument);
@@ -1997,9 +2004,54 @@ public sealed class DynamicSqlScannerTests
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
             graph);
 
-        Assert.Empty(result.AnalyzableScripts);
-        var finding = Assert.Single(result.Findings);
-        Assert.Equal("variable-not-in-scope", finding.Reason);
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.Matches(@"^SELECT 1 WHERE Status = '__silentscan_sym_L\d+C\d+__'$", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ProcParamOmittedByCallerRelyingOnItsOwnLiteralDefault_SeedsFromThatDefault()
+    {
+        // T-SQL lets a caller omit a trailing parameter entirely when the formal declares its own
+        // DEFAULT - a real, common shape (found via scan-db --fetch-sql-from-tables against a
+        // restored production database: spExecuteSql-style shared utility procs, and any proc
+        // whose caller passes fewer positional arguments than it declares). The formal's own
+        // default is a T-SQL-required CONSTANT expression, so folding it is exact, not a guess.
+        // Before this existed, an omitted argument left the formal's key OUT of `seed` entirely,
+        // surfacing as "variable-not-in-scope" for a parameter that WAS genuinely declared and
+        // DID have a real, known value - just never passed explicitly.
+        var graph = SingleCallerGraph(); // caller passes ZERO arguments at all
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) = N'Active' AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            graph);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT 1 WHERE Status = 'Active'", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_ProcParamOmittedByCallerWithNoDefaultDeclared_FoldsToSymbolicPlaceholder()
+    {
+        // An omitted argument for a formal with NO default at all is a genuine caller-side bug
+        // this scanner doesn't validate (SQL Server itself would raise "procedure expects
+        // parameter which was not supplied") - but statically, all this scan actually knows is
+        // "no known value", the same honest state as any other unresolved-but-declared parameter,
+        // never an absent key.
+        var graph = SingleCallerGraph(); // caller passes ZERO arguments at all
+
+        var result = ScanWithCallGraph(
+            $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
+            "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
+            graph);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal(FindingConfidence.Medium, script.Confidence);
+        Assert.Matches(@"^SELECT 1 WHERE Status = '__silentscan_sym_L\d+C\d+__'$", script.InnerText);
     }
 
     // ------------------------------------------------------------------

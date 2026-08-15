@@ -169,10 +169,29 @@ public static class DynamicSqlTransfer
         {
             var paramName = formal.VariableName.Value;
             var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
-            if (argument is null || argument.FormalParameterIsOutput)
+            if (argument is null)
             {
-                // No matching actual argument (a default value applies) or an OUTPUT parameter
-                // (flows the other direction) - nothing to seed, left unseeded.
+                // No matching actual argument - the formal's own DEFAULT value applies (T-SQL
+                // requires a parameter default to be a constant expression, never referencing
+                // another parameter, so folding it against the state built so far is exact, not
+                // an approximation). Previously left the key OUT of `seed` entirely ("nothing to
+                // seed") - which reads as "never declared" to every later reference, a real bug
+                // (surfaced as spurious "variable-not-in-scope" findings for a genuinely-declared,
+                // just not literally-passed, parameter) - every other unresolved-but-real
+                // parameter in this file always seeds SOMETHING (a typed Hole or Tainted), never
+                // leaves the key absent, and a defaulted parameter deserves the same treatment.
+                var declaredType = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
+                seed[paramName] = formal.Value is { } defaultExpression
+                    ? ExpressionEvaluator.Fold(defaultExpression, seed, context.SourcePath, context.Cap, context.Catalog) with { DeclaredType = declaredType }
+                    : SeedSymbolicOrTaint(formal, "parameter-not-seeded:default-value-applies", context);
+                continue;
+            }
+
+            if (argument.FormalParameterIsOutput)
+            {
+                // Flows the other direction (the callee WRITES to it) - its value before any
+                // write is genuinely unknown, never "not in scope" if read before being set.
+                seed[paramName] = SeedSymbolicOrTaint(formal, "parameter-not-seeded:output-argument", context);
                 continue;
             }
 
