@@ -28,5 +28,9 @@ docs/.rebuild-baseline/
 
 # CLAUDE.md is tracked with a sanitized version; the local copy carries
 # credentials and is protected via `git update-index --skip-worktree CLAUDE.md`
+
+# Third-party proprietary binaries kept locally for reference/comparison only —
+# never redistributable, must never be committed or pushed.
+vendor/
 # (this ignore entry is belt-and-braces for any untracked state)
 CLAUDE.md

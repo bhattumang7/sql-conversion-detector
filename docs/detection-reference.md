@@ -18,13 +18,22 @@ checklist Tier 3); Shipped = already implemented.
 
 - Only two static analyzers in existence ever bind column types to check
   conversions; both flag type mismatches **symmetrically** (no notion of which
-  side converts), neither knows collation families, lineage, or dynamic SQL,
-  and one is dead (docs recoverable only from web archives) while the other is
-  a niche community project. Direction-aware conversion detection otherwise
-  exists **only at runtime** (plan-XML convert warnings, the 2022 anti-pattern
-  event). **Named and re-verified from source 2026-08-16 — see "Named
-  incumbents" below.** The claim survives intact; the type-binding analyzer is
-  `SqlServer.Rules` (`SRP0016`), and it is symmetric exactly as described.
+  side converts), neither knows collation families, lineage, or dynamic SQL.
+  **Re-verified 2026-08-16 — see "Named incumbents" below — with one
+  correction: the "one is dead" half was stale.** That commercial analyzer is
+  alive (its IDE-extension listing shows updates as recent as June 2026, and
+  its doc site was recently rebuilt) and its cross-type-operator rule is
+  genuinely **schema-bound**: it requires a configured SQL connection and is
+  silently skipped without one — connection-aware in a way even the DacFx rule
+  pack isn't. Its docs still describe a symmetric mismatch check with no
+  direction, collation, index, or lineage awareness, but the vendor site is a
+  JS shell that defeats fetching, so direction-awareness is an **unverified
+  negative**: before the study publishes, close it by trial-installing that
+  tool and running it against our direction fixtures.
+  The other type-binding analyzer is `SqlServer.Rules` (`SRP0016`) — measured,
+  symmetric, 1/3 precision on the three-case demo. Direction-aware conversion
+  detection otherwise exists **only at runtime** (plan-XML convert warnings,
+  the 2022 anti-pattern event).
 - Microsoft's official static rule set is ~16 rules, ~6 performance-relevant:
   SELECT * in a batch, unindexed column in IN, leading-wildcard LIKE,
   non-sargable expression on a column, varchar(1)/(2), data-loss cast,
@@ -49,19 +58,32 @@ checklist Tier 3); Shipped = already implemented.
 
 ### Named incumbents (cloned and read at source level, 2026-08-16)
 
-Six analyzers surveyed. Two are out of scope by dialect or seriousness; the
-rest set the competitive floor. **None resolves conversion direction,
+Six analyzers surveyed at source level, plus an independent web sweep of the
+commercial market (2026-08-16). Two are out of scope by dialect or seriousness;
+the rest set the competitive floor. **None resolves conversion direction,
 collation, or lineage, and none has any plan oracle** — every finding any of
 them emits is an unverified static claim.
 
 | Tool | Type-aware? | Status | Conversion rule |
 |---|---|---|---|
-| `SqlServer.Rules` (DacFx; dormant original + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric |
+| `SqlServer.Rules` (DacFx; dormant original + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric (measured, 1/3 precision) |
+| Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule, symmetric per docs; direction-awareness an unverified negative (JS-shell site) — close via trial install before publication |
 | SonarQube T-SQL plugin (ANTLR `grammars-v4`) | No | Dormant since 2024 | none |
 | Oracle PL/SQL analyzer | No (block-scope symbol table, no catalog) | Active | none; **no T-SQL support at all** |
 | Rust multi-dialect linter, 282 rules | Parses DDL types into a field it **never reads** | Active | declared stub, never fires |
 | DacFx rule sample, 9 rules | No | Abandoned 2017 | none |
 | WinForms regex scorer, 9 regexes | No | Toy, 0 stars | none |
+
+Ruled out by the same web sweep (none does query-level type-aware analysis):
+a dormant enterprise rule-pack product (no release since 2022, vendor
+sunsetting the family), a live commercial IDE-add-in analyzer (~180 rules,
+text-level only — full rule list unverifiable, JS-shell docs), a connected
+instance-health advisor (configuration/index checks, not code analysis), a
+defunct workload-replay tuner (dead vendor site; empirical, never static), a
+code-governance tool whose T-SQL rules are security/maintainability only,
+generic multi-language SAST platforms listing T-SQL (security only), an AI
+query optimizer with no SQL Server support, and a database-observability
+startup (acquired 2025; runtime-only, Postgres-centric).
 
 **`SRP0016` is the entire incumbent state of the art**, and its verdict is one
 line: `if (!Comparer.Equals(datatype1, datatype2)) → problem`. No data-type
@@ -86,10 +108,15 @@ precedence table exists anywhere in that codebase. Limits, all read from source:
 * Resolution failures are swallowed by a bare `catch` carrying a literal
   `// TODO: PROPERLY LOG THIS ERROR`, yielding silent zero findings.
 
-**Our oracle, run 2026-08-16** (SQL 2022, `SQL_Latin1_General_CP1_CI_AS`, all
-three columns indexed, compile-only SHOWPLAN_XML) across the three cases
-`SRP0016` cannot tell apart. It fires on **all three** and is right about
-**one**:
+**Head-to-head, both sides measured 2026-08-16** — not inferred from source.
+The incumbent was *run*: the §7.2 rule pack ships a free cross-platform .NET
+CLI (installs on Linux as a dotnet global tool; analyzes `.sql`/`.dacpac`/live
+connection). Feeding it one script declaring an indexed table plus three
+procedures — one per case — produced **three `SRP0016` findings, one per
+procedure, at identical severity and with identical message text**. Our side
+is the compile-only SHOWPLAN_XML oracle (SQL 2022,
+`SQL_Latin1_General_CP1_CI_AS`, all three columns indexed). It fires on **all
+three** and is right about **one**:
 
 | Predicate | Plan marker | Result | `SRP0016` |
 |---|---|---|---|
@@ -97,12 +124,31 @@ three columns indexed, compile-only SHOWPLAN_XML) across the three cases
 | `NvarCol = 'x'` | `CONVERT_IMPLICIT(nvarchar(4000),[@1],0)` — on the **literal** | Index Seek | fires — **FP** |
 | `VarCol = N'x'` | `CONVERT_IMPLICIT(nvarchar(50),[…].[VarCol],0)=[@1]` — on the **column** | Index Scan | fires — TP |
 
-The canonical three-case demo for the study: incumbent precision on its own
-flagship rule is 1/3, and the discriminator is exactly the column-side marker
-our oracle already keys on. Note both false positives still emit a real
+The canonical three-case demo for the study: **measured** incumbent precision on
+its own flagship rule is 1/3, and the discriminator is exactly the column-side
+marker our oracle already keys on. Note both false positives still emit a real
 `CONVERT_IMPLICIT` — so even a plan-reading tool that greps for the marker
 without checking *which side* it wraps reproduces both errors. Side-of-the-
 conversion is the whole game.
+
+Reproducing it (both halves are re-runnable, no Windows and no license
+needed): install the §7.2 rule pack's CLI as a dotnet global tool and point it
+at the script for the incumbent side, and use the standing Docker instance
+under `SET SHOWPLAN_XML ON` for ours. Because that CLI also accepts a live
+connection string and a `.json` output file, it is the one incumbent that can
+be run head-to-head against the same target we scan — the obvious next
+measurement is a full both-tools pass over the local production copy to get
+real agreement/disagreement counts rather than a three-case demo.
+
+**The commercial incumbent behind Appendix 7 §7.3's catalog is not runnable
+for this comparison** (checked 2026-08-16): its vendor's product page for the
+tool now redirects elsewhere, the current command-line edition is deprecated
+and requires a separate commercial license for automated use, and it is a
+Windows-only SSMS extension with no headless/CLI mode, so it cannot be run on
+this platform to produce a measured result the way the §7.2 CLI was. Its
+**rule catalog** is nonetheless fully captured in Appendix 7 §7.3 from the
+metadata file the SonarQube plugin ships, so nothing about *what* it detects
+is missing — only a head-to-head measurement of how well it does it.
 
 **Most citable line found**, from the 282-rule Rust linter's own source, at the
 stub where its implicit-conversion rule should be — an actively developed,
@@ -484,9 +530,9 @@ nothing is lost to a summariser's judgement about what looked relevant. **Every
 rule is listed, including whole categories out of our scope.** Disposition
 notes are opinions; the lists are facts.
 
-Totals: `SqlServer.Rules` (DacFx) 120 · SQL Code Guard (T-SQL, imported by the
-SonarQube plugin) 148 · Rust multi-dialect linter 282 · SonarQube plugin's own
-22 (16 enabled for T-SQL) · Oracle PL/SQL analyzer 57 · DacFx sample 9.
+Totals: `SqlServer.Rules` (DacFx) 120 · commercial T-SQL catalog (imported by
+the SonarQube plugin) 148 · Rust multi-dialect linter 282 · SonarQube plugin's
+own 22 (16 enabled for T-SQL) · Oracle PL/SQL analyzer 57 · DacFx sample 9.
 **~638 rules total.** None of them resolves conversion direction, collation, or
 lineage; none has a plan oracle.
 
@@ -588,11 +634,11 @@ recovery time, AUTO_CLOSE, AUTO_SHRINK).
 
 **Naming (4).** SRN0001-0004 — object-name prefix conventions.
 
-### 7.3 SQL Code Guard (T-SQL) — all 148
+### 7.3 Commercial T-SQL catalog — all 148
 
-The richest T-SQL catalog found. Imported as metadata by the SonarQube plugin;
-the engine itself is closed-source Redgate software, so detection quality is
-unverified.
+The richest T-SQL catalog found, from a mainstream commercial vendor's tool.
+Imported as metadata by the SonarQube plugin; the engine itself is
+closed-source, so detection quality is unverified.
 
 **Performance, `PE` (23).** PE001 proc schema not specified · PE002 table/view
 schema not specified · PE003 SELECT INTO · PE004 INDEX HINT · PE005 JOIN HINT ·

@@ -258,6 +258,15 @@ get an oracle fixture for the serial-plan consequence).
 ~638 rules across six analyzers, extracted in full to
 `detection-reference.md` Appendix 7 (read that before adding anything here —
 the complete lists are there, including the categories we don't play in).
+
+- [ ] **Pre-publication gate: measure the second type-binding incumbent's
+      conversion rule against our direction fixtures.** The 2026-08-16 web
+      sweep found the commercial schema-bound analyzer previously recorded as
+      dead is in fact alive, and its cross-type-operator rule is genuinely
+      connection-bound. Its docs read as symmetric, but that's an unverified
+      negative (vendor site defeats fetching). Trial-install it and run the
+      same three-case demo used against `SRP0016`; the study cannot claim
+      "nothing is direction-aware" in public until this is measured.
 Most of it is syntax-only and already covered or already skipped. These are the
 items that need our catalog and that nobody does properly. Several sit under
 the incumbents' *Design* or *Execution-issue* headings, not Performance, which
