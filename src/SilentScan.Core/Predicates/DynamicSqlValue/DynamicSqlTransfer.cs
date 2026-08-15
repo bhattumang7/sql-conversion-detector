@@ -555,26 +555,45 @@ public static class DynamicSqlTransfer
     /// prefix @x already held survive this statement - the general path (assigning THAT prefix a
     /// context-free <see cref="HoleKind.HavocWrite"/> hole) would otherwise discard it entirely,
     /// even though every execution of THIS specific shape provably keeps it intact. Deliberately
-    /// narrow: only the SAME variable appearing as the untouched LEFT operand of a top-level
-    /// addition (the idiom's actual shape everywhere it's been seen) - anything else (the variable
-    /// on the right, nested inside a function call, multiple assigned variables) falls back to the
-    /// caller's own general havoc, never a guess.
+    /// narrow: only the SAME variable appearing as the LEFTMOST leaf of a chain of top-level
+    /// additions (the idiom's actual shape everywhere it's been seen, including the common
+    /// three-or-more-term form <c>@x = @x + col + ', '</c>, which T-SQL's left-associative parse
+    /// nests as <c>(@x + col) + ', '</c> - @x is still the untouched base, just no longer the
+    /// immediate <see cref="BinaryExpression.FirstExpression"/> of the outermost node, hence the
+    /// walk down <see cref="IsLeftmostSelfReference"/> rather than a single direct match) -
+    /// anything else (the variable on the right, nested inside a function call, multiple assigned
+    /// variables) falls back to the caller's own general havoc, never a guess.
     /// </summary>
     private static bool TryCompileSelfReferentialAppend(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         if (select.QueryExpression is not QuerySpecification { SelectElements: [SelectSetVariable { AssignmentKind: AssignmentKind.Equals } setVar] }
-            || setVar.Expression is not BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add, FirstExpression: VariableReference selfRef } binary
-            || !string.Equals(selfRef.Name, setVar.Variable.Name, StringComparison.OrdinalIgnoreCase)
+            || setVar.Expression is not BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary
+            || !IsLeftmostSelfReference(binary, setVar.Variable.Name)
             || !state.TryGetValue(setVar.Variable.Name, out var existing))
         {
             return false;
         }
 
         var declaredType = context.DeclaredTypes.GetValueOrDefault(setVar.Variable.Name);
-        var appended = HavocOrTaint("select-assignment-not-pure", context.Span(binary.SecondExpression), declaredType);
+        var appended = HavocOrTaint("select-assignment-not-pure", context.Span(binary), declaredType);
         state[setVar.Variable.Name] = SqlTextValue.Concat(existing, appended) with { DeclaredType = declaredType };
         return true;
     }
+
+    /// <summary>
+    /// True when <paramref name="expression"/> is <paramref name="name"/> itself, or a top-level
+    /// addition whose own left operand is (recursively) the same thing - i.e. <paramref name="name"/>
+    /// is the leftmost leaf of a left-associative <c>+</c> chain, with everything else in the chain
+    /// appended somewhere to its right. Stops descending the instant a non-Add node is reached, so
+    /// this never crosses into a different operator (e.g. <c>@x - y + z</c> does not match: the
+    /// leftmost leaf of THAT chain's Add is the whole <c>@x - y</c> subtraction, not @x alone).
+    /// </summary>
+    private static bool IsLeftmostSelfReference(ScalarExpression expression, string name) => expression switch
+    {
+        VariableReference variable => string.Equals(variable.Name, name, StringComparison.OrdinalIgnoreCase),
+        BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add, FirstExpression: { } left } => IsLeftmostSelfReference(left, name),
+        _ => false,
+    };
 
     /// <summary>
     /// <c>SELECT @x = expr[, @y = expr2, ...]</c>, the other common way T-SQL assigns local

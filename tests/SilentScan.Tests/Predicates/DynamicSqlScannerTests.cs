@@ -4337,6 +4337,38 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_SelectAssignmentSelfAppendsThroughAThreeTermAdditionChain_PreservesKnownPrefix()
+    {
+        // SELECT @x = @x + col + ', ' FROM t - T-SQL's left-associative parse nests this as
+        // (@x + col) + ', ', so @x is the LEFTMOST LEAF of the chain, not the immediate left
+        // operand of the outermost addition. Real corpus shape (spPotentialCustomerImport2):
+        // accumulating a comma-separated column list one row at a time, then trimming the
+        // trailing separator afterward. Before generalizing the self-append recognition past one
+        // level, this fell through to the general havoc path and discarded @x's own literal
+        // prefix entirely.
+        var (extraction, pipeline) = ProbePipeline("""
+            CREATE PROCEDURE dbo.usp_Test AS
+            BEGIN
+                DECLARE @cols VARCHAR(2000)
+                SET @cols = 'SELECT '
+                SELECT @cols = @cols + ColumnName + ', TAIL' FROM sys.columns
+                EXECUTE(@cols)
+            END
+            """);
+
+        // @cols's own leading literal prefix ('SELECT ') survives the self-append recognition -
+        // everything appended after it (the unresolved ColumnName reference AND the trailing
+        // ', TAIL' literal alike) collapses into a single unmodeled hole, exactly as it already
+        // did for the one-level case: this fix only widens WHICH shapes are recognized as
+        // self-referential, not how much of the appended tail gets modeled. Before this fix, the
+        // recognition didn't fire at all for a three-term chain, so even the prefix was lost.
+        Assert.Empty(extraction.Findings);
+        Assert.DoesNotContain(pipeline.Findings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.StartsWith("SELECT __silentscan_sym_", script.InnerText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Scan_SelectAssignmentAppendsToADifferentVariableThanTheOneOnTheLeft_StaysOrdinaryHavoc()
     {
         // SELECT @x = @y + expr FROM t - @x is NOT self-referential (the appended-to variable on
