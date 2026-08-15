@@ -20,5 +20,10 @@ corpus/*
 # Local dev secrets (SA password override for docker-compose)
 .env
 
+# Remote database backups (never checked in)
+backups/
+
 # Disposable dynamic-SQL rebuild scaffolding (docs/dynamic-sql-rebuild-plan.md Phase 0/6)
 docs/.rebuild-baseline/
+
+CLAUDE.md
