@@ -11,6 +11,8 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class SchemaDependencyScannerTests
 {
+    private static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "scalar_udf");
+
     private static IReadOnlyList<ScalarUdfFinding> ScanSql(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
@@ -18,6 +20,58 @@ public sealed class SchemaDependencyScannerTests
 
         var catalog = CatalogBuilder.Build([result]);
         return SchemaDependencyScanner.Scan(catalog);
+    }
+
+    private static IReadOnlyList<ScalarUdfFinding> ScanFixture(string fileName)
+    {
+        var path = Path.Combine(FixturesDir, fileName);
+        var result = SqlScriptParser.ParseFile(path);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        return SchemaDependencyScanner.Scan(catalog);
+    }
+
+    [Fact]
+    public void Fixture_ComputedColumn_RealCitedFunction_Fires()
+    {
+        var finding = Assert.Single(ScanFixture("COMPUTED_COLUMN_fires.sql"));
+        Assert.Equal(SchemaDependencyKind.ComputedColumn, finding.SchemaDependencyKind);
+        Assert.Equal("dbo.discount_price", finding.FunctionQualifiedName);
+    }
+
+    [Fact]
+    public void Fixture_ComputedColumn_PlainArithmetic_NeverFires()
+    {
+        Assert.Empty(ScanFixture("COMPUTED_COLUMN_clean.sql"));
+    }
+
+    [Fact]
+    public void Fixture_DefaultConstraint_RealCitedFunction_Fires()
+    {
+        var finding = Assert.Single(ScanFixture("DEFAULT_CONSTRAINT_fires.sql"));
+        Assert.Equal(SchemaDependencyKind.DefaultConstraint, finding.SchemaDependencyKind);
+        Assert.Equal("dbo.YearDiff", finding.FunctionQualifiedName);
+    }
+
+    [Fact]
+    public void Fixture_DefaultConstraint_ConstantLiteral_NeverFires()
+    {
+        Assert.Empty(ScanFixture("DEFAULT_CONSTRAINT_clean.sql"));
+    }
+
+    [Fact]
+    public void Fixture_CheckConstraint_RealCitedFunction_Fires()
+    {
+        var finding = Assert.Single(ScanFixture("CHECK_CONSTRAINT_fires.sql"));
+        Assert.Equal(SchemaDependencyKind.CheckConstraint, finding.SchemaDependencyKind);
+        Assert.Equal("Sales.SalesQuantity", finding.FunctionQualifiedName);
+    }
+
+    [Fact]
+    public void Fixture_CheckConstraint_PlainComparison_NeverFires()
+    {
+        Assert.Empty(ScanFixture("CHECK_CONSTRAINT_clean.sql"));
     }
 
     [Fact]

@@ -50,6 +50,10 @@ public sealed class RepoVerificationSummaryConfidenceTests
         TvfFenceNotConfirmed: [],
         TvfFenceNotProbeable: [],
         TvfFenceProbeFailed: [],
+        ScalarUdfConfirmed: [],
+        ScalarUdfNotConfirmed: [],
+        ScalarUdfNotProbeable: [],
+        ScalarUdfProbeFailed: [],
         DynamicSql: new DynamicSqlSummary(0, 0, 0, 0, new Dictionary<string, int>()),
         PassesDialectSniffing: true,
         ParseSuccessRate: 1.0);
