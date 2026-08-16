@@ -75,7 +75,20 @@ When working with a remote database, make sure that no information about the sch
   asserted SELECT-only by `LiveReadOnlyGuard` before being bound as a
   parameter. Any reader that DOES fetch real row content is a separate,
   explicit code path from the describe-only probe, SELECT-only enforced the
-  same way, but not compile-only.
+  same way, but not compile-only. One narrow, separate carve-out exists on top
+  of that SELECT-only guarantee, for this same DMV only:
+  `LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly` additionally
+  accepts a bare, named-procedure `EXEC` (`ExecutableProcedureReference`) -
+  never a string-form `EXEC('...')`/`EXEC(@sql)`, which could contain
+  arbitrary text - used only for probe text about to be bound as this DMV's
+  own parameter (docs/detection-checklist.md Tier 2 "Dynamic SQL quality"
+  item 3, temp-table shape mismatch across a proc-call boundary:
+  `INSERT INTO #temp EXEC OtherProc`). Empirically confirmed compile-only for
+  this form too (zero rows touched) before shipping. Every other live query,
+  including the outer command text this probe itself travels in, still goes
+  through the unmodified SELECT-only `AssertSelectOnly`/
+  `CreateReadOnlyCommand` path - this carve-out never loosens what anything
+  else accepts.
 * .NET 10, C#. Ubuntu; Docker assumed available.
 * Corpus stays at the pinned 5-repo pilot set unless we decide otherwise.
 * **Everything goes via the database — no file-parsed catalog, no file-only
