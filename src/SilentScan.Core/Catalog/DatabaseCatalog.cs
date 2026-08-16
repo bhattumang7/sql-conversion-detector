@@ -27,6 +27,8 @@ public sealed class DatabaseCatalog
 
     private readonly List<ForeignKeyRelationship> _foreignKeys = [];
 
+    private readonly List<CatalogCheckConstraint> _checkConstraints = [];
+
     private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -152,6 +154,11 @@ public sealed class DatabaseCatalog
     public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
 
     public IReadOnlyList<ForeignKeyRelationship> ForeignKeys => _foreignKeys;
+
+    /// <summary>CHECK constraints, live from <c>sys.check_constraints</c> only - same "engine-authoritative, never parsed from DDL" reasoning as <see cref="ForeignKeys"/>. Always empty for a file-mode scan.</summary>
+    public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
+
+    public IReadOnlyList<CatalogCheckConstraint> CheckConstraints => _checkConstraints;
 
     /// <summary>
     /// An indexed view's own clustered/nonclustered index shape, keyed by the view's qualified

@@ -36,6 +36,22 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         GO
         ALTER TABLE dbo.OrdersFk ADD CONSTRAINT FK_OrdersFk_CustomersFk
             FOREIGN KEY (CustomerCode) REFERENCES dbo.CustomersFk (CustomerCode);
+        GO
+        CREATE TABLE dbo.Parents (Id INT NOT NULL PRIMARY KEY);
+        GO
+        CREATE TABLE dbo.CascadeChildren (Id INT NOT NULL PRIMARY KEY, ParentId INT NULL);
+        GO
+        ALTER TABLE dbo.CascadeChildren ADD CONSTRAINT FK_CascadeChildren_Parents
+            FOREIGN KEY (ParentId) REFERENCES dbo.Parents (Id) ON DELETE CASCADE ON UPDATE SET NULL;
+        GO
+        CREATE TABLE dbo.UntrustedChildren (Id INT NOT NULL PRIMARY KEY, ParentId INT NULL);
+        GO
+        ALTER TABLE dbo.UntrustedChildren WITH NOCHECK ADD CONSTRAINT FK_UntrustedChildren_Parents
+            FOREIGN KEY (ParentId) REFERENCES dbo.Parents (Id);
+        GO
+        CREATE TABLE dbo.CheckedOrders (Id INT NOT NULL PRIMARY KEY, Amount INT NOT NULL);
+        GO
+        ALTER TABLE dbo.CheckedOrders WITH NOCHECK ADD CONSTRAINT CK_CheckedOrders_Amount CHECK (Amount > 0);
         """;
 
     [Fact]
@@ -139,5 +155,71 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         var findings = CrossTableTypeDriftScanner.Scan(catalog);
 
         Assert.Empty(findings);
+    }
+
+    [Fact]
+    public async Task ReadAsync_CascadingForeignKey_ReadsRealActionsFromSysForeignKeys()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var fk = Assert.Single(catalog.ForeignKeys, f => f.ConstraintName == "FK_CascadeChildren_Parents");
+        Assert.Equal(ReferentialAction.Cascade, fk.DeleteAction);
+        Assert.Equal(ReferentialAction.SetNull, fk.UpdateAction);
+        Assert.False(fk.IsNotTrusted);
+    }
+
+    [Fact]
+    public async Task ReadAsync_OrdinaryForeignKey_NoActionAndTrusted()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var fk = Assert.Single(catalog.ForeignKeys, f => f.ConstraintName == "FK_OrdersFk_CustomersFk");
+        Assert.Equal(ReferentialAction.NoAction, fk.DeleteAction);
+        Assert.Equal(ReferentialAction.NoAction, fk.UpdateAction);
+        Assert.False(fk.IsNotTrusted);
+    }
+
+    [Fact]
+    public async Task ReadAsync_UntrustedForeignKey_ReadsRealIsNotTrustedFromSysForeignKeys()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var fk = Assert.Single(catalog.ForeignKeys, f => f.ConstraintName == "FK_UntrustedChildren_Parents");
+        Assert.True(fk.IsNotTrusted);
+    }
+
+    [Fact]
+    public async Task ReadAsync_UntrustedCheckConstraint_ReadsRealIsNotTrustedFromSysCheckConstraints()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var check = Assert.Single(catalog.CheckConstraints, c => c.ConstraintName == "CK_CheckedOrders_Amount");
+        Assert.Equal("dbo.CheckedOrders", check.TableQualifiedName);
+        Assert.True(check.IsNotTrusted);
+        Assert.False(check.IsDisabled);
+    }
+
+    [Fact]
+    public async Task ReadAsync_UntrustedConstraints_UntrustedConstraintScannerFires()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var findings = UntrustedConstraintScanner.Scan(catalog);
+
+        Assert.Contains(findings, f => f.Kind == UntrustedConstraintFindingKind.ForeignKey && f.ConstraintName == "FK_UntrustedChildren_Parents");
+        Assert.Contains(findings, f => f.Kind == UntrustedConstraintFindingKind.CheckConstraint && f.ConstraintName == "CK_CheckedOrders_Amount");
+        Assert.DoesNotContain(findings, f => f.ConstraintName == "FK_OrdersFk_CustomersFk");
+    }
+
+    [Fact]
+    public async Task ReadAsync_CascadingForeignKey_CascadingForeignKeyScannerFires()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var findings = CascadingForeignKeyScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.ConstraintName == "FK_CascadeChildren_Parents");
+        Assert.Equal(ReferentialAction.Cascade, finding.DeleteAction);
+        Assert.Equal(ReferentialAction.SetNull, finding.UpdateAction);
     }
 }

@@ -28,6 +28,8 @@ public sealed record ScanReport(
     IReadOnlyList<NotInNullableSubqueryFinding> NotInNullableSubqueryFindings,
     IReadOnlyList<NonUniqueUpdateSourceFinding> NonUniqueUpdateSourceFindings,
     IReadOnlyList<ForcedSerialFinding> ForcedSerialFindings,
+    IReadOnlyList<UntrustedConstraintFinding> UntrustedConstraintFindings,
+    IReadOnlyList<CascadingForeignKeyFinding> CascadingForeignKeyFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -73,7 +75,10 @@ public sealed record ScanReport(
     /// <see cref="NonUniqueUpdateSourceFindings"/> stream (docs/detection-checklist.md Tier 2
     /// "UPDATE ... FROM without source uniqueness"). Bumped to 19 for the new
     /// <see cref="ForcedSerialFindings"/> stream (docs/detection-checklist.md Tier 2
-    /// "Forced-serial construct inventory").
+    /// "Forced-serial construct inventory"). Bumped to 20 for the new
+    /// <see cref="UntrustedConstraintFindings"/> and <see cref="CascadingForeignKeyFindings"/>
+    /// streams (docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Untrusted (WITH
+    /// NOCHECK) FK/CHECK constraints" and "Cascading FK actions").
     /// </summary>
-    public const int CurrentSchemaVersion = 19;
+    public const int CurrentSchemaVersion = 20;
 }

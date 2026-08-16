@@ -1370,18 +1370,72 @@ latest) compat level.
       as a finding with the chain (57 views reference other views locally).
 - [ ] Multi-referenced CTE — inline macro re-executed per reference; count
       references in the AST. Rarely covered anywhere; high precision.
-- [ ] Untrusted (WITH NOCHECK) FK/CHECK constraints — optimizer forfeits join
-      elimination; pure catalog flag (`is_not_trusted`).
-      **Origin half, added from the incumbent read:** the catalog flag says a
-      constraint is untrusted but not *why*, and the answer is almost always a
-      re-enabling statement that omitted `WITH CHECK` (the default there is
-      `WITH NOCHECK`, the opposite of the default on the original `ADD
-      CONSTRAINT`). Since we already parse deployment/migration text, pair the
-      catalog finding with the statement that caused it wherever the scan can
-      see it — that turns an unactionable flag into a one-line fix, and origin
-      attribution is the schema every stream here already carries.
-- [ ] Cascading FK actions (ON DELETE/UPDATE CASCADE) — hidden serial
-      multi-table work per DML; catalog-only, informational.
+- [x] Untrusted (WITH NOCHECK) FK/CHECK constraints — optimizer forfeits join
+      elimination; pure catalog flag (`is_not_trusted`). `ForeignKeyRelationship`
+      gained `IsNotTrusted`/`IsDisabled` fields, `LiveCatalogReader.ReadForeignKeysAsync`
+      now selects `fk.is_not_trusted`/`fk.is_disabled`; a new `CatalogCheckConstraint`
+      record + `DatabaseCatalog.CheckConstraints` + `LiveCatalogReader.ReadCheckConstraintsAsync`
+      read `sys.check_constraints` (previously not modeled in the catalog at
+      all — no `LiveCatalogReader`/DDL-parsed path had ever touched CHECK
+      constraints). Catalog-only, unconditional (every untrusted, non-disabled
+      constraint reported once, the same `MaxTypedColumnFinding` "once per
+      object" precedent) — a disabled constraint is not reported, since it's
+      openly off, not silently weaker than it looks. `Confidence.High`, SARIF
+      `LevelWarning` (structural risk, not itself a proof of a wrong result —
+      the same tier `ForcedSerialFinding`/`SetOptionFinding` use, not the
+      `LevelError` correctness tier). No oracle needed: `is_not_trusted` is a
+      documented, exact catalog fact, not a plan-shape claim.
+      **Origin half, added from the incumbent read:** deliberately deferred,
+      not attempted this pass. Checked directly: this tool's corpus-deploy
+      pipeline (`ScriptDeployer`) discards the parsed DDL AST after
+      deployment, with no existing constraint-name-to-(file, line)
+      side-channel anywhere to attribute a specific re-enabling statement
+      back to — real new cross-project plumbing (deploy-time AST capture
+      threaded into report-construction time), not an incremental add to
+      this stream. Also structurally corpus-only even if built: a `scan-db`
+      target has no deployment script text at all to attribute back to.
+      Documented as a known gap rather than half-built.
+      Unit-tested (`UntrustedConstraintScannerTests`, 6 cases: untrusted FK
+      fires, trusted FK never fires, untrusted-but-disabled FK never fires,
+      a composite FK reported once not once per column pair, untrusted
+      CHECK fires, trusted CHECK never fires) and oracle-tested against a
+      real deployed schema (`LiveCatalogReaderTests`, 4 new cases confirming
+      `is_not_trusted`/`is_disabled` read correctly off `sys.foreign_keys`/
+      `sys.check_constraints`, plus the scanner firing against real catalog
+      state). Wired end-to-end (`ScanReport` schema version 19 → 20, SARIF,
+      readable report). **Real coverage against the local RM_ test
+      database: 81 findings** (65 untrusted FKs, 16 untrusted CHECK
+      constraints).
+- [x] Cascading FK actions (ON DELETE/UPDATE CASCADE) — hidden multi-table
+      work per DML; catalog-only, informational. `ForeignKeyRelationship`
+      gained `DeleteAction`/`UpdateAction` fields (a `ReferentialAction`
+      enum matching `sys.foreign_keys`' own documented integer codes),
+      read in the same `ReadForeignKeysAsync` query change as the untrusted-
+      constraint item above (same query, same row, no extra join). Reported
+      unconditionally, not gated on any DML-correlation heuristic — matching
+      `MaxTypedColumnFinding`'s own precedent, since gating on "only report
+      where the scan can see application DML touching this table" would
+      itself be an unsound guess (a table modified only through an
+      unresolvable proc, or an ORM entirely outside this tool's hard scope,
+      would silently vanish from a gated report). `Confidence.High` (the
+      action is an exact catalog fact), but SARIF `LevelNote`, not Warning —
+      purely informational, no magnitude claim (how many rows, how often
+      depends on data this pass cannot see), the same no-magnitude-claim
+      tier `LocalVariablePredicateFinding` uses for its own reason, though
+      at higher confidence since (unlike that finding's cardinality-estimate
+      risk) the structural fact itself is never in doubt.
+      Unit-tested (`CascadingForeignKeyScannerTests`, 4 cases: DELETE
+      CASCADE fires, UPDATE SET NULL fires, NO ACTION never fires, a
+      composite FK reported once not once per column pair) and oracle-
+      tested against a real deployed schema (`LiveCatalogReaderTests`, 2 new
+      cases confirming `delete_referential_action`/`update_referential_action`
+      read correctly off `sys.foreign_keys`, including a genuinely
+      cascading-and-SET-NULL FK, plus the scanner firing against real
+      catalog state). Wired end-to-end alongside the untrusted-constraint
+      stream (same schema bump, SARIF, readable report). **Real coverage
+      against the local RM_ test database: 115 findings** (101 `DELETE
+      CASCADE` only, 8 `SET NULL`, 6 carrying both a cascading delete and a
+      cascading update action).
 - [ ] **Post-expansion join width.** Every surveyed tool counts tables in the
       written `FROM`/`JOIN` list and warns past a threshold; that count is
       meaningless when half the sources are views. The number that matters is

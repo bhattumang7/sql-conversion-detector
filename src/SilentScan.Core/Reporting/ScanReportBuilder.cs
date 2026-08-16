@@ -330,6 +330,20 @@ public static class ScanReportBuilder
             maxTypedColumnStage.Complete($"{maxTypedColumnFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<UntrustedConstraintFinding> untrustedConstraintFindings;
+        using (var untrustedConstraintStage = progress.Begin("scanning untrusted FK/CHECK constraints"))
+        {
+            untrustedConstraintFindings = UntrustedConstraintScanner.Scan(catalog);
+            untrustedConstraintStage.Complete($"{untrustedConstraintFindings.Count:N0} findings");
+        }
+
+        IReadOnlyList<CascadingForeignKeyFinding> cascadingForeignKeyFindings;
+        using (var cascadingFkStage = progress.Begin("scanning cascading FK actions"))
+        {
+            cascadingForeignKeyFindings = CascadingForeignKeyScanner.Scan(catalog);
+            cascadingFkStage.Complete($"{cascadingForeignKeyFindings.Count:N0} findings");
+        }
+
         List<PartialCompositeForeignKeyJoinFinding> partialCompositeForeignKeyJoinFindings;
         using (var partialFkJoinStage = progress.Begin("scanning partial composite-FK joins", usableCount))
         {
@@ -569,6 +583,7 @@ public static class ScanReportBuilder
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
+            untrustedConstraintFindings, cascadingForeignKeyFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

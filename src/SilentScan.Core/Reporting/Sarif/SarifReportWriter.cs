@@ -58,6 +58,8 @@ public static class SarifReportWriter
         results.AddRange(report.NotInNullableSubqueryFindings.Select(ToResult));
         results.AddRange(report.NonUniqueUpdateSourceFindings.Select(ToResult));
         results.AddRange(report.ForcedSerialFindings.Select(ToResult));
+        results.AddRange(report.UntrustedConstraintFindings.Select(ToResult));
+        results.AddRange(report.CascadingForeignKeyFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -378,6 +380,37 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(UntrustedConstraintFinding finding)
+    {
+        // Warning, not error: real optimizer forfeiture (join elimination / constraint-based
+        // rewrites), but the finding itself proves no wrong result on its own - the same
+        // "structural risk, not provably-wrong-result" tier ForcedSerialFinding/SetOptionFinding
+        // get, not the Error tier a correctness finding gets.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UntrustedConstraintRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var kindDisplay = finding.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint";
+        var message = $"'{finding.ConstraintName}' ({kindDisplay} on '{finding.TableQualifiedName}') is untrusted - the engine does not guarantee it holds over existing rows, and forfeits join-elimination/constraint-based query rewrites that assume it does.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(CascadingForeignKeyFinding finding)
+    {
+        // Note, not warning/error: purely informational per the finding's own doc comment - a
+        // real, exact catalog fact, but no magnitude claim (how many rows, how often), the same
+        // no-magnitude-claim tier LocalVariablePredicateFinding uses for its own reason.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CascadingForeignKeyRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var actions = string.Join(", ", new[]
+        {
+            finding.DeleteAction != ReferentialAction.NoAction ? $"ON DELETE {finding.DeleteAction}" : null,
+            finding.UpdateAction != ReferentialAction.NoAction ? $"ON UPDATE {finding.UpdateAction}" : null,
+        }.Where(a => a is not null));
+        var message = $"'{finding.ConstraintName}' ({finding.ParentTableQualifiedName} -> {finding.ReferencedTableQualifiedName}) carries {actions} - a DML statement against the referenced table silently cascades to the parent's dependent rows too.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)

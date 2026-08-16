@@ -79,6 +79,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(NotInNullableSubquery(report, headingLevel, pathBase));
         blocks.AddRange(NonUniqueUpdateSource(report, headingLevel, pathBase));
         blocks.AddRange(ForcedSerial(report, headingLevel, pathBase));
+        blocks.AddRange(UntrustedConstraint(report, headingLevel, pathBase));
+        blocks.AddRange(CascadingForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -138,6 +140,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
+        AddCount(counts, "Untrusted FK/CHECK constraints", report.UntrustedConstraintFindings.Count);
+        AddCount(counts, "Foreign keys with a cascading ON DELETE/UPDATE action", report.CascadingForeignKeyFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -765,6 +769,52 @@ public static class ReadableScanReportWriter
         ForcedSerialFindingKind.FastForwardCursor => "FAST_FORWARD cursor",
         _ => "Non-parallelizable intrinsic",
     };
+
+    private static IEnumerable<ReadableBlock> UntrustedConstraint(ScanReport report, int level, string? pathBase)
+    {
+        if (report.UntrustedConstraintFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Untrusted FK/CHECK constraints ({report.UntrustedConstraintFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A constraint the engine itself does not trust - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement (the default there, the opposite of the default on the original ADD CONSTRAINT). The optimizer forfeits join-elimination and other constraint-based rewrites for every query touching it, and the constraint may not actually hold over existing rows. A disabled constraint is not reported - it's openly off, not silently weaker than it looks.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Constraint", "Table", "Kind"],
+            [.. report.UntrustedConstraintFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ConstraintName,
+                f.TableQualifiedName,
+                f.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CascadingForeignKey(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CascadingForeignKeyFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Cascading FK actions ({report.CascadingForeignKeyFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action - a single DML statement against the referenced table silently touches every dependent row in the child table too, with no visible predicate change at the call site. Purely informational: this states the fact, not a proven cost - how many rows and how often depends on data this pass cannot see.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Constraint", "Parent", "Referenced", "Delete action", "Update action"],
+            [.. report.CascadingForeignKeyFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ConstraintName,
+                f.ParentTableQualifiedName,
+                f.ReferencedTableQualifiedName,
+                f.DeleteAction.ToString(),
+                f.UpdateAction.ToString(),
+            })]);
+    }
 
     private static IEnumerable<ReadableBlock> PartialCompositeForeignKeyJoin(ScanReport report, int level, string? pathBase)
     {

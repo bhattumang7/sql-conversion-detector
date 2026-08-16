@@ -102,6 +102,11 @@ public sealed class LiveCatalogReader
             catalog.AddForeignKey(foreignKey);
         }
 
+        foreach (var checkConstraint in await ReadCheckConstraintsAsync(connection, cancellationToken))
+        {
+            catalog.AddCheckConstraint(checkConstraint);
+        }
+
         foreach (var (qualifiedName, indexes) in await ReadIndexedViewsAsync(connection, cancellationToken))
         {
             catalog.AddIndexedView(qualifiedName, indexes);
@@ -371,7 +376,8 @@ public sealed class LiveCatalogReader
         const string sql = """
             SELECT fk.name AS constraint_name,
                    ps.name AS parent_schema, pt.name AS parent_table, pc.name AS parent_column,
-                   rs.name AS referenced_schema, rt.name AS referenced_table, rc.name AS referenced_column
+                   rs.name AS referenced_schema, rt.name AS referenced_table, rc.name AS referenced_column,
+                   fk.is_not_trusted, fk.is_disabled, fk.delete_referential_action, fk.update_referential_action
             FROM sys.foreign_key_columns fkc
             JOIN sys.foreign_keys fk ON fk.object_id = fkc.constraint_object_id
             JOIN sys.tables pt ON pt.object_id = fkc.parent_object_id
@@ -394,10 +400,42 @@ public sealed class LiveCatalogReader
                 ParentTableQualifiedName: $"{reader.GetString(1)}.{reader.GetString(2)}",
                 ParentColumnName: reader.GetString(3),
                 ReferencedTableQualifiedName: $"{reader.GetString(4)}.{reader.GetString(5)}",
-                ReferencedColumnName: reader.GetString(6)));
+                ReferencedColumnName: reader.GetString(6),
+                IsNotTrusted: reader.GetBoolean(7),
+                IsDisabled: reader.GetBoolean(8),
+                DeleteAction: (ReferentialAction)reader.GetByte(9),
+                UpdateAction: (ReferentialAction)reader.GetByte(10)));
         }
 
         return relationships;
+    }
+
+    private static async Task<List<CatalogCheckConstraint>> ReadCheckConstraintsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT cc.name AS constraint_name, s.name AS schema_name, t.name AS table_name,
+                   cc.is_not_trusted, cc.is_disabled
+            FROM sys.check_constraints cc
+            JOIN sys.tables t ON t.object_id = cc.parent_object_id
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            WHERE t.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var constraints = new List<CatalogCheckConstraint>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            constraints.Add(new CatalogCheckConstraint(
+                ConstraintName: reader.GetString(0),
+                TableQualifiedName: $"{reader.GetString(1)}.{reader.GetString(2)}",
+                IsNotTrusted: reader.GetBoolean(3),
+                IsDisabled: reader.GetBoolean(4)));
+        }
+
+        return constraints;
     }
 
     /// <summary>
