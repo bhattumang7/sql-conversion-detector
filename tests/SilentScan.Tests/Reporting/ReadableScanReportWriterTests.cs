@@ -170,8 +170,8 @@ public sealed class ReadableScanReportWriterTests
 
         var rendered = Render(await Build(Sql));
 
-        Assert.Contains("Column wrapped in a function (2)", rendered, StringComparison.Ordinal);
-        var explanation = "The index stores the column's values, not the function's results";
+        Assert.Contains("Date-part function applied to the column (2)", rendered, StringComparison.Ordinal);
+        var explanation = "Oracle-verified: the date-part function forces a per-row scan";
         Assert.Equal(1, CountOccurrences(rendered, explanation));
         Assert.Contains("CreatedAt", rendered, StringComparison.Ordinal);
         Assert.Contains("UpdatedAt", rendered, StringComparison.Ordinal);

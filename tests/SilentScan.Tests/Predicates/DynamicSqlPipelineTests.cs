@@ -299,7 +299,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var result = DynamicSqlPipeline.Analyze(extraction.AnalyzableScripts, catalog, lineage);
 
         var tier1Finding = Assert.Single(result.Tier1Findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, tier1Finding.Kind);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, tier1Finding.Kind);
         Assert.Equal("app.sql", tier1Finding.SourcePath);
         Assert.Equal(1, tier1Finding.Line);
         Assert.NotNull(tier1Finding.DynamicSqlCallSite);
@@ -494,7 +494,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var tier1Result = DynamicSqlPipeline.Analyze([tier1Script], catalog, lineage);
 
         var tier1Finding = Assert.Single(tier1Result.Tier1Findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, tier1Finding.Kind);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, tier1Finding.Kind);
         Assert.Equal("app.sql", tier1Finding.SourcePath);
         Assert.NotNull(tier1Finding.DynamicSqlCallSite);
         Assert.Equal("app.sql", tier1Finding.DynamicSqlCallSite!.Value.SourcePath);

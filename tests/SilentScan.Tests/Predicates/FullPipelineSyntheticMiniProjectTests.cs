@@ -123,7 +123,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     {
         var finding = Assert.Single(_report.Tier1Findings);
 
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
         Assert.Equal("CreatedAt", finding.ColumnName);
         Assert.Equal("YEAR", finding.Detail);
 

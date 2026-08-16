@@ -26,7 +26,7 @@ public sealed class NonSargablePredicateScannerTests
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_fires.sql");
 
         var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
         Assert.Equal("SomeDate", finding.ColumnName);
         Assert.Equal("YEAR", finding.Detail);
     }
@@ -189,6 +189,39 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Equal("JSON_VALUE", finding.Detail);
     }
 
+    [Fact]
+    public void CaseFoldOnColumn_UpperWrapsColumn_Fires()
+    {
+        var findings = ScanFixture("CASE_FOLD_ON_COLUMN_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CaseFoldOnColumn, finding.Kind);
+        Assert.Equal("Email", finding.ColumnName);
+        Assert.Contains("collation unresolved", finding.Detail);
+    }
+
+    [Fact]
+    public void DateFunctionOnColumn_YearOnColumn_Fires()
+    {
+        var findings = ScanFixture("DATE_YEAR_ON_COLUMN_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
+        Assert.Equal("OrderDate", finding.ColumnName);
+        Assert.Equal("YEAR", finding.Detail);
+    }
+
+    [Fact]
+    public void DateFunctionOnColumn_DateDiffOnColumn_Fires()
+    {
+        var findings = ScanFixture("DATE_DATEDIFF_ON_COLUMN_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
+        Assert.Equal("LastActiveAt", finding.ColumnName);
+        Assert.Equal("DATEDIFF", finding.Detail);
+    }
+
     // FUNCTION_WRAPPED_COLUMN_json_value_clean.sql (the suppression itself) and
     // FUNCTION_WRAPPED_COLUMN_json_value_different_path_fires.sql (the precision guard against a
     // similar-but-different computed column) both need a real catalog with computed-column
@@ -286,7 +319,7 @@ public sealed class NonSargablePredicateScannerTests
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_fires.sql");
 
         var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
         Assert.Equal("SomeDate", finding.ColumnName);
         Assert.Equal("YEAR", finding.Detail);
     }
@@ -321,7 +354,7 @@ public sealed class NonSargablePredicateScannerTests
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_fires.sql");
 
         var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.DateFunctionOnColumn, finding.Kind);
         Assert.Equal("CreatedAt", finding.ColumnName);
         Assert.Equal("YEAR", finding.Detail);
     }

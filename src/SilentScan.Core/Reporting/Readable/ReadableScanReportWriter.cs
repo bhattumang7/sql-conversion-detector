@@ -321,6 +321,8 @@ public static class ReadableScanReportWriter
         SargabilityFindingKind.CastOrConvertOnColumn => "CAST/CONVERT applied to the column",
         SargabilityFindingKind.ColumnArithmetic => "Arithmetic on the column",
         SargabilityFindingKind.LeadingWildcardLike => "LIKE with a leading wildcard",
+        SargabilityFindingKind.CaseFoldOnColumn => "UPPER/LOWER applied to the column",
+        SargabilityFindingKind.DateFunctionOnColumn => "Date-part function applied to the column",
         _ => "LIKE with a non-literal pattern",
     };
 
@@ -334,6 +336,10 @@ public static class ReadableScanReportWriter
             "The column is part of an expression rather than standing alone. Moving the arithmetic to the other side of the comparison usually restores the seek.",
         SargabilityFindingKind.LeadingWildcardLike =>
             "A pattern starting with % has no known prefix, and a b-tree can only seek on a prefix - the whole index or table is read.",
+        SargabilityFindingKind.CaseFoldOnColumn =>
+            "Oracle-verified: the wrap forces a scan regardless of the column's collation family - it is never a no-op for the PLAN, even when it's a no-op for the RESULT SET. See the finding's own Detail for whether this specific column's wrap is safe to delete or needs a real rewrite.",
+        SargabilityFindingKind.DateFunctionOnColumn =>
+            "Oracle-verified: the date-part function forces a per-row scan just like any other function wrap. Usually rewritable to a sargable literal date range (e.g. YEAR(col)=2024 becomes col >= '2024-01-01' AND col < '2025-01-01') that restores the seek.",
         _ =>
             "The pattern is a variable or expression, so the plan cannot be built around a known prefix; the engine has to assume the worst at compile time.",
     };

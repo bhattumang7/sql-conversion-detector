@@ -381,8 +381,18 @@ public static class ScanReportBuilder
         scalarUdfFindings = [.. scalarUdfFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         // Deterministic output ordering (CLAUDE.md), then CLAUDE.md's Pass 4 rank:
-        // SCAN_FORCED + indexed + depth>=1 first.
-        tier1Findings = [.. tier1Findings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)];
+        // SCAN_FORCED + indexed + depth>=1 first. Index-existence weighting
+        // (docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #5)
+        // mirrors TypedFindings' own ThenByDescending(f => f.Column.Indexed) below - a non-
+        // sargable predicate on an unindexed column is noise, on an indexed column it's a real
+        // lost seek. Indexed is nullable (unresolved != false, CLAUDE.md's own "never guess"
+        // discipline) - true ranks first (a proven lost seek), unresolved ranks second (real
+        // signal, just not confirmed), false ranks last (confirmed noise).
+        tier1Findings = [.. tier1Findings
+            .OrderBy(f => f.Indexed switch { true => 0, null => 1, false => 2 })
+            .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+            .ThenBy(f => f.Line)
+            .ThenBy(f => f.Column)];
         dynamicSqlFindings = [.. dynamicSqlFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
         typedFindings = [.. typedFindings
             .OrderBy(f => VerdictRank(f.Verdict))

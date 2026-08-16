@@ -362,35 +362,118 @@ follow-up under cross-table type drift (the join-candidate/observed-
 comparison half).
 
 ### Type-aware upgrade of the sargability stream
-Highest base rate of anything measured: ~1,100 modules with ISNULL/COALESCE
-in WHERE clauses; 96 with RTRIM-family wrappers; 54 with leading wildcards.
+Real AST/catalog-derived counts (live `scan-db` against the local RM_ test
+database, replacing the old crude LIKE-heuristic numbers below where they
+disagree): 6,942 Tier-1 findings total. **Date-form functions (2,044
+findings, `DATEDIFF` alone 1,633) are the largest bucket, not ISNULL/COALESCE
+(1,713)** — the "highest base rate" framing this section opened with was
+wrong once measured with the real parser; corrected below. `CHARINDEX`: 12.
+`LEFT(col,n)` genuinely wrapping a column: 0. `UPPER`: 11 (`LOWER`: 0).
 
-- [ ] `ISNULL(col, x) = y` / `COALESCE(col, x) = y` in predicates — upgrade
-      from syntactic flag to verdict: is the column nullable (catalog)? does
-      an index exist? does COALESCE's result-type inference (highest
-      precedence operand) flip a conversion onto the column? Folds in the
-      incumbent-catalog finding "`ISNULL`/`COALESCE` arguments of differing
-      datatypes" — the incumbent rule flags the mismatch but never computes
-      the result type, so it can't say whether a conversion lands on the
-      column; this item's own result-type inference is what makes it precise.
-- [ ] Date-form non-sargables as named rules: `YEAR(col)=`, `DATEPART` on
-      column, `DATEADD/DATEDIFF` on column, `CONVERT(varchar, col, n)`
-      comparisons, BETWEEN with end-of-period boundary.
-- [ ] `CHARINDEX(x, col)` / `LEFT(col, n) =` — rewritable-to-sargable forms.
-- [ ] UPPER/LOWER on column **checked against actual collation** — fires only
-      when the column's collation is case-sensitive (existing linters assume
-      case-insensitivity blindly). Collation-aware = our edge.
-- [ ] Index-existence weighting for all sargability findings: an unsargable
-      predicate on an unindexed column is noise; on an indexed column it's a
-      lost seek (we already rank expression findings by underlying index —
-      extend to the whole stream).
-- **Mandatory precision guard for every rule in this section:** a function
-  wrapping a column does not imply a lost seek when an indexed computed column
-  matches the same expression. Already landed for the shipped
-  function-wrapped-column rule's own JSON_VALUE/JSON_QUERY case (see
-  "Corrections to shipped work" above, `JsonComputedColumnMatcher`) — hold
-  each new rule here to the same guard rather than re-deriving it.
-- Oracle: seek-vs-scan probes; for the collation rule, CS vs CI fixtures.
+- [x] `ISNULL(col, x) = y` — **shipped, the false-positive half**:
+      oracle-verified `ISNULL(col, x)` on a catalog-provable NOT NULL column
+      is a false positive the blanket rule didn't catch — the optimizer
+      proves `ISNULL(NOT-NULL-col, x) = col` and simplifies the wrap away
+      entirely, **regardless of the default argument's own type** (even a
+      widening int-vs-bigint default still seeks — nullability alone decides
+      it, never a type question). Suppressed in
+      `Predicates/NonSargablePredicateScanner.cs` (`IsKnownNotNullColumn`).
+      Fixtures `FUNCTION_WRAPPED_COLUMN_isnull_not_null_clean.sql` +
+      oracle coverage (`IsNullNotNullSuppressionTests`, 5 tests including the
+      widening-default oracle probe and a nullable-column near-miss guard the
+      other direction).
+- [x] `COALESCE(col, x) = y` — **decided, no change needed**: oracle-verified
+      `COALESCE` gets **no** equivalent NOT-NULL simplification —
+      `COALESCE(NOT-NULL-col, x) = y` still scans even with no type
+      conversion present at all (`COALESCE` is `CASE` syntax sugar; the
+      optimizer never folds it the way it folds `ISNULL`). This closes the
+      original "does COALESCE's result-type inference flip a conversion"
+      question — the real blocker was never type inference, so no new
+      classifier is needed; `COALESCE` already fires correctly today as
+      `FunctionWrappedColumn` and now benefits from index-existence weighting
+      (below). The "ISNULL/COALESCE arguments of differing datatypes"
+      incumbent-catalog fold-in is superseded by this finding — computing the
+      result type would not have changed COALESCE's verdict here regardless.
+- [x] Date-form non-sargables as a named rule — **shipped**:
+      `SargabilityFindingKind.DateFunctionOnColumn` covers
+      `YEAR`/`MONTH`/`DAY`/`DATEPART`/`DATEDIFF`/`DATEADD`/`DATENAME`.
+      Oracle-verified structurally identical to case-folding (below): the
+      wrap forces a scan unconditionally, so this is syntactic-with-guard,
+      not a new verdict system — the "does the type change" framing this
+      item started with turned out not to apply. **Oracle discovery, load-
+      bearing for the precision guard:** SQL Server rewrites `YEAR(x)`/
+      `MONTH(x)`/`DAY(x)` to `DATEPART(year/month/day, x)` the moment a
+      computed column definition is stored (`sys.computed_columns.definition`)
+      — a real false-negative trap the guard's structural comparer now
+      canonicalizes around (`ComputedColumnMatcher.TryAsCanonicalDatePart`),
+      found and fixed via a failing live-pipeline oracle test before it could
+      ship broken. Fixtures `DATE_YEAR_ON_COLUMN_{fires,clean}.sql` (real
+      source: Kendra Little's computed-column-index article) and
+      `DATE_DATEDIFF_ON_COLUMN_fires.sql` (labeled synthetic, no distinct
+      real bug report found for this exact shape, per CLAUDE.md's rare-
+      exception allowance) + `DateFunctionColumnPipelineTests` (4 oracle
+      tests, both directions). `CONVERT(varchar, col, n)`-style date
+      comparisons stay under the existing `CastOrConvertOnColumn` kind
+      (not a new named kind) but now share the same computed-column guard —
+      see below. **BETWEEN with an end-of-period boundary deliberately NOT
+      shipped** — a genuinely new syntactic pattern (distinguishing a
+      legitimate range BETWEEN from an end-of-period hack) with real false-
+      positive risk this pass didn't have time to get precise; left as
+      explicit follow-up rather than guessed.
+- [x] UPPER/LOWER on a column — **shipped, scope corrected from the
+      checklist's original framing**: oracle-verified the wrap forces a scan
+      **regardless of collation family** (built one CS-collation and one
+      CI-collation indexed table, 5,000 rows, `UPDATE STATISTICS ...
+      FULLSCAN` — both produced `Index Scan`, never `Index Seek`) — the
+      checklist's premise that SQL Server special-cases away the wrap for a
+      case-insensitive collation is **false** as a seek-preservation claim
+      (it's only true as a *result-set-correctness* claim: the row set
+      doesn't change). So this is syntactic-with-index-weighting, never
+      suppressed by collation — only the finding's own remediation message
+      changes: a CI-collation column's wrap is a provably safe, zero-risk
+      deletion; a CS/BIN-collation column's wrap is load-bearing and needs a
+      real rewrite. New `SargabilityFindingKind.CaseFoldOnColumn`,
+      `Predicates/NonSargablePredicateScanner.cs` (`AddCaseFold`,
+      `DescribeCaseFoldRemediation`). Fixtures
+      `CASE_FOLD_ON_COLUMN_{fires,clean}.sql` (fires is labeled synthetic —
+      no confirmed distinct real bug report, only general advisory blog
+      coverage — per CLAUDE.md's rare-exception allowance) +
+      `CaseFoldColumnPipelineTests` (7 tests: both collation families
+      oracle-confirmed scanning, both remediation messages, computed-column
+      guard both directions).
+- [x] **Mandatory precision guard for every rule in this section** — shipped
+      as a genuine generalization, not per-rule copy-paste: new
+      `Predicates/ComputedColumnMatcher.cs`, a structural-equality comparer
+      over arbitrary `FunctionCall`/`CastCall`/`ConvertCall` subtrees
+      (column references, literals, CAST/CONVERT target type + CONVERT
+      style, and the DATEPART-unit `IdentifierLiteral` shape), reused by both
+      the date-function and case-fold rules above, and also retrofitted onto
+      the existing generic `CastCall`/`ConvertCall` case so a
+      `CONVERT(varchar, col, n)`-style predicate gets the same suppression.
+      Deliberately does NOT refactor the already-shipped, already-tested
+      `JsonComputedColumnMatcher` (JSON_VALUE keeps its own narrower,
+      hand-parsed matcher) — avoids regressing working code for a refactor
+      with no new behavior to show for it.
+- [x] Index-existence weighting for all sargability findings — **shipped**:
+      `ScanReportBuilder.cs` orders `Tier1Findings` by `Indexed` (true first,
+      unresolved second, false last — CLAUDE.md's "unresolved ≠ false"
+      discipline) before source position, mirroring `TypedFindings`' own
+      existing `Indexed` ordering, which `Tier1Findings` never had until now.
+      Tested: `ScanReportBuilderTier1OrderingTests`.
+- [ ] `CHARINDEX(x, col)` / `LEFT(col, n) =` — rewritable-to-sargable forms —
+      **not shipped, deliberately deprioritized**: real AST-derived base rate
+      is near-zero locally (12 `CHARINDEX` findings across 5 files, **0**
+      genuine `LEFT(col,n)`-wrapping-a-column findings — the 2 fragments that
+      contain `LEFT(...)` are a `LIKE` pattern built from a variable, not a
+      column being wrapped). A real `CHARINDEX` repro exists (MS Learn forum,
+      "Charindex very bad performance"), but `LEFT(col,n)`'s own fixture
+      sourcing came back borderline (opinion pieces only, no distinct real
+      bug report). Left as explicit follow-up given the low local signal,
+      rather than building a low-value rule under time pressure.
+- Oracle: seek-vs-scan probes for every rule above; the case-fold rule's own
+  CS-vs-CI fixture pair confirms the SAME outcome for both (not a different
+  one, correcting the checklist's original "verdict differs by collation"
+  premise).
 
 ### Oversized and MAX-typed parameters
 Under-represented in existing rule sets, adjacent to the existing conversion

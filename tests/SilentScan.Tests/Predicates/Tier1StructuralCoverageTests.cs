@@ -40,7 +40,7 @@ public sealed class Tier1StructuralCoverageTests
             """);
 
         var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.CaseFoldOnColumn, finding.Kind);
         Assert.Equal("UserName", finding.ColumnName);
         Assert.Equal("dbo.Users", finding.TableQualifiedName);
         Assert.True(finding.Indexed);
@@ -69,9 +69,8 @@ public sealed class Tier1StructuralCoverageTests
             """);
 
         var finding = Assert.Single(findings);
-        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal(SargabilityFindingKind.CaseFoldOnColumn, finding.Kind);
         Assert.Equal("LowCode", finding.ColumnName);
-        Assert.Equal("LOWER", finding.Detail);
         Assert.True(finding.Indexed);
     }
 
