@@ -415,11 +415,43 @@ wrong once measured with the real parser; corrected below. `CHARINDEX`: 12.
       tests, both directions). `CONVERT(varchar, col, n)`-style date
       comparisons stay under the existing `CastOrConvertOnColumn` kind
       (not a new named kind) but now share the same computed-column guard —
-      see below. **BETWEEN with an end-of-period boundary deliberately NOT
-      shipped** — a genuinely new syntactic pattern (distinguishing a
-      legitimate range BETWEEN from an end-of-period hack) with real false-
-      positive risk this pass didn't have time to get precise; left as
-      explicit follow-up rather than guessed.
+      see below.
+- [x] **BETWEEN with an end-of-period boundary — shipped, re-scoped as a
+      CORRECTNESS finding, not a sargability one**: BETWEEN itself is
+      perfectly sargable here — the real bug (Aaron Bertrand's widely-cited
+      "Bad Habits: Using BETWEEN") is that an upper-bound literal with fewer
+      fractional-second digits than the column's own declared
+      TIME/DATETIME2/DATETIMEOFFSET precision silently EXCLUDES rows in the
+      precision gap, oracle-confirmed directly: a `DATETIME2(7)` row at
+      `23:59:59.9999999` is dropped by the classic `'...23:59:59.997'`
+      end-of-day literal (the very hack people write believing they've fixed
+      the cruder bare-date/`.999` version of the same bug) while a
+      `>= start AND < next-period-start` rewrite includes it. New
+      `TemporalBoundaryPrecisionFinding`/`TemporalBoundaryPrecisionScanner`
+      wired into `NonSargablePredicateScanner`'s existing scope-resolution
+      walk via a new `ScanFull` API (`Scan` is now a thin wrapper over it, no
+      behavior change) rather than a second, redundant AST pass — reused the
+      already-correct FROM-scope/column-resolution machinery instead of
+      rebuilding it. **Oracle discovery, load-bearing:** `SqlTypeReferenceResolver`
+      (file mode) and `LiveTypeMapper` (live mode) both silently dropped
+      TIME/DATETIME2/DATETIMEOFFSET's own declared scale entirely before this
+      — every column of these types resolved with `Scale: null` — a real,
+      independently-worth-fixing gap in both parsing paths, now captured
+      (defaulting to 7 when no explicit `(n)` is given, T-SQL's own default).
+      Wired into `ScanReport.TemporalBoundaryFindings` (schema v10), SARIF
+      rule `silentscan/correctness/between-end-of-period-boundary` (error
+      level — a live correctness bug, not a "worth investigating" signal),
+      readable-report section. Fixtures:
+      `TEMPORAL_BOUNDARY_PRECISION_fires.sql` (real source: Aaron Bertrand's
+      article) + two near-misses (`_clean.sql`: a range comparison instead of
+      BETWEEN; `_matching_scale_clean.sql`: a boundary literal precise to the
+      column's full declared scale) + 6 unit/oracle tests
+      (`TemporalBoundaryPrecisionTests`, `TemporalBoundaryPrecisionOracleTests`
+      — the oracle test inserts a real probe row at the exact edge of the
+      precision gap and proves the buggy query misses it while the safe
+      rewrite includes it, the same self-authored-probe-row discipline
+      `WriteLossOracleTests` uses, since this is a runtime DML/query-result
+      behavior, not a query-plan one).
 - [x] UPPER/LOWER on a column — **shipped, scope corrected from the
       checklist's original framing**: oracle-verified the wrap forces a scan
       **regardless of collation family** (built one CS-collation and one

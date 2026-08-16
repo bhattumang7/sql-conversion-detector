@@ -69,6 +69,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ColumnCollationDrift(report, headingLevel, pathBase));
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -116,6 +117,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Columns whose collation drifts from the database/tempdb default", report.ColumnCollationDriftFindings.Count);
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
+        AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -498,6 +500,29 @@ public static class ReadableScanReportWriter
                 f.CallerTypeDisplay,
                 f.FormalParameterTypeDisplay,
                 DescribeWriteLossKind(f.Kind),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TemporalBoundary(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TemporalBoundaryFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"BETWEEN end-of-period boundary correctness bugs ({report.TemporalBoundaryFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CORRECTNESS finding, not a sargability one - BETWEEN itself is perfectly sargable here. The upper bound literal has fewer fractional-second digits than the column's own declared TIME/DATETIME2/DATETIMEOFFSET precision, so rows whose value falls in that precision gap are silently excluded - oracle-confirmed directly (a DATETIME2(7) row at 23:59:59.9999999 is dropped by the classic '23:59:59.997' end-of-day literal). Rewrite as >= start AND < (start of the next period) instead, which has no precision gap to fall into.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Column", "Column scale", "Boundary literal", "Literal fractional digits"],
+            [.. report.TemporalBoundaryFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.ColumnScale.ToString(CultureInfo.InvariantCulture),
+                f.BoundaryLiteralText,
+                f.BoundaryLiteralFractionalDigits.ToString(CultureInfo.InvariantCulture),
             })]);
     }
 

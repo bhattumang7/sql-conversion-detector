@@ -81,6 +81,16 @@ public static class LiveTypeMapper
             return new SqlType(category.Value, Precision: precision, Scale: scale);
         }
 
+        // TIME/DATETIME2/DATETIMEOFFSET's own fractional-seconds-precision scale -
+        // sys.columns.scale carries it exactly like it does for DECIMAL, previously dropped here
+        // (matching a parallel file-mode gap in SqlTypeReferenceResolver, fixed alongside this).
+        // Needed for the BETWEEN end-of-period boundary finding (docs/detection-checklist.md
+        // Tier 1 "Type-aware upgrade of the sargability stream").
+        if (category is SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset)
+        {
+            return new SqlType(category.Value, Scale: scale);
+        }
+
         if (!IsStringOrBinaryFamily(category.Value))
         {
             return new SqlType(category.Value);

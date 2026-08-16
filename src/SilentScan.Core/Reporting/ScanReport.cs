@@ -16,6 +16,7 @@ public sealed record ScanReport(
     IReadOnlyList<ColumnCollationDriftFinding> ColumnCollationDriftFindings,
     IReadOnlyList<CrossTableTypeDriftFinding> CrossTableTypeDriftFindings,
     IReadOnlyList<ProcCallArgumentMismatchFinding> ProcCallArgumentMismatchFindings,
+    IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -39,7 +40,10 @@ public sealed record ScanReport(
     /// database collation). Bumped to 8 for the new <see cref="CrossTableTypeDriftFindings"/>
     /// stream (same Tier 1 section: FK-linked cross-table type drift). Bumped to 9 for the new
     /// <see cref="ProcCallArgumentMismatchFindings"/> stream (same Tier 1 section: call-boundary
-    /// argument mismatch).
+    /// argument mismatch). Bumped to 10 for the new <see cref="TemporalBoundaryFindings"/> stream
+    /// (docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream": BETWEEN
+    /// end-of-period boundary - a correctness finding, not a sargability one, but shares the same
+    /// scope-resolution walk as Tier1Findings).
     /// </summary>
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 }

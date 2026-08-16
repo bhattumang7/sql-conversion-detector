@@ -46,8 +46,30 @@ public static class SqlTypeReferenceResolver
         {
             SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric => ResolveDecimal(category.Value, sqlDataType),
             _ when IsStringOrBinaryFamily(category.Value) => ResolveStringOrBinary(category.Value, sqlDataType, collation),
+            _ when IsFractionalSecondsFamily(category.Value) => ResolveFractionalSeconds(category.Value, sqlDataType),
             _ => new SqlType(category.Value),
         };
+    }
+
+    private static bool IsFractionalSecondsFamily(SqlTypeCategory category) => category is
+        SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
+
+    /// <summary>
+    /// TIME/DATETIME2/DATETIMEOFFSET's own <c>(n)</c> fractional-seconds-precision parameter -
+    /// previously unresolved entirely (fell into the generic <c>new SqlType(category)</c> branch,
+    /// permanently losing the declared scale). Needed for the BETWEEN end-of-period boundary
+    /// finding (docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability
+    /// stream"): a boundary literal with fewer fractional digits than the column's own declared
+    /// scale silently drops rows in the gap, oracle-confirmed. Defaults to 7 when no explicit
+    /// <c>(n)</c> is given - T-SQL's own default precision for all three types.
+    /// </summary>
+    private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDataTypeReference sqlDataType)
+    {
+        var scale = sqlDataType.Parameters.Count > 0 && sqlDataType.Parameters[0] is IntegerLiteral s
+            ? int.Parse(s.Value, CultureInfo.InvariantCulture)
+            : 7;
+
+        return new SqlType(category, Scale: scale);
     }
 
     private static SqlType? ResolveUserType(UserDataTypeReference userType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases)

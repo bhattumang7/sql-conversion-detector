@@ -48,6 +48,7 @@ public static class SarifReportWriter
         results.AddRange(report.ColumnCollationDriftFindings.Select(ToResult));
         results.AddRange(report.CrossTableTypeDriftFindings.Select(ToResult));
         results.AddRange(report.ProcCallArgumentMismatchFindings.Select(ToResult));
+        results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -172,6 +173,17 @@ public static class SarifReportWriter
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
         var message = $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerVariableName}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(TemporalBoundaryPrecisionFinding finding)
+    {
+        // Error, not warning/note - unlike a sargability finding, this is a live correctness
+        // bug (silently dropped rows), oracle-confirmed, not a "worth investigating" signal.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalBoundaryPrecisionRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (scale {finding.ColumnScale}) is compared with BETWEEN against upper bound '{finding.BoundaryLiteralText}' ({finding.BoundaryLiteralFractionalDigits} fractional digit(s)) - rows in the precision gap are silently excluded. Rewrite as >= start AND < (start of the next period).";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

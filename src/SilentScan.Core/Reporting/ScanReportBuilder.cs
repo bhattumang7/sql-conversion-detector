@@ -244,7 +244,7 @@ public static class ScanReportBuilder
             callerScopeByCalleeScope[group.Key] = group.Select(e => e.CallerScopeQualifiedName!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        List<(List<SargabilityFinding> Findings, IReadOnlyList<SkippedConstruct> Skipped)> tier1PerFile;
+        List<(List<SargabilityFinding> Findings, List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings, IReadOnlyList<SkippedConstruct> Skipped)> tier1PerFile;
         using (var tier1Stage = progress.Begin("scanning syntactic predicates", usableCount))
         {
             tier1PerFile = usableParseResults
@@ -252,14 +252,16 @@ public static class ScanReportBuilder
                 .Select(r =>
                 {
                     var fileLedger = new SkipLedger();
-                    var findings = NonSargablePredicateScanner.Scan(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope).ToList();
+                    var (findings, temporalBoundaryFindings) = NonSargablePredicateScanner.ScanFull(r, catalog, lineage, ledger: fileLedger, callerScopeByCalleeScope: callerScopeByCalleeScope);
                     tier1Stage.Advance();
-                    return (Findings: findings, Skipped: fileLedger.Entries);
+                    return (Findings: findings.ToList(), TemporalBoundaryFindings: temporalBoundaryFindings.ToList(), Skipped: fileLedger.Entries);
                 })
                 .ToList();
         }
 
         var tier1Findings = tier1PerFile.SelectMany(p => p.Findings).ToList();
+        var temporalBoundaryFindings = tier1PerFile.SelectMany(p => p.TemporalBoundaryFindings)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         var tier1SkippedEntries = tier1PerFile.SelectMany(p => p.Skipped).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
@@ -440,7 +442,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
-            tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings,
+            tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

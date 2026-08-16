@@ -58,12 +58,25 @@ public static class NonSargablePredicateScanner
     /// </summary>
     public static IReadOnlyList<SargabilityFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
+        ScanFull(parseResult, catalog, lineage, enclosingScope, ledger, callerScopeByCalleeScope).Findings;
+
+    /// <summary>
+    /// Same walk as <see cref="Scan(SqlParseResult, DatabaseCatalog, LineageCatalog, DynamicSqlScope?, SkipLedger?, IReadOnlyDictionary{string, IReadOnlyList{string}})"/>, also returning
+    /// <see cref="TemporalBoundaryPrecisionFinding"/>s (the BETWEEN end-of-period boundary
+    /// correctness check, docs/detection-checklist.md Tier 1 "Type-aware upgrade of the
+    /// sargability stream") - a genuinely distinct finding family from
+    /// <see cref="SargabilityFinding"/> (a correctness bug, not a lost seek), but reusing the
+    /// SAME scope-resolution walk rather than a second, redundant AST pass over the same file.
+    /// </summary>
+    public static (IReadOnlyList<SargabilityFinding> Findings, IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings) ScanFull(
+        SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope, ledger, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope();
         parseResult.Fragment.Accept(visitor);
-        return visitor.Findings;
+        return (visitor.Findings, visitor.TemporalBoundaryFindings);
     }
 
     private sealed class Visitor(
@@ -76,6 +89,8 @@ public static class NonSargablePredicateScanner
         private bool _inFilterContext;
 
         public List<SargabilityFinding> Findings { get; } = [];
+
+        public List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings { get; } = [];
 
         /// <summary>Mirrors TypedPredicateExtractor's identical seed - pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack before the visitor starts walking, so a reparsed dynamic SQL fragment found inside a trigger body sees them too.</summary>
         public void SeedEnclosingScope()
@@ -328,6 +343,14 @@ public static class NonSargablePredicateScanner
                 InspectSide(node.FirstExpression);
                 InspectSide(node.SecondExpression);
                 InspectSide(node.ThirdExpression);
+            }
+
+            // Plain BETWEEN (not NotBetween - the imprecision-direction analysis differs and
+            // wasn't oracle-probed) against a TIME/DATETIME2/DATETIMEOFFSET column is a distinct,
+            // CORRECTNESS concern, not a sargability one - BETWEEN is perfectly sargable here.
+            if (node.TernaryExpressionType == BooleanTernaryExpressionType.Between)
+            {
+                TryAddTemporalBoundaryFinding(node);
             }
         }
 
@@ -678,6 +701,65 @@ public static class NonSargablePredicateScanner
 
             Add(SargabilityFindingKind.CharindexOrLeftOnColumn, named.Name, detail, leftCall, named.Ref);
             return true;
+        }
+
+        /// <summary>
+        /// Fires only when: the tested value is a real, resolved column whose catalog type is
+        /// TIME/DATETIME2/DATETIMEOFFSET with a known declared scale (fractional-seconds
+        /// precision), AND the BETWEEN's upper bound is a string literal whose own fractional-
+        /// second digit count is LESS than that declared scale - the exact, oracle-confirmed
+        /// mechanism by which rows in the precision gap are silently excluded. Never fires on an
+        /// unresolved column or a non-literal bound (never a guess).
+        /// </summary>
+        private void TryAddTemporalBoundaryFinding(BooleanTernaryExpression node)
+        {
+            if (node.FirstExpression is not ColumnReferenceExpression columnRef || ColumnName(columnRef) is not { } columnName)
+            {
+                return;
+            }
+
+            if (node.ThirdExpression is not StringLiteral { Value: { } upperBoundText })
+            {
+                return;
+            }
+
+            var (tableQualifiedName, _) = ResolveIndexInfo(columnRef);
+            if (tableQualifiedName is not { } table)
+            {
+                return;
+            }
+
+            var type = catalog.Find(table, _currentProcScope)?.FindColumn(columnName)?.Type;
+            if (type is not { Category: SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset or SqlTypeCategory.Time, Scale: { } columnScale })
+            {
+                return;
+            }
+
+            var fractionalDigits = CountFractionalDigits(upperBoundText);
+            if (fractionalDigits >= columnScale)
+            {
+                return;
+            }
+
+            TemporalBoundaryFindings.Add(new TemporalBoundaryPrecisionFinding(
+                table, columnName, columnScale, fractionalDigits, upperBoundText, sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        private static int CountFractionalDigits(string text)
+        {
+            var dotIndex = text.LastIndexOf('.');
+            if (dotIndex < 0)
+            {
+                return 0;
+            }
+
+            var digits = 0;
+            for (var i = dotIndex + 1; i < text.Length && char.IsDigit(text[i]); i++)
+            {
+                digits++;
+            }
+
+            return digits;
         }
 
         private static readonly HashSet<string> DateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
