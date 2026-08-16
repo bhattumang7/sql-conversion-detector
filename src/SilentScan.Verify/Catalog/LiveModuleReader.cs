@@ -36,7 +36,7 @@ public sealed class LiveModuleReader
     private static async Task<List<LiveModule>> ReadReadableModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition, m.uses_quoted_identifier
+            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition, m.uses_quoted_identifier, m.uses_ansi_nulls
             FROM sys.sql_modules m
             JOIN sys.objects o ON o.object_id = m.object_id
             JOIN sys.schemas s ON s.schema_id = o.schema_id
@@ -63,7 +63,14 @@ public sealed class LiveModuleReader
                 // default (QI ON) turns those into unclosed quoted identifiers and drops the
                 // batch. Threading the flag through keeps such modules analyzable rather than
                 // silently misclassified as broken T-SQL.
-                UsesQuotedIdentifier: reader.GetBoolean(4)));
+                UsesQuotedIdentifier: reader.GetBoolean(4),
+                // sys.sql_modules.uses_ansi_nulls - docs/detection-checklist.md Tier 1 "SET
+                // options that silently disable plan features": ANSI_NULLS OFF, like
+                // QUOTED_IDENTIFIER OFF, makes a filtered index/indexed view the module touches
+                // unusable by the optimizer (oracle-confirmed directly, real seeded filtered
+                // index, real SHOWPLAN_XML: PhysicalOp falls back to Table Scan under ANSI_NULLS
+                // OFF). Baked in wholesale at CREATE/ALTER compile time, same as QUOTED_IDENTIFIER.
+                UsesAnsiNulls: reader.GetBoolean(5)));
         }
 
         return modules;

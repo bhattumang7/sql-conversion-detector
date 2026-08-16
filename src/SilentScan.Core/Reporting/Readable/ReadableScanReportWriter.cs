@@ -658,7 +658,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"SET options silently disabling a filtered index/indexed view ({report.SetOptionFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "QUOTED_IDENTIFIER OFF and SET NUMERIC_ROUNDABORT ON each independently make a filtered index or an indexed view unusable by the optimizer, silently falling back to a base-table/heap scan - neither shows up in the query text as anything resembling a predicate, so the plan consequence is invisible at the call site. Oracle-confirmed directly (real seeded data, both a filtered index and an indexed view). Only reported when this module's own body was proven to touch a filtered index or an indexed view (directly, or through a referenced view however many layers down) - see each row's own touched object. SET ARITHABORT OFF was investigated and deliberately excluded: oracle-probed directly, it changed neither plan at all on this engine version/edition, contradicting the checklist's original premise that lumped all three options together.");
+            "QUOTED_IDENTIFIER OFF, ANSI_NULLS OFF, SET NUMERIC_ROUNDABORT ON, SET ANSI_WARNINGS OFF, and SET CONCAT_NULL_YIELDS_NULL OFF each independently make a filtered index or an indexed view unusable by the optimizer, silently falling back to a base-table/heap scan - none shows up in the query text as anything resembling a predicate, so the plan consequence is invisible at the call site. Oracle-confirmed directly (real seeded data, both a filtered index and an indexed view). Only reported when this module's own body was proven to touch a filtered index or an indexed view (directly, or through a referenced view however many layers down) - see each row's own touched object. SET ARITHABORT OFF was investigated and deliberately excluded: oracle-probed directly, it changed neither plan at all on this engine version/edition, contradicting the checklist's original premise that lumped all six options together.");
 
         foreach (var group in report.SetOptionFindings
             .GroupBy(f => f.Kind)
@@ -684,7 +684,10 @@ public static class ReadableScanReportWriter
     private static string SetOptionTitle(SetOptionFindingKind kind) => kind switch
     {
         SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature => "Module compiled under QUOTED_IDENTIFIER OFF",
-        _ => "SET NUMERIC_ROUNDABORT ON",
+        SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature => "Module compiled under ANSI_NULLS OFF",
+        SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature => "SET NUMERIC_ROUNDABORT ON",
+        SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature => "SET ANSI_WARNINGS OFF",
+        _ => "SET CONCAT_NULL_YIELDS_NULL OFF",
     };
 
     private static string ScalarUdfTitle(ScalarUdfFindingKind kind) => kind switch

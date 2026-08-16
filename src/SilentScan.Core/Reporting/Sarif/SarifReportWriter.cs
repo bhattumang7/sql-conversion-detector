@@ -252,7 +252,13 @@ public static class SarifReportWriter
         {
             SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature =>
                 $"'{finding.ModuleQualifiedName}' was compiled under QUOTED_IDENTIFIER OFF{touchedDisplay}.",
-            _ => $"'{finding.ModuleQualifiedName}': SET NUMERIC_ROUNDABORT ON{touchedDisplay}.",
+            SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature =>
+                $"'{finding.ModuleQualifiedName}' was compiled under ANSI_NULLS OFF{touchedDisplay}.",
+            SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature =>
+                $"'{finding.ModuleQualifiedName}': SET NUMERIC_ROUNDABORT ON{touchedDisplay}.",
+            SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature =>
+                $"'{finding.ModuleQualifiedName}': SET ANSI_WARNINGS OFF{touchedDisplay}.",
+            _ => $"'{finding.ModuleQualifiedName}': SET CONCAT_NULL_YIELDS_NULL OFF{touchedDisplay}.",
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);

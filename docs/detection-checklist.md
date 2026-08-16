@@ -761,7 +761,7 @@ nobody resolves it properly.
       the widely documented multi-tenant "always join on tenant_id too"
       SaaS bug class).
 
-### SET options that silently disable plan features — shipped (2 of the originally-proposed 3 plan-feature kinds, plus the independent ANSI_PADDING comparison-seed finding)
+### SET options that silently disable plan features — shipped (5 of the original 6 plan-feature kinds - ARITHABORT oracle-falsified and dropped - plus the independent ANSI_PADDING comparison-seed finding)
 Folded in from the incumbent-catalog read. Universally filed elsewhere as
 style hygiene; the actual consequence is plan-shape, and it's
 catalog-verifiable per module, not a guess.
@@ -839,28 +839,38 @@ exactly the same way ARITHABORT's own assumption just failed one.
       `IndexKind` checked directly for both settings, plus the ARITHABORT
       exclusion kept as a permanent regression guard). Real coverage against
       the local RM_ test database: **99 findings**, all
-      `QuotedIdentifierOffBlocksIndexedFeature` (0 `NUMERIC_ROUNDABORT ON`
-      occurrences found in that codebase's own text) — every one a module
-      compiled under legacy `QUOTED_IDENTIFIER OFF` that touches a real
-      filtered unique constraint.
-- [ ] **Complete the required-option set — not resumed this session.** The
-      four remaining candidates (`ANSI_NULLS`/`ANSI_PADDING`/
-      `ANSI_WARNINGS`/`CONCAT_NULL_YIELDS_NULL`) still need their own direct
-      oracle confirmation before landing as additional kinds on this stream —
-      do not assume any of them behaves like QUOTED_IDENTIFIER/
-      NUMERIC_ROUNDABORT or like the falsified ARITHABORT without checking.
-      `ANSI_NULLS` is a baked-in module setting (`sys.sql_modules
-      .uses_ansi_nulls`) if it does turn out to matter; the other three would
-      need the same in-body `SET` scan pattern `NUMERIC_ROUNDABORT` already
-      uses. Reuse `ModuleReachableObjectWalker` verbatim for the guard.
-      **The catalog-vs-syntax half of that is now settled** (independent of the
-      plan question, which is still open and still needs its own probe):
-      `sys.sql_modules`' full column list was read off the engine on
-      2026-08-16 and carries exactly two session settings, `uses_ansi_nulls`
-      and `uses_quoted_identifier`. So `ANSI_NULLS` is the only one of the four
-      with a catalog half at all, and `ANSI_PADDING`/`ANSI_WARNINGS`/
-      `CONCAT_NULL_YIELDS_NULL` are confirmed syntax-scan-only. No need to
-      re-check that list; see `detection-reference.md` Appendix 8.
+      `QuotedIdentifierOffBlocksIndexedFeature`.
+- [x] **Complete the required-option set — shipped.** The three remaining
+      plan-feature candidates (`ANSI_NULLS`/`ANSI_WARNINGS`/
+      `CONCAT_NULL_YIELDS_NULL`) were oracle-probed directly (real seeded
+      filtered index, real `SHOWPLAN_XML`) rather than assumed to behave like
+      QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT or like the falsified ARITHABORT —
+      **all three demonstrably degrade the same filtered-index seek to a
+      table scan** (`PhysicalOp="Table Scan"`, matching QUOTED_IDENTIFIER/
+      NUMERIC_ROUNDABORT exactly, not ARITHABORT's no-op). `ANSI_NULLS` is
+      the catalog half (`sys.sql_modules.uses_ansi_nulls`, confirmed the only
+      one of the three with a baked-in module column — read live via
+      `LiveModuleReader`/`LiveModule.UsesAnsiNulls`, registered on
+      `DatabaseCatalog` via `AddModuleUsesAnsiNulls`/
+      `TryGetModuleUsesAnsiNulls`, same shape as `QuotedIdentifier`);
+      `ANSI_WARNINGS`/`CONCAT_NULL_YIELDS_NULL` are syntax-scan-only
+      (`SetOptions.AnsiWarnings`/`SetOptions.ConcatNullYieldsNull` flag bits,
+      same `PredicateSetStatement` visitor `NUMERIC_ROUNDABORT` already
+      uses — generalized into one data-driven trigger table
+      (`SetOptionScanner.SyntaxOnlyTriggers`) instead of one hand-written
+      branch per option). `ModuleReachableObjectWalker` reused verbatim for
+      the guard, unchanged. Oracle-tested (`SetOptionOracleTests`, 3 new
+      cases, one per option, same real-seeded-filtered-index mechanism as
+      QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT). Unit-tested (`SetOptionScannerTests`,
+      7 new cases: fires/never-fires per option, catalog-flag-unknown never
+      guesses for ANSI_NULLS, and a same-`IsOn`-comma-list statement firing
+      two distinct kinds from one `PredicateSetStatement` node). Real
+      coverage against the local RM_ test database: still 99 findings, all
+      `QuotedIdentifierOffBlocksIndexedFeature` — the three new kinds are
+      coverage-empty on this particular database (it doesn't compile under
+      `ANSI_NULLS OFF` or explicitly `SET` the other two), but the rules are
+      real, oracle-confirmed, and shipped, exercised cleanly end-to-end
+      against the whole 4,987-module corpus with no errors.
 - [x] **`ANSI_PADDING OFF` as a second, independent finding — shipped, scope
       narrowed from the original framing once oracle-checked directly.** With
       the option off, trailing blanks are stripped on INSERT into
@@ -1309,6 +1319,36 @@ doing before the study can make certain public claims.
     filed under Open scope questions below, and this read is one more data
     point for it (a performance-oriented commercial T-SQL analyzer devotes
     about one rule in sixteen to security) rather than a new decision.
+  * **Eight rules the first pass at this block missed**, found doing a
+    rule-by-rule reconciliation of all ~83 against this block rather than
+    trusting the "roughly sixty" estimate above — same disposition as
+    everything else here (none needs the catalog, lineage pass, or plan
+    oracle our own admission rule requires), just never actually written
+    down: `IF`/`CASE` missing an `ELSE` where a sibling has one, and the
+    closely related dangling-`IF`-on-a-shared-line ambiguity — a small
+    missing-`ELSE` family the dead-code bullet above doesn't name; `GOTO`
+    usage; a redundant database/schema qualifier on a reference already in
+    scope (distinct from the qualification-*requiring* rule already covered
+    by the schema-prefix skip at the top of this list — this one is the
+    opposite complaint). Two more were read but their exact trigger
+    couldn't be pinned down with confidence from the decompiled source
+    alone, so they're recorded as unresolved rather than guessed into a
+    bucket: a rule pairing one `SET` option being `OFF` against a sibling
+    that should be `ON` (unclear whether this overlaps the already-falsified
+    `ARITHABORT` finding above or is unrelated — needs the vendor's own docs
+    or a fresh oracle probe, not decompiled bytecode, to settle), and a rule
+    about a statement "forcing serialization" without `SNAPSHOT ISOLATION`
+    whose actual firing condition wasn't reconstructable from what was
+    decompiled. One is a genuine miss from the "correctness, not performance"
+    reasoning used everywhere else in this block, not a style rule: a
+    non-deterministic function (`RAND`/`NEWID`/`CRYPT_GEN_RANDOM`) used as a
+    `CASE` **input expression** gets re-evaluated per `WHEN` comparison, so
+    the branch taken can silently disagree with itself — this is a different
+    mechanism from the per-row-predicate premise probed and killed elsewhere
+    in this tier (that one was about seek behavior; this one is about a
+    `CASE` evaluating its own input more than once), never itself probed, and
+    still correctness- rather than plan-shape-framed either way, so it stays
+    a skip rather than getting queued.
   The load-bearing result of the read is not any single rule: it is that the
   richest paid T-SQL rule set found still contains **no implicit-conversion
   rule of any kind, no collation-aware rule, no lineage-aware rule, and no

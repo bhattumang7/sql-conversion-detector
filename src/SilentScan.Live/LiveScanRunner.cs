@@ -92,6 +92,7 @@ public static class LiveScanRunner
         foreach (var module in modules)
         {
             catalog.AddModuleUsesQuotedIdentifier(module.QualifiedName, module.UsesQuotedIdentifier);
+            catalog.AddModuleUsesAnsiNulls(module.QualifiedName, module.UsesAnsiNulls);
         }
 
         // A lazy, re-enumerable query, not a materialized list: every module's parsed AST runs

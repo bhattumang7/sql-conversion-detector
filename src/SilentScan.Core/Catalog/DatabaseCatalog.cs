@@ -33,6 +33,9 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, bool> _moduleUsesAnsiNullsByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -180,6 +183,19 @@ public sealed class DatabaseCatalog
 
     public bool TryGetModuleUsesQuotedIdentifier(string qualifiedName, out bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName.TryGetValue(qualifiedName, out usesQuotedIdentifier);
+
+    /// <summary>
+    /// A module's own <c>sys.sql_modules.uses_ansi_nulls</c> flag - same shape and same reasoning
+    /// as <see cref="AddModuleUsesQuotedIdentifier"/>, baked in wholesale at CREATE/ALTER compile
+    /// time. Oracle-confirmed directly (docs/detection-checklist.md Tier 1 "SET options that
+    /// silently disable plan features"): ANSI_NULLS OFF, like QUOTED_IDENTIFIER OFF, makes a
+    /// filtered index/indexed view the module touches unusable by the optimizer.
+    /// </summary>
+    public void AddModuleUsesAnsiNulls(string qualifiedName, bool usesAnsiNulls) =>
+        _moduleUsesAnsiNullsByQualifiedName[qualifiedName] = usesAnsiNulls;
+
+    public bool TryGetModuleUsesAnsiNulls(string qualifiedName, out bool usesAnsiNulls) =>
+        _moduleUsesAnsiNullsByQualifiedName.TryGetValue(qualifiedName, out usesAnsiNulls);
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the

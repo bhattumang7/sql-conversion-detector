@@ -15,9 +15,9 @@ namespace SilentScan.Tests.Predicates;
 /// so <c>SetOptionScanner.Scan</c>'s <c>moduleQualifiedName = parseResult.SourcePath</c>
 /// convention lines up the same way it would against a real live scan.
 ///
-/// Only QUOTED_IDENTIFIER OFF and NUMERIC_ROUNDABORT ON are covered - ARITHABORT OFF was
-/// investigated and dropped, oracle-falsified: see <see cref="SetOptionFinding"/>'s own doc
-/// comment.
+/// QUOTED_IDENTIFIER OFF, ANSI_NULLS OFF, NUMERIC_ROUNDABORT ON, ANSI_WARNINGS OFF, and
+/// CONCAT_NULL_YIELDS_NULL OFF are covered - ARITHABORT OFF was investigated and dropped,
+/// oracle-falsified: see <see cref="SetOptionFinding"/>'s own doc comment.
 /// </summary>
 public sealed class SetOptionScannerTests
 {
@@ -34,7 +34,7 @@ public sealed class SetOptionScannerTests
             [new CatalogColumn("Id", new SqlType(SqlTypeCategory.Int), IsNullable: false, IsIdentity: false, IsComputed: false, IsPersisted: false)],
             [], SourcePath: $"{schema}.{name}", SourceLine: 1);
 
-    private static IReadOnlyList<SetOptionFinding> Scan(string sql, DatabaseCatalog catalog, bool? usesQuotedIdentifier = true)
+    private static IReadOnlyList<SetOptionFinding> Scan(string sql, DatabaseCatalog catalog, bool? usesQuotedIdentifier = true, bool? usesAnsiNulls = true)
     {
         var result = SqlScriptParser.ParseText(ModuleName, sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
@@ -42,6 +42,11 @@ public sealed class SetOptionScannerTests
         if (usesQuotedIdentifier is { } uqi)
         {
             catalog.AddModuleUsesQuotedIdentifier(ModuleName, uqi);
+        }
+
+        if (usesAnsiNulls is { } uan)
+        {
+            catalog.AddModuleUsesAnsiNulls(ModuleName, uan);
         }
 
         var lineage = LineageResolver.Resolve(catalog, [result]);
@@ -197,5 +202,110 @@ public sealed class SetOptionScannerTests
         var findings = Scan("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END", catalog, usesQuotedIdentifier: true);
 
         Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AnsiNullsOff_ModuleTouchesFilteredIndexTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT Id FROM dbo.Orders; END", catalog, usesAnsiNulls: false);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature, finding.Kind);
+        Assert.Equal("dbo.Orders", finding.TouchedObjectQualifiedName);
+    }
+
+    [Fact]
+    public void AnsiNullsOn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT Id FROM dbo.Orders; END", catalog, usesAnsiNulls: true);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AnsiNullsFlagUnknown_NeverGuesses()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT Id FROM dbo.Orders; END", catalog, usesAnsiNulls: null);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AnsiWarningsOff_ModuleTouchesFilteredIndexTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET ANSI_WARNINGS OFF; SELECT Id FROM dbo.Orders; END", catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature, finding.Kind);
+    }
+
+    [Fact]
+    public void AnsiWarningsOn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET ANSI_WARNINGS ON; SELECT Id FROM dbo.Orders; END", catalog);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ConcatNullYieldsNullOff_ModuleTouchesFilteredIndexTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET CONCAT_NULL_YIELDS_NULL OFF; SELECT Id FROM dbo.Orders; END", catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature, finding.Kind);
+    }
+
+    [Fact]
+    public void ConcatNullYieldsNullOn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET CONCAT_NULL_YIELDS_NULL ON; SELECT Id FROM dbo.Orders; END", catalog);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SingleStatementSettingMultipleOptionsOfTheSameState_FiresBothKinds()
+    {
+        // SET ANSI_WARNINGS, CONCAT_NULL_YIELDS_NULL OFF - a comma-separated option list sharing
+        // one IsOn (T-SQL cannot mix ON and OFF within a single SET statement) legitimately
+        // triggers two distinct kinds from the same PredicateSetStatement node.
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET ANSI_WARNINGS, CONCAT_NULL_YIELDS_NULL OFF; SELECT Id FROM dbo.Orders; END", catalog);
+
+        Assert.Equal(2, findings.Count);
+        Assert.Contains(findings, f => f.Kind == SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature);
+        Assert.Contains(findings, f => f.Kind == SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature);
     }
 }

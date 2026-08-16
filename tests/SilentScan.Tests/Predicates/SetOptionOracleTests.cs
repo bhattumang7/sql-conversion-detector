@@ -80,6 +80,33 @@ public sealed class SetOptionOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task AnsiNullsOff_FilteredIndexBecomesUnusable()
+    {
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, Probe, ["SET ANSI_NULLS OFF;"]);
+
+        Assert.Contains("PhysicalOp=\"Table Scan\"", planXml);
+        Assert.DoesNotContain("PhysicalOp=\"Index Seek\"", planXml);
+    }
+
+    [Fact]
+    public async Task AnsiWarningsOff_FilteredIndexBecomesUnusable()
+    {
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, Probe, ["SET ANSI_WARNINGS OFF;"]);
+
+        Assert.Contains("PhysicalOp=\"Table Scan\"", planXml);
+        Assert.DoesNotContain("PhysicalOp=\"Index Seek\"", planXml);
+    }
+
+    [Fact]
+    public async Task ConcatNullYieldsNullOff_FilteredIndexBecomesUnusable()
+    {
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, Probe, ["SET CONCAT_NULL_YIELDS_NULL OFF;"]);
+
+        Assert.Contains("PhysicalOp=\"Table Scan\"", planXml);
+        Assert.DoesNotContain("PhysicalOp=\"Index Seek\"", planXml);
+    }
+
+    [Fact]
     public async Task ArithAbortOff_FilteredIndexRemainsUsable_ConfirmingWhyItIsExcluded()
     {
         // Directly re-confirms the oracle finding that made this stream drop the ARITHABORT
