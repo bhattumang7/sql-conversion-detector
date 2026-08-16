@@ -1,13 +1,18 @@
 # CLAUDE.md — SilentScan
 
-Static analyser for SQL Server query-level performance defects — the ones only
-an engine-authoritative catalog, a lineage pass, or a plan-XML oracle can
-detect precisely: type-aware, direction-aware, lineage-aware analysis that no
-living static tool does. Index-killing implicit conversions were the first
-shipped stream and are the **template** every new stream copies (same finding
-schema, same fixture discipline, same oracle confirmation). The gated working
-backlog of what to build next is `docs/detection-checklist.md`; the complete
-un-gated research behind it is `docs/detection-reference.md`.
+Static analyser for SQL Server code.
+
+**Scope: if it's detectable from the code and schema, it's in scope. If it
+only shows up once the app is running in production, it's out** — we are not
+an application performance monitor. That's the whole rule.
+
+Type-aware, direction-aware, lineage-aware analysis (engine-authoritative
+catalog, lineage pass, plan-XML oracle) is our differentiator and stays the
+template for how oracle-backed rules ship. Syntax-only rules ship too, same
+finding schema, fire/near-miss fixtures instead of an oracle.
+
+Working backlog: `docs/detection-checklist.md`. Research behind it:
+`docs/detection-reference.md`.
 
 **Tool-first.** The tool (`silentscan scan`/`scan-db`/`scan-corpus`/
 `verify-corpus`, JSON + SARIF findings) is the deliverable, and the primary
@@ -88,11 +93,9 @@ When working with a remote database, make sure that no information about the sch
 
 ## New detection streams (the checklist's cross-cutting rules, binding here)
 
-* **Rule of admission:** a new detection should require the
-  engine-authoritative catalog, the lineage pass, or the plan-XML oracle to be
-  possible at all — syntax-only patterns several linters already cover dilute
-  the tool's identity (deliberate skips and reasons live in the checklist's
-  Tier 3; don't re-litigate them without new evidence).
+* Whether a rule needs the catalog/lineage/oracle just decides its schema
+  (verdict + oracle fixture) vs. a syntax-only one (fire/near-miss fixtures).
+  It's not an admission gate — see the scope rule at the top of this file.
 * Findings in every stream carry the conversion stream's schema: `verdict`,
   whether the base column is **indexed**, **depth** (0 = direct table
   predicate, N = view/TVF layers between predicate and base column), and

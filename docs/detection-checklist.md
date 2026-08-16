@@ -1199,198 +1199,143 @@ doing before the study can make certain public claims.
 
 ---
 
-## Tier 3 — deliberate skips (decided; don't re-litigate without new evidence)
+## Tier 3 — out of scope (production-only signals)
+Not visible from code or schema at all, so no amount of static analysis
+reaches them — the one real exclusion under CLAUDE.md's scope rule. Two
+items:
 
-- **Parameter sniffing** — runtime data-distribution problem; static tools can
-  only flag risk factors → hedged findings violate the precision bar.
-- **SELECT \*, SET NOCOUNT, sp_ prefix, schema-prefix, ORDER BY ordinal,
-  style/correctness linting** — crowded syntax-only territory several linters
-  already cover; diluting into a generic linter destroys the tool's identity.
-  (Missing schema prefix and unparameterized ad-hoc SQL are the only ones
-  with real perf teeth, and both are plan-cache problems, not plan-shape
-  problems.)
-- **Missing/duplicate/unused indexes, heaps, fill factor, clustering-key
-  width** — index-advisor space; catalog-only, no query analysis, different
-  tool.
+- **Parameter sniffing** — which plan a parameter *value* gets depends on the
+  runtime data distribution and which value first compiled the plan; neither
+  is present in the code or the schema. A static tool can flag risk factors
+  (a catch-all predicate, `OPTION(RECOMPILE)` absent) but not the sniffing
+  event itself — those risk factors are separately queued under "Catch-all /
+  kitchen-sink predicates" in Tier 2, which is the honest static form of this.
 - **Runtime-only signals** — spills, memory grants, execution frequency,
-  compile time, stale stats, plan-cache duplication, row-estimate mismatch:
-  by definition not static. The oracle stays compile-only.
-- **NOLOCK / READ UNCOMMITTED** — correctness smell wearing a performance
-  costume; only 17 modules locally; linters cover it.
-- **MERGE pitfalls** — real but correctness-focused and version-dependent;
-  19 modules locally. Revisit only if a precise perf-framed subrule emerges
-  (`WHEN MATCHED THEN DELETE`, missing HOLDLOCK).
-- **CHECK-constraint-as-enum dead predicate** (from the wider-product-landscape
-  read: one small PoC-labeled T-SQL type-checker treats `CHECK (col IN (...))`
-  as an implicit enum and flags a predicate comparing the column against a
-  literal proven outside it) — *decided, folding the checklist-numbering
-  item's open question.* This is fundamentally a correctness finding (an
-  always-false predicate), the same family as the incumbents' "comparison
-  always evaluates to TRUE/FALSE" rule, which they themselves file under
-  Design, not Performance. The one sibling correctness-adjacent finding kept
-  on this backlog — NOT IN over a nullable subquery column, above — was kept
-  specifically because it has a real perf angle beyond the correctness bug
-  (an expensive null-aware anti-semi-join); this candidate has no equivalent
-  extra angle, so it gets the same treatment as MERGE pitfalls just above:
-  skipped unless a genuinely perf-framed variant turns up.
-- **DISTINCT-masking-bad-join, correlated-subquery-won't-unnest, row goals,
-  UNION vs UNION ALL** — harm depends on optimizer decisions we'd be
-  guessing; low-precision by nature. Inventory-grade at best.
-- **Indexed view NOEXPAND matching** — edition-dependent and matching-logic
-  FP risk; revisit if the corpus shows indexed views at all.
-- **OR across different columns** — detection trivial, harm imprecise
-  (index union often fine). Only viable as an index-aware variant; parked.
-- **Partition elimination defeat** (non-literal/wrapped predicate on the
-  partitioning column) — real and distinct from b-tree seek/scan, but needs
-  partition function/scheme catalog modeling we don't have yet. Revisit if a
-  corpus repo turns out to use partitioning.
-- **Always Encrypted column-comparison restrictions** — high precision in
-  principle (catalog exposes `encryption_type`), but needs a target using the
-  feature to matter at all; the local production copy and pilot corpus don't.
-  Revisit if that changes.
-- **Batch Mode on Rowstore eligibility loss** — deterministic in principle,
-  but Microsoft doesn't publish a fully canonical disqualifier list, so
-  completeness (and therefore precision) is a real risk; parked until a
-  trustworthy exhaustive list exists.
-- **Window-function POC (Partition-Order-Covering) index shape** — real
-  (missing index keyed PARTITION BY → ORDER BY → covering columns forces a
-  Sort per partition), catalog + syntax detectable, but scoped as an
-  index-advisor recommendation rather than a query-defect finding; revisit if
-  the tool's scope ever grows to include index suggestions.
-- **The maintainability and correctness bulk of the paid-tier T-SQL analyzer
-  read at source on 2026-08-16** — roughly sixty of its ~83 rules, decided as a
-  block rather than one at a time because they share one disposition and one
-  reason. Grouped by theme, with the reason each group is out:
-  * *Size and complexity metrics* (line length, file length, routine length,
+  compile time, stale statistics, plan-cache duplication, row-estimate
+  mismatch, query/order hint usage counters (`sys.dm_exec_query_optimizer_info`
+  is a since-restart aggregate, not a per-query static fact). None of these
+  exist until a query actually runs against real data; the oracle in this
+  project stays compile-only by design, which structurally cannot reach them.
+
+Everything else formerly listed here was excluded for reasons that no longer
+apply under the current scope rule (crowded linter territory, "different
+tool," "we'd be guessing," "needs a corpus repo that uses the feature") —
+none of those are about production-only visibility, so they've moved to
+Tier 4 as in-scope, unbuilt candidates.
+
+Context note, not a scope decision: the mainstream CI-analysis platform's
+T-SQL coverage was measured on both its tiers — free (16 rules, dormant since
+2024) and paid (~83 rules, read at source 2026-08-16) — and neither has a
+conversion, collation, or lineage-aware rule, or a plan oracle. Details in
+`detection-reference.md` Appendix 7.
+
+---
+
+## Tier 4 — syntax-only, unbuilt (reopened 2026-08-16)
+Was excluded for needing no catalog/lineage/oracle; that's no longer a reason
+to exclude anything (see CLAUDE.md's scope rule). Each item still needs its
+own fixture pair (fire + near-miss) before it ships, same as every rule here.
+
+- **The maintainability/correctness bulk of the paid-tier T-SQL analyzer read
+  at source on 2026-08-16** — ~68 of its ~83 rules, grouped by theme:
+  * *Size and complexity metrics* — line length, file length, routine length,
     parameter count, nesting depth, expression-operator count, branch count,
-    branch-body length) — configurable thresholds over the AST, no catalog, no
-    plan consequence. Generic-linter territory by definition.
-  * *Formatting and layout* (tab characters, one statement per line, one
+    branch-body length. Configurable thresholds over the AST, no catalog
+    needed.
+  * *Formatting and layout* — tab characters, one statement per line, one
     declaration per line, misleading indentation, a branch keyword sharing a
     line with the end of the previous block, missing `BEGIN…END` around a
     conditional body, useless parentheses, empty statements, file header
-    comments) — style only.
-  * *Naming and identifiers* (routine name patterns, variable name patterns,
+    comments.
+  * *Naming and identifiers* — routine name patterns, variable name patterns,
     a reserved keyword used as an identifier, database/schema qualification on
-    a `CREATE`) — style only.
-  * *Dead and duplicated code* (unreachable code, unused labels, unused local
+    a `CREATE`.
+  * *Dead and duplicated code* — unreachable code, unused labels, unused local
     variables, unused parameters, redundant jumps, commented-out code,
     duplicated string literals, a loop that can only run once, self-assignment,
     identical operands either side of an operator, duplicated conditions,
     identical branch bodies, a conditional whose branches are all the same,
     redundant conditions, mutually exclusive conditions, collapsible nested
     conditionals, nested conditional-expression functions, a repeated unary
-    operator, a negated comparison written as the negation of its opposite) —
-    correctness-and-tidiness, none of it plan-shape. Note that the
-    always-true/always-false predicate family here is the same one already
-    decided against under the enum-style `CHECK`-constraint entry above; that
-    reasoning covers these too and does not need redoing.
-  * *Task-comment tracking* (`TODO`, `FIXME`) — process tooling, not analysis.
-  * *Non-ANSI and deprecated spellings* (`!=`/`!<`/`!>`, `= NULL` in place of
+    operator, a negated comparison written as the negation of its opposite.
+    The always-true/always-false predicate family here overlaps the
+    enum-style `CHECK`-constraint candidate below — same rule, build once.
+  * *Task-comment tracking* — `TODO`, `FIXME`.
+  * *Non-ANSI and deprecated spellings* — `!=`/`!<`/`!>`, `= NULL` in place of
     `IS NULL`, a `LIKE` pattern containing no wildcard, legacy system
     compatibility views, table hints written without `WITH`, index hints with
     a two-part name, numbered procedures, string literals used as column
-    aliases, unparenthesised error-raising, and an assortment of removed system
-    procedures) — a deprecation list, mechanically derivable from vendor
-    documentation, with no query-level consequence. The one member of this
-    family with real plan teeth, the old non-ANSI outer-join operators, is
-    already queued in Tier 2 on its own merits.
-  * *Statement-shape advice* (`SELECT *`, `INSERT` without a column list,
+    aliases, unparenthesised error-raising, an assortment of removed system
+    procedures. (The one member with real plan teeth, the old non-ANSI
+    outer-join operators, is already queued separately in Tier 2.)
+  * *Statement-shape advice* — `SELECT *`, `INSERT` without a column list,
     ordinal `ORDER BY`, `TOP` without `ORDER BY`, a table with no primary key,
     `UPDATE`/`DELETE` with no `WHERE`, an existence check over an unfiltered
-    `SELECT`, more than N tables written in a join, requiring a named session
-    setting at the top of every routine, requiring an explicit constraint-check
-    mode) — already covered by the `SELECT *`/`SET NOCOUNT`/schema-prefix skip
-    at the top of this list, and the two members that do have a real angle when
-    resolved rather than counted (join width after view expansion; `SELECT *`
-    confined to a view) are queued in Tier 2 as their own, differently-scoped
-    items.
-  * *Cursor and control-flow correctness* (a fetch selecting a different column
-    count than its cursor declares, an output parameter never assigned, an
-    empty catch block, output emitted from a trigger, dirty-read isolation
-    hints, duplicated arguments in a call, a legacy identity intrinsic where
-    the scope-limited one was meant) — correctness findings wearing no
-    performance costume at all. Dirty-read hints are separately skipped above;
-    trigger output is already reachable through the queued trigger content
-    scan.
-  * *Security* (dynamic code execution, hard-coded credentials, hard-coded IP
-    addresses, weak hash algorithms in general and in sensitive contexts) —
-    not skipped, deferred: this is the same security-axis question already
-    filed under Open scope questions below, and this read is one more data
-    point for it (a performance-oriented commercial T-SQL analyzer devotes
-    about one rule in sixteen to security) rather than a new decision.
-  * **Eight rules the first pass at this block missed**, found doing a
-    rule-by-rule reconciliation of all ~83 against this block rather than
-    trusting the "roughly sixty" estimate above — same disposition as
-    everything else here (none needs the catalog, lineage pass, or plan
-    oracle our own admission rule requires), just never actually written
-    down: `IF`/`CASE` missing an `ELSE` where a sibling has one, and the
-    closely related dangling-`IF`-on-a-shared-line ambiguity — a small
-    missing-`ELSE` family the dead-code bullet above doesn't name; `GOTO`
-    usage; a redundant database/schema qualifier on a reference already in
-    scope (distinct from the qualification-*requiring* rule already covered
-    by the schema-prefix skip at the top of this list — this one is the
-    opposite complaint). Two more were read but their exact trigger
-    couldn't be pinned down with confidence from the decompiled source
-    alone, so they're recorded as unresolved rather than guessed into a
-    bucket: a rule pairing one `SET` option being `OFF` against a sibling
+    `SELECT`, more than N tables written in a join (the resolved,
+    view-expanded version of this is separately queued in Tier 2 and is the
+    one worth building first), requiring a named session setting at the top
+    of every routine, requiring an explicit constraint-check mode.
+  * *Cursor and control-flow correctness* — a fetch selecting a different
+    column count than its cursor declares, an output parameter never
+    assigned, an empty catch block, output emitted from a trigger, dirty-read
+    isolation hints, duplicated arguments in a call, a legacy identity
+    intrinsic where the scope-limited one was meant.
+  * *Security* — dynamic code execution, hard-coded credentials, hard-coded IP
+    addresses, weak hash algorithms in general and in sensitive contexts.
+    Still separately tracked under Open scope questions below, since it's a
+    bigger axis question than this reopening covers.
+  * *Missing/ambiguous `ELSE`* — `IF`/`CASE` with no `ELSE` where a sibling
+    has one, and the closely related dangling-`IF`-on-a-shared-line ambiguity.
+  * `GOTO` usage.
+  * A redundant database/schema qualifier on a reference already in scope
+    (the opposite complaint from the qualification-*requiring* rule above).
+  * A non-deterministic function (`RAND`/`NEWID`/`CRYPT_GEN_RANDOM`) used as a
+    `CASE` **input expression** — re-evaluated per `WHEN` comparison, so the
+    branch taken can silently disagree with itself. Distinct from the
+    per-row-predicate premise probed and killed elsewhere in this file (that
+    one was about seek behavior; this is about `CASE` evaluating its own
+    input more than once) — never itself probed, but syntax-only either way.
+  * Two with unresolved exact semantics — read from decompiled source, not
+    confirmed: a rule pairing one `SET` option being `OFF` against a sibling
     that should be `ON` (unclear whether this overlaps the already-falsified
-    `ARITHABORT` finding above or is unrelated — needs the vendor's own docs
-    or a fresh oracle probe, not decompiled bytecode, to settle), and a rule
-    about a statement "forcing serialization" without `SNAPSHOT ISOLATION`
-    whose actual firing condition wasn't reconstructable from what was
-    decompiled. One is a genuine miss from the "correctness, not performance"
-    reasoning used everywhere else in this block, not a style rule: a
-    non-deterministic function (`RAND`/`NEWID`/`CRYPT_GEN_RANDOM`) used as a
-    `CASE` **input expression** gets re-evaluated per `WHEN` comparison, so
-    the branch taken can silently disagree with itself — this is a different
-    mechanism from the per-row-predicate premise probed and killed elsewhere
-    in this tier (that one was about seek behavior; this one is about a
-    `CASE` evaluating its own input more than once), never itself probed, and
-    still correctness- rather than plan-shape-framed either way, so it stays
-    a skip rather than getting queued.
-  The load-bearing result of the read is not any single rule: it is that the
-  richest paid T-SQL rule set found still contains **no implicit-conversion
-  rule of any kind, no collation-aware rule, no lineage-aware rule, and no
-  plan oracle** — the same gap every other surveyed catalog has. That is a
-  citable negative for the study, recorded in `detection-reference.md`.
-- **Query/order hint usage counters** (`sys.dm_exec_query_optimizer_info`
-  join/order hint frequency) — inherently a runtime aggregate (counts since
-  last restart), not a per-query static fact; the static form is already
-  covered by the hard-coded-hints skip above.
-- **The mainstream CI-analysis platform's T-SQL coverage** — *resolved, no
-  longer open, and now measured on both tiers.* The free tier is a
-  community-maintained analyzer, read at source: 16 enabled T-SQL rules, all
-  declarative parse-tree shape matches, dormant since 2024, no
-  implicit-conversion rule of any kind, and its one non-sargability rule is
-  marked beta with no ground truth. The paid tier is a separate, far larger
-  analyzer with a real hand-written T-SQL grammar — read at source on
-  2026-08-16, ~83 rules — and it too has no conversion, collation, or
-  lineage-aware rule and no plan oracle; its disposition is the block entry
-  above. So the CI-gate niche is unoccupied at both price points, which is a
-  stronger claim than the one this entry originally recorded. Details in
-  `detection-reference.md` → Appendix 7.
+    `ARITHABORT` finding elsewhere in this file), and a rule about a statement
+    "forcing serialization" without `SNAPSHOT ISOLATION` whose firing
+    condition wasn't reconstructable from the bytecode alone. Pin down the
+    actual trigger condition (vendor docs or a fresh oracle probe) before
+    building either.
+  The read's other conclusion still stands regardless of this reopening: the
+  richest paid T-SQL rule set found still contains no implicit-conversion
+  rule, no collation-aware rule, no lineage-aware rule, and no plan oracle —
+  recorded in `detection-reference.md`.
+- **Everything else the old Tier 3 excluded for a reason other than
+  production-only visibility** — same status as above, unbuilt candidates now:
+  `SELECT *`/`SET NOCOUNT`/`sp_` prefix/schema-prefix/ordinal `ORDER BY`
+  style linting; missing/duplicate/unused indexes, heaps, fill factor,
+  clustering-key width (index-advisor space); `NOLOCK`/`READ UNCOMMITTED`;
+  `MERGE` pitfalls (`WHEN MATCHED THEN DELETE`, missing `HOLDLOCK`);
+  `CHECK (col IN (...))` treated as an enum, flagging a predicate proven
+  false against it; DISTINCT masking a bad join, a correlated subquery that
+  won't unnest, row goals, `UNION` vs `UNION ALL`; indexed-view `NOEXPAND`
+  matching; `OR` across different columns; partition-elimination defeat;
+  Always Encrypted column-comparison restrictions; Batch Mode on Rowstore
+  eligibility loss; the window-function Partition-Order-Covering index shape.
+  Each item's old entry (elsewhere in this file's history) already states
+  its own precision caveat — those still apply as implementation guidance,
+  just not as an admission veto anymore.
 
 ---
 
 ## Open scope questions
-Genuinely undecided, unlike Tier 3 above — these change what *kind* of tool
-this is rather than just adding a rule, so they're kept separate from both the
-detection tiers and the deliberate-skip list rather than defaulted either way.
 
-- **Security, compliance, and correctness-only rules as a whole new axis.**
-  The incumbent catalogs carry a substantial security axis (one tool devotes
-  61 rules to it — its second-largest category — and the actively-developed
-  DacFx pack ships a SQL-injection rule). Adding that axis would mean this
-  tool detects a bug class CLAUDE.md's own identity statement doesn't mention
-  at all (type-aware, direction-aware, lineage-aware *performance* analysis) —
-  a scope call for whoever owns that identity, not something a checklist
-  reorg should decide by default. The full incumbent security rule lists are
-  in `detection-reference.md` Appendix 7 §7.4 so the decision can be made from
-  the actual rules rather than a category label. Note the one already-admitted
-  overlap: `EXEC(string)` where `sp_executesql` was possible (Tier 2's
-  "Dynamic SQL quality" section) is admitted purely on plan-cache grounds,
-  with the injection surface as a side effect, not as security scope creep.
+Resolved by the scope rule above (2026-08-16): security/compliance/
+correctness rules are in scope on the same basis as everything else —
+detectable from code and schema, so admissible. Not built yet; goes in the
+same reopened queue as Tier 4. The old open question here was whether
+CLAUDE.md's identity statement covered this axis at all — it does now, since
+the identity statement itself changed.
+
+Incumbent security rule lists for reference: `detection-reference.md`
+Appendix 7 §7.4.
 
 ## Reporting ideas worth stealing (not detections)
 Folded in from the wider-product-landscape read — cross-cutting reporting/UX
