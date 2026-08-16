@@ -29,6 +29,8 @@ public sealed class DatabaseCatalog
 
     private readonly List<CatalogCheckConstraint> _checkConstraints = [];
 
+    private readonly List<TemporalTablePair> _temporalTablePairs = [];
+
     private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -159,6 +161,25 @@ public sealed class DatabaseCatalog
     public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
 
     public IReadOnlyList<CatalogCheckConstraint> CheckConstraints => _checkConstraints;
+
+    /// <summary>
+    /// A system-versioned temporal table's own current-table/history-table pairing, read live from
+    /// <c>sys.tables.temporal_type</c>/<c>history_table_id</c> only (docs/detection-checklist.md
+    /// "Temporal table history-side index gap") - same "engine-authoritative, never parsed from
+    /// DDL" reasoning as <see cref="ForeignKeys"/>/<see cref="CheckConstraints"/>: file mode has no
+    /// parsed representation of <c>WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = ...))</c> at all
+    /// (<c>SystemCatalogViewRegistry</c> only models <c>sys.tables</c>' own columns, never DDL
+    /// clause parsing for this feature), so this is always empty for a file-mode scan. Both the
+    /// current table AND its history table are otherwise ordinary <see cref="CatalogTable"/> rows
+    /// already carrying their own real <see cref="CatalogTable.Indexes"/> (both come back from the
+    /// same plain <c>sys.tables</c>/<c>sys.indexes</c> read every other table does - a history table
+    /// is not a distinct catalog object kind, just a table with <c>temporal_type = 1</c>) - this
+    /// registry supplies only the missing fact those two rows can't carry on their own: which table
+    /// is which side of which pair.
+    /// </summary>
+    public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
+
+    public IReadOnlyList<TemporalTablePair> TemporalTablePairs => _temporalTablePairs;
 
     /// <summary>
     /// An indexed view's own clustered/nonclustered index shape, keyed by the view's qualified

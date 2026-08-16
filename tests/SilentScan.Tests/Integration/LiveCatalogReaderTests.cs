@@ -52,6 +52,28 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         CREATE TABLE dbo.CheckedOrders (Id INT NOT NULL PRIMARY KEY, Amount INT NOT NULL);
         GO
         ALTER TABLE dbo.CheckedOrders WITH NOCHECK ADD CONSTRAINT CK_CheckedOrders_Amount CHECK (Amount > 0);
+        GO
+        CREATE TABLE dbo.Widget (
+            WidgetId INT NOT NULL PRIMARY KEY,
+            Code VARCHAR(50) NOT NULL,
+            ValidFrom DATETIME2 GENERATED ALWAYS AS ROW START NOT NULL,
+            ValidTo DATETIME2 GENERATED ALWAYS AS ROW END NOT NULL,
+            PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo))
+        WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.WidgetHistory));
+        GO
+        CREATE NONCLUSTERED INDEX IX_Widget_Code ON dbo.Widget(Code);
+        GO
+        CREATE TABLE dbo.Gadget (
+            GadgetId INT NOT NULL PRIMARY KEY,
+            Code VARCHAR(50) NOT NULL,
+            ValidFrom DATETIME2 GENERATED ALWAYS AS ROW START NOT NULL,
+            ValidTo DATETIME2 GENERATED ALWAYS AS ROW END NOT NULL,
+            PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo))
+        WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.GadgetHistory));
+        GO
+        CREATE NONCLUSTERED INDEX IX_Gadget_Code ON dbo.Gadget(Code);
+        GO
+        CREATE NONCLUSTERED INDEX IX_GadgetHistory_Code ON dbo.GadgetHistory(Code);
         """;
 
     [Fact]
@@ -221,5 +243,66 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         var finding = Assert.Single(findings, f => f.ConstraintName == "FK_CascadeChildren_Parents");
         Assert.Equal(ReferentialAction.Cascade, finding.DeleteAction);
         Assert.Equal(ReferentialAction.SetNull, finding.UpdateAction);
+    }
+
+    [Fact]
+    public async Task ReadAsync_TemporalTable_ReadsRealPairingFromSysTables()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var pair = Assert.Single(catalog.TemporalTablePairs, p => p.CurrentTableQualifiedName == "dbo.Widget");
+        Assert.Equal("dbo.WidgetHistory", pair.HistoryTableQualifiedName);
+    }
+
+    [Fact]
+    public async Task ReadAsync_TemporalTable_BothSidesReadAsOrdinaryTablesWithRealIndexes()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var current = catalog.Find("dbo.Widget");
+        Assert.NotNull(current);
+        Assert.True(current!.IsIndexedColumn("Code"));
+
+        var history = catalog.Find("dbo.WidgetHistory");
+        Assert.NotNull(history);
+        // The engine auto-creates a clustered index on the history table keyed on the period
+        // columns (no explicit history index was named) - real, but not a business-column index,
+        // so it must never be treated as a match for IX_Widget_Code.
+        Assert.DoesNotContain(history!.Indexes, i => i.KeyColumns.Contains("Code", StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ReadAsync_TemporalTableMissingHistoryIndex_TemporalTableHistoryIndexGapScannerFires()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var findings = TemporalTableHistoryIndexGapScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.CurrentTableQualifiedName == "dbo.Widget");
+        Assert.Equal("dbo.WidgetHistory", finding.HistoryTableQualifiedName);
+        Assert.Equal("IX_Widget_Code", finding.CurrentIndexName);
+        Assert.Equal(["Code"], finding.KeyColumns);
+    }
+
+    [Fact]
+    public async Task ReadAsync_TemporalTableWithMatchingHistoryIndex_TemporalTableHistoryIndexGapScannerNeverFires()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var findings = TemporalTableHistoryIndexGapScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.CurrentTableQualifiedName == "dbo.Gadget");
+    }
+
+    [Fact]
+    public async Task ReadAsync_TemporalTable_PrimaryKeyNeverFlaggedAgainstHistorySide()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var findings = TemporalTableHistoryIndexGapScanner.Scan(catalog);
+
+        // WidgetId is the current table's clustered PRIMARY KEY - structurally impossible on the
+        // history side (Msg 13558), so it must never appear as a finding's own key-column list.
+        Assert.DoesNotContain(findings, f => f.KeyColumns.Contains("WidgetId"));
     }
 }

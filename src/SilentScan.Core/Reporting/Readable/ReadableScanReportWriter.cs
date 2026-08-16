@@ -100,6 +100,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(UnparameterizedDynamicSql(report, headingLevel, pathBase));
         blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
         blocks.AddRange(SelfReferencingDml(report, headingLevel, pathBase));
+        blocks.AddRange(TemporalTableHistoryIndexGap(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -169,6 +170,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Dynamic SQL call sites concatenating a proven-constant value instead of parameterizing it", report.UnparameterizedDynamicSqlFindings.Count);
         AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.TempTableExecShapeFindings.Count);
         AddCount(counts, "Self-referencing DML (Halloween Protection risk)", report.SelfReferencingDmlFindings.Count);
+        AddCount(counts, "Temporal table history-side index gaps", report.TemporalTableHistoryIndexGapFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1017,6 +1019,29 @@ public static class ReadableScanReportWriter
                 f.Kind == SelfReferencingDmlFindingKind.ThroughView
                     ? $"read side reaches the target through view '{f.ReadSideQualifiedName}'"
                     : "read side names the target table directly",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TemporalTableHistoryIndexGap(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TemporalTableHistoryIndexGapFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Temporal table history-side index gaps ({report.TemporalTableHistoryIndexGapFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A system-versioned temporal table's CURRENT side carries a nonclustered index with no structurally matching index (same key columns, same order) on its HISTORY side. FOR SYSTEM_TIME AS OF/BETWEEN rewrites to a UNION ALL of the two tables - oracle-confirmed directly (real seeded data, UPDATE STATISTICS ... WITH FULLSCAN on both sides): a predicate that seeks the current-table branch via this index degrades to a full Clustered Index Scan of the whole history table when the gap exists, and seeks both branches once a matching index is added. PRIMARY KEY/UNIQUE-constraint indexes on the current side are never compared - the engine itself refuses either constraint on a temporal history table (Msg 13558/13583), so flagging them would be a guaranteed-always-fire signal with no possible fix.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Current table", "History table", "Index", "Key columns"],
+            [.. report.TemporalTableHistoryIndexGapFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CurrentTableQualifiedName,
+                f.HistoryTableQualifiedName,
+                f.CurrentIndexName ?? "(unnamed)",
+                string.Join(", ", f.KeyColumns),
             })]);
     }
 

@@ -356,6 +356,13 @@ public static class ScanReportBuilder
             cascadingFkStage.Complete($"{cascadingForeignKeyFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<TemporalTableHistoryIndexGapFinding> temporalTableHistoryIndexGapFindings;
+        using (var temporalHistoryStage = progress.Begin("scanning temporal table history-side index gaps"))
+        {
+            temporalTableHistoryIndexGapFindings = TemporalTableHistoryIndexGapScanner.Scan(catalog);
+            temporalHistoryStage.Complete($"{temporalTableHistoryIndexGapFindings.Count:N0} findings");
+        }
+
         List<PartialCompositeForeignKeyJoinFinding> partialCompositeForeignKeyJoinFindings;
         using (var partialFkJoinStage = progress.Begin("scanning partial composite-FK joins", usableCount))
         {
@@ -698,6 +705,7 @@ public static class ScanReportBuilder
             // this builder never issues - always empty here; LiveScanRunner merges the real result in afterward.
             [],
             selfReferencingDmlFindings,
+            temporalTableHistoryIndexGapFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

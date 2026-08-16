@@ -38,6 +38,7 @@ public sealed record ScanReport(
     IReadOnlyList<NonPersistedComputedColumnFinding> NonPersistedComputedColumnFindings,
     IReadOnlyList<TempTableExecShapeFinding> TempTableExecShapeFindings,
     IReadOnlyList<SelfReferencingDmlFinding> SelfReferencingDmlFindings,
+    IReadOnlyList<TemporalTableHistoryIndexGapFinding> TemporalTableHistoryIndexGapFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -107,6 +108,10 @@ public sealed record ScanReport(
     /// (<see cref="CrossTableTypeDriftFindings"/>'s FK-linked half, the indexed-view registry).
     /// Bumped to 27 for the new <see cref="SelfReferencingDmlFindings"/> stream
     /// (docs/detection-checklist.md Tier 2 "Halloween Protection and self-referencing DML").
+    /// Bumped to 28 for the new <see cref="TemporalTableHistoryIndexGapFindings"/> stream
+    /// (docs/detection-checklist.md "Temporal table history-side index gap"). Live-mode only -
+    /// always empty in a file-mode scan, same reasoning as <see cref="CrossTableTypeDriftFindings"/>'s
+    /// FK-linked half.
     /// </summary>
-    public const int CurrentSchemaVersion = 27;
+    public const int CurrentSchemaVersion = 28;
 }

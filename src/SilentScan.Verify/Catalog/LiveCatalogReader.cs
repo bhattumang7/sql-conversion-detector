@@ -112,6 +112,11 @@ public sealed class LiveCatalogReader
             catalog.AddIndexedView(qualifiedName, indexes);
         }
 
+        foreach (var pair in await ReadTemporalTablePairsAsync(connection, cancellationToken))
+        {
+            catalog.AddTemporalTablePair(pair);
+        }
+
         return catalog;
     }
 
@@ -436,6 +441,42 @@ public sealed class LiveCatalogReader
         }
 
         return constraints;
+    }
+
+    /// <summary>
+    /// Every system-versioned temporal table's own current/history pairing, read from
+    /// <c>sys.tables.temporal_type = 2</c> (<c>SYSTEM_VERSIONED_TEMPORAL_TABLE</c>) joined to its
+    /// own <c>history_table_id</c>. Both sides are ALSO ordinary rows in <see cref="ReadTablesAsync"/>/
+    /// <see cref="ReadIndexesAsync"/> already - a history table has no distinct
+    /// <c>sys.objects.type</c>, it's a plain user table with <c>temporal_type = 1</c> - so this
+    /// query supplies only the pairing fact, not table/index shape (docs/detection-checklist.md
+    /// "Temporal table history-side index gap").
+    /// </summary>
+    private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT ps.name AS current_schema, pt.name AS current_table,
+                   hs.name AS history_schema, ht.name AS history_table
+            FROM sys.tables pt
+            JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
+            JOIN sys.tables ht ON ht.object_id = pt.history_table_id
+            JOIN sys.schemas hs ON hs.schema_id = ht.schema_id
+            WHERE pt.temporal_type = 2 AND pt.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var pairs = new List<TemporalTablePair>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            pairs.Add(new TemporalTablePair(
+                CurrentTableQualifiedName: $"{reader.GetString(0)}.{reader.GetString(1)}",
+                HistoryTableQualifiedName: $"{reader.GetString(2)}.{reader.GetString(3)}"));
+        }
+
+        return pairs;
     }
 
     /// <summary>

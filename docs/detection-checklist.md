@@ -2038,14 +2038,100 @@ get an oracle fixture for the serial-plan consequence).
       the mechanism itself is oracle-proven and the scanner correctly fires
       on every hand-authored fixture in the unit-test suite.
 
-### Temporal table history-side index gap
-- [ ] System-versioned temporal table (`sys.tables.temporal_type`) whose
-      history table lacks the index set the current table has — `FOR
-      SYSTEM_TIME AS OF/BETWEEN` queries rewrite to a UNION ALL between the
-      two tables, so a sargable predicate on the current side does nothing
-      for the history side, silently forcing a scan on half the union.
-      Catalog-only: compare index definitions between `parent_id` and
-      `history_table_id`.
+### Temporal table history-side index gap — shipped
+- [x] System-versioned temporal table (`sys.tables.temporal_type`) whose
+      history table lacks the index set the current table has —
+      **oracle-confirmed directly, not assumed from the checklist's own
+      premise**: built a real temporal table (5,000 current-table rows, 2,500
+      history-table rows, `UPDATE STATISTICS ... WITH FULLSCAN` on both) and
+      captured `SET STATISTICS XML ON` for a `FOR SYSTEM_TIME BETWEEN ...`
+      query with a sargable predicate on an indexed column. The plan is a
+      `Concatenation` (UNION ALL) of the two tables exactly as the checklist's
+      own text claimed - confirmed, not assumed - and with no matching index
+      on the history side, the current-table branch does a genuine
+      `Index Seek` (nonclustered index + clustered key lookup) while the
+      history-table branch does a `Clustered Index Scan` of the whole table.
+      Adding a structurally matching index to the history side (same key
+      columns, same order) restores a seek on that branch too - the SAME
+      probe, both directions, both oracle-confirmed with real captured plan
+      XML, not inferred from one side alone.
+      <br><br>
+      **Match criterion, oracle-decided rather than assumed:** a third probe
+      (a 2-column composite key, `(Region, Code)` on the current side vs.
+      `(Code, Region)` - REVERSED order - on the history side, both columns
+      bound by equality) found that a reversed key order CAN still produce a
+      seek on both branches when every key column is bound by equality. Key-
+      column order is nonetheless treated as SIGNIFICANT (a reversed-order
+      history index does not count as a match) - the conservative, safe
+      direction for a catalog-only finding making no claim about any one
+      query's own predicate shape: a reversed-order index is not guaranteed to
+      rescue a predicate that supplies only the current index's own leading
+      column(s), which is the common, load-bearing case this rule exists to
+      catch. A false negative here (never firing) would hide a real risk; the
+      false positive this choice accepts instead (flagging a reversed-order
+      index some specific full-equality query would in fact seek through) is
+      the safe direction to be wrong in, and is stated explicitly in the
+      finding's own doc comment rather than left implicit.
+      <br><br>
+      **PRIMARY KEY/UNIQUE-constraint indexes are never compared - oracle-
+      confirmed structurally impossible on the history side, not a scope
+      gap:** `ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY`/`... ADD CONSTRAINT
+      UNIQUE` against a real temporal history table both fail outright (Msg
+      13558/13583) - a currently-valid history table can never carry either,
+      by engine construction, so comparing the current table's own PK/unique-
+      constraint index against it would be a guaranteed-always-fire signal
+      with no possible fix. Only `CatalogIndexKind.Index` (an ordinary,
+      non-constraint-backed index) is a candidate on the current side.
+      Filtered/columnstore/disabled indexes are excluded on both sides,
+      matching `CatalogTable.IsIndexedColumn`'s own "genuinely seekable"
+      definition. Included columns and uniqueness are ignored in the match
+      (oracle-confirmed neither affects seek-vs-scan, only covering-ness/cost)
+      - only the ordered key-column list matters.
+      <br><br>
+      `TemporalTablePair`/`DatabaseCatalog.TemporalTablePairs` (populated live
+      -only via a new `LiveCatalogReader.ReadTemporalTablePairsAsync` reading
+      `sys.tables.temporal_type = 2` joined to its own `history_table_id`;
+      always empty for a file-mode scan - no parsed representation of `WITH
+      (SYSTEM_VERSIONING = ON (HISTORY_TABLE = ...))` exists anywhere in this
+      codebase's DDL-parsing path, the same "everything goes via the
+      database" reasoning `ForeignKeys`/`CheckConstraints` already follow).
+      Both the current table and its history table are otherwise ordinary
+      `CatalogTable` rows already carrying their own real `Indexes` - a
+      history table has no distinct `sys.objects.type`, so no new index-
+      reading plumbing was needed, only the pairing fact. New
+      `TemporalTableHistoryIndexGapFinding`/`TemporalTableHistoryIndexGapScanner`
+      (`src/SilentScan.Core/Predicates/TemporalTableHistoryIndexGapScanner.cs`)
+      - catalog-only, no AST walking, mirrors `UntrustedConstraintScanner`'s
+      own shape. Catalog-only, unconditional - reported once per current-side
+      index lacking a history-side match, the same "reported once per object"
+      precedent `MaxTypedColumnFinding` already establishes. Not verdict-
+      bearing per finding (the oracle confirmation above is of the GENERAL
+      mechanism, not a per-finding plan-XML probe against a real query site,
+      the same tier `UntrustedConstraintFinding`/`ForcedSerialFinding` already
+      use) - `Confidence.High`, SARIF `LevelWarning`.
+      <br><br>
+      Wired end-to-end (`ScanReport` schema version 27 → 28, SARIF rule
+      `silentscan/catalog/temporal-history-index-gap`, readable-report
+      section). Live-mode only, same reasoning as `CrossTableTypeDriftFindings`'s
+      FK-linked half. Unit-tested (`TemporalTableHistoryIndexGapScannerTests`,
+      12 cases: missing-index fires, matching index (name/included-columns-
+      agnostic) never fires, reversed key order still fires, PRIMARY
+      KEY/UNIQUE CONSTRAINT never compared, filtered/disabled history index
+      not treated as a match, disabled/columnstore current index never a
+      candidate, an unresolved table in a reported pairing skipped rather
+      than throwing, multiple gaps on one table each get their own finding)
+      and oracle-tested against a real deployed schema (`LiveCatalogReaderTests`,
+      5 new cases: the pairing itself reads correctly off `sys.tables`, both
+      sides read as ordinary tables with real indexes and the history side's
+      own auto-created period-column clustered index is confirmed never
+      mistaken for a match, the scanner fires on a genuine gap, stays silent
+      on a genuinely matching pair, and never flags the current table's own
+      PRIMARY KEY). **Real coverage against the local RM_ test database: 0
+      findings** - a real, honest zero (`SELECT COUNT(*) FROM sys.tables
+      WHERE temporal_type = 2` confirms 0 system-versioned temporal tables
+      exist there at all), not a detection gap; the mechanism itself is
+      oracle-proven end-to-end and the scanner correctly fires on every hand-
+      authored fixture in the unit-test suite and the live oracle fixture.
 
 ### Small precise adds (each an afternoon, not a stream)
 - [ ] Proc authored `WITH RECOMPILE` — compiles every call, invisible to

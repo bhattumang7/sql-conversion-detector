@@ -70,6 +70,7 @@ public static class SarifReportWriter
         results.AddRange(report.SelfReferencingDmlFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
+        results.AddRange(report.TemporalTableHistoryIndexGapFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -444,6 +445,22 @@ public static class SarifReportWriter
             finding.UpdateAction != ReferentialAction.NoAction ? $"ON UPDATE {finding.UpdateAction}" : null,
         }.Where(a => a is not null));
         var message = $"'{finding.ConstraintName}' ({finding.ParentTableQualifiedName} -> {finding.ReferencedTableQualifiedName}) carries {actions} - a DML statement against the referenced table silently cascades to the parent's dependent rows too.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(TemporalTableHistoryIndexGapFinding finding)
+    {
+        // Warning, not error: an oracle-confirmed real mechanism (the history-side branch of the
+        // FOR SYSTEM_TIME UNION ALL scans without a matching index), but the oracle confirmation is
+        // of the general mechanism, not a per-finding plan-XML probe against a real query site - the
+        // same "structural risk, not provably-wrong-result" tier UntrustedConstraintFinding/
+        // ForcedSerialFinding get, not the Error tier a correctness finding gets.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalTableHistoryIndexGapRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var indexDisplay = finding.CurrentIndexName is null ? "an unnamed index" : $"'{finding.CurrentIndexName}'";
+        var keyColumns = string.Join(", ", finding.KeyColumns);
+        var message = $"{indexDisplay} on '{finding.CurrentTableQualifiedName}' ({keyColumns}) has no structurally matching index on its history table '{finding.HistoryTableQualifiedName}' - a FOR SYSTEM_TIME query that seeks the current side via this index degrades to a scan of the whole history table.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
