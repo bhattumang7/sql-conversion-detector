@@ -1,3 +1,4 @@
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
 using SilentScan.Live;
@@ -27,7 +28,8 @@ public sealed class ReadableLiveScanWriterTests
         IReadOnlyList<WorkloadFinding>? workloadFindings = null) =>
         new(await EmptyReport(), Catalog, ModulesAnalyzed: 7,
             new LiveLineageParityReport(mismatches ?? [], [], [], []),
-            unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? []);
+            unanalyzable ?? [], PlanCacheEvidence: null, RankedFindings: [], workloadFindings ?? [],
+            TempTableExecShapeReport.Empty);
 
     [Fact]
     public async Task CatalogSummary_SaysWhatWasReadAndThatNothingWasExecuted()

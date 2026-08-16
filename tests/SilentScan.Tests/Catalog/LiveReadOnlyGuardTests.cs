@@ -105,4 +105,39 @@ public sealed class LiveReadOnlyGuardTests
     [InlineData("SELECT * FROM [dbo].[fn_NoArgs]();")]
     public void AssertSelectOnly_SynthesizedDescribeProbeText_DoesNotThrow(string probeText) =>
         LiveReadOnlyGuard.AssertSelectOnly(probeText);
+
+    // docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3 - the one carve-out on top
+    // of the default SELECT-only guarantee, scoped narrowly to sys.dm_exec_describe_first_result_set
+    // probe text alone (SilentScan.Live.Catalog.LiveDescribedColumnReader.DescribeProcedureOrderedAsync).
+    [Fact]
+    public void AssertDescribeFirstResultSetProbeOnly_PlainSelect_DoesNotThrow() =>
+        LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly("SELECT name FROM sys.tables;");
+
+    [Fact]
+    public void AssertDescribeFirstResultSetProbeOnly_NamedProcedureExecNoArguments_DoesNotThrow() =>
+        LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly("EXEC [dbo].[usp_AllOrders];");
+
+    [Fact]
+    public void AssertDescribeFirstResultSetProbeOnly_NamedProcedureExecWithPositionalArguments_DoesNotThrow() =>
+        LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly("EXEC [dbo].[usp_Find] NULL, NULL;");
+
+    [Theory]
+    [InlineData("EXEC('SELECT 1');")]
+    [InlineData("EXEC(@sql);")]
+    [InlineData("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; EXEC(@sql);")]
+    public void AssertDescribeFirstResultSetProbeOnly_StringFormExec_StillThrows(string sql) =>
+        Assert.Throws<InvalidOperationException>(() => LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly(sql));
+
+    [Theory]
+    [InlineData("INSERT INTO dbo.T (Id) VALUES (1);")]
+    [InlineData("DROP TABLE dbo.T;")]
+    [InlineData("EXEC [dbo].[usp_Find]; DROP TABLE dbo.T;")]
+    public void AssertDescribeFirstResultSetProbeOnly_AnyOtherStatement_Throws(string sql) =>
+        Assert.Throws<InvalidOperationException>(() => LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly(sql));
+
+    [Fact]
+    public void AssertSelectOnly_NamedProcedureExec_StillThrows() =>
+        // The default guard must NOT gain this carve-out - only AssertDescribeFirstResultSetProbeOnly
+        // does, and only for its own one caller's probe text.
+        Assert.Throws<InvalidOperationException>(() => LiveReadOnlyGuard.AssertSelectOnly("EXEC [dbo].[usp_AllOrders];"));
 }

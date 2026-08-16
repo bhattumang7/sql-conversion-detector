@@ -51,6 +51,45 @@ public static class LiveDescribeProbeBuilder
         return ($"SELECT * FROM {BracketQualifiedName(qualifiedName)}({string.Join(", ", arguments)});", null);
     }
 
+    /// <summary>
+    /// Returns the probe text for a stored procedure's <c>INSERT ... EXEC</c> shape (docs/
+    /// detection-checklist.md Tier 2 "Dynamic SQL quality" item 3, temp-table shape mismatch
+    /// across a proc-call boundary) - a bare, positional <c>EXEC [schema].[proc] NULL, ...;</c>.
+    /// Unlike <see cref="BuildFunctionProbe"/>'s inline-TVF-call argument list, T-SQL's own
+    /// <c>EXECUTE</c> grammar accepts only a constant or a variable as an argument value, never an
+    /// arbitrary expression - <c>CAST(NULL AS type)</c> is a real parse error here (oracle-
+    /// confirmed against the Docker instance: Msg 156, "Incorrect syntax near the keyword
+    /// 'NULL'"), so a bare, untyped <c>NULL</c> literal is used instead (oracle-confirmed to
+    /// compile and implicitly convert to the parameter's own declared type, whatever it is) -
+    /// simpler than the function-probe path AND correct, since a probe argument is never compared
+    /// against anything here, only its ability to compile matters. Declines (returns null) only
+    /// for a case that never arises for a table-valued function: an <c>OUTPUT</c> parameter - a
+    /// plain positional value is not valid T-SQL for one, and silently omitting it would risk
+    /// either a parse error on a required parameter or a misleading probe for one with a default -
+    /// "report, don't guess" applies equally here. A table-valued parameter is declined for the
+    /// same reason <see cref="BuildFunctionProbe"/> declines one: no positional literal form exists
+    /// for a TVP at all.
+    /// </summary>
+    public static (string? Probe, string? UnrenderableReason) BuildProcedureProbe(
+        string qualifiedName, IReadOnlyList<ProcedureParameterSpec> parameters)
+    {
+        foreach (var parameter in parameters)
+        {
+            if (parameter.IsOutput)
+            {
+                return (null, $"parameter '{parameter.Name}' is an OUTPUT parameter, which this probe cannot supply a positional value for");
+            }
+
+            if (parameter.IsTableType)
+            {
+                return (null, $"parameter '{parameter.Name}' is a table-valued parameter, which has no positional literal form");
+            }
+        }
+
+        var argumentText = parameters.Count > 0 ? " " + string.Join(", ", parameters.Select(_ => "NULL")) : string.Empty;
+        return ($"EXEC {BracketQualifiedName(qualifiedName)}{argumentText};", null);
+    }
+
     private static string BracketQualifiedName(string qualifiedName)
     {
         var parts = qualifiedName.Split('.', 2);
@@ -62,3 +101,12 @@ public static class LiveDescribeProbeBuilder
 
 /// <summary>One inline-TVF parameter's name plus its resolved type, or null when the type has no rendering; <see cref="IsTableType"/> marks a TVP, which has no typed-NULL form at all.</summary>
 public sealed record FunctionParameterSpec(string Name, SqlType? Type, bool IsTableType);
+
+/// <summary>
+/// One stored-procedure parameter's name and whether it's table-valued/declared OUTPUT - no
+/// resolved type, unlike <see cref="FunctionParameterSpec"/>: <see cref="LiveDescribeProbeBuilder.BuildProcedureProbe"/>
+/// renders a bare, untyped <c>NULL</c> for every non-output, non-table-valued parameter (EXECUTE's
+/// own grammar only accepts a constant or a variable, never a typed <c>CAST</c> expression), so
+/// nothing here ever needs the parameter's own declared type.
+/// </summary>
+public sealed record ProcedureParameterSpec(string Name, bool IsTableType, bool IsOutput);

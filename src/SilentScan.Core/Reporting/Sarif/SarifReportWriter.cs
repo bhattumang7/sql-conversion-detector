@@ -65,6 +65,8 @@ public static class SarifReportWriter
         results.AddRange(report.PostExpansionJoinWidthFindings.Select(ToResult));
         results.AddRange(report.SelectStarViewFindings.Select(ToResult));
         results.AddRange(report.UnparameterizedDynamicSqlFindings.Select(ToResult));
+        results.AddRange(report.NonPersistedComputedColumnFindings.Select(ToResult));
+        results.AddRange(report.TempTableExecShapeFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -474,6 +476,39 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(NonPersistedComputedColumnFinding finding)
+    {
+        // Informational, not error/warning - a structural catalog fact (is_persisted = 0),
+        // definitionally true independent of whether any scanned query touches the column,
+        // same tier as MaxTypedColumnFinding's own structural report.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NonPersistedComputedColumnRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-persisted computed column ({finding.DefinitionText}) - recomputed from the base row on every read that touches it.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(TempTableExecShapeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TempTableExecShapeRuleId(finding.Kind), finding.Confidence);
+
+        if (finding.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch)
+        {
+            // A hard runtime error every time this statement executes (Msg 213/8164), not a
+            // silent defect - same "provably wrong outcome" tier as NotInNullableSubqueryFinding,
+            // error rather than warning.
+            var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+            var message = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: the temp table declares {finding.TempTableDeclaredColumnCount} column(s) but the executed proc's real result set describes {finding.DescribedColumnCount} - this raises a hard error (Msg 213/8164) every time it runs.";
+            return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+        }
+
+        // Silent data loss at a call boundary, not a predicate - same tier as WriteLossFinding/
+        // ProcCallArgumentMismatchFinding: always warning, never downgraded by index existence.
+        var typeLevel = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var typeMessage = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: position {finding.ColumnPosition} ('{finding.ColumnName}', {finding.TempColumnTypeDisplay}) receives {finding.DescribedColumnTypeDisplay} from the executed proc's real result set - {DescribeWriteLossKind(finding.WriteLoss!.Value)}.";
+        return BuildResult(ruleId, typeLevel, typeMessage, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)

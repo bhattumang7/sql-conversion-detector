@@ -178,6 +178,23 @@ public static class LiveScanRunner
                 parseResultSource(), catalog: catalog, minimumConfidence: minimumConfidence, resolvedLineage: lineage, progress: progress);
         }
 
+        // docs/detection-checklist.md Tier 2 "Dynamic SQL quality" item 3: INSERT INTO #temp EXEC
+        // proc's shape mismatch needs its own live round trip per call site
+        // (sys.dm_exec_describe_first_result_set) - not something ScanReportBuilder's own
+        // catalog+lineage pipeline above can produce, so it's computed here and merged into the
+        // report afterward, the same shape LineageParity already uses for a live-only concern.
+        TempTableExecShapeReport tempTableExecShape;
+        using (var tempTableStage = progress.Begin("checking INSERT...EXEC temp-table shapes"))
+        {
+            var candidates = parseResultSource()
+                .SelectMany(r => TempTableExecShapeCandidateScanner.Scan(r, catalog))
+                .ToList();
+            tempTableExecShape = await new TempTableExecShapeChecker(connectionString).CheckAsync(candidates, cancellationToken);
+            report = report with { TempTableExecShapeFindings = tempTableExecShape.Findings };
+            tempTableStage.Complete($"{tempTableExecShape.Findings.Count:N0} findings, {tempTableExecShape.Unanalyzed.Count:N0} unanalyzed");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];
         IReadOnlyList<WorkloadFinding> workloadFindings = [];
@@ -200,7 +217,7 @@ public static class LiveScanRunner
 
         return new LiveScanResult(
             report, LiveCatalogSummary.From(catalog), moduleCount, parity,
-            unanalyzable, planCacheEvidence, rankedFindings, workloadFindings);
+            unanalyzable, planCacheEvidence, rankedFindings, workloadFindings, tempTableExecShape);
     }
 
     private static List<RankedFinding> RankByPlanCacheEvidence(
@@ -230,7 +247,12 @@ public static class LiveScanRunner
 /// non-empty <see cref="LiveLineageParityReport.Mismatches"/> means this run's findings rest on
 /// at least one type the pipeline got wrong, verified against what the engine computes for that
 /// object right now - not against its cached <c>sys.columns</c> metadata, which can go stale
-/// without being a tool bug (see <see cref="LiveLineageParityChecker"/>).
+/// without being a tool bug (see <see cref="LiveLineageParityChecker"/>). The
+/// <see cref="TempTableExecShapeReport"/> findings folded into <see cref="Report"/>'s own
+/// <c>TempTableExecShapeFindings</c> are exposed again, whole, so its <c>Unanalyzed</c> list
+/// (every <c>INSERT INTO #temp EXEC proc</c> site this pass declined to judge, and why) is
+/// reachable at all - the same "findings in the report, honesty list beside it" split
+/// <see cref="LineageParity"/> already uses.
 /// </summary>
 public sealed record LiveScanResult(
     ScanReport Report,
@@ -240,7 +262,8 @@ public sealed record LiveScanResult(
     IReadOnlyList<UnanalyzableModule> UnanalyzableModules,
     PlanCacheEvidenceResult? PlanCacheEvidence,
     IReadOnlyList<RankedFinding> RankedFindings,
-    IReadOnlyList<WorkloadFinding> WorkloadFindings);
+    IReadOnlyList<WorkloadFinding> WorkloadFindings,
+    TempTableExecShapeReport TempTableExecShape);
 
 /// <summary>One static finding plus whether the live plan cache actually shows it converting right now, and how often.</summary>
 public sealed record RankedFinding(TypedPredicateFinding Finding, bool ObservedInLivePlanCache, long ObservedExecutionCount);

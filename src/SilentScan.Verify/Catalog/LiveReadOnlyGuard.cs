@@ -23,18 +23,54 @@ public static class LiveReadOnlyGuard
 
     public static void AssertSelectOnly(string sql)
     {
+        var statements = ParseSingleBatch(sql);
+        var disallowed = statements.FirstOrDefault(s => s is not SelectStatement);
+        if (disallowed is not null)
+        {
+            throw new InvalidOperationException(
+                $"Live scanning issues read-only SELECT queries only - refusing to execute a {disallowed.GetType().Name}.");
+        }
+    }
+
+    /// <summary>
+    /// A narrower, separate carve-out - used ONLY for text about to be bound as
+    /// <c>sys.dm_exec_describe_first_result_set</c>'s own parameter (see
+    /// <c>SilentScan.Live.Catalog.LiveDescribedColumnReader.DescribeProcedureAsync</c>), never
+    /// for the outer command text itself, which still goes through
+    /// <see cref="CreateReadOnlyCommand"/>/<see cref="AssertSelectOnly"/> like every other live
+    /// query. The DMV parses, binds and compiles the batch it's handed and returns result-set
+    /// metadata WITHOUT executing it - empirically confirmed compile-only for both a bare
+    /// <c>SELECT</c> and an <c>EXEC dbo.SomeProc</c> form against the standing Docker oracle (zero
+    /// rows touched in either case) - so accepting a bare named-procedure EXEC here, in addition
+    /// to a bare SELECT, extends the same no-execution guarantee <see cref="AssertSelectOnly"/>
+    /// gives every other live query, rather than loosening it. A string-form EXEC
+    /// (<see cref="ExecutableStringList"/>, e.g. <c>EXEC('...')</c> or <c>EXEC(@sql)</c>) is
+    /// still rejected here exactly as it is everywhere else - it could contain arbitrary text,
+    /// not a fixed, catalog-known procedure name, so it carries none of this carve-out's
+    /// justification.
+    /// </summary>
+    public static void AssertDescribeFirstResultSetProbeOnly(string sql)
+    {
+        var statements = ParseSingleBatch(sql);
+        var disallowed = statements.FirstOrDefault(s => s is not SelectStatement
+            && s is not ExecuteStatement { ExecuteSpecification.ExecutableEntity: ExecutableProcedureReference });
+        if (disallowed is not null)
+        {
+            throw new InvalidOperationException(
+                "Describe-first-result-set probes accept only a bare SELECT or a bare named-procedure EXEC - " +
+                $"refusing to describe a {disallowed.GetType().Name}.");
+        }
+    }
+
+    private static IEnumerable<TSqlStatement> ParseSingleBatch(string sql)
+    {
         var parseResult = SqlScriptParser.ParseText("live-query", sql);
         if (parseResult.HasErrors || parseResult.Fragment is not TSqlScript { Batches: var batches })
         {
             throw new InvalidOperationException($"Live query failed to parse as valid T-SQL: {sql}");
         }
 
-        var disallowed = batches.SelectMany(b => b.Statements).FirstOrDefault(s => s is not SelectStatement);
-        if (disallowed is not null)
-        {
-            throw new InvalidOperationException(
-                $"Live scanning issues read-only SELECT queries only - refusing to execute a {disallowed.GetType().Name}.");
-        }
+        return batches.SelectMany(b => b.Statements);
     }
 
     /// <summary>

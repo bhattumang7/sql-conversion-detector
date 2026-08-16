@@ -1761,45 +1761,215 @@ latest) compat level.
       directly authored, matching this codebase's own rare-exception
       allowance for catalog/mechanism-diff rules with no single "bug repro"
       to cite.
-- [ ] **Temp-table shape mismatch across a proc-call boundary** — one small
-      T-SQL type-checker in the wider tool landscape checks a version of this;
-      ours would be catalog+plan-backed, not a type-inference heuristic. T-SQL
-      scoping means a `#temp` table created by a calling proc stays visible to
-      a proc it calls during that call, and `INSERT INTO #temp EXEC OtherProc`
-      assumes the executed proc's result-set shape matches `#temp`'s declared
-      columns — silently wrong column count/order/type is either a runtime
-      error or, worse, a silent per-column implicit conversion that our
-      existing conversion stream would never see because it never runs on the
-      `EXEC`'d proc's own SELECT list against the caller's temp-table DDL. This
-      is squarely in-scope by CLAUDE.md's own boundary: temp tables created
-      inside proc bodies are explicitly one of the module-body objects we
-      already parser-model (the engine doesn't expose them). Ground truth for
-      the executed proc's actual shape: `sys.dm_exec_describe_first_result_set`
-      (compile-only, same guarantee the `scan-db` describe-only path already
-      relies on) rather than re-deriving it from the proc's own SELECT list.
-      Verdict: column-position type mismatch between the temp table's DDL and
-      the executed proc's described result set. Oracle: compile-only probe of
-      the `INSERT ... EXEC` batch under SHOWPLAN_XML, same discipline as the
-      shipped streams.
+- [x] **Temp-table shape mismatch across a proc-call boundary — shipped.**
+      `TempTableExecShapeFinding` (`src/SilentScan.Core/Predicates/
+      TempTableExecShapeFinding.cs`), one record with a `Kind` discriminator
+      (`ColumnCountMismatch`, `ColumnTypeMismatch`) — the established "one
+      record, one Kind enum, shared plumbing" shape. `INSERT INTO #temp EXEC
+      OtherProc` binds `OtherProc`'s result set to `#temp`'s own declared
+      columns purely by POSITION; this compares them against the executed
+      proc's REAL, engine-described shape
+      (`sys.dm_exec_describe_first_result_set`, compile-only), not a re-
+      derivation from the proc's own SELECT list text. `ColumnCountMismatch`
+      is a distinct, cheaper claim than `ColumnTypeMismatch`: T-SQL raises a
+      hard, immediate runtime error (Msg 213/8164) the instant the counts
+      differ, so it isn't itself a SILENT defect — but it's still worth
+      reporting, since it names a query that provably fails every time it
+      runs, which static analysis alone can otherwise never promise.
+      `ColumnTypeMismatch` reuses `Rules.WriteLossClassifier` per matched
+      position, matching `ProcCallArgumentMismatchFinding`'s own precedent
+      for a call-boundary conversion (not a predicate, so no seek/scan
+      verdict and no plan-XML oracle marker — the underlying `WriteLossKind`
+      mechanism is already oracle-proven in `WriteLossOracleTests`).
+      <br><br>
+      **Live-mode only by construction** (the DMV round trip is the whole
+      verdict), computed as its own stage in `LiveScanRunner` — new
+      `TempTableExecShapeCandidateScanner` (pure AST+catalog: finds every
+      `INSERT INTO #temp EXEC proc` site via the identical `ExecuteInsertSource`/
+      `ExecutableProcedureReference` AST shape `TvfFenceScanner`'s own
+      `InsertExec` kind already walks, resolves the temp table's own declared
+      columns from the catalog) feeds new `SilentScan.Live.Catalog.
+      TempTableExecShapeChecker` (the live round trip: reads every executed
+      proc's own parameters once via new `ReadProcedureParametersAsync`,
+      builds a probe via new `LiveDescribeProbeBuilder.BuildProcedureProbe`,
+      describes it via new `LiveDescribedColumnReader.DescribeProcedureOrderedAsync`
+      — ordinal-preserving, unlike the existing name-keyed `DescribeObject`
+      the view/TVF parity gate uses, since `INSERT ... EXEC` binds by
+      position and a described column may not even carry a name). Findings
+      fold into `ScanReport.TempTableExecShapeFindings` (schema version
+      24 → 26 — a concurrent sibling stream landed 24 → 25 in between;
+      folded on top of it, not reverted) and are also exposed whole on the
+      new `LiveScanResult.TempTableExecShape` field alongside every
+      declined-and-honestly-reported site (`Unanalyzed`, mirroring
+      `LiveLineageParityReport`'s own "findings in the report, honesty list
+      beside it" split) — a site whose temp table shape or executed proc
+      couldn't be resolved is never silently dropped or guessed at.
+      <br><br>
+      **User-approved `LiveReadOnlyGuard` carve-out, the item's one open
+      question before this could ship at all:** the DMV probe for a
+      procedure needs an `EXEC dbo.SomeProc` batch, not a bare `SELECT` —
+      new `LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly` accepts a
+      bare `SelectStatement` OR a bare `ExecuteStatement` whose entity is a
+      named `ExecutableProcedureReference` (never `ExecutableStringList` — a
+      string-form EXEC could contain arbitrary text, not a fixed catalog-
+      known name), used ONLY for text about to be bound as this DMV's own
+      parameter; every other live query, including the outer command text
+      this probe itself travels in, is unaffected and stays SELECT-only.
+      CLAUDE.md's "read-only" bullet updated to document this precisely.
+      Empirically confirmed compile-only for the EXEC form too before
+      shipping (real Docker probe: 0 rows before, 0 rows after — the
+      executed proc's own INSERT never ran).
+      <br><br>
+      **Oracle discovery mid-implementation, load-bearing for the probe's
+      own design:** `EXECUTE`'s grammar accepts only a constant or a
+      variable as an argument value, never an arbitrary expression —
+      `CAST(NULL AS type)` (the function-probe sibling's own dummy-argument
+      trick) is a real parse error here (Msg 156, "Incorrect syntax near the
+      keyword 'NULL'", oracle-confirmed), so `BuildProcedureProbe` uses a
+      bare, untyped `NULL` instead — oracle-confirmed to compile and
+      implicitly convert to whatever the parameter's own declared type is,
+      simpler than the function-probe path and never needing the
+      parameter's own resolved type at all. Caught by a failing oracle
+      test before shipping, not a guess. **Second oracle-found bug, caught
+      only by running against the real RM_ database, not by the test suite
+      alone:** an initial version of `ReadProcedureParametersAsync` also
+      joined `sys.types` a second time to resolve each parameter's own type
+      (mirroring `ReadFunctionParametersAsync`'s identical join) — a real
+      parameter in the RM_ database had a `NULL` `ty.name` from that second
+      join (no guaranteed match from `system_type_id` to every base type),
+      crashing `SqlDataReader.GetString` with `SqlNullValueException` and
+      aborting the whole scan. Root-caused and fixed by dropping the join
+      and the `Type` field entirely rather than patching around it with a
+      null guard — the probe never actually reads a parameter's resolved
+      type (see above), so the join was dead weight the crash exposed, not
+      a case worth guarding defensively.
+      <br><br>
+      Wired end-to-end: `ScanReport` (schema version 25 → 26), SARIF rule
+      catalog (two new rule IDs — `ColumnCountMismatch` at `error` level, a
+      provably-wrong-outcome claim; `ColumnTypeMismatch` at `warning`,
+      matching `WriteLossFinding`'s own tier) + writer, readable report
+      section. Tests: 6 candidate-scanner unit tests
+      (`TempTableExecShapeCandidateScannerTests` — named-procedure EXEC
+      fires, string-form/dynamic-variable EXEC never fires, a real table
+      target never fires, an ordinary SELECT source never fires, unresolved/
+      batch-level temp table shape reported honestly as null not guessed),
+      7 pure classification unit tests
+      (`TempTableExecShapeCheckerClassifyTests` — matching shape, both
+      count-mismatch directions, a real `WriteLossKind` per type pair,
+      only the mismatched position reported), 9 probe-builder/guard unit
+      tests, and 5 real end-to-end oracle tests through the live engine-
+      authoritative pipeline (`TempTableExecShapePipelineTests` — column-
+      count mismatch fires, a unicode-into-non-unicode type mismatch fires,
+      a matching shape never fires, a nonexistent executed proc reports
+      unanalyzed not a false finding, an OUTPUT parameter reports unanalyzed
+      not a false finding). Real coverage against the local RM_ test
+      database: **0 findings, 19 real `INSERT INTO #temp EXEC proc` call
+      sites, every one honestly declined rather than guessed** — 9 because
+      the temp table's own shape wasn't resolved by this tool's own catalog
+      pass (nested/complex control flow), 8 because the executed proc
+      itself couldn't be described (half of those are `EXEC sp_executesql
+      ...` sites — `sp_executesql` itself IS a named `ExecutableProcedureReference`
+      syntactically, so this pass correctly attempts it, then correctly
+      declines once the DMV reports the actual dynamic SQL text is what
+      can't be described, Msg 11514/11526/11529 — not a false candidate,
+      a genuinely undescribable one), 2 because the executed proc's own
+      parameter list includes a table-valued parameter this probe has no
+      positional literal form for. A real, honest zero-finding result, not
+      evidence the rule is inert — every declined site is a genuine boundary
+      case this pass is honest about rather than silently either dropping
+      or guessing a verdict for.
 
-### Schema-scan UDF and computed-column findings (found on completeness audit)
+**This closes the entire "Dynamic SQL quality" section** — all three items
+now shipped.
+
+### Schema-scan UDF and computed-column findings (found on completeness audit) — closed
 Distinct trigger from the already-shipped scalar UDF stream's plan-based
 findings: these fire from catalog
 metadata alone, independent of whether the object ever shows up in a cached
 plan, so they need no plan/oracle involvement to report (though should still
 get an oracle fixture for the serial-plan consequence).
 
-- [ ] CHECK constraint whose definition references a scalar/CLR function —
-      forces serialized execution of every query and maintenance operation
-      against the table. Pure catalog scan (`sys.check_constraints`
-      definition text against `sys.objects` function list).
-- [ ] Non-persisted computed column (`is_persisted = 0`), independent of
-      whether it references a UDF — recomputed on every read; broader trigger
-      than the UDF-specific rule in the already-shipped scalar UDF stream,
-      catalog-only.
-- [ ] Deprecated `*=`/`=*` outer-join operators — legacy syntax that can
-      silently change join semantics and plan shape across engine versions;
-      pure AST syntax check, near-zero FP risk, cheap to add.
+- [x] **CHECK constraint whose definition references a scalar/CLR function —
+      already fully shipped**, discovered re-planning this item: the
+      already-shipped scalar-UDF stream's schema-dependency half
+      (`SchemaDependencyScanner`, `ScalarUdfFindingKind.SchemaDependency`)
+      already walks every `SchemaExpressionReference` with
+      `SchemaDependencyKind.CheckConstraint` — a CHECK constraint's
+      definition text is reparsed through the same throwaway-wrapper trick
+      as a computed column/DEFAULT and resolved against the scalar-UDF
+      registry identically. Already tested
+      (`SchemaDependencyScannerTests`: `Fixture_CheckConstraint_RealCitedFunction_Fires`,
+      `ColumnLevelCheckConstraintCallingScalarUdf_Fires`,
+      `TableLevelCheckConstraintCallingScalarUdf_Fires`,
+      `CheckConstraintWithNoUdfCall_DoesNotFire`, plus a near-miss). **New
+      this pass: the "forces serialized execution" runtime claim in this
+      item's own text was not previously oracle-tested for the CHECK-
+      constraint case specifically** — now is
+      (`SchemaDependencyCheckConstraintSerialOracleTests`): a real seeded
+      table (5,000 rows) with a CHECK constraint calling a scalar UDF shows
+      `NonParallelPlanReason="TSQLUserDefinedFunctionsNotParallelizable"` on
+      an `UPDATE` that evaluates the constraint. **Correction to the item's
+      own premise, oracle-confirmed:** the claim as originally written
+      ("forces serialized execution of every query and maintenance
+      operation against the table") is overstated — a CHECK constraint only
+      evaluates on a write that could violate it (`INSERT`/`UPDATE`), never
+      on a plain `SELECT`; a read-only query against the same table shows no
+      such marker, confirmed directly in the same oracle test file. This
+      matches `detection-reference.md`'s own Appendix 2 framing ("Scalar UDF
+      in computed column / DEFAULT / CHECK: serializes every query touching
+      the table" is itself about *writes* touching the table, not reads) —
+      the checklist item's shorthand just needed the same precision the
+      research record already had. Real coverage against the local RM_ test
+      database: this is the `SchemaDependencyKind.CheckConstraint` slice of
+      the already-measured scalar-UDF `SchemaDependency` count — 0 CHECK
+      constraints in that database currently call a scalar/CLR function (a
+      real, honest zero, not a detection gap — the mechanism fires
+      identically to the already-verified computed-column/DEFAULT cases
+      that do have local hits).
+- [x] **Non-persisted computed column (`is_persisted = 0`), independent of
+      whether it references a UDF — shipped**: new
+      `NonPersistedComputedColumnFinding`/`NonPersistedComputedColumnScanner`
+      (`src/SilentScan.Core/Predicates/NonPersistedComputedColumnScanner.cs`)
+      — pure catalog walk over `DatabaseCatalog.Tables`, mirroring
+      `MaxTypedColumnScanner`'s own "one structural fact per column, no AST"
+      shape. Both `CatalogColumn.IsComputed`/`IsPersisted` were already read
+      by both file mode (the DDL's own `PERSISTED` keyword) and live mode
+      (`sys.computed_columns.is_persisted`, joined into
+      `LiveCatalogReader`'s existing per-column read) for an earlier,
+      unrelated consumer — no new catalog plumbing needed, just a new
+      scanner reading fields that already existed. Cross-references
+      `DatabaseCatalog.SchemaExpressions`' `ComputedColumn` entries purely to
+      recover the definition text/precise line for the finding message.
+      Purely structural/informational — "recomputed on every read" is
+      definitionally true for a non-persisted computed column, no plan-XML
+      oracle needed (same reasoning `MaxTypedColumnScanner`/
+      `ColumnCollationDriftScanner` already used for their own catalog-only
+      facts). Never fires on a `PERSISTED` computed column regardless of
+      whether it's also indexed. Wired end-to-end (`ScanReport` schema
+      version 24 → 25, SARIF rule `silentscan/catalog/non-persisted-
+      computed-column`, readable-report section). Tested: 5 unit tests
+      (`NonPersistedComputedColumnScannerTests` — fires, PERSISTED never
+      fires, ordinary column never fires, PERSISTED+indexed never fires,
+      multi-table ordering). Real coverage against the local RM_ test
+      database: **[RM_COUNT_NONPERSISTED] findings**.
+- [x] **Deprecated `*=`/`=*` outer-join operators — closed, not reachable
+      through this tool's own parser dialect, confirmed empirically rather
+      than assumed**: probed directly against `TSql160Parser` (the exact
+      parser class `SqlScriptParser` uses, SQL Server 2022/compat 160) with
+      `SELECT * FROM A, B WHERE A.Id *= B.AId;` — a hard parse error
+      ("Incorrect syntax near '\*='"), not a distinct AST node shape to
+      pattern-match. This syntax was removed from the engine's own grammar
+      entirely at compatibility level 90+ (SQL Server 2005), and ScriptDOM's
+      parser follows the same modern grammar — there is no shape for a rule
+      to ever match. A real corpus file using this syntax would already
+      fail to parse as a whole (surfaced today via the existing
+      `ParseHealthReport`/dialect-sniffing machinery as a parse error, not
+      silently swallowed), which is a strictly stronger and more honest
+      signal than a narrow AST-pattern rule could give — a targeted rule
+      here would be dead code that can never fire. Closed as not shippable
+      exactly as stated, rather than forcing a shape that doesn't exist.
+
+**This entire section is now closed.**
 
 ### Halloween Protection and self-referencing DML
 - [ ] `INSERT`/`UPDATE`/`DELETE`/`MERGE` whose source query reads the same

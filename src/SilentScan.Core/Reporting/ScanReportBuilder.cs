@@ -335,6 +335,13 @@ public static class ScanReportBuilder
             maxTypedColumnStage.Complete($"{maxTypedColumnFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<NonPersistedComputedColumnFinding> nonPersistedComputedColumnFindings;
+        using (var nonPersistedComputedColumnStage = progress.Begin("scanning non-persisted computed columns"))
+        {
+            nonPersistedComputedColumnFindings = NonPersistedComputedColumnScanner.Scan(catalog);
+            nonPersistedComputedColumnStage.Complete($"{nonPersistedComputedColumnFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<UntrustedConstraintFinding> untrustedConstraintFindings;
         using (var untrustedConstraintStage = progress.Begin("scanning untrusted FK/CHECK constraints"))
         {
@@ -666,6 +673,10 @@ public static class ScanReportBuilder
             catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
             nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings, unparameterizedDynamicSqlFindings,
+            nonPersistedComputedColumnFindings,
+            // TempTableExecShapeFindings needs a live database round trip (sys.dm_exec_describe_first_result_set)
+            // this builder never issues - always empty here; LiveScanRunner merges the real result in afterward.
+            [],
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

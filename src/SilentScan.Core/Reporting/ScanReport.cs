@@ -35,6 +35,8 @@ public sealed record ScanReport(
     IReadOnlyList<PostExpansionJoinWidthFinding> PostExpansionJoinWidthFindings,
     IReadOnlyList<SelectStarViewFinding> SelectStarViewFindings,
     IReadOnlyList<UnparameterizedDynamicSqlFinding> UnparameterizedDynamicSqlFindings,
+    IReadOnlyList<NonPersistedComputedColumnFinding> NonPersistedComputedColumnFindings,
+    IReadOnlyList<TempTableExecShapeFinding> TempTableExecShapeFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -93,7 +95,15 @@ public sealed record ScanReport(
     /// "Lineage-metric findings": "SELECT * inside a view or inline TVF"). Bumped to 24 for the
     /// new <see cref="UnparameterizedDynamicSqlFindings"/> stream (docs/detection-checklist.md
     /// Tier 2 "Dynamic SQL quality": concatenated value in constant dynamic SQL, and
-    /// EXEC(string) where sp_executesql with params was possible).
+    /// EXEC(string) where sp_executesql with params was possible). Bumped to 25 for the new
+    /// <see cref="NonPersistedComputedColumnFindings"/> stream (docs/detection-checklist.md
+    /// "Schema-scan UDF and computed-column findings": non-persisted computed column,
+    /// independent of whether it references a UDF). Bumped to 26 for the new
+    /// <see cref="TempTableExecShapeFindings"/> stream (docs/detection-checklist.md Tier 2
+    /// "Dynamic SQL quality" item 3: temp-table shape mismatch across a proc-call boundary,
+    /// <c>INSERT INTO #temp EXEC OtherProc</c>). Live-mode only - always empty in a file-mode
+    /// scan, exactly like every other stream whose verdict needs a real database round trip
+    /// (<see cref="CrossTableTypeDriftFindings"/>'s FK-linked half, the indexed-view registry).
     /// </summary>
-    public const int CurrentSchemaVersion = 24;
+    public const int CurrentSchemaVersion = 26;
 }

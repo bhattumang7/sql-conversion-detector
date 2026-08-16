@@ -60,11 +60,73 @@ public static class LiveDescribedColumnReader
     /// probe text before sending it, belt-and-braces on top of the outer command already going
     /// through <see cref="LiveReadOnlyGuard"/>.
     /// </summary>
-    public static async Task<DescribedObject> DescribeFunctionAsync(
+    public static Task<DescribedObject> DescribeFunctionAsync(
         SqlConnection connection, string probeText, CancellationToken cancellationToken)
     {
         LiveReadOnlyGuard.AssertSelectOnly(probeText);
+        return DescribeAsync(connection, probeText, cancellationToken);
+    }
 
+    /// <summary>
+    /// Describes a stored procedure's <c>INSERT ... EXEC</c> shape against a probe text built by
+    /// <see cref="LiveDescribeProbeBuilder.BuildProcedureProbe"/> - the one caller in this
+    /// codebase whose probe text is a bare named-procedure <c>EXEC</c> rather than a
+    /// <c>SELECT</c>, so it goes through <see cref="LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly"/>
+    /// instead of <see cref="LiveReadOnlyGuard.AssertSelectOnly"/> - a narrower guard than the
+    /// default, applied only to this one call site, never loosening what
+    /// <see cref="DescribeFunctionAsync"/> or any other live query accepts. Returns columns in
+    /// their real ORDINAL order rather than <see cref="DescribedObject"/>'s name-keyed
+    /// dictionary - <c>INSERT ... EXEC</c> binds purely by POSITION, so the temp-table-shape
+    /// checker this feeds needs the sequence, not just a name-addressable lookup, and a described
+    /// column may not even carry a name at all (an unaliased expression in the executed proc's
+    /// own SELECT list still occupies a real, binding position).
+    /// </summary>
+    public static async Task<DescribedResultSet> DescribeProcedureOrderedAsync(
+        SqlConnection connection, string probeText, CancellationToken cancellationToken)
+    {
+        LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly(probeText);
+
+        const string sql = """
+            SELECT r.error_number, r.error_message,
+                   r.name AS column_name, ty.name AS type_name, r.max_length, r.precision, r.scale, r.collation_name
+            FROM sys.dm_exec_describe_first_result_set(@probeText, NULL, 0) r
+            LEFT JOIN sys.types ty ON ty.user_type_id = r.system_type_id
+            ORDER BY r.column_ordinal;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+        command.Parameters.AddWithValue("@probeText", probeText);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var errorNumber = -1;
+        var errorMessage = "";
+        var columns = new List<DescribedResultColumn>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!await reader.IsDBNullAsync(0, cancellationToken))
+            {
+                errorNumber = reader.GetInt32(0);
+                errorMessage = await reader.IsDBNullAsync(1, cancellationToken) ? "" : reader.GetString(1);
+                continue;
+            }
+
+            var name = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
+            columns.Add(new DescribedResultColumn(
+                name,
+                new LiveLineageParityChecker.ActualColumn(
+                    TypeName: reader.GetString(3),
+                    MaxLength: reader.GetInt16(4),
+                    Precision: reader.GetByte(5),
+                    Scale: reader.GetByte(6),
+                    CollationName: await reader.IsDBNullAsync(7, cancellationToken) ? null : reader.GetString(7))));
+        }
+
+        return errorNumber >= 0 ? new DescribedResultSet(errorNumber, errorMessage, null) : new DescribedResultSet(0, null, columns);
+    }
+
+    private static async Task<DescribedObject> DescribeAsync(
+        SqlConnection connection, string probeText, CancellationToken cancellationToken)
+    {
         const string sql = """
             SELECT r.error_number, r.error_message,
                    r.name AS column_name, ty.name AS type_name, r.max_length, r.precision, r.scale, r.collation_name
@@ -93,6 +155,57 @@ public static class LiveDescribedColumnReader
         }
 
         return errorNumber >= 0 ? DescribedObject.FromError(errorNumber, errorMessage) : DescribedObject.FromColumns(columns);
+    }
+
+    /// <summary>
+    /// Reads every stored procedure's own parameter list in one round trip - just enough to build
+    /// <see cref="LiveDescribeProbeBuilder.BuildProcedureProbe"/>'s bare-<c>NULL</c> argument list
+    /// (name, table-valued flag, OUTPUT flag), never the parameter's own resolved type. An
+    /// earlier version of this reader also resolved <c>ty.name</c>/length/precision/scale via a
+    /// second join to <c>sys.types</c> the way <see cref="ReadFunctionParametersAsync"/> does for
+    /// an inline TVF - live-verified against the local test database to be both unnecessary
+    /// (<see cref="LiveDescribeProbeBuilder.BuildProcedureProbe"/> never actually reads a
+    /// parameter's type; a bare <c>NULL</c> compiles for any type) AND UNSAFE: that second join's
+    /// <c>ty.name</c> came back a genuine SQL NULL for a real parameter in that database
+    /// (<c>ty.user_type_id = ut.system_type_id</c> has no guaranteed match for every base type),
+    /// crashing <c>SqlDataReader.GetString</c> with <c>SqlNullValueException</c> - dropped
+    /// entirely rather than patched with a null guard around a value nothing downstream reads.
+    /// </summary>
+    public static async Task<Dictionary<string, List<ProcedureParameterSpec>>> ReadProcedureParametersAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, o.name AS object_name, p.name AS parameter_name,
+                   ut.is_table_type, p.is_output
+            FROM sys.parameters p
+            JOIN sys.objects o ON o.object_id = p.object_id
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            JOIN sys.types ut ON ut.user_type_id = p.user_type_id
+            WHERE o.is_ms_shipped = 0 AND o.type = 'P' AND p.parameter_id > 0
+            ORDER BY o.object_id, p.parameter_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var byObject = new Dictionary<string, List<ProcedureParameterSpec>>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var parameterName = reader.GetString(2);
+            var isTableType = reader.GetBoolean(3);
+            var isOutput = reader.GetBoolean(4);
+
+            if (!byObject.TryGetValue(qualifiedName, out var parameters))
+            {
+                parameters = [];
+                byObject[qualifiedName] = parameters;
+            }
+
+            parameters.Add(new ProcedureParameterSpec(parameterName, isTableType, isOutput));
+        }
+
+        return byObject;
     }
 
     /// <summary>
@@ -227,4 +340,13 @@ public sealed class DescribedObject
     public static DescribedObject FromColumns(Dictionary<string, LiveLineageParityChecker.ActualColumn> columns) => new(columns, 0, null);
 
     public static DescribedObject FromError(int errorNumber, string errorMessage) => new(null, errorNumber, errorMessage);
+}
+
+/// <summary>One column of <see cref="DescribedResultSet"/>, in real ordinal position - <see cref="Name"/> is null for an unaliased expression, which still occupies a real, binding position.</summary>
+public sealed record DescribedResultColumn(string? Name, LiveLineageParityChecker.ActualColumn Column);
+
+/// <summary>The ordinal-preserving counterpart to <see cref="DescribedObject"/>, returned by <see cref="LiveDescribedColumnReader.DescribeProcedureOrderedAsync"/>.</summary>
+public sealed record DescribedResultSet(int ErrorNumber, string? ErrorMessage, IReadOnlyList<DescribedResultColumn>? Columns)
+{
+    public bool IsError => Columns is null;
 }

@@ -71,6 +71,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
+        blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
         blocks.AddRange(AnsiPaddingMismatch(report, headingLevel, pathBase));
@@ -88,6 +89,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(UnparameterizedDynamicSql(report, headingLevel, pathBase));
+        blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -137,6 +139,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
+        AddCount(counts, "Non-persisted computed columns", report.NonPersistedComputedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.UnderLengthParameterFindings.Count);
         AddCount(counts, "LIKE predicates that can never match a non-ANSI-padded column", report.AnsiPaddingMismatchFindings.Count);
@@ -154,6 +157,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Dynamic SQL call sites concatenating a proven-constant value instead of parameterizing it", report.UnparameterizedDynamicSqlFindings.Count);
+        AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.TempTableExecShapeFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -583,6 +587,27 @@ public static class ReadableScanReportWriter
             })]);
     }
 
+    private static IEnumerable<ReadableBlock> NonPersistedComputedColumn(ScanReport report, int level, string? pathBase)
+    {
+        if (report.NonPersistedComputedColumnFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Non-persisted computed columns ({report.NonPersistedComputedColumnFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact (sys.computed_columns.is_persisted = 0): the column's definition is recomputed from the base row on every read that touches it, independent of whether that definition calls a UDF - never fires on a PERSISTED computed column, regardless of whether it's also indexed.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Definition"],
+            [.. report.NonPersistedComputedColumnFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.DefinitionText,
+            })]);
+    }
+
     private static IEnumerable<ReadableBlock> OversizedParameter(ScanReport report, int level, string? pathBase)
     {
         if (report.OversizedParameterFindings.Count == 0)
@@ -934,6 +959,29 @@ public static class ReadableScanReportWriter
                 f.Kind == UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue
                     ? "EXEC(string), sp_executesql available"
                     : "Concatenated value in constant SQL",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TempTableExecShape(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TempTableExecShapeFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"INSERT INTO #temp EXEC proc shape mismatches ({report.TempTableExecShapeFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "INSERT INTO #temp EXEC OtherProc binds the executed proc's result set to #temp's own declared columns purely by POSITION, live-verified against the executed proc's real, engine-described shape (sys.dm_exec_describe_first_result_set, compile-only). A column-count mismatch raises a hard runtime error (Msg 213/8164) every time the statement runs. A column-type mismatch at a matching position risks the same class of silent data loss WriteLossFinding already reports for INSERT/UPDATE assignments - live-mode only, since the verdict depends on a real database round trip.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.TempTableExecShapeFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch ? "Column count mismatch" : "Column type mismatch",
+                f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch
+                    ? $"{f.TempTableQualifiedName} declares {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
+                    : $"{f.TempTableQualifiedName} position {f.ColumnPosition} ('{f.ColumnName}', {f.TempColumnTypeDisplay}) <- {f.ExecutedProcQualifiedName} ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
             })]);
     }
 

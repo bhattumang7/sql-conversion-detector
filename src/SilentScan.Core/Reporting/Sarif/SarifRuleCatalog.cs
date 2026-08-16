@@ -50,6 +50,9 @@ public static class SarifRuleCatalog
     public const string PartialCompositeForeignKeyJoinRuleId = "silentscan/join/partial-composite-fk";
     public const string ConcatenatedValueInConstantSqlRuleId = "silentscan/dynamic-sql/concatenated-value-in-constant-sql";
     public const string ExecStringConcatenatesParameterizableValueRuleId = "silentscan/dynamic-sql/exec-string-concatenates-parameterizable-value";
+    public const string TempTableExecShapeColumnCountMismatchRuleId = "silentscan/dynamic-sql/insert-exec-temp-table-column-count-mismatch";
+    public const string TempTableExecShapeColumnTypeMismatchRuleId = "silentscan/dynamic-sql/insert-exec-temp-table-column-type-mismatch";
+    public const string NonPersistedComputedColumnRuleId = "silentscan/catalog/non-persisted-computed-column";
 
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
     {
@@ -66,6 +69,13 @@ public static class SarifRuleCatalog
         UnparameterizedDynamicSqlFindingKind.ConcatenatedValueInConstantSql => ConcatenatedValueInConstantSqlRuleId,
         UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue => ExecStringConcatenatesParameterizableValueRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled UnparameterizedDynamicSqlFindingKind."),
+    };
+
+    public static string TempTableExecShapeRuleId(TempTableExecShapeFindingKind kind) => kind switch
+    {
+        TempTableExecShapeFindingKind.ColumnCountMismatch => TempTableExecShapeColumnCountMismatchRuleId,
+        TempTableExecShapeFindingKind.ColumnTypeMismatch => TempTableExecShapeColumnTypeMismatchRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled TempTableExecShapeFindingKind."),
     };
 
     public static string ForcedSerialRuleId(ForcedSerialFindingKind kind) => kind switch
@@ -236,6 +246,9 @@ public static class SarifRuleCatalog
             Rule(SelectStarViewRuleId, "A view/inline TVF nested 1+ view/TVF layers deep whose own outermost SELECT is a bare or qualified * - its column list is frozen at CREATE/ALTER time and silently disagrees with the base table after any change, confirmed to survive even a live describe-only probe and real execution until sp_refreshview runs. Only fires when a real consuming query elsewhere explicitly selects a strict, named subset of the view's full column set - a consumer that itself does SELECT * never narrows anything and is never matched."),
             Rule(ConcatenatedValueInConstantSqlRuleId, "A proven-constant value was spliced into an EXEC/sp_executesql dynamic SQL string via concatenation rather than authored as one whole literal or passed through sp_executesql's own parameter mechanism - every distinct concatenated value compiles its own cached plan, oracle-confirmed against sys.dm_exec_cached_plans."),
             Rule(ExecStringConcatenatesParameterizableValueRuleId, "An EXEC(string)/EXEC(@sql) call site concatenates a proven-constant value into its SQL text - sp_executesql's own @params mechanism was available and unused, and would have let this call site reuse one cached plan across every distinct value instead of compiling a new one each time."),
+            Rule(NonPersistedComputedColumnRuleId, "A computed column with is_persisted = 0 (sys.computed_columns) - its definition is recomputed from the base row on every read that touches it, independent of whether that definition calls a UDF at all. Catalog-only structural fact, never fires on a PERSISTED computed column regardless of whether it's also indexed."),
+            Rule(TempTableExecShapeColumnCountMismatchRuleId, "INSERT INTO #temp EXEC proc, where the executed proc's real, engine-described result-set column count differs from #temp's own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
+            Rule(TempTableExecShapeColumnTypeMismatchRuleId, "INSERT INTO #temp EXEC proc, where column counts match but at least one position's type risks silent data loss between the executed proc's real, engine-described column type and #temp's own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),
             Rule(SetOptionRuleId(SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature), "The module was compiled under QUOTED_IDENTIFIER OFF (sys.sql_modules.uses_quoted_identifier) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature), "An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),

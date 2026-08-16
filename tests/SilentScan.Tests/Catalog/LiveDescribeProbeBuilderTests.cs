@@ -90,4 +90,57 @@ public sealed class LiveDescribeProbeBuilderTests
         Assert.Null(probe);
         Assert.Contains("@tag", reason);
     }
+
+    [Fact]
+    public void BuildProcedureProbe_NoParameters_EmitsBareExec()
+    {
+        var (probe, reason) = LiveDescribeProbeBuilder.BuildProcedureProbe("dbo.usp_AllOrders", []);
+
+        Assert.Null(reason);
+        Assert.Equal("EXEC [dbo].[usp_AllOrders];", probe);
+    }
+
+    [Fact]
+    public void BuildProcedureProbe_MultipleParameters_PositionalBareNullArguments()
+    {
+        // EXECUTE's own grammar accepts only a constant or a variable as an argument value, never
+        // an arbitrary expression - CAST(NULL AS type) (used for the function-probe sibling) is a
+        // real parse error here, oracle-confirmed (Msg 156). A bare, untyped NULL compiles and
+        // implicitly converts to whatever the parameter's own declared type is.
+        var parameters = new List<ProcedureParameterSpec>
+        {
+            new("@id", IsTableType: false, IsOutput: false),
+            new("@name", IsTableType: false, IsOutput: false),
+        };
+
+        var (probe, reason) = LiveDescribeProbeBuilder.BuildProcedureProbe("dbo.usp_Find", parameters);
+
+        Assert.Null(reason);
+        Assert.Equal("EXEC [dbo].[usp_Find] NULL, NULL;", probe);
+    }
+
+    [Fact]
+    public void BuildProcedureProbe_OutputParameter_ReturnsNullWithAReasonNamingIt()
+    {
+        var parameters = new List<ProcedureParameterSpec> { new("@total", IsTableType: false, IsOutput: true) };
+
+        var (probe, reason) = LiveDescribeProbeBuilder.BuildProcedureProbe("dbo.usp_Totals", parameters);
+
+        Assert.Null(probe);
+        Assert.Contains("@total", reason);
+        Assert.Contains("OUTPUT", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildProcedureProbe_TableValuedParameter_ReturnsNullWithAReasonNamingIt()
+    {
+        var parameters = new List<ProcedureParameterSpec> { new("@ids", IsTableType: true, IsOutput: false) };
+
+        var (probe, reason) = LiveDescribeProbeBuilder.BuildProcedureProbe("dbo.usp_Filter", parameters);
+
+        Assert.Null(probe);
+        Assert.Contains("@ids", reason);
+        Assert.Contains("table-valued parameter", reason, StringComparison.Ordinal);
+    }
+
 }
