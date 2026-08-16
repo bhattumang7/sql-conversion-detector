@@ -2032,11 +2032,25 @@ get an oracle fixture for the serial-plan consequence).
       against the live Docker instance — a self-referencing DML's defensive
       plan work is a compile-time structural artifact, not a cardinality-
       dependent choice, confirmed directly against completely empty tables).
-      Real coverage against the local RM_ test database: **0 findings** — a
-      real, honest zero (this codebase's own DML apparently doesn't use the
-      hole-filling/self-join idioms this rule targets), not a detection gap;
-      the mechanism itself is oracle-proven and the scanner correctly fires
-      on every hand-authored fixture in the unit-test suite.
+      **Coverage correction (2026-08-17):** this entry originally recorded
+      "0 findings" against the local RM_ test database. Re-measured via a
+      fresh `scan-db` run while investigating an unrelated stream and found
+      **420 findings** (401 `DirectTableReference`, 19 `ThroughView`; 240
+      INSERT, 71 UPDATE, 56 DELETE, 53 MERGE) — the original "0" was stale/
+      wrong, not a real result; the scanner itself was never broken. Spot-
+      checked directly against the real deployed module text for a sampled
+      finding (an `INSERT INTO dbo.tblTripsScheduled (...) SELECT ... FROM
+      dbo.tblTrips ... WHERE ... AND NOT EXISTS (SELECT * FROM
+      tblTripsScheduled WHERE ...)`) and confirmed it is a genuine true
+      positive — the exact hole-filling `INSERT ... WHERE NOT EXISTS`
+      anti-join idiom this rule targets, with the self-reference appearing
+      several lines below the statement's own reported start line (the
+      finding's `Line`/`Column` point at the statement, not necessarily the
+      exact re-read line, matching this stream's own "one finding per
+      statement" design stated above) — not a false positive. The mechanism
+      itself remains oracle-proven and the scanner correctly fires on every
+      hand-authored fixture in the unit-test suite; only the recorded real-
+      corpus number was inaccurate.
 
 ### Temporal table history-side index gap — shipped
 - [x] System-versioned temporal table (`sys.tables.temporal_type`) whose
