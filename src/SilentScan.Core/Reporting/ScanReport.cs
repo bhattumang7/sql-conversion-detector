@@ -25,6 +25,7 @@ public sealed record ScanReport(
     IReadOnlyList<SetOptionFinding> SetOptionFindings,
     IReadOnlyList<CatchAllPredicateFinding> CatchAllPredicateFindings,
     IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings,
+    IReadOnlyList<NotInNullableSubqueryFinding> NotInNullableSubqueryFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -64,7 +65,9 @@ public sealed record ScanReport(
     /// "SET options that silently disable plan features": "ANSI_PADDING OFF as a second,
     /// independent finding"). Bumped to 16 for the new <see cref="CatchAllPredicateFindings"/>
     /// and <see cref="LocalVariablePredicateFindings"/> streams (docs/detection-checklist.md
-    /// Tier 2 "Catch-all / kitchen-sink predicates" and "Local-variable predicates").
+    /// Tier 2 "Catch-all / kitchen-sink predicates" and "Local-variable predicates"). Bumped to
+    /// 17 for the new <see cref="NotInNullableSubqueryFindings"/> stream (docs/detection-
+    /// checklist.md Tier 2 "NOT IN over a nullable subquery column").
     /// </summary>
-    public const int CurrentSchemaVersion = 16;
+    public const int CurrentSchemaVersion = 17;
 }

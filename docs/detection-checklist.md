@@ -1067,9 +1067,83 @@ exactly the same way ARITHABORT's own assumption just failed one.
 ### NOT IN over a nullable subquery column
 346 modules locally use `NOT IN (SELECT ...)`.
 
-- [ ] Fires **only** when the catalog says the subquery column is nullable —
-      correctness trap plus expensive null-aware anti-semi-join. The
-      nullability gate is what makes this precise where linters spray.
+- [x] Fires **only** when the catalog says the subquery column is nullable —
+      `WHERE x NOT IN (SELECT y FROM t)` desugars to a chain of `<> ALL`
+      comparisons; the instant the subquery produces one `NULL` row, ANDing
+      UNKNOWN into that chain makes the whole predicate UNKNOWN, which
+      `WHERE` treats as excluding every row, not just the one that would
+      have matched the `NULL`. **A correctness bug, not a plan-shape one** —
+      the query returns the wrong result set (often zero rows) whenever the
+      underlying data hits the trap, independent of any index or plan
+      choice. Own standalone AST-walking scanner
+      (`NotInNullableSubqueryScanner`), the same "different traversal shape
+      than a plain comparison" reasoning `CatchAllPredicateScanner`/
+      `PartialCompositeForeignKeyJoinScanner` already document — `InPredicate`
+      with a populated `Subquery` needs a SECOND, independent
+      `FromScopeResolver.Resolve` call over the subquery's own `FromClause`,
+      a kind of nested-scope resolution no other scanner in this codebase
+      does. `TypedPredicateExtractor` already explicitly bails on `NOT IN`
+      without looking at the subquery at all, so there is no overlap.
+      Deliberately narrow, base-table-only, Depth-0-only on the subquery
+      side (matching `CatchAllPredicateScanner`'s own scope): only a bare
+      `ColumnReferenceExpression` projected as the subquery's sole SELECT
+      element, resolving to a base table, is matched — a projected
+      expression (`SELECT ISNULL(y, 0)`, which can never itself be `NULL`
+      and would be a genuine false positive if guessed at), a multi-column/
+      `SELECT *` subquery, a view/CTE-derived column, or a set-operator
+      (`UNION`/`EXCEPT`/`INTERSECT`) subquery is left unanalyzed rather than
+      guessed at — known v1 scope limits, not silently-missed cases. An
+      `InPredicate` reachable only through an `OR` branch of the outer WHERE
+      is also left unmatched (the OR could be masking an already-safe
+      alternate path). **A subquery that already defends itself with a
+      top-level `WHERE y IS NOT NULL` on the identical projected column
+      never fires** — this is the single most common real-world fix for
+      this exact bug (see fixture note below), and firing on already-fixed
+      code would be a visible, avoidable false positive; a filter only
+      reachable through an OR branch does not count, since it doesn't
+      unconditionally exclude NULLs from every row the subquery could
+      project. `Confidence.High`, SARIF `LevelError` — the same certainty
+      tier as `AnsiPaddingMismatchFinding`/`TemporalBoundaryPrecisionFinding`,
+      never downgraded by indexed-ness (no seek/scan angle to this finding
+      at all). **Version-insensitive**: fundamental ANSI three-valued-logic
+      semantics, not an optimizer behavior — unaffected by compat level or
+      CE mode.
+
+      Real, internet-sourced fire-shape reference: a SQLServerCentral forum
+      thread, "Subquery Returns No Rows when there are NULLs and 'NOT IN' is
+      used," reporting the exact `WHERE SID NOT IN (SELECT SID FROM
+      dbo.BusRoute)` shape returning zero rows the instant `BusRoute.SID`
+      has any `NULL` — its own suggested fix, adding `WHERE SID IS NOT
+      NULL` to the subquery, is precisely the defensive-filter shape this
+      rule detects and suppresses on, confirming that check is load-bearing
+      rather than optional precision. Real execution-based oracle proof
+      (`NotInNullableSubqueryOracleTests`, 3 tests, all passing — a genuine
+      correctness/result-set-shape claim, so plan-XML is irrelevant here,
+      matching how `AnsiPaddingMismatchOracleTests` already verifies this
+      class of finding): a seeded nullable column's `NOT IN` returns zero
+      rows despite intuitively-matching rows existing; the identical query
+      against a `NOT NULL` column returns the expected anti-join rows; and
+      the identical nullable column WITH a defensive `IS NOT NULL` filter
+      also returns the expected anti-join rows, confirming the suppression
+      is sound rather than a guess.
+
+      Unit-tested (`NotInNullableSubqueryScannerTests`, 13 cases covering
+      the nullable-fires/not-null-never-fires core pair, plain `IN` never
+      firing, a literal value list never firing, the defensive-filter
+      suppression (including the OR-reachable and different-column
+      near-misses that must still fire), a projected expression never
+      firing, a multi-column subquery never firing, `NOT EXISTS` never
+      firing, an `InPredicate` inside an OR branch never firing, `UPDATE`
+      statements, and an expression on the outer side still firing with a
+      null `OuterColumnName`). Wired end-to-end (`ScanReport` schema
+      version 16 → 17, SARIF, readable report). **Real coverage against the
+      local RM_ test database: 5 findings** across 5 distinct modules — a
+      raw-text sweep found 515 modules containing the loose `NOT IN
+      (SELECT` shape, the overwhelming majority of which the catalog
+      correctly rules safe (`NOT NULL` subquery column) or leaves
+      unanalyzed under the deliberately narrow base-table/bare-column v1
+      scope above, rather than the rule spraying across all of them the way
+      a syntax-only linter would.
 
 ### UPDATE ... FROM without source uniqueness
 - [ ] Target joined to a source whose join columns carry no PK/unique

@@ -76,6 +76,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(AnsiPaddingMismatch(report, headingLevel, pathBase));
         blocks.AddRange(CatchAllPredicate(report, headingLevel, pathBase));
         blocks.AddRange(LocalVariablePredicate(report, headingLevel, pathBase));
+        blocks.AddRange(NotInNullableSubquery(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -132,6 +133,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "LIKE predicates that can never match a non-ANSI-padded column", report.AnsiPaddingMismatchFindings.Count);
         AddCount(counts, "Catch-all / kitchen-sink optional-filter predicates", report.CatchAllPredicateFindings.Count);
         AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
+        AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -676,6 +678,28 @@ public static class ReadableScanReportWriter
                 f.VariableName,
                 f.Operator,
                 f.Indexed ? "yes" : "no",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NotInNullableSubquery(ScanReport report, int level, string? pathBase)
+    {
+        if (report.NotInNullableSubqueryFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"NOT IN over a nullable subquery column ({report.NotInNullableSubqueryFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "'x NOT IN (SELECT y FROM t)' where y is a nullable column - a three-valued-logic correctness trap, not a plan-shape one. The instant the subquery produces one NULL row, the whole predicate evaluates to UNKNOWN for every outer row, so the query silently returns ZERO rows instead of the expected anti-join result - independent of any index or plan choice. Never fires when the subquery column is NOT NULL, or when the subquery already filters it with an unconditional 'WHERE y IS NOT NULL'.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Outer column", "Subquery column", "Indexed"],
+            [.. report.NotInNullableSubqueryFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.OuterColumnName ?? "<expression>",
+                $"{f.SubqueryTableQualifiedName}.{f.SubqueryColumnName}",
+                f.SubqueryColumnIndexed ? "yes" : "no",
             })]);
     }
 

@@ -55,6 +55,7 @@ public static class SarifReportWriter
         results.AddRange(report.AnsiPaddingMismatchFindings.Select(ToResult));
         results.AddRange(report.CatchAllPredicateFindings.Select(ToResult));
         results.AddRange(report.LocalVariablePredicateFindings.Select(ToResult));
+        results.AddRange(report.NotInNullableSubqueryFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -322,6 +323,22 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LocalVariablePredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - a DECLARE'd local, not a formal parameter, so its value is invisible to the cardinality estimator (falls back to average-density statistics). The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(NotInNullableSubqueryFinding finding)
+    {
+        // Error, not warning - a data-correctness bug, the same certainty tier
+        // AnsiPaddingMismatchFinding/TemporalBoundaryPrecisionFinding get: not a conditional risk
+        // dependent on an unknown runtime value, but a query that returns the wrong RESULT SET
+        // right now, for this exact code, the instant the underlying data contains one NULL in
+        // the subquery column. Never downgraded by indexed-ness - there is no seek/scan angle to
+        // this finding at all.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NotInNullableSubqueryRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var outerColumnDisplay = finding.OuterColumnName ?? "<expression>";
+        var message = $"{outerColumnDisplay} NOT IN (SELECT '{finding.SubqueryTableQualifiedName}.{finding.SubqueryColumnName}' ...) - the subquery column is nullable and unfiltered, so the whole predicate evaluates to UNKNOWN and silently returns zero rows the instant the data contains one NULL there, instead of the expected anti-join result.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
