@@ -432,11 +432,26 @@ contains any of: time-dependent intrinsics (GETDATE class), WHILE loops,
 TRY/CATCH, RETURN in multiple places / certain control flow, table variable
 or table-access patterns outside the supported shapes, invocation from a
 computed column or check constraint, recursion, use as a DEFAULT, reference
-to a non-inlineable UDF, or `WITH SCHEMABINDING`-related edge cases. The
-inlineability bit is per-UDF observable in the catalog
-(`sys.sql_modules.is_inlineable`) — prefer reading that flag over
-re-implementing the blocker scan, and use the body scan only to *explain*
-why inlining fails.
+to a non-inlineable UDF, `GOTO`/label usage, a `SELECT @v = expr(@v) FROM t`
+running-accumulator assignment (the running string-concatenation-aggregate
+idiom real code uses in place of `STRING_AGG`/`FOR XML PATH` — a plain
+`SELECT @v = expr FROM t` that does not read its own target variable inlines
+cleanly), or `WITH SCHEMABINDING`-related edge cases. The inlineability bit
+is per-UDF observable in the catalog (`sys.sql_modules.is_inlineable`) —
+prefer reading that flag over re-implementing the blocker scan, and use the
+body scan only to *explain* why inlining fails.
+
+**Parity check against a real corpus (2026-08-17, `ScalarUdfInlineabilityScanner`
+vs. `sys.sql_modules.is_inlineable` on the local test database's 193 distinct
+scalar UDFs):** found 9 functions the engine reported `NotInlineable` for
+that the (then-current) closed list could not explain at all. Investigated
+each directly against its real deployed body and found the two new blockers
+above — both newly oracle-confirmed (a `GOTO`/label control probe and a
+`SELECT`-accumulator probe, each isolated from its nearest GOTO-free/
+accumulator-free control shape) and added to the scanner. Re-measured after
+adding both: 0 of the 193 remain unexplained — full parity. GOTO explained 2
+of the 9 (two sibling functions sharing a documented "keep these UDFs in
+sync" comment block); the accumulator pattern explained the other 7.
 
 ## Appendix 4 — Engine-version mitigation matrix
 

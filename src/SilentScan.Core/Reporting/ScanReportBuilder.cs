@@ -400,6 +400,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<ModuleCompileFlagFinding> moduleCompileFlagFindings;
+        using (var moduleCompileFlagStage = progress.Begin("scanning module compile flags (WITH RECOMPILE, database-collation-dependent TVF returns)", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = ModuleCompileFlagScanner.Scan(r, catalog);
+                    moduleCompileFlagStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            moduleCompileFlagFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<CatchAllPredicateFinding> catchAllPredicateFindings;
         using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
         {
@@ -706,6 +724,7 @@ public static class ScanReportBuilder
             [],
             selfReferencingDmlFindings,
             temporalTableHistoryIndexGapFindings,
+            moduleCompileFlagFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

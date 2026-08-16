@@ -101,6 +101,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
         blocks.AddRange(SelfReferencingDml(report, headingLevel, pathBase));
         blocks.AddRange(TemporalTableHistoryIndexGap(report, headingLevel, pathBase));
+        blocks.AddRange(ModuleCompileFlag(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -171,6 +172,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.TempTableExecShapeFindings.Count);
         AddCount(counts, "Self-referencing DML (Halloween Protection risk)", report.SelfReferencingDmlFindings.Count);
         AddCount(counts, "Temporal table history-side index gaps", report.TemporalTableHistoryIndexGapFindings.Count);
+        AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.ModuleCompileFlagFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1042,6 +1044,29 @@ public static class ReadableScanReportWriter
                 f.HistoryTableQualifiedName,
                 f.CurrentIndexName ?? "(unnamed)",
                 string.Join(", ", f.KeyColumns),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ModuleCompileFlag(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ModuleCompileFlagFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Module compile flags ({report.ModuleCompileFlagFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Two independent sys.sql_modules catalog flags, each baked in wholesale at CREATE/ALTER time: WITH RECOMPILE (every call compiles a fresh plan and discards it, invisible to any plan-cache-based monitoring), and a non-schema-bound table-valued function's own RETURNS TABLE declaring a character column with no explicit COLLATE (its collation was resolved against the database's default at CREATE/ALTER time and silently disagrees with the database's collation after any later ALTER DATABASE ... COLLATE). Schema-bound modules are deliberately excluded from the second kind - oracle-confirmed that schema-binding sets the underlying flag unconditionally, string data or not, so it carries no differentiating signal there.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Module", "Flag"],
+            [.. report.ModuleCompileFlagFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ModuleQualifiedName,
+                f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall
+                    ? "WITH RECOMPILE"
+                    : "RETURNS TABLE column uses database collation",
             })]);
     }
 

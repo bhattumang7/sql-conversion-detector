@@ -36,7 +36,8 @@ public sealed class LiveModuleReader
     private static async Task<List<LiveModule>> ReadReadableModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition, m.uses_quoted_identifier, m.uses_ansi_nulls
+            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type, m.definition, m.uses_quoted_identifier, m.uses_ansi_nulls,
+                   m.is_schema_bound, m.is_recompiled, m.uses_database_collation
             FROM sys.sql_modules m
             JOIN sys.objects o ON o.object_id = m.object_id
             JOIN sys.schemas s ON s.schema_id = o.schema_id
@@ -70,7 +71,17 @@ public sealed class LiveModuleReader
                 // unusable by the optimizer (oracle-confirmed directly, real seeded filtered
                 // index, real SHOWPLAN_XML: PhysicalOp falls back to Table Scan under ANSI_NULLS
                 // OFF). Baked in wholesale at CREATE/ALTER compile time, same as QUOTED_IDENTIFIER.
-                UsesAnsiNulls: reader.GetBoolean(5)));
+                UsesAnsiNulls: reader.GetBoolean(5),
+                // sys.sql_modules.is_schema_bound/is_recompiled/uses_database_collation -
+                // docs/detection-checklist.md "Small precise adds": WITH RECOMPILE (compiles
+                // every call, invisible to the plan cache) and the table-valued-function
+                // return-shape database-collation dependency (see ModuleCompileFlagFinding's own
+                // doc comment for the oracle-confirmed scope, including why is_schema_bound is
+                // read here purely to EXCLUDE the always-true schema-bound case from that second
+                // finding, not to report on it directly).
+                IsSchemaBound: reader.GetBoolean(6),
+                IsRecompiled: reader.GetBoolean(7),
+                UsesDatabaseCollation: reader.GetBoolean(8)));
         }
 
         return modules;

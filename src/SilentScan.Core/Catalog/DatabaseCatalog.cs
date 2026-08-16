@@ -40,6 +40,15 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, bool> _moduleUsesAnsiNullsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, bool> _moduleIsRecompiledByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, bool> _moduleUsesDatabaseCollationByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, bool> _moduleIsSchemaBoundByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -224,6 +233,57 @@ public sealed class DatabaseCatalog
 
     public bool TryGetModuleUsesAnsiNulls(string qualifiedName, out bool usesAnsiNulls) =>
         _moduleUsesAnsiNullsByQualifiedName.TryGetValue(qualifiedName, out usesAnsiNulls);
+
+    /// <summary>
+    /// A module's own <c>sys.sql_modules.is_recompiled</c> flag - true only for a routine authored
+    /// with <c>WITH RECOMPILE</c> (docs/detection-checklist.md "Small precise adds"). Every
+    /// execution compiles a fresh plan and discards it rather than caching it, invisible to any
+    /// monitoring that reads the plan cache (<c>sys.dm_exec_cached_plans</c>/<c>sys.dm_exec_query_stats</c>)
+    /// - the module's own cost never accumulates there at all. Baked in at CREATE/ALTER time, same
+    /// shape as <see cref="AddModuleUsesQuotedIdentifier"/>. Always empty for a file-mode scan -
+    /// there is no live <c>sys.sql_modules</c> row to read the flag from.
+    /// </summary>
+    public void AddModuleIsRecompiled(string qualifiedName, bool isRecompiled) =>
+        _moduleIsRecompiledByQualifiedName[qualifiedName] = isRecompiled;
+
+    public bool TryGetModuleIsRecompiled(string qualifiedName, out bool isRecompiled) =>
+        _moduleIsRecompiledByQualifiedName.TryGetValue(qualifiedName, out isRecompiled);
+
+    /// <summary>
+    /// A module's own <c>sys.sql_modules.uses_database_collation</c> flag - true for a
+    /// schema-bound module (an indexed view, a schema-bound function, or a check
+    /// constraint/computed column expression) whose own compiled plan resolved a string
+    /// comparison or sort by implicitly falling back to the CURRENT database's default collation,
+    /// with no explicit <c>COLLATE</c> clause pinning it (docs/detection-checklist.md "Small
+    /// precise adds"). Baked in at CREATE/ALTER time; a later <c>ALTER DATABASE ... COLLATE</c>
+    /// changes what the module actually compares against without the module's own text ever
+    /// changing - oracle-confirmed directly (Docker instance): SQL Server accepts a schema-bound
+    /// object with an implicit database-collation dependency, and <c>ALTER DATABASE</c> is not
+    /// blocked by its existence, so the object's real string-comparison behavior silently follows
+    /// the database's collation wherever it is moved to next. Always empty for a file-mode scan -
+    /// there is no live <c>sys.sql_modules</c> row to read the flag from.
+    /// </summary>
+    public void AddModuleUsesDatabaseCollation(string qualifiedName, bool usesDatabaseCollation) =>
+        _moduleUsesDatabaseCollationByQualifiedName[qualifiedName] = usesDatabaseCollation;
+
+    public bool TryGetModuleUsesDatabaseCollation(string qualifiedName, out bool usesDatabaseCollation) =>
+        _moduleUsesDatabaseCollationByQualifiedName.TryGetValue(qualifiedName, out usesDatabaseCollation);
+
+    /// <summary>
+    /// A module's own <c>sys.sql_modules.is_schema_bound</c> flag, for ANY module kind (view,
+    /// function, trigger) - not to be confused with <see cref="ScalarUdfInfo.IsSchemaBound"/>,
+    /// which only ever exists for a scalar UDF. Read purely so <see
+    /// cref="Predicates.ModuleCompileFlagScanner"/> can EXCLUDE a schema-bound module from its own
+    /// <c>uses_database_collation</c> finding (oracle-confirmed: schema-binding sets that flag
+    /// unconditionally, regardless of whether the module touches string data at all, so it carries
+    /// no differentiating signal there - see <see cref="Predicates.ModuleCompileFlagFinding"/>'s
+    /// own doc comment). Always empty for a file-mode scan.
+    /// </summary>
+    public void AddModuleIsSchemaBound(string qualifiedName, bool isSchemaBound) =>
+        _moduleIsSchemaBoundByQualifiedName[qualifiedName] = isSchemaBound;
+
+    public bool TryGetModuleIsSchemaBound(string qualifiedName, out bool isSchemaBound) =>
+        _moduleIsSchemaBoundByQualifiedName.TryGetValue(qualifiedName, out isSchemaBound);
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the

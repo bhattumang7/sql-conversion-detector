@@ -261,6 +261,79 @@ public sealed class ScalarUdfScannerTests
     }
 
     [Fact]
+    public void FunctionUsingGoto_ReportsNotInlineableWithBlockerReason()
+    {
+        var findings = ScanSql("""
+            CREATE FUNCTION dbo.fn_Goto(@x INT) RETURNS INT AS
+            BEGIN
+                DECLARE @v INT = @x;
+                IF @v IS NULL
+                BEGIN
+                    GOTO DONE;
+                END
+                SET @v = @v + 1;
+                DONE:
+                RETURN @v;
+            END;
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_Goto(Id) FROM dbo.T;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ScalarUdfInlineability.NotInlineable, finding.Inlineability);
+        Assert.Contains("GOTO", finding.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FunctionWithSelectAccumulatorAssignment_ReportsNotInlineableWithBlockerReason()
+    {
+        var findings = ScanSql("""
+            CREATE FUNCTION dbo.fn_Accum(@x INT) RETURNS VARCHAR(200) AS
+            BEGIN
+                DECLARE @s VARCHAR(200) = '';
+                SELECT @s = COALESCE(@s + ',', '') + CAST(Val AS VARCHAR(20))
+                FROM dbo.Source
+                WHERE OwnerId = @x;
+                RETURN @s;
+            END;
+            GO
+            CREATE TABLE dbo.Source (OwnerId INT NOT NULL, Val INT NOT NULL);
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_Accum(Id) FROM dbo.T;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ScalarUdfInlineability.NotInlineable, finding.Inlineability);
+        Assert.Contains("accumulator", finding.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FunctionWithPlainSelectAssignmentFromTable_DoesNotFlagAccumulatorBlocker()
+    {
+        var findings = ScanSql("""
+            CREATE FUNCTION dbo.fn_PlainSelect(@x INT) RETURNS INT AS
+            BEGIN
+                DECLARE @v INT;
+                SELECT @v = Val FROM dbo.Source WHERE OwnerId = @x;
+                RETURN @v;
+            END;
+            GO
+            CREATE TABLE dbo.Source (OwnerId INT NOT NULL, Val INT NOT NULL);
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_PlainSelect(Id) FROM dbo.T;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ScalarUdfInlineability.Unknown, finding.Inlineability);
+    }
+
+    [Fact]
     public void CleanFunctionBody_ReportsUnknownInlineabilityNeverInlineable()
     {
         var findings = ScanSql("""

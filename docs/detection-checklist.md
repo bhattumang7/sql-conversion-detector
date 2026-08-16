@@ -2148,22 +2148,113 @@ get an oracle fixture for the serial-plan consequence).
       authored fixture in the unit-test suite and the live oracle fixture.
 
 ### Small precise adds (each an afternoon, not a stream)
-- [ ] Proc authored `WITH RECOMPILE` — compiles every call, invisible to
-      cache-based monitoring; pure catalog flag (`sys.sql_modules
-      .is_recompiled`, column existence confirmed 2026-08-16, so this really is
-      the one-column job it was assumed to be).
-- [ ] **Two more `sys.sql_modules` columns nobody has claimed yet**, surfaced
-      while confirming the above and recorded so they are not rediscovered:
-      * `inline_type` / `is_inlineable` give **the engine's own verdict** on
-        whether a scalar UDF is inlineable under 2019+ — i.e. ground truth for
-        the shipped scalar-UDF stream, which currently reasons from our own
-        reimplementation of the blocker list in `detection-reference.md`
-        Appendix 3. Worth a parity check of the two against the local database:
-        any disagreement is a bug in our blocker list, and agreeing lets the
-        stream cite the engine instead of a hand-maintained list.
-      * `uses_database_collation` marks a schema-bound module whose correctness
-        depends on the database collation — a collation dependency the shipped
-        collation work does not currently consider at all.
+- [x] **Proc authored `WITH RECOMPILE` — shipped**: pure catalog flag
+      (`sys.sql_modules.is_recompiled`), read live-only via
+      `LiveModuleReader`/`LiveScanRunner` (`DatabaseCatalog
+      .AddModuleIsRecompiled`/`TryGetModuleIsRecompiled`, same "baked in
+      wholesale at CREATE/ALTER time" shape as `UsesQuotedIdentifier`/
+      `UsesAnsiNulls`). New `ModuleCompileFlagFinding`/`ModuleCompileFlagScanner`
+      (`src/SilentScan.Core/Predicates/ModuleCompileFlagFinding.cs`,
+      `.../ModuleCompileFlagScanner.cs`) — module-level, no AST walk needed
+      beyond the module's own CREATE/ALTER position for `Line`/`Column`, same
+      shape as `SetOptionScanner`'s catalog-flag half. Purely informational:
+      "compiles every call, invisible to `sys.dm_exec_cached_plans`/
+      `sys.dm_exec_query_stats`" is a documented, unconditional mechanism, no
+      oracle needed for the claim itself. Wired end-to-end (`ScanReport`
+      schema version 28 → 29, SARIF rule `silentscan/catalog/with-recompile`,
+      readable-report section). Unit-tested
+      (`ModuleCompileFlagScannerTests`) + real end-to-end oracle coverage via
+      `EngineAuthoritativeScan` against the disposable Docker instance
+      (`ModuleCompileFlagPipelineTests`: a real deployed `WITH RECOMPILE` proc
+      fires, a plain proc doesn't). **Real coverage against the local RM_ test
+      database: 2 findings** (`dbo.spRIL_AdvancedAdhoc`,
+      `dbo.spRIL_AdvancedAdhoc2`).
+- [x] **`inline_type`/`is_inlineable` parity check against the shipped
+      scalar-UDF stream's blocker list — done, found already substantially
+      wired, closed the remaining gap.** Investigated before assuming this was
+      unbuilt: `LiveCatalogReader.ReadTSqlScalarUdfInfoAsync` already reads
+      `sys.sql_modules.is_inlineable` live (`ScalarUdfInfo.EngineIsInlineable`)
+      and `ScalarUdfInlineabilityClassifier.Classify` already PREFERS it over
+      the static blocker scan unconditionally — the architecture this item
+      asked for already existed, so "any disagreement is a bug" cannot
+      literally occur: the engine flag always wins, the static scan's own text
+      only ever explains. What remained undone was the actual **parity
+      measurement** the item asked for. Ran it directly against the local RM_
+      test database: of 193 distinct scalar UDFs, **9 were `NotInlineable`
+      with no blocker text at all** (`InlineabilityBlocker: null`) — the
+      static closed list found nothing to explain the engine's own verdict.
+      Investigated each of the 9 directly against the real deployed function
+      bodies (not guessed) and found two genuine, previously-unrecognized
+      FROID blockers, each oracle-confirmed on the Docker instance before
+      being added to the closed list in `ScalarUdfInlineabilityScanner`:
+      * **`GOTO`/label usage** (2 of the 9: two sibling functions sharing a
+        documented "keep these five UDFs in sync" comment block, both using
+        `GOTO END_OF_FUNCTION` as an early-exit). Oracle-confirmed directly: a
+        function with a real `GOTO`/label pair shows `is_inlineable = 0`; the
+        identical IF/SET control-flow shape with the `GOTO` removed shows
+        `is_inlineable = 1` — isolating `GOTO` itself, not the surrounding
+        `IF`, as the blocker.
+      * **A `SELECT @v = expr(@v) FROM t` running-accumulator assignment**
+        (7 of the 9: the real string-concatenation-aggregate idiom production
+        code uses in place of `STRING_AGG`/`FOR XML PATH`, e.g. `SELECT
+        @s = COALESCE(@s + ',', '') + col FROM t`). Oracle-confirmed
+        directly: this shape shows `is_inlineable = 0`; the same FROM-clause
+        `SELECT` assignment WITHOUT reading the target variable's own prior
+        value (`SELECT @v = col FROM t`) shows `is_inlineable = 1` — isolating
+        the self-reference, not the FROM clause itself, as the blocker.
+      Both added to `ScalarUdfInlineabilityScanner` (`GoToStatement`/
+      `LabelStatement` visitor; a `QuerySpecification` visitor checking every
+      `SelectSetVariable` element for a self-referencing `Expression` when a
+      `FromClause` is present). **After adding both, re-measured: 0 of the 193
+      functions remain unexplained** — full parity achieved, not just a
+      partial improvement. Tested: 6 new unit tests (`ScalarUdfScannerTests`,
+      `ScalarUdfInfoTests` — fires/near-miss pairs for both new patterns,
+      isolating each blocker from its surrounding control flow) + 3 new live
+      oracle tests (`LiveCatalogReaderScalarUdfTests` — real deployed
+      functions, `EngineIsInlineable` checked directly). `detection-
+      reference.md` Appendix 3 updated with both newly-confirmed blockers.
+- [x] **`uses_database_collation` — shipped, scope corrected from the
+      checklist's own original premise once oracle-investigated.** The
+      original framing ("marks a schema-bound module whose correctness
+      depends on the database collation") turned out to be a half-truth:
+      oracle-probed directly (Docker instance, real schema-bound objects) and
+      found `uses_database_collation` is set to **1 for every schema-bound
+      object unconditionally** — even a pure-arithmetic `WITH SCHEMABINDING`
+      scalar function with an `INT` parameter and `INT` return, zero string
+      columns anywhere, still sets it. Schema-binding's own identifier-
+      resolution mechanism depends on the database's collation for
+      case-insensitive name matching regardless of data type, so the flag
+      carries **no differentiating signal** for a schema-bound object — it is
+      definitionally always true there, and reporting on it would be a
+      redundant, always-true, zero-information finding. Real measurement on
+      the local RM_ test database confirmed this exactly: of 29 modules with
+      the flag set, only 2 are schema-bound (both scalar functions) — the
+      other **27 are non-schema-bound multi-statement table-valued
+      functions**. Investigated those 27 directly and found the real,
+      narrower, genuinely informative mechanism: a `RETURNS @t TABLE(...)`
+      declaring a character column with **no explicit `COLLATE`** clause has
+      that column's collation implicitly resolved against the database's
+      default at CREATE/ALTER time and baked in — oracle-confirmed precisely
+      (three-way probe on the same Docker instance): an `INT`-only return
+      table never sets the flag; a `VARCHAR` return column with no `COLLATE`
+      sets it; the identical shape with an explicit `COLLATE` on that same
+      column does not. **Shipped scope**: fires only for a non-schema-bound
+      module with `uses_database_collation = true` — the schema-bound case is
+      deliberately excluded (see `ModuleCompileFlagFinding`'s own doc comment
+      for the full reasoning), which is what isolates the real, narrow,
+      correctly-scoped claim: this TVF's own returned string data will
+      silently disagree with the database's default collation the moment a
+      future `ALTER DATABASE ... COLLATE` changes what that default IS,
+      since the function's own already-compiled return shape is never told.
+      Same finding type/scanner as the WITH RECOMPILE item above
+      (`ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation`).
+      SARIF rule `silentscan/catalog/tvf-return-database-collation`. Tested:
+      unit tests covering the schema-bound-exclusion guard directly + 5 live
+      oracle tests via `EngineAuthoritativeScan` (`ModuleCompileFlagPipelineTests`
+      — un-COLLATE'd TVF fires, explicitly-COLLATE'd TVF doesn't, INT-only TVF
+      doesn't, schema-bound function doesn't despite the flag being true).
+      **Real coverage against the local RM_ test database: 27 findings**, all
+      multi-statement table-valued functions.
 - [ ] `RANGE` instead of `ROWS` in window-function frames — on-disk spool per
       partition; purely syntactic, near-zero FP risk.
 - [ ] Trigger content scan — run trigger bodies through the existing pipeline

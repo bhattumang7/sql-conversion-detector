@@ -58,6 +58,36 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @x + 1;
         END;
         GO
+        CREATE TABLE dbo.AccumSource (
+            OwnerId INT NOT NULL,
+            Val INT NOT NULL
+        );
+        GO
+        CREATE FUNCTION dbo.fn_Goto (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @v INT = @x;
+            IF @v IS NULL
+            BEGIN
+                GOTO DONE;
+            END
+            SET @v = @v + 1;
+            DONE:
+            RETURN @v;
+        END;
+        GO
+        CREATE FUNCTION dbo.fn_Accum (@x INT)
+        RETURNS VARCHAR(200)
+        AS
+        BEGIN
+            DECLARE @s VARCHAR(200) = '';
+            SELECT @s = COALESCE(@s + ',', '') + CAST(Val AS VARCHAR(20))
+            FROM dbo.AccumSource
+            WHERE OwnerId = @x;
+            RETURN @s;
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -95,6 +125,44 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_NotInlineable", out var info));
+        Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionUsingGoto_EngineReportsNotInlineable()
+    {
+        // Oracle discovery 2026-08-17 while parity-checking ScalarUdfInlineabilityScanner's own
+        // closed blocker list against real corpus functions the list didn't explain: GOTO/label
+        // usage is a genuine, previously-unrecorded FROID blocker, confirmed directly against a
+        // real deployed function and its GOTO-free control (below).
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Goto", out var info));
+        Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_PlainFunction_EngineReportsInlineableAsGotoFreeControl()
+    {
+        // Same shape as fn_Goto (a DECLARE, an IF, a SET, a RETURN) with the GOTO/label removed -
+        // isolates GOTO itself as the blocker rather than the surrounding IF/SET control flow.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Plain", out var info));
+        Assert.True(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionWithSelectAccumulatorAssignment_EngineReportsNotInlineable()
+    {
+        // Oracle discovery 2026-08-17: the `SELECT @v = expr(@v) FROM t` running-concatenation-
+        // aggregate idiom (real production code uses this in place of STRING_AGG/FOR XML PATH) is
+        // a genuine, previously-unrecorded FROID blocker - a plain `SELECT @v = expr FROM t` that
+        // does not read its own target variable inlines cleanly (see MergeFileModeExtras test
+        // below for the file-mode static-scan side of this same claim).
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Accum", out var info));
         Assert.False(info!.EngineIsInlineable);
     }
 

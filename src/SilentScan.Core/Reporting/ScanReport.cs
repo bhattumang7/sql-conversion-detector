@@ -39,6 +39,7 @@ public sealed record ScanReport(
     IReadOnlyList<TempTableExecShapeFinding> TempTableExecShapeFindings,
     IReadOnlyList<SelfReferencingDmlFinding> SelfReferencingDmlFindings,
     IReadOnlyList<TemporalTableHistoryIndexGapFinding> TemporalTableHistoryIndexGapFindings,
+    IReadOnlyList<ModuleCompileFlagFinding> ModuleCompileFlagFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -111,7 +112,9 @@ public sealed record ScanReport(
     /// Bumped to 28 for the new <see cref="TemporalTableHistoryIndexGapFindings"/> stream
     /// (docs/detection-checklist.md "Temporal table history-side index gap"). Live-mode only -
     /// always empty in a file-mode scan, same reasoning as <see cref="CrossTableTypeDriftFindings"/>'s
-    /// FK-linked half.
+    /// FK-linked half. Bumped to 29 for the new <see cref="ModuleCompileFlagFindings"/> stream
+    /// (docs/detection-checklist.md "Small precise adds": WITH RECOMPILE, and a table-valued
+    /// function's own un-COLLATE'd return-table string column). Live-mode only, same reasoning.
     /// </summary>
-    public const int CurrentSchemaVersion = 28;
+    public const int CurrentSchemaVersion = 29;
 }

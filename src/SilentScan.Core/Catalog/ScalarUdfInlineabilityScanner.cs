@@ -86,6 +86,67 @@ public static class ScalarUdfInlineabilityScanner
             base.ExplicitVisit(node);
         }
 
+        public override void ExplicitVisit(GoToStatement node)
+        {
+            Report("GOTO statement");
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(LabelStatement node)
+        {
+            Report("GOTO statement");
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>
+        /// Oracle-confirmed 2026-08-17 (real Docker probe, is_inlineable checked directly): a
+        /// `SELECT @v = expr(@v) FROM t` running-accumulator assignment - the string-concatenation-
+        /// aggregate idiom real code uses in place of STRING_AGG/FOR XML PATH - is not inlined, while
+        /// the identical shape assigning a value that does not reference the variable's own prior
+        /// value (`SELECT @v = expr FROM t`) is. Only checked when the query specification has a
+        /// FROM clause - a FROM-less `SELECT @v = @v + 1` is a plain scalar reassignment, a
+        /// different, unprobed shape this scanner does not claim anything about.
+        /// </summary>
+        public override void ExplicitVisit(QuerySpecification node)
+        {
+            if (node.FromClause is not null)
+            {
+                foreach (var element in node.SelectElements)
+                {
+                    if (element is SelectSetVariable { Expression: { } expression } setVariable
+                        && ReferencesVariable(expression, setVariable.Variable.Name))
+                    {
+                        Report("SELECT accumulator assignment reading its own variable");
+                        break;
+                    }
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private static bool ReferencesVariable(ScalarExpression expression, string variableName)
+        {
+            var finder = new VariableReferenceFinder(variableName);
+            expression.Accept(finder);
+            return finder.Found;
+        }
+
+        private sealed class VariableReferenceFinder(string variableName) : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(VariableReference node)
+            {
+                if (string.Equals(node.Name, variableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    Found = true;
+                }
+
+                base.ExplicitVisit(node);
+            }
+        }
+
         public override void ExplicitVisit(FunctionCall node)
         {
             if (node.CallTarget is MultiPartIdentifierCallTarget)

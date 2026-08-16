@@ -71,6 +71,7 @@ public static class SarifReportWriter
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
         results.AddRange(report.TemporalTableHistoryIndexGapFindings.Select(ToResult));
+        results.AddRange(report.ModuleCompileFlagFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -463,6 +464,24 @@ public static class SarifReportWriter
         var message = $"{indexDisplay} on '{finding.CurrentTableQualifiedName}' ({keyColumns}) has no structurally matching index on its history table '{finding.HistoryTableQualifiedName}' - a FOR SYSTEM_TIME query that seeks the current side via this index degrades to a scan of the whole history table.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(ModuleCompileFlagFinding finding)
+    {
+        // Warning, not error: a real, structural cost/risk, not a proven-wrong-result claim - the
+        // same "structural risk" tier SetOptionFinding/CascadingForeignKeyFinding use.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ModuleCompileFlagRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            ModuleCompileFlagFindingKind.RecompilesEveryCall =>
+                $"'{finding.ModuleQualifiedName}' is authored WITH RECOMPILE - every call compiles a fresh plan and discards it, so this module's own cost never accumulates in the plan cache at all.",
+            ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation =>
+                $"'{finding.ModuleQualifiedName}' declares a RETURNS TABLE character column with no explicit COLLATE - its collation was baked in against the database's default collation at CREATE/ALTER time and will silently disagree with the database's collation after any future ALTER DATABASE ... COLLATE.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(MultiReferencedCteFinding finding)

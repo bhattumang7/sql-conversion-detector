@@ -106,6 +106,103 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionUsingGoto_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionUsingGoto_EngineReportsNotInlineable): a real GOTO/label defeats
+        // sys.sql_modules.is_inlineable - a genuine blocker this closed list did not previously
+        // recognize, found while parity-checking it against real corpus functions.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Goto (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @v INT = @x;
+                IF @v IS NULL
+                BEGIN
+                    GOTO DONE;
+                END
+                SET @v = @v + 1;
+                DONE:
+                RETURN @v;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Goto", out var info));
+        Assert.Contains("GOTO", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionWithIfElseAndSetOnly_NoGotoNoBlocker()
+    {
+        // GOTO-free control: same IF/SET shape as fn_Goto, no GOTO/label - isolates GOTO itself
+        // as the blocker rather than the surrounding IF.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_NoGoto (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @v INT = @x;
+                IF @v IS NULL
+                BEGIN
+                    SET @v = 0;
+                END
+                SET @v = @v + 1;
+                RETURN @v;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_NoGoto", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
+    [Fact]
+    public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionWithSelectAccumulatorAssignment_EngineReportsNotInlineable): a
+        // `SELECT @v = expr(@v) FROM t` running-concatenation aggregate - the real idiom this
+        // codebase's own corpus uses in place of STRING_AGG/FOR XML PATH - defeats
+        // is_inlineable, a genuine blocker this closed list did not previously recognize.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Accum (@x INT)
+            RETURNS VARCHAR(200)
+            AS
+            BEGIN
+                DECLARE @s VARCHAR(200) = '';
+                SELECT @s = COALESCE(@s + ',', '') + CAST(Val AS VARCHAR(20))
+                FROM dbo.Source
+                WHERE OwnerId = @x;
+                RETURN @s;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Accum", out var info));
+        Assert.Contains("accumulator", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionWithPlainSelectAssignmentFromTable_NoAccumulatorBlocker()
+    {
+        // Same FROM-clause SELECT-assignment shape as fn_Accum, but the assigned expression does
+        // not read the target variable's own prior value - isolates the self-reference, not the
+        // FROM clause itself, as the blocker.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_PlainSelect (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @v INT;
+                SELECT @v = Val FROM dbo.Source WHERE OwnerId = @x;
+                RETURN @v;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_PlainSelect", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
+    [Fact]
     public void Build_FunctionReferencingNonInlineableCallee_RecordsBlockerOneLevelDeep()
     {
         var catalog = BuildFrom("""
