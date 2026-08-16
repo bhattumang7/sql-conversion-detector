@@ -123,11 +123,14 @@ public static class ScanReportBuilder
         // is cheap next to the passes either side of it.
         IReadOnlyDictionary<string, Lineage.TvfFenceOrigin> tvfFenceMap;
         IReadOnlyDictionary<string, Lineage.ScalarUdfOrigin> scalarUdfMap;
+        IReadOnlyDictionary<string, Lineage.ViewExpansionOrigin> viewExpansionMap;
+        List<Lineage.ViewDefinition> viewDefinitions;
         using (var fenceMapStage = progress.Begin("mapping TVF fences and scalar UDFs"))
         {
-            var (views, _) = Lineage.ViewDefinitionExtractor.Extract(usableParseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
-            tvfFenceMap = Lineage.TvfFenceMap.Build(views, catalog);
-            scalarUdfMap = Lineage.ScalarUdfMap.Build(views, catalog);
+            (viewDefinitions, _) = Lineage.ViewDefinitionExtractor.Extract(usableParseResults, catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
+            tvfFenceMap = Lineage.TvfFenceMap.Build(viewDefinitions, catalog);
+            scalarUdfMap = Lineage.ScalarUdfMap.Build(viewDefinitions, catalog);
+            viewExpansionMap = Lineage.ViewExpansionMap.Build(viewDefinitions, catalog);
             fenceMapStage.Complete($"{tvfFenceMap.Count:N0} view/TVF layers inherit a fence, {scalarUdfMap.Count:N0} inherit a scalar UDF");
         }
 
@@ -471,6 +474,33 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        IReadOnlyList<NestedViewDepthFinding> nestedViewDepthFindings;
+        using (var nestedViewDepthStage = progress.Begin("scanning nested-view depth"))
+        {
+            nestedViewDepthFindings = NestedViewDepthScanner.Scan(viewExpansionMap, viewDefinitions);
+            nestedViewDepthStage.Complete($"{nestedViewDepthFindings.Count:N0} findings");
+        }
+
+        List<PostExpansionJoinWidthFinding> postExpansionJoinWidthFindings;
+        using (var joinWidthStage = progress.Begin("scanning post-expansion join width", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = PostExpansionJoinWidthScanner.Scan(r, catalog, viewExpansionMap);
+                    joinWidthStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            postExpansionJoinWidthFindings = unordered
+                .OrderByDescending(f => f.ExpandedCount - f.WrittenCount)
+                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -602,6 +632,7 @@ public static class ScanReportBuilder
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
+            nestedViewDepthFindings, postExpansionJoinWidthFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

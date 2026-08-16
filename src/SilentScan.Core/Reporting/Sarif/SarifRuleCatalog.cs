@@ -44,6 +44,8 @@ public static class SarifRuleCatalog
     public const string UntrustedCheckConstraintRuleId = "silentscan/catalog/untrusted-check-constraint";
     public const string CascadingForeignKeyRuleId = "silentscan/catalog/cascading-foreign-key";
     public const string MultiReferencedCteRuleId = "silentscan/lineage/multi-referenced-cte";
+    public const string NestedViewDepthRuleId = "silentscan/lineage/nested-view-depth";
+    public const string PostExpansionJoinWidthRuleId = "silentscan/lineage/post-expansion-join-width";
     public const string PartialCompositeForeignKeyJoinRuleId = "silentscan/join/partial-composite-fk";
 
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
@@ -219,6 +221,8 @@ public static class SarifRuleCatalog
             Rule(UntrustedCheckConstraintRuleId, "A CHECK constraint the engine itself does not trust (sys.check_constraints.is_not_trusted) - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement. The constraint may not actually hold over existing rows, and the optimizer forfeits constraint-based rewrites that assume it does."),
             Rule(CascadingForeignKeyRuleId, "A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action - a single DML statement against the referenced table silently cascades to every dependent row in the child table too, with no visible predicate change at the call site."),
             Rule(MultiReferencedCteRuleId, "A CTE referenced 2+ times downstream of its own WITH clause - SQL Server does not materialize a plain CTE once and reuse it, so each reference independently re-runs the CTE's own defining query. A self-reference inside a recursive CTE's own body is never counted - that is the structurally mandated recursion mechanism, not optional re-invocation."),
+            Rule(NestedViewDepthRuleId, "A view/inline TVF nested 2+ view/TVF layers deep before reaching a base table - a change to a base table now has to be traced through 2+ independent view layers before its blast radius is understood, and each layer is a place a SELECT */column-list mismatch or silent type widening can hide."),
+            Rule(PostExpansionJoinWidthRuleId, "A query whose written FROM/JOIN table count meaningfully understates how many base tables it actually touches once every view/inline-TVF reference is expanded transitively - a query that looks like a 3-table join can expand to 20."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),
             Rule(SetOptionRuleId(SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature), "The module was compiled under QUOTED_IDENTIFIER OFF (sys.sql_modules.uses_quoted_identifier) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature), "An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),

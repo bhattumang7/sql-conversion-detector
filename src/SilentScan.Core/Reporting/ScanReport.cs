@@ -31,6 +31,8 @@ public sealed record ScanReport(
     IReadOnlyList<UntrustedConstraintFinding> UntrustedConstraintFindings,
     IReadOnlyList<CascadingForeignKeyFinding> CascadingForeignKeyFindings,
     IReadOnlyList<MultiReferencedCteFinding> MultiReferencedCteFindings,
+    IReadOnlyList<NestedViewDepthFinding> NestedViewDepthFindings,
+    IReadOnlyList<PostExpansionJoinWidthFinding> PostExpansionJoinWidthFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -81,7 +83,10 @@ public sealed record ScanReport(
     /// streams (docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Untrusted (WITH
     /// NOCHECK) FK/CHECK constraints" and "Cascading FK actions"). Bumped to 21 for the new
     /// <see cref="MultiReferencedCteFindings"/> stream (docs/detection-checklist.md Tier 2
-    /// "Lineage-metric findings": "Multi-referenced CTE").
+    /// "Lineage-metric findings": "Multi-referenced CTE"). Bumped to 22 for the new
+    /// <see cref="NestedViewDepthFindings"/> and <see cref="PostExpansionJoinWidthFindings"/>
+    /// streams (docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Nested-view depth
+    /// report" and "Post-expansion join width").
     /// </summary>
-    public const int CurrentSchemaVersion = 21;
+    public const int CurrentSchemaVersion = 22;
 }

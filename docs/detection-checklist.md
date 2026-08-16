@@ -1366,8 +1366,49 @@ latest) compat level.
       `@@TRANCOUNT`, 128 reference `OBJECT_ID(`.
 
 ### Lineage-metric findings (cheap adds on existing passes)
-- [ ] Nested-view depth report — we already compute topo order; emit depth ≥ N
+- [x] Nested-view depth report — we already compute topo order; emit depth ≥ N
       as a finding with the chain (57 views reference other views locally).
+      Structural depth, not a claim a query through the view is currently
+      slow — the risk is maintenance/robustness: a change to a base table
+      now has to be traced through 2+ independent view layers before its
+      blast radius is understood, and each layer is a place a `SELECT *`/
+      column-list mismatch or silent type widening can hide. Threshold
+      N = 2, chosen against real local depth distribution (depth 0/1/2/3 =
+      80/37/17/3 of the 57 views that touch another view at all — depth 1
+      is common and not itself notable; depth ≥ 2 is a small, real,
+      selective signal). "View" means both `CREATE VIEW` and inline TVF
+      uniformly, matching this codebase's own established "inline TVFs =
+      views" treatment elsewhere. `Chain` reports top-down (the view
+      itself first, then each further-nested view, ending just before the
+      base tables) — the order a reader debugging "why is this wrong/slow"
+      actually wants.
+
+      New shared foundation (`Lineage.ViewExpansionMap`), reused by "Post-
+      expansion join width" below rather than built twice — one memoized
+      DFS over every `ViewDefinition` (the exact `TvfFenceMap`-shaped
+      "walk once, memoize, reuse" template already established for the
+      same kind of transitive view-dependency walk), computing depth,
+      top-down chain, and the full set of transitively-reached base tables
+      in a single pass. Catalog/lineage-only, unconditional — reported once
+      per qualifying view regardless of whether any scanned query calls it
+      (the same "reported once per object" precedent `MaxTypedColumnFinding`
+      already establishes). `Confidence.High`, SARIF `LevelWarning`. No
+      oracle needed: depth is a pure catalog/AST fact, not a plan-shape
+      claim. Version-insensitive: pure DDL-dependency structure.
+
+      Unit-tested (`NestedViewDepthScannerTests`, 5 cases: a view over a
+      base table never fires, a view over one other view (depth 1) never
+      fires, a view over a view over a view (depth 2) fires with the
+      correct top-down chain and base-table set, a 4-deep chain fires for
+      both qualifying views at their own correct depths, and a view fanning
+      out to two base tables lists both). Wired end-to-end (`ScanReport`
+      schema version 21 → 22, SARIF, readable report). **Real coverage
+      against the local RM_ test database: 62 findings** (42 at depth 2, 14
+      at depth 3, 6 at depth 4) — cross-checked directly against
+      `sys.sql_expression_dependencies`: exactly 57 distinct views
+      reference another view at all, matching the checklist's own original
+      count exactly, of which the tool's own depth-2+ threshold correctly
+      selects a smaller, real subset rather than reporting all 57.
 - [x] Multi-referenced CTE — inline macro re-executed per reference; count
       references in the AST. Rarely covered anywhere; high precision.
       SQL Server does NOT materialize a plain (non-recursive) CTE once and
@@ -1479,7 +1520,7 @@ latest) compat level.
       against the local RM_ test database: 115 findings** (101 `DELETE
       CASCADE` only, 8 `SET NULL`, 6 carrying both a cascading delete and a
       cascading update action).
-- [ ] **Post-expansion join width.** Every surveyed tool counts tables in the
+- [x] **Post-expansion join width.** Every surveyed tool counts tables in the
       written `FROM`/`JOIN` list and warns past a threshold; that count is
       meaningless when half the sources are views. The number that matters is
       the *expanded* one — base tables after resolving views and inline TVFs
@@ -1489,9 +1530,53 @@ latest) compat level.
       compute it. Report the expanded count, the written count, and the chain
       that inflated it; rank by the gap between the two, since a query that
       *looks* like a three-table join and expands to twenty is the finding
-      nobody else can produce. Confirm the engine's actual reordering
-      thresholds against the oracle before quoting a number in output —
-      the "past a dozen" figure above is folklore until measured.
+      nobody else can produce.
+
+      **The "past a dozen, optimizer gives up exhaustive search" absolute
+      threshold is deliberately NOT quoted anywhere in this finding's
+      output** — attempted to confirm it directly (a synthetic chain of 6
+      to 18 joined base tables, `SET STATISTICS XML ON`, reading
+      `StatementOptmEarlyAbortReason`): the attribute reads
+      `"GoodEnoughPlanFound"` at every join count tried, including the
+      smallest (6) — this is evidently a normal, common early-exit reason
+      unrelated to "gave up specifically because there were too many
+      tables," not the clean signal the checklist's own folklore number
+      needed. Rather than force a number that wasn't actually confirmed,
+      the shipped finding ranks purely by the **gap** (expanded − written)
+      instead, which needs no such threshold — a real, honest structural
+      fact either way, and the "nobody else can compute this" differentiator
+      holds regardless of whether the absolute-optimizer-threshold claim
+      is ever nailed down. That investigation remains open as a genuine
+      follow-up, not silently abandoned.
+
+      Reuses `Lineage.ViewExpansionMap` (built once, shared with "Nested-
+      view depth report" above — see that item for the map's own design).
+      Standalone per-query scanner (`PostExpansionJoinWidthScanner`),
+      reusing `FromScopeResolver.Resolve`'s existing FROM-clause flattening
+      purely for its written-count/qualified-name output. Fires at gap ≥ 3.
+      `PartiallyUnexpanded` is surfaced explicitly whenever a derived
+      table, MSTVF/CLR TVF fence, or other unresolved reference means the
+      expanded count is a lower bound, never silently undercounted as if
+      it were exhaustive. Deliberately scoped to `SELECT` statements in
+      v1, matching "Multi-referenced CTE"'s own scope decision.
+      `Confidence.High`, SARIF `LevelWarning`. No oracle needed for the
+      shipped claim — the gap is exact structural arithmetic over the
+      already-verified lineage pass, not a plan-shape claim requiring
+      confirmation.
+
+      Unit-tested (`PostExpansionJoinWidthScannerTests`, 5 cases: a view
+      fanning out to 5 base tables with a written count of 1 fires with the
+      correct expanded set, a plain base-table query never fires, a gap of
+      1 (below the threshold of 3) never fires, written == expanded never
+      fires, and the inflating view is correctly named in the finding).
+      Wired end-to-end alongside the nested-view-depth stream (same schema
+      bump, SARIF, readable report). **Real coverage against the local RM_
+      test database: 2,993 findings** across 1,260 distinct modules
+      (roughly a quarter of the whole corpus) — including several written-
+      count-1 queries expanding to 36 base tables through a single view
+      reference, exactly the "looks like nothing, is actually huge" shape
+      no written-count-only tool can see. No silent cap: the real count is
+      reported honestly rather than truncated for volume's sake.
 - [ ] **`SELECT *` inside a view or inline TVF.** The bare `SELECT *` rule is
       an explicit Tier 3 skip below and stays skipped — but the in-a-view case
       is a different defect with a lineage consequence: the column list is

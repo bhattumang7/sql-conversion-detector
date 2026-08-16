@@ -82,6 +82,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(UntrustedConstraint(report, headingLevel, pathBase));
         blocks.AddRange(CascadingForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(MultiReferencedCte(report, headingLevel, pathBase));
+        blocks.AddRange(NestedViewDepth(report, headingLevel, pathBase));
+        blocks.AddRange(PostExpansionJoinWidth(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -144,6 +146,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Untrusted FK/CHECK constraints", report.UntrustedConstraintFindings.Count);
         AddCount(counts, "Foreign keys with a cascading ON DELETE/UPDATE action", report.CascadingForeignKeyFindings.Count);
         AddCount(counts, "CTEs referenced 2+ times downstream of their own WITH clause", report.MultiReferencedCteFindings.Count);
+        AddCount(counts, "Views/inline TVFs nested 2+ view/TVF layers deep", report.NestedViewDepthFindings.Count);
+        AddCount(counts, "Queries whose expanded join width exceeds their written FROM/JOIN count", report.PostExpansionJoinWidthFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -836,6 +840,52 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.CteName,
                 f.ReferenceCount.ToString(CultureInfo.InvariantCulture),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NestedViewDepth(ScanReport report, int level, string? pathBase)
+    {
+        if (report.NestedViewDepthFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Nested-view depth ({report.NestedViewDepthFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            $"A view/inline TVF nested {NestedViewDepthScanner.DepthThreshold}+ view/TVF layers deep before reaching a base table - structural depth, not a claim the query is currently slow. A change to a base table now has to be traced through multiple independent view layers before its blast radius is understood, and each layer is a place a SELECT */column-list mismatch or silent type widening can hide. Catalog/lineage-only, reported once per view regardless of whether any scanned query calls it.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "View", "Depth", "Chain", "Base tables"],
+            [.. report.NestedViewDepthFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ViewQualifiedName,
+                f.Depth.ToString(CultureInfo.InvariantCulture),
+                string.Join(" -> ", f.Chain),
+                string.Join(", ", f.BaseTables),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> PostExpansionJoinWidth(ScanReport report, int level, string? pathBase)
+    {
+        if (report.PostExpansionJoinWidthFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Post-expansion join width ({report.PostExpansionJoinWidthFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "The written FROM/JOIN table count is meaningless when half the sources are views - the number that matters is the EXPANDED one, base tables after resolving every view/inline-TVF reference transitively. Ranked by the gap between written and expanded count. Deliberately makes no claim about a specific 'past N the optimizer gives up exhaustive search' threshold - that number is unconfirmed folklore, not yet oracle-verified on this engine.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Written", "Expanded", "Inflating source(s)", "Unexpanded?"],
+            [.. report.PostExpansionJoinWidthFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.WrittenCount.ToString(CultureInfo.InvariantCulture),
+                f.ExpandedCount.ToString(CultureInfo.InvariantCulture),
+                string.Join(", ", f.InflatingSources),
+                f.PartiallyUnexpanded ? "yes" : "no",
             })]);
     }
 

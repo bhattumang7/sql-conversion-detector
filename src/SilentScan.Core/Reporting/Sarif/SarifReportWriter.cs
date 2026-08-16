@@ -61,6 +61,8 @@ public static class SarifReportWriter
         results.AddRange(report.UntrustedConstraintFindings.Select(ToResult));
         results.AddRange(report.CascadingForeignKeyFindings.Select(ToResult));
         results.AddRange(report.MultiReferencedCteFindings.Select(ToResult));
+        results.AddRange(report.NestedViewDepthFindings.Select(ToResult));
+        results.AddRange(report.PostExpansionJoinWidthFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -422,6 +424,26 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MultiReferencedCteRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"CTE '{finding.CteName}' is referenced {finding.ReferenceCount} times downstream of its own WITH clause - each reference independently re-runs the CTE's own defining query, SQL Server does not materialize it once and reuse it.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(NestedViewDepthFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NestedViewDepthRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var chain = string.Join(" -> ", finding.Chain);
+        var message = $"'{finding.ViewQualifiedName}' nests {finding.Depth} view/TVF layers deep before reaching a base table: {chain} -> [{string.Join(", ", finding.BaseTables)}].";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(PostExpansionJoinWidthFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.PostExpansionJoinWidthRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var unexpandedNote = finding.PartiallyUnexpanded ? " (partially unexpanded - the real count may be higher)" : string.Empty;
+        var message = $"'{finding.ModuleQualifiedName}' writes {finding.WrittenCount} FROM/JOIN reference(s) but expands to {finding.ExpandedCount} base table(s) via [{string.Join(", ", finding.InflatingSources)}]{unexpandedNote}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
