@@ -259,9 +259,7 @@ public static class SarifReportWriter
         // checklist.md's own note on the compile-only SHOWPLAN_XML mechanism.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SetOptionRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
-        var touchedDisplay = finding.TouchedObjectQualifiedName is { } touched
-            ? $" - touches {(finding.TouchedIsIndexedView ? "indexed view" : "filtered index")} '{touched}'{(finding.TouchedIndexName is { } idx ? $".{idx}" : string.Empty)}"
-            : string.Empty;
+        var touchedDisplay = DescribeTouchedObjectForSetOption(finding);
         var message = finding.Kind switch
         {
             SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature =>
@@ -276,6 +274,18 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static string DescribeTouchedObjectForSetOption(SetOptionFinding finding)
+    {
+        if (finding.TouchedObjectQualifiedName is not { } touched)
+        {
+            return string.Empty;
+        }
+
+        var featureKind = finding.TouchedIsIndexedView ? "indexed view" : "filtered index";
+        var indexSuffix = finding.TouchedIndexName is { } idx ? $".{idx}" : string.Empty;
+        return $" - touches {featureKind} '{touched}'{indexSuffix}";
     }
 
     private static SarifResult ToResult(UnderLengthParameterFinding finding)

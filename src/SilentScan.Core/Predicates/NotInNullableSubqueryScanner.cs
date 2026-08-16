@@ -46,33 +46,23 @@ public static class NotInNullableSubqueryScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
-            InspectSearchCondition(node.WhereClause?.SearchCondition, [(byAlias, ordered)]);
+            InspectSearchCondition(node.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
-            var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, [(byAlias, ordered)]);
+            InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
-            var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
-            InspectSearchCondition(spec.WhereClause?.SearchCondition, [(byAlias, ordered)]);
+            InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
-
-        private void InspectSearchCondition(
-            BooleanExpression? searchCondition,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> outerScopeChain)
+        private void InspectSearchCondition(BooleanExpression? searchCondition)
         {
             if (searchCondition is null)
             {
@@ -81,7 +71,7 @@ public static class NotInNullableSubqueryScanner
 
             foreach (var predicate in FlattenAnd(searchCondition).OfType<InPredicate>())
             {
-                TryMatch(predicate, outerScopeChain);
+                TryMatch(predicate);
             }
         }
 
@@ -120,9 +110,7 @@ public static class NotInNullableSubqueryScanner
             }
         }
 
-        private void TryMatch(
-            InPredicate predicate,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> outerScopeChain)
+        private void TryMatch(InPredicate predicate)
         {
             if (!predicate.NotDefined || predicate.Subquery is not { QueryExpression: QuerySpecification subquerySpec })
             {

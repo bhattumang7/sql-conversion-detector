@@ -411,56 +411,7 @@ public static class NonSargablePredicateScanner
             {
                 case FunctionCall { Parameters.Count: > 0 } functionCall
                     when !AggregateFunctionNames.Contains(functionCall.FunctionName.Value) && FirstNamedColumn(functionCall.Parameters) is { } named:
-                    // JSON_VALUE/JSON_QUERY are the one function-wrap shape that ISN'T always a
-                    // lost seek (checklist "Corrections to shipped work" false-positive fix):
-                    // since SQL Server 2016 the engine can match the call to an indexed computed
-                    // column with an identical definition and seek on it instead of scanning.
-                    if (JsonComputedColumnMatcher.IsJsonPathFunction(functionCall.FunctionName.Value)
-                        && ResolveIndexInfo(named.Ref).TableQualifiedName is { } jsonTable
-                        && JsonComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, jsonTable, named.Name, functionCall))
-                    {
-                        break;
-                    }
-
-                    if (IsCaseFoldFunction(functionCall.FunctionName.Value))
-                    {
-                        AddCaseFold(functionCall, named);
-                        break;
-                    }
-
-                    // ISNULL(col, x) on a NOT NULL column is a false positive the blanket
-                    // function-wrap rule doesn't catch (docs/detection-checklist.md Tier 1
-                    // "Type-aware upgrade of the sargability stream" #1): oracle-verified the
-                    // optimizer proves ISNULL(NOT-NULL-col, x) = col and simplifies the wrap away
-                    // entirely, REGARDLESS of the default argument's own type (even a widening
-                    // int-column-vs-bigint-default default still seeks) - so this is a nullability
-                    // fact alone, never a type question. COALESCE gets no equivalent suppression:
-                    // oracle-verified separately that COALESCE(NOT-NULL-col, x) still scans even
-                    // with no type conversion at all - COALESCE is CASE syntax sugar and the
-                    // optimizer never folds it the way it folds ISNULL.
-                    if (string.Equals(functionCall.FunctionName.Value, "ISNULL", StringComparison.OrdinalIgnoreCase)
-                        && IsKnownNotNullColumn(named.Ref))
-                    {
-                        break;
-                    }
-
-                    // Named date-form rule (docs/detection-checklist.md Tier 1 "Type-aware
-                    // upgrade of the sargability stream" #2) - oracle-verified structurally
-                    // identical to case-folding: always forces a scan, no type/verdict question,
-                    // only the computed-column precision guard can suppress it.
-                    if (IsDateFunction(functionCall.FunctionName.Value))
-                    {
-                        if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } dateTable
-                            && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, dateTable, functionCall))
-                        {
-                            break;
-                        }
-
-                        Add(SargabilityFindingKind.DateFunctionOnColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
-                        break;
-                    }
-
-                    Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
+                    InspectFunctionCall(functionCall, named);
                     break;
 
                 case CastCall castCall when FindAnyColumn(castCall.Parameter) is { } found:
@@ -511,6 +462,60 @@ public static class NonSargablePredicateScanner
                     Add(SargabilityFindingKind.FunctionWrappedColumn, wrapped.Name, WrapConstructName(expression), expression, wrapped.Ref);
                     break;
             }
+        }
+
+        private void InspectFunctionCall(FunctionCall functionCall, (ColumnReferenceExpression Ref, string Name) named)
+        {
+            // JSON_VALUE/JSON_QUERY are the one function-wrap shape that ISN'T always a
+            // lost seek (checklist "Corrections to shipped work" false-positive fix):
+            // since SQL Server 2016 the engine can match the call to an indexed computed
+            // column with an identical definition and seek on it instead of scanning.
+            if (JsonComputedColumnMatcher.IsJsonPathFunction(functionCall.FunctionName.Value)
+                && ResolveIndexInfo(named.Ref).TableQualifiedName is { } jsonTable
+                && JsonComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, jsonTable, named.Name, functionCall))
+            {
+                return;
+            }
+
+            if (IsCaseFoldFunction(functionCall.FunctionName.Value))
+            {
+                AddCaseFold(functionCall, named);
+                return;
+            }
+
+            // ISNULL(col, x) on a NOT NULL column is a false positive the blanket
+            // function-wrap rule doesn't catch (docs/detection-checklist.md Tier 1
+            // "Type-aware upgrade of the sargability stream" #1): oracle-verified the
+            // optimizer proves ISNULL(NOT-NULL-col, x) = col and simplifies the wrap away
+            // entirely, REGARDLESS of the default argument's own type (even a widening
+            // int-column-vs-bigint-default default still seeks) - so this is a nullability
+            // fact alone, never a type question. COALESCE gets no equivalent suppression:
+            // oracle-verified separately that COALESCE(NOT-NULL-col, x) still scans even
+            // with no type conversion at all - COALESCE is CASE syntax sugar and the
+            // optimizer never folds it the way it folds ISNULL.
+            if (string.Equals(functionCall.FunctionName.Value, "ISNULL", StringComparison.OrdinalIgnoreCase)
+                && IsKnownNotNullColumn(named.Ref))
+            {
+                return;
+            }
+
+            // Named date-form rule (docs/detection-checklist.md Tier 1 "Type-aware
+            // upgrade of the sargability stream" #2) - oracle-verified structurally
+            // identical to case-folding: always forces a scan, no type/verdict question,
+            // only the computed-column precision guard can suppress it.
+            if (IsDateFunction(functionCall.FunctionName.Value))
+            {
+                if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } dateTable
+                    && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, dateTable, functionCall))
+                {
+                    return;
+                }
+
+                Add(SargabilityFindingKind.DateFunctionOnColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
+                return;
+            }
+
+            Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
         }
 
         private static string WrapConstructName(ScalarExpression expression) => expression switch

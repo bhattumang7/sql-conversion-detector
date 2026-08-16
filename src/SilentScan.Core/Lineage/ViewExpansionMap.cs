@@ -84,34 +84,15 @@ public static class ViewExpansionMap
 
         foreach (var qualifiedName in referencedNames)
         {
-            if (context.ViewsByName.TryGetValue(qualifiedName, out var childView))
-            {
-                var childOrigin = Resolve(childView, context);
-                if (childOrigin is null)
-                {
-                    partiallyUnexpanded = true;
-                    continue;
-                }
+            var (refBaseTables, refPartiallyUnexpanded, child) = ResolveReference(qualifiedName, context);
+            baseTables.UnionWith(refBaseTables);
+            partiallyUnexpanded |= refPartiallyUnexpanded;
 
-                baseTables.UnionWith(childOrigin.BaseTables);
-                partiallyUnexpanded |= childOrigin.PartiallyUnexpanded;
-                if (childOrigin.Depth > deepestChildDepth)
-                {
-                    deepestChildDepth = childOrigin.Depth;
-                    deepestChildName = qualifiedName;
-                    deepestChildOrigin = childOrigin;
-                }
-            }
-            else if (context.Catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table or CatalogTableKind.ClrTableValuedFunction })
+            if (child is { } named && named.Origin.Depth > deepestChildDepth)
             {
-                baseTables.Add(qualifiedName);
-            }
-            else
-            {
-                // Unresolved: an MSTVF fence, a dynamic/unmodeled construct, or a temp
-                // table/table variable - none contribute a countable base table, and none can
-                // be expanded further. Never guessed at.
-                partiallyUnexpanded = true;
+                deepestChildDepth = named.Origin.Depth;
+                deepestChildName = named.Name;
+                deepestChildOrigin = named.Origin;
             }
         }
 
@@ -124,5 +105,30 @@ public static class ViewExpansionMap
         context.InProgress.Remove(view.QualifiedName);
         context.Resolved[view.QualifiedName] = result;
         return result;
+    }
+
+    private static readonly IReadOnlySet<string> NoBaseTables = new HashSet<string>();
+
+    /// <summary>One referenced name's own contribution to the parent's aggregate: its transitive base tables, whether it (or anything below it) is partially unexpanded, and - only for a child view/TVF reference, never a base table - its own resolved origin, so the caller can track the deepest child without re-deriving depth here.</summary>
+    private static (IReadOnlySet<string> BaseTables, bool PartiallyUnexpanded, (string Name, ViewExpansionOrigin Origin)? Child) ResolveReference(
+        string qualifiedName, ResolutionContext context)
+    {
+        if (context.ViewsByName.TryGetValue(qualifiedName, out var childView))
+        {
+            var childOrigin = Resolve(childView, context);
+            return childOrigin is null
+                ? (NoBaseTables, true, null)
+                : (childOrigin.BaseTables, childOrigin.PartiallyUnexpanded, (qualifiedName, childOrigin));
+        }
+
+        if (context.Catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table or CatalogTableKind.ClrTableValuedFunction })
+        {
+            return (new HashSet<string>(StringComparer.OrdinalIgnoreCase) { qualifiedName }, false, null);
+        }
+
+        // Unresolved: an MSTVF fence, a dynamic/unmodeled construct, or a temp table/table
+        // variable - none contribute a countable base table, and none can be expanded further.
+        // Never guessed at.
+        return (NoBaseTables, true, null);
     }
 }

@@ -77,26 +77,6 @@ public static class ForcedSerialScanner
             base.ExplicitVisit(node);
         }
 
-        private void InspectDataModification(DataModificationSpecification spec)
-        {
-            var targetVariable = TableVariableName(spec.Target);
-            var outputVariable = TableVariableName(spec.OutputIntoClause?.IntoTable);
-            var variableName = targetVariable ?? outputVariable;
-            if (variableName is null)
-            {
-                return;
-            }
-
-            Findings.Add(new ForcedSerialFinding(
-                ForcedSerialFindingKind.TableVariableModification, sourcePath, sourcePath,
-                spec.StartLine, spec.StartColumn, DetailText: variableName));
-        }
-
-        private string? TableVariableName(TableReference? tableReference) =>
-            tableReference is VariableTableReference variableRef && _tableVariableNames.Contains(variableRef.Variable.Name)
-                ? variableRef.Variable.Name
-                : null;
-
         public override void ExplicitVisit(DeclareCursorStatement node)
         {
             InspectCursorDefinition(node.CursorDefinition, node.Name.Value);
@@ -111,30 +91,6 @@ public static class ForcedSerialScanner
             }
 
             base.ExplicitVisit(node);
-        }
-
-        private void InspectCursorDefinition(CursorDefinition definition, string cursorName)
-        {
-            var kinds = definition.Options.Select(o => o.OptionKind).ToHashSet();
-
-            // Oracle-confirmed (NonParallelPlanReason="NoParallelFastForwardCursor"): FAST_FORWARD
-            // itself, or the equivalent bare FORWARD_ONLY READ_ONLY lacking an explicit
-            // STATIC/KEYSET/DYNAMIC, forces the cursor's own defining query serial - the OPPOSITE
-            // of "cursor without LOCAL FAST_FORWARD" as a risk shape. STATIC/KEYSET/DYNAMIC
-            // cursors (with or without FORWARD_ONLY/READ_ONLY) were oracle-checked and do NOT
-            // trigger this mechanism, so they are never matched here.
-            var hasExplicitType = kinds.Contains(CursorOptionKind.Static) || kinds.Contains(CursorOptionKind.Keyset) || kinds.Contains(CursorOptionKind.Dynamic);
-            var fires = kinds.Contains(CursorOptionKind.FastForward)
-                || (kinds.Contains(CursorOptionKind.ForwardOnly) && kinds.Contains(CursorOptionKind.ReadOnly) && !hasExplicitType);
-
-            if (!fires)
-            {
-                return;
-            }
-
-            Findings.Add(new ForcedSerialFinding(
-                ForcedSerialFindingKind.FastForwardCursor, sourcePath, sourcePath,
-                definition.StartLine, definition.StartColumn, DetailText: cursorName));
         }
 
         public override void ExplicitVisit(QuerySpecification node)
@@ -175,6 +131,50 @@ public static class ForcedSerialScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private void InspectDataModification(DataModificationSpecification spec)
+        {
+            var targetVariable = TableVariableName(spec.Target);
+            var outputVariable = TableVariableName(spec.OutputIntoClause?.IntoTable);
+            var variableName = targetVariable ?? outputVariable;
+            if (variableName is null)
+            {
+                return;
+            }
+
+            Findings.Add(new ForcedSerialFinding(
+                ForcedSerialFindingKind.TableVariableModification, sourcePath, sourcePath,
+                spec.StartLine, spec.StartColumn, DetailText: variableName));
+        }
+
+        private string? TableVariableName(TableReference? tableReference) =>
+            tableReference is VariableTableReference variableRef && _tableVariableNames.Contains(variableRef.Variable.Name)
+                ? variableRef.Variable.Name
+                : null;
+
+        private void InspectCursorDefinition(CursorDefinition definition, string cursorName)
+        {
+            var kinds = definition.Options.Select(o => o.OptionKind).ToHashSet();
+
+            // Oracle-confirmed (NonParallelPlanReason="NoParallelFastForwardCursor"): FAST_FORWARD
+            // itself, or the equivalent bare FORWARD_ONLY READ_ONLY lacking an explicit
+            // STATIC/KEYSET/DYNAMIC, forces the cursor's own defining query serial - the OPPOSITE
+            // of "cursor without LOCAL FAST_FORWARD" as a risk shape. STATIC/KEYSET/DYNAMIC
+            // cursors (with or without FORWARD_ONLY/READ_ONLY) were oracle-checked and do NOT
+            // trigger this mechanism, so they are never matched here.
+            var hasExplicitType = kinds.Contains(CursorOptionKind.Static) || kinds.Contains(CursorOptionKind.Keyset) || kinds.Contains(CursorOptionKind.Dynamic);
+            var fires = kinds.Contains(CursorOptionKind.FastForward)
+                || (kinds.Contains(CursorOptionKind.ForwardOnly) && kinds.Contains(CursorOptionKind.ReadOnly) && !hasExplicitType);
+
+            if (!fires)
+            {
+                return;
+            }
+
+            Findings.Add(new ForcedSerialFinding(
+                ForcedSerialFindingKind.FastForwardCursor, sourcePath, sourcePath,
+                definition.StartLine, definition.StartColumn, DetailText: cursorName));
         }
     }
 }

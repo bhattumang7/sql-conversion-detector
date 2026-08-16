@@ -233,6 +233,11 @@ try {
     #    project (SilentScan.Tests) is auto-detected as tests.
     #  - sonar.scanner.scanAll=true is what pulls non-MSBuild files (fixture
     #    .sql, docker-compose.yml, shell scripts) in alongside the compiled C#.
+    #  - tests/SilentScan.Tests/fixtures/**/*.sql is excluded outright: this
+    #    server has no T-SQL analyzer, so scanAll hands every fixture to the
+    #    Oracle PL/SQL plugin instead, which flags real T-SQL constructs
+    #    (VARCHAR, SELECT *, ...) as Oracle-dialect violations - noise against
+    #    a dialect these files were never written for, not a real finding.
     $beginArgs = @(
         "/k:$ProjectKey"
         "/n:SilentScan"
@@ -240,7 +245,7 @@ try {
         "/d:sonar.token=$Token"
         "/d:sonar.scanner.scanAll=true"
         "/d:sonar.sourceEncoding=UTF-8"
-        "/d:sonar.exclusions=**/bin/**,**/obj/**,**/corpus/**,**/.sonarqube/**,**/*.scanbak"
+        "/d:sonar.exclusions=**/bin/**,**/obj/**,**/corpus/**,**/.sonarqube/**,**/*.scanbak,**/tests/SilentScan.Tests/fixtures/**/*.sql"
     )
     if ($WithCoverage) {
         $beginArgs += @(

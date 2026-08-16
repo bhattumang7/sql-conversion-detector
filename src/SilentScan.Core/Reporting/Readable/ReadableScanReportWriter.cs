@@ -25,6 +25,15 @@ public static class ReadableScanReportWriter
     /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string ColumnHeader = "Column";
 
+    /// <summary>Shared across every finding table with an index-existence column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string IndexedHeader = "Indexed";
+
+    /// <summary>Shared across every finding table with a free-text detail column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string DetailHeader = "Detail";
+
+    /// <summary>Shared across every constraint-table header - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string ConstraintHeader = "Constraint";
+
     /// <summary>Shared across every "we don't have a name for this" fallback string.</summary>
     private const string UnknownDisplay = "unknown";
 
@@ -216,7 +225,7 @@ public static class ReadableScanReportWriter
         }
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Column type", "Compared with", "Indexed", "Introduced by"],
+            [WhereHeader, ColumnHeader, "Column type", "Compared with", IndexedHeader, "Introduced by"],
             [.. findings.Select(f => TypedRow(f, pathBase))]);
     }
 
@@ -346,7 +355,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{Tier1Title(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(Tier1Explanation(group.Key));
             yield return new ReadableBlock.Table(
-                [WhereHeader, ColumnHeader, "Indexed", "Detail"],
+                [WhereHeader, ColumnHeader, IndexedHeader, DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
@@ -412,7 +421,7 @@ public static class ReadableScanReportWriter
 
             yield return new ReadableBlock.Heading(level + 1, $"{TvfFenceTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Referenced", "Fence function", "Depth", "Origin", "Detail"],
+                [WhereHeader, "Referenced", "Fence function", "Depth", "Origin", DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
@@ -459,7 +468,7 @@ public static class ReadableScanReportWriter
 
             yield return new ReadableBlock.Heading(level + 1, $"{ScalarUdfTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Function", "Context", "Inlineable", "Depth", "Origin", "Detail"],
+                [WhereHeader, "Function", "Context", "Inlineable", "Depth", "Origin", DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
@@ -507,7 +516,7 @@ public static class ReadableScanReportWriter
             "A conversion seed on a real foreign-key relationship: every JOIN that follows it risks the same column-side conversion the implicit-conversion stream classifies, whether or not any scanned query actually joins on it yet. Read live from sys.foreign_key_columns - always empty for a file-mode scan.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Constraint", "Parent column", "Referenced column", "Collation differs"],
+            [WhereHeader, ConstraintHeader, "Parent column", "Referenced column", "Collation differs"],
             [.. report.CrossTableTypeDriftFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -687,7 +696,7 @@ public static class ReadableScanReportWriter
             "The classic '(Col = @p OR @p IS NULL)' optional-filter idiom (Erland Sommarskog, \"Dynamic Search Conditions in T-SQL\") - one cached plan must stay correct for every NULL/non-NULL state of @p, typically forcing a scan regardless of what value a given call actually passes. Not a claim about what a specific already-compiled plan is doing right now - a structural risk report. Suppressed entirely (not merely downgraded) when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, both of which let the optimizer see the real value on each call and fully resolve this risk. Rows on a confirmed-indexed column are listed first.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Parameter", "Indexed"],
+            [WhereHeader, ColumnHeader, "Parameter", IndexedHeader],
             [.. report.CatchAllPredicateFindings
                 .OrderByDescending(f => f.Indexed)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
@@ -713,7 +722,7 @@ public static class ReadableScanReportWriter
             "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value came from a DECLARE'd local variable, not a formal parameter, so it is invisible to the cardinality estimator (Microsoft's own documented behavior - the optimizer falls back to the column's average-density statistic instead of a value-specific estimate). Whether a bad estimate actually matters depends on data-distribution facts this pass cannot see - listed for awareness, not as a proven defect. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, since a per-execution recompile lets the optimizer see the variable's real current value.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Variable", "Operator", "Indexed"],
+            [WhereHeader, ColumnHeader, "Variable", "Operator", IndexedHeader],
             [.. report.LocalVariablePredicateFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -736,7 +745,7 @@ public static class ReadableScanReportWriter
             "'x NOT IN (SELECT y FROM t)' where y is a nullable column - a three-valued-logic correctness trap, not a plan-shape one. The instant the subquery produces one NULL row, the whole predicate evaluates to UNKNOWN for every outer row, so the query silently returns ZERO rows instead of the expected anti-join result - independent of any index or plan choice. Never fires when the subquery column is NOT NULL, or when the subquery already filters it with an unconditional 'WHERE y IS NOT NULL'.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Outer column", "Subquery column", "Indexed"],
+            [WhereHeader, "Outer column", "Subquery column", IndexedHeader],
             [.. report.NotInNullableSubqueryFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -788,7 +797,7 @@ public static class ReadableScanReportWriter
 
             yield return new ReadableBlock.Heading(level + 1, $"{ForcedSerialTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Module", "Detail"],
+                [WhereHeader, "Module", DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -817,7 +826,7 @@ public static class ReadableScanReportWriter
             "A constraint the engine itself does not trust - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement (the default there, the opposite of the default on the original ADD CONSTRAINT). The optimizer forfeits join-elimination and other constraint-based rewrites for every query touching it, and the constraint may not actually hold over existing rows. A disabled constraint is not reported - it's openly off, not silently weaker than it looks.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Constraint", "Table", "Kind"],
+            [WhereHeader, ConstraintHeader, "Table", "Kind"],
             [.. report.UntrustedConstraintFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -839,7 +848,7 @@ public static class ReadableScanReportWriter
             "A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action - a single DML statement against the referenced table silently touches every dependent row in the child table too, with no visible predicate change at the call site. Purely informational: this states the fact, not a proven cost - how many rows and how often depends on data this pass cannot see.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Constraint", "Parent", "Referenced", "Delete action", "Update action"],
+            [WhereHeader, ConstraintHeader, "Parent", "Referenced", "Delete action", "Update action"],
             [.. report.CascadingForeignKeyFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -974,7 +983,7 @@ public static class ReadableScanReportWriter
             "INSERT INTO #temp EXEC OtherProc binds the executed proc's result set to #temp's own declared columns purely by POSITION, live-verified against the executed proc's real, engine-described shape (sys.dm_exec_describe_first_result_set, compile-only). A column-count mismatch raises a hard runtime error (Msg 213/8164) every time the statement runs. A column-type mismatch at a matching position risks the same class of silent data loss WriteLossFinding already reports for INSERT/UPDATE assignments - live-mode only, since the verdict depends on a real database round trip.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.TempTableExecShapeFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -997,7 +1006,7 @@ public static class ReadableScanReportWriter
             "A CORRECTNESS and plan defect, not a lost seek: this join equates some but not all of a real composite foreign key's column pairs, and the omitted column(s) are not covered anywhere else in the statement - a parent row can match more than one child row than the declared relationship allows, silently multiplying rows through the join. Reported at MEDIUM confidence by default: a narrower join can be a genuine, deliberate fan-out (e.g. joining every historical revision), which static analysis alone cannot always tell apart from a forgotten column - review each one rather than treating it as a certain bug.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Constraint", "Tables", "Matched columns", "Missing columns"],
+            [WhereHeader, ConstraintHeader, "Tables", "Matched columns", "Missing columns"],
             [.. report.PartialCompositeForeignKeyJoinFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1032,12 +1041,20 @@ public static class ReadableScanReportWriter
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                     f.ModuleQualifiedName,
-                    f.TouchedObjectQualifiedName is { } touched
-                        ? $"{touched}{(f.TouchedIndexName is { } idx ? $".{idx}" : string.Empty)}"
-                        : UnknownDisplay,
+                    DescribeTouchedObject(f.TouchedObjectQualifiedName, f.TouchedIndexName),
                     f.TouchedIsIndexedView ? "indexed view" : "filtered index",
                 })]);
         }
+    }
+
+    private static string DescribeTouchedObject(string? qualifiedName, string? indexName)
+    {
+        if (qualifiedName is null)
+        {
+            return UnknownDisplay;
+        }
+
+        return indexName is { } idx ? $"{qualifiedName}.{idx}" : qualifiedName;
     }
 
     private static string SetOptionTitle(SetOptionFindingKind kind) => kind switch

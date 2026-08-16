@@ -47,12 +47,9 @@ public static class MultiReferencedCteScanner
                 var name = cte.ExpressionName.Value;
 
                 var referenceLines = CollectReferences(mainBody, name);
-                foreach (var other in ctes)
+                foreach (var other in ctes.Where(other => !ReferenceEquals(other, cte)))
                 {
-                    if (!ReferenceEquals(other, cte))
-                    {
-                        referenceLines.AddRange(CollectReferences(other.QueryExpression, name));
-                    }
+                    referenceLines.AddRange(CollectReferences(other.QueryExpression, name));
                 }
 
                 if (referenceLines.Count >= 2)

@@ -370,14 +370,6 @@ public static class TypedPredicateExtractor
             _cteStack.Pop();
         }
 
-        /// <summary>Shared by every top-level statement kind that can carry <c>OPTION (...)</c> query hints - a subquery/derived table is never its own SelectStatement/UpdateStatement/etc in ScriptDOM's object model, so this never needs a stack.</summary>
-        private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
-        {
-            var previous = _statementHasOptionRecompile;
-            _statementHasOptionRecompile = hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
-            return previous;
-        }
-
         /// <summary>
         /// MergeSpecification's ON clause (SearchCondition) is a genuine filter position - a raw
         /// BooleanExpression, not wrapped in a WhereClause node the way SELECT/UPDATE/DELETE's
@@ -553,6 +545,14 @@ public static class TypedPredicateExtractor
         public override void ExplicitVisit(CoalesceExpression node) => EnterOperandPosition(node);
 
         public override void ExplicitVisit(NullIfExpression node) => EnterOperandPosition(node);
+
+        /// <summary>Shared by every top-level statement kind that can carry <c>OPTION (...)</c> query hints - a subquery/derived table is never its own SelectStatement/UpdateStatement/etc in ScriptDOM's object model, so this never needs a stack.</summary>
+        private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
+        {
+            var previous = _statementHasOptionRecompile;
+            _statementHasOptionRecompile = hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
+            return previous;
+        }
 
         /// <summary>
         /// Suspends the seekable position (and negation) while walking a scalar-expression

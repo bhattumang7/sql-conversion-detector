@@ -71,29 +71,6 @@ public static class CatchAllPredicateScanner
 
         public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitProcedureOrFunctionBody([], hasWithRecompile: false, node);
 
-        private void VisitProcedureOrFunctionBody(IList<ProcedureParameter> parameters, bool hasWithRecompile, TSqlFragment node)
-        {
-            var previousFormalParameterNames = new HashSet<string>(_formalParameterNames, StringComparer.OrdinalIgnoreCase);
-            var previousProcedureHasWithRecompile = _procedureHasWithRecompile;
-
-            _formalParameterNames.Clear();
-            foreach (var parameter in parameters)
-            {
-                _formalParameterNames.Add(parameter.VariableName.Value);
-            }
-
-            _procedureHasWithRecompile = hasWithRecompile;
-            node.AcceptChildren(this);
-
-            _formalParameterNames.Clear();
-            foreach (var name in previousFormalParameterNames)
-            {
-                _formalParameterNames.Add(name);
-            }
-
-            _procedureHasWithRecompile = previousProcedureHasWithRecompile;
-        }
-
         public override void ExplicitVisit(SelectStatement node)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
@@ -150,6 +127,29 @@ public static class CatchAllPredicateScanner
             // resolution (FromScopeResolver.ResolveForMerge) and raw SearchCondition shape differ
             // enough from every other statement kind that covering it precisely needs its own
             // dedicated work - out of v1 scope, a known limitation, not silently missed.
+        }
+
+        private void VisitProcedureOrFunctionBody(IList<ProcedureParameter> parameters, bool hasWithRecompile, TSqlFragment node)
+        {
+            var previousFormalParameterNames = new HashSet<string>(_formalParameterNames, StringComparer.OrdinalIgnoreCase);
+            var previousProcedureHasWithRecompile = _procedureHasWithRecompile;
+
+            _formalParameterNames.Clear();
+            foreach (var parameter in parameters)
+            {
+                _formalParameterNames.Add(parameter.VariableName.Value);
+            }
+
+            _procedureHasWithRecompile = hasWithRecompile;
+            node.AcceptChildren(this);
+
+            _formalParameterNames.Clear();
+            foreach (var name in previousFormalParameterNames)
+            {
+                _formalParameterNames.Add(name);
+            }
+
+            _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
         private FromScopeResolver.ResolutionContext ResolutionContext() =>

@@ -41,41 +41,51 @@ public static class ModuleReachableObjectWalker
         var visitedViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var rawName in collector.QualifiedNames)
         {
-            var qualifiedName = catalog.ResolveSynonymName(rawName);
-
-            if (catalog.IsIndexedView(qualifiedName))
+            if (TryInspectQualifiedName(catalog.ResolveSynonymName(rawName), catalog, lineage, visitedViews, out touch))
             {
-                touch = new Touch(qualifiedName, IndexName: null, IsIndexedView: true);
+                return true;
+            }
+        }
+
+        touch = default;
+        return false;
+    }
+
+    private static bool TryInspectQualifiedName(string qualifiedName, DatabaseCatalog catalog, LineageCatalog lineage, HashSet<string> visitedViews, out Touch touch)
+    {
+        if (catalog.IsIndexedView(qualifiedName))
+        {
+            touch = new Touch(qualifiedName, IndexName: null, IsIndexedView: true);
+            return true;
+        }
+
+        if (catalog.Find(qualifiedName) is { } table)
+        {
+            if (table.Indexes.FirstOrDefault(i => i.IsFiltered) is { } filteredIndex)
+            {
+                touch = new Touch(qualifiedName, filteredIndex.Name, IsIndexedView: false);
                 return true;
             }
 
-            if (catalog.Find(qualifiedName) is { } table)
-            {
-                if (table.Indexes.FirstOrDefault(i => i.IsFiltered) is { } filteredIndex)
-                {
-                    touch = new Touch(qualifiedName, filteredIndex.Name, IsIndexedView: false);
-                    return true;
-                }
+            touch = default;
+            return false;
+        }
 
-                continue;
-            }
+        if (!visitedViews.Add(qualifiedName) || !lineage.AllRelations.TryGetValue(qualifiedName, out var relation))
+        {
+            touch = default;
+            return false;
+        }
 
-            if (!visitedViews.Add(qualifiedName) || !lineage.AllRelations.TryGetValue(qualifiedName, out var relation))
-            {
-                continue;
-            }
+        var nested = relation.Columns
+            .SelectMany(column => ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(column.Provenance))
+            .Select(baseColumn => (baseColumn.TableQualifiedName, Index: catalog.Find(baseColumn.TableQualifiedName)?.Indexes.FirstOrDefault(i => i.IsFiltered)))
+            .FirstOrDefault(x => x.Index is not null);
 
-            foreach (var column in relation.Columns)
-            {
-                foreach (var baseColumn in ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(column.Provenance))
-                {
-                    if (catalog.Find(baseColumn.TableQualifiedName)?.Indexes.FirstOrDefault(i => i.IsFiltered) is { } nestedFilteredIndex)
-                    {
-                        touch = new Touch(baseColumn.TableQualifiedName, nestedFilteredIndex.Name, IsIndexedView: false);
-                        return true;
-                    }
-                }
-            }
+        if (nested.Index is not null)
+        {
+            touch = new Touch(nested.TableQualifiedName, nested.Index.Name, IsIndexedView: false);
+            return true;
         }
 
         touch = default;
