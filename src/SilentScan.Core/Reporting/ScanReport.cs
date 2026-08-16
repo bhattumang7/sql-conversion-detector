@@ -20,6 +20,7 @@ public sealed record ScanReport(
     IReadOnlyList<MaxTypedColumnFinding> MaxTypedColumnFindings,
     IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
     IReadOnlyList<PartialCompositeForeignKeyJoinFinding> PartialCompositeForeignKeyJoinFindings,
+    IReadOnlyList<SetOptionFinding> SetOptionFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -50,7 +51,9 @@ public sealed record ScanReport(
     /// <see cref="MaxTypedColumnFindings"/> and <see cref="OversizedParameterFindings"/> streams
     /// (docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters"). Bumped to 12
     /// for the new <see cref="PartialCompositeForeignKeyJoinFindings"/> stream (docs/detection-
-    /// checklist.md Tier 1 "Join predicate incomplete vs. the backing foreign key").
+    /// checklist.md Tier 1 "Join predicate incomplete vs. the backing foreign key"). Bumped to 13
+    /// for the new <see cref="SetOptionFindings"/> stream (docs/detection-checklist.md Tier 1
+    /// "SET options that silently disable plan features").
     /// </summary>
-    public const int CurrentSchemaVersion = 12;
+    public const int CurrentSchemaVersion = 13;
 }

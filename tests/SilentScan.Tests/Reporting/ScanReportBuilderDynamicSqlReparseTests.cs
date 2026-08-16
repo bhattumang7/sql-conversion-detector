@@ -76,18 +76,18 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // OUTPUT-summary loop needed. Measured directly: materializing once (the fix) enumerates
         // the source a small, round-count-independent number of times - one per full-corpus phase
         // (7 at the baseline this test originally locked in, +2 for the MSTVF-as-fence stream's
-        // own two full-corpus passes: mapping which views/TVFs inherit a fence, then scanning
-        // each file for one, +1 for the partial-composite-FK-join stream's own dedicated pass
-        // (docs/detection-checklist.md Tier 1 "Join predicate incomplete vs. the backing foreign
-        // key") - the same "one dedicated pass per stream" shape every other stage in this method
-        // already uses); reverting to re-enumerating per round pushes this fixture's 3 rounds well
-        // past that. 11 sits strictly between the two (measured 11 with every fix/stream landed to
-        // date), so this fails the moment the loop stops reusing its one materialization and
-        // starts scaling with round count again, while still tolerating a future +/-1 shift from
-        // unrelated changes elsewhere in the method (e.g. the next new full-corpus stream).
+        // own two full-corpus passes, +1 for the partial-composite-FK-join stream, +1 for the
+        // SET-option stream (docs/detection-checklist.md Tier 1 "SET options that silently
+        // disable plan features") - the same "one dedicated pass per stream" shape every other
+        // stage in this method already uses); reverting to re-enumerating per round pushes this
+        // fixture's 3 rounds well past that. 12 sits strictly between the two (measured 12 with
+        // every fix/stream landed to date), so this fails the moment the loop stops reusing its
+        // one materialization and starts scaling with round count again, while still tolerating a
+        // future +/-1 shift from unrelated changes elsewhere in the method (e.g. the next new
+        // full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 11,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 11 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 12,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 12 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

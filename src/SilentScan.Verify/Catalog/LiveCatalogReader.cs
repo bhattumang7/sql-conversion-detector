@@ -102,6 +102,11 @@ public sealed class LiveCatalogReader
             catalog.AddForeignKey(foreignKey);
         }
 
+        foreach (var (qualifiedName, indexes) in await ReadIndexedViewsAsync(connection, cancellationToken))
+        {
+            catalog.AddIndexedView(qualifiedName, indexes);
+        }
+
         return catalog;
     }
 
@@ -778,4 +783,84 @@ public sealed class LiveCatalogReader
         bool IsDisabled,
         List<(int Ordinal, string Name)> KeyColumns,
         List<string> IncludedColumns);
+
+    /// <summary>
+    /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead
+    /// of <c>sys.tables</c> (docs/detection-checklist.md Tier 1 "SET options that silently
+    /// disable plan features" - both the QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT and ARITHABORT
+    /// sub-rules need to know whether a query touches an indexed view). A view's own real
+    /// clustered index (created via <c>CREATE UNIQUE CLUSTERED INDEX ... ON dbo.SomeView</c>) is
+    /// the one thing that makes it "indexed" at all - an ordinary view has no
+    /// <c>sys.indexes</c> row of its own.
+    /// </summary>
+    private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadIndexedViewsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, v.name AS view_name, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
+                   i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
+                   ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name
+            FROM sys.indexes i
+            JOIN sys.views v ON v.object_id = i.object_id
+            JOIN sys.schemas s ON s.schema_id = v.schema_id
+            JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE v.is_ms_shipped = 0 AND i.type_desc <> 'HEAP'
+            ORDER BY s.name, v.name, i.index_id, ic.index_column_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var rowsByIndex = new Dictionary<(string QualifiedName, int IndexId), IndexRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var indexId = reader.GetInt32(2);
+            var key = (qualifiedName, indexId);
+
+            if (!rowsByIndex.TryGetValue(key, out var row))
+            {
+                var indexName = await reader.IsDBNullAsync(3, cancellationToken) ? null : reader.GetString(3);
+                row = new IndexRow(
+                    Name: indexName,
+                    TypeDesc: reader.GetString(4),
+                    IsUnique: reader.GetBoolean(5),
+                    IsPrimaryKey: reader.GetBoolean(6),
+                    IsUniqueConstraint: reader.GetBoolean(7),
+                    HasFilter: reader.GetBoolean(8),
+                    IsDisabled: reader.GetBoolean(9),
+                    KeyColumns: [],
+                    IncludedColumns: []);
+                rowsByIndex[key] = row;
+            }
+
+            var isIncluded = reader.GetBoolean(11);
+            var columnName = reader.GetString(13);
+            if (isIncluded)
+            {
+                row.IncludedColumns.Add(columnName);
+            }
+            else
+            {
+                row.KeyColumns.Add((reader.GetByte(10), columnName));
+            }
+        }
+
+        var indexesByView = new Dictionary<string, IReadOnlyList<CatalogIndex>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in rowsByIndex.GroupBy(kv => kv.Key.QualifiedName, StringComparer.OrdinalIgnoreCase))
+        {
+            indexesByView[group.Key] = [.. group.Select(kv => new CatalogIndex(
+                Name: kv.Value.Name,
+                Kind: ClassifyIndexKind(kv.Value),
+                IsUnique: kv.Value.IsUnique,
+                KeyColumns: [.. kv.Value.KeyColumns.OrderBy(k => k.Ordinal).Select(k => k.Name)],
+                IncludedColumns: kv.Value.IncludedColumns,
+                IsFiltered: kv.Value.HasFilter,
+                IsColumnstore: kv.Value.TypeDesc.Contains("COLUMNSTORE", StringComparison.OrdinalIgnoreCase),
+                IsDisabled: kv.Value.IsDisabled))];
+        }
+
+        return indexesByView;
+    }
 }

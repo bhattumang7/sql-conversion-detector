@@ -24,11 +24,40 @@ public sealed class PlanXmlCapture
     /// Compiles <paramref name="probeStatement"/> (a statement WE authored, never corpus
     /// code) against <paramref name="database"/> and returns its estimated plan XML.
     /// </summary>
-    public async Task<string> CaptureAsync(
-        string database, string probeStatement, CancellationToken cancellationToken = default)
+    public Task<string> CaptureAsync(string database, string probeStatement, CancellationToken cancellationToken = default) =>
+        CaptureCoreAsync(database, probeStatement, sessionSetStatements: null, cancellationToken);
+
+    /// <summary>
+    /// Same as <see cref="CaptureAsync(string, string, CancellationToken)"/>, but pins one or
+    /// more session-level SET options - e.g. <c>SET ARITHABORT OFF;</c>/<c>SET NUMERIC_ROUNDABORT
+    /// ON;</c> - BEFORE compilation, the same way an application connection's own defaults would
+    /// (docs/detection-checklist.md Tier 1 "SET options that silently disable plan features").
+    /// Still entirely compile-only: these are ordinary session settings, not DML, and
+    /// SHOWPLAN_XML never returns rows either way - this never crosses into executing anything,
+    /// it only changes what the SAME compile-only probe compiles under. A separate overload
+    /// rather than an added optional parameter on the existing method, so every already-shipped
+    /// positional call site (<c>CaptureAsync(db, probe, cancellationToken)</c>) keeps compiling
+    /// unchanged.
+    /// </summary>
+    public Task<string> CaptureAsync(
+        string database, string probeStatement, IReadOnlyList<string> sessionSetStatements, CancellationToken cancellationToken = default) =>
+        CaptureCoreAsync(database, probeStatement, sessionSetStatements, cancellationToken);
+
+    private async Task<string> CaptureCoreAsync(
+        string database, string probeStatement, IReadOnlyList<string>? sessionSetStatements, CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(_options.BuildConnectionString(database));
         await connection.OpenAsync(cancellationToken);
+
+        if (sessionSetStatements is not null)
+        {
+            foreach (var setStatement in sessionSetStatements)
+            {
+                await using var setCommand = connection.CreateCommand();
+                setCommand.CommandText = setStatement;
+                await setCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
 
         // SET SHOWPLAN_XML ON/OFF must each be the only statement in their batch, so they
         // are sent as separate commands from the probe itself.

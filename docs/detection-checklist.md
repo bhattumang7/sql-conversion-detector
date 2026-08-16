@@ -611,6 +611,45 @@ All four sub-items wired end-to-end: `ScanReportBuilder` → `ScanReport`
 (`ReadableScanReportWriter`, summary rows + dedicated sections). Full test
 suite green (2,635 tests) after landing.
 
+### Under-length and length-defaulted string declarations
+The third leg of the parameter-sizing stream, and the only one still missing:
+the shipped pair covers *too wide* (`MAX`-typed, and declared longer than the
+column). Nothing covers *too narrow*, which is the strictly worse failure —
+it doesn't just widen an estimate, it silently truncates the compared value so
+the predicate matches the wrong rows or none at all. Found on an incumbent read
+where it exists only as a bare "declaration has no length" syntax check with no
+column awareness at all; resolved against the catalog it becomes a real
+finding, and the machinery is already built.
+
+- [ ] **`varchar`/`nvarchar`/`char`/`binary` declared with no length at all.**
+      T-SQL's default is length 1 in a `DECLARE` or a parameter declaration,
+      but 30 in `CAST`/`CONVERT` — two different defaults for the same
+      spelling, which is why this is so consistently written by accident.
+      Detection is syntax-only, but the finding only earns its place once the
+      catalog says what it is compared against, so it must be reported jointly
+      with the compared column, not standalone.
+- [ ] **Declared shorter than the compared column** (`varchar(10)` variable or
+      parameter vs a `varchar(100)` column) — the exact mirror of the shipped
+      "declared longer than the compared column" rule, and it should reuse that
+      rule's comparison and reporting path rather than starting a new one.
+      Two distinct consequences, and the finding should say which applies:
+      truncation of the compared value (correctness), and — where the value
+      flows into a `LIKE` pattern or a range bound — a changed range.
+- [ ] **Precision guards (mandatory):** don't fire when the declaration is
+      never actually compared to a catalog-typed column (the sizing is then
+      nobody's business but the author's); don't fire on assignment from a
+      source the pipeline can't type, report `Unknown` instead; treat
+      `sysname` and other aliases by resolving to the underlying type first.
+- [ ] Carry the standard schema — indexed?, depth, and origin (both the
+      declaration site and the predicate site, which are usually different
+      lines and sometimes different modules once dynamic SQL is involved).
+      Engine-version note: no version sensitivity; the defaults are the same
+      across every supported release, which makes this one of the cheaper
+      rules to state honestly.
+- [ ] Oracle: verdict-bearing only for the range-changing half; the truncation
+      half is syntactic-plus-catalog and ships fire/near-miss fixtures from
+      real, internet-sourced bugs.
+
 ### Join predicate incomplete vs. the backing foreign key — shipped
 Folded in from the incumbent-catalog read — "strongest single find" there,
 nobody resolves it properly.
@@ -677,33 +716,113 @@ nobody resolves it properly.
       the widely documented multi-tenant "always join on tenant_id too"
       SaaS bug class).
 
-### SET options that silently disable plan features
+### SET options that silently disable plan features — shipped (2 of the originally-proposed 3 kinds)
 Folded in from the incumbent-catalog read. Universally filed elsewhere as
 style hygiene; the actual consequence is plan-shape, and it's
 catalog-verifiable per module, not a guess.
 
-- [ ] `QUOTED_IDENTIFIER OFF` and `NUMERIC_ROUNDABORT ON` mean **indexed
-      views and filtered indexes cannot be used** by that module — catalog
-      flag (`sys.sql_modules.uses_quoted_identifier`; `NUMERIC_ROUNDABORT` has
-      no baked-in `sys.sql_modules` column the way `uses_quoted_identifier`/
-      `uses_ansi_nulls` do, so that half needs the same syntax-only `SET`
-      scan the ARITHABORT subrule below uses).
-- [ ] **`ARITHABORT` subrule** — structurally different from the two above:
-      purely a connection/session setting, invisible to catalog inspection of
-      the object itself (verified: not one of `sys.sql_modules`'s baked-in
-      settings). The only static surface is an explicit `SET ARITHABORT OFF`
-      statement in the T-SQL text (syntax-only, same shape as the
-      already-shipped FORCEPLAN/deprecated-SET-option rules). Real-world
-      story: SSMS defaults the setting ON, most driver/app connections
-      default it OFF, so the *same* proc gets different cached plans
-      depending on which kind of connection first compiled it — classic
-      "fast in SSMS, slow from the app." **Precision guard (mandatory):**
-      only fire when the module's dependency graph actually touches a table
-      with a filtered index or an indexed view (catalog-derivable via the
-      same dependency walk the schema-scan UDF stream already does) — an
-      explicit `SET ARITHABORT OFF` in a module that never touches either is
-      noise. Oracle: compile/connect with ARITHABORT ON vs OFF against a
-      query touching a filtered index and diff the plan or plan-cache entry.
+**Correction to this section's own premise, oracle-confirmed the hard way:**
+the checklist's original text (echoing a common but imprecise summary of
+Microsoft's own docs) claimed all of `ARITHABORT`/`NUMERIC_ROUNDABORT`/
+`QUOTED_IDENTIFIER` (and, further down, `ANSI_NULLS`/`ANSI_PADDING`/
+`ANSI_WARNINGS`/`CONCAT_NULL_YIELDS_NULL`) gate whether the optimizer can use
+an indexed view or filtered index at query-compile time. Probed directly
+against the Docker oracle (SQL Server 2022 Developer edition, real seeded
+data, both a real filtered index and a real indexed view, `SET
+SHOWPLAN_XML`-compile-only, no execution): **`QUOTED_IDENTIFIER OFF` and
+`NUMERIC_ROUNDABORT ON` both demonstrably degrade a filtered-index seek to a
+table scan and an indexed-view match to a base-table scan** — confirmed.
+**`ARITHABORT OFF` alone changed neither plan at all** — the filtered index
+still sought, the indexed view still matched, oracle-refuted directly, twice,
+with `PhysicalOp`/`IndexKind` checked precisely (not a raw substring match on
+the index's own name, which is a trap: an unused index's name still appears
+in `OptimizerStatsUsage/StatisticsInfo` even when it was never chosen as an
+access path — an earlier draft of this stream's own oracle test fell into
+exactly that trap and had to be corrected). **`ARITHABORT` is dropped from
+this stream entirely** rather than shipped as an unverified or
+false-positive-prone rule — CLAUDE.md's "precision beats recall everywhere."
+The remaining four options (`ANSI_NULLS`/`ANSI_PADDING`/`ANSI_WARNINGS`/
+`CONCAT_NULL_YIELDS_NULL`) were NOT probed this session — do not assume they
+behave like QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT OR like the falsified
+ARITHABORT; each needs its own direct oracle confirmation before being added,
+exactly the same way ARITHABORT's own assumption just failed one.
+
+- [x] `QUOTED_IDENTIFIER OFF` means **indexed views and filtered indexes
+      cannot be used** by that module — catalog flag
+      (`sys.sql_modules.uses_quoted_identifier`, already read by
+      `LiveModuleReader` for parsing purposes, now also registered per-module
+      on `DatabaseCatalog` via `AddModuleUsesQuotedIdentifier`/
+      `TryGetModuleUsesQuotedIdentifier`). Baked in wholesale at CREATE/ALTER
+      compile time — a mid-body `SET QUOTED_IDENTIFIER` statement has no
+      bearing on this; only the catalog-level flag does.
+- [x] `NUMERIC_ROUNDABORT ON` — same plan consequence, no baked-in
+      `sys.sql_modules` column (verified), so this half is a syntax-only
+      `SET NUMERIC_ROUNDABORT ON` scan of the module's own body
+      (`PredicateSetStatement`/`SetOptions.NumericRoundAbort` flag bit —
+      `SET NUMERIC_ROUNDABORT, ANSI_NULLS ON` is legal T-SQL sharing one
+      `IsOn`, handled via the flags bit test, not statement-per-option).
+- [x] **Precision guard (mandatory), shared by both kinds:** only fire when
+      the module's own body actually touches a table with a filtered index
+      or an indexed view — `ModuleReachableObjectWalker`
+      (`src/SilentScan.Core/Predicates/ModuleReachableObjectWalker.cs`) walks
+      every `NamedTableReference` in the module's own AST directly against
+      the catalog, plus transitively through a referenced VIEW'S own
+      containment for free from the already-resolved `LineageCatalog`
+      (`ColumnProvenanceAnalysis.FindUnderlyingBaseColumns`, no re-parsing of
+      the view's own body). **Known, deliberate scope limit:** does NOT
+      recurse through a called PROCEDURE's own body — `ScanReportBuilder`'s
+      own documented design never holds every module's parsed AST alive
+      simultaneously (live-mode reparse runs ~200x source text size), and a
+      proc-call-transitive walk would need exactly that. A false negative
+      here is the honest trade against a real, measured memory property of
+      this codebase's scan pipeline, not a gap silently claimed as covered.
+      New catalog registry needed for the indexed-view half: `DatabaseCatalog
+      .IndexedViews`/`.IsIndexedView`/`.AddIndexedView`, read live via
+      `LiveCatalogReader.ReadIndexedViewsAsync` (`sys.indexes` joined against
+      `sys.views` instead of `sys.tables` — indexed views were not read
+      anywhere in this codebase before this stream; a view is never a
+      `CatalogTable`, so this is a narrow side-registry like `ForeignKeys`,
+      not a `Tables` entry).
+      Oracle: `PlanXmlCapture` gained a `sessionSetStatements` overload (a
+      separate overload, not an added optional parameter, so every existing
+      positional call site keeps compiling unchanged) to pin a session-level
+      `SET` before compilation, still entirely compile-only.
+      Unit-tested (`SetOptionScannerTests`: direct/transitive-through-view
+      touch, catalog-flag-unknown never guesses, comma-separated option list,
+      short-circuit when nothing could trigger a finding). Oracle-tested
+      (`SetOptionOracleTests`: real seeded filtered index, `PhysicalOp`/
+      `IndexKind` checked directly for both settings, plus the ARITHABORT
+      exclusion kept as a permanent regression guard). Real coverage against
+      the local RM_ test database: **99 findings**, all
+      `QuotedIdentifierOffBlocksIndexedFeature` (0 `NUMERIC_ROUNDABORT ON`
+      occurrences found in that codebase's own text) — every one a module
+      compiled under legacy `QUOTED_IDENTIFIER OFF` that touches a real
+      filtered unique constraint.
+- [ ] **Complete the required-option set — not resumed this session.** The
+      four remaining candidates (`ANSI_NULLS`/`ANSI_PADDING`/
+      `ANSI_WARNINGS`/`CONCAT_NULL_YIELDS_NULL`) still need their own direct
+      oracle confirmation before landing as additional kinds on this stream —
+      do not assume any of them behaves like QUOTED_IDENTIFIER/
+      NUMERIC_ROUNDABORT or like the falsified ARITHABORT without checking.
+      `ANSI_NULLS` is a baked-in module setting (`sys.sql_modules
+      .uses_ansi_nulls`) if it does turn out to matter; the other three would
+      need the same in-body `SET` scan pattern `NUMERIC_ROUNDABORT` already
+      uses. Reuse `ModuleReachableObjectWalker` verbatim for the guard.
+- [ ] **`ANSI_PADDING OFF` as a second, independent finding — a comparison
+      seed, not just a plan-feature blocker.** With the option off, trailing
+      blanks are stripped on insert into `varchar`/`varbinary` columns, so a
+      column's stored values stop matching the padding semantics the rest of
+      the codebase assumes, and equality/`LIKE` comparisons against that column
+      change meaning. That is the same family as the shipped collation and
+      conversion work — a per-column property that silently changes what a
+      predicate does — and it is catalog-visible per column
+      (`sys.columns.is_ansi_padded`), not just per module. Scope it as: a
+      predicate or join comparing a non-ANSI-padded `varchar` column against a
+      padded one, or against a literal with trailing whitespace. Precision
+      guard: fixed-length and `nvarchar` columns are unaffected; only fire
+      where the catalog actually reports the column as not padded. Oracle:
+      compare plans and the `CONVERT_IMPLICIT`/residual-predicate shape for a
+      padded vs non-padded column pair.
 
 ---
 
@@ -761,8 +880,39 @@ catalog-verifiable per module, not a guess.
       references in the AST. Rarely covered anywhere; high precision.
 - [ ] Untrusted (WITH NOCHECK) FK/CHECK constraints — optimizer forfeits join
       elimination; pure catalog flag (`is_not_trusted`).
+      **Origin half, added from the incumbent read:** the catalog flag says a
+      constraint is untrusted but not *why*, and the answer is almost always a
+      re-enabling statement that omitted `WITH CHECK` (the default there is
+      `WITH NOCHECK`, the opposite of the default on the original `ADD
+      CONSTRAINT`). Since we already parse deployment/migration text, pair the
+      catalog finding with the statement that caused it wherever the scan can
+      see it — that turns an unactionable flag into a one-line fix, and origin
+      attribution is the schema every stream here already carries.
 - [ ] Cascading FK actions (ON DELETE/UPDATE CASCADE) — hidden serial
       multi-table work per DML; catalog-only, informational.
+- [ ] **Post-expansion join width.** Every surveyed tool counts tables in the
+      written `FROM`/`JOIN` list and warns past a threshold; that count is
+      meaningless when half the sources are views. The number that matters is
+      the *expanded* one — base tables after resolving views and inline TVFs
+      through the lineage pass — because that is what the optimizer actually
+      reorders, and past roughly a dozen joined relations it stops searching
+      exhaustively and takes a greedy plan. We are the only tool that can
+      compute it. Report the expanded count, the written count, and the chain
+      that inflated it; rank by the gap between the two, since a query that
+      *looks* like a three-table join and expands to twenty is the finding
+      nobody else can produce. Confirm the engine's actual reordering
+      thresholds against the oracle before quoting a number in output —
+      the "past a dozen" figure above is folklore until measured.
+- [ ] **`SELECT *` inside a view or inline TVF.** The bare `SELECT *` rule is
+      an explicit Tier 3 skip below and stays skipped — but the in-a-view case
+      is a different defect with a lineage consequence: the column list is
+      frozen at create time, so it silently disagrees with the base table
+      after any change (which is exactly the drift the live parity gate already
+      detects), and it forces every consumer to carry the full width whether or
+      not it selects from it, which is how a covering index stops covering.
+      Fire only at depth ≥ 1 and only when the consuming query selects a strict
+      subset of the expanded columns — that guard is what keeps it out of the
+      style-linting territory the plain rule lives in.
 
 ### Dynamic SQL quality (extends the existing dynamic-SQL pass)
 123 modules use `EXEC(...)`, 51 use sp_executesql locally.
@@ -854,6 +1004,27 @@ get an oracle fixture for the serial-plan consequence).
 - [ ] **`IF` statements containing queries inside a procedure** (folded in
       from the incumbent-catalog read) — estimation and recompile
       consequences; nobody frames it as a performance finding.
+- [ ] **Non-foldable nondeterministic intrinsic in a predicate** (`NEWID()`,
+      `RAND()`, `CRYPT_GEN_RANDOM()`). The incumbent framing of this is
+      "evaluated more than once, assign it to a variable" — a correctness
+      argument. The performance fact underneath is sharper and is ours: these
+      cannot be folded to a runtime constant, so a predicate containing one is
+      re-evaluated per row and cannot seek, whatever the index says.
+      **The precision this needs, and the reason it is admissible at all:**
+      the intrinsics that *are* runtime-constant — `GETDATE()`,
+      `SYSDATETIME()`, `CURRENT_TIMESTAMP` and friends — are folded once and
+      are completely harmless in the same position, and every syntax-only rule
+      in this space either lumps them together or ignores the distinction.
+      Fire only on the non-foldable set, weight by whether the predicate's
+      column is indexed (reuse the shipped index-existence weighting), and
+      state the boundary explicitly: the same function in the `SELECT` list or
+      in an `ORDER BY` is not this finding.
+- [ ] **Explicit-length audit of `CAST`/`CONVERT` to a string type**, as the
+      expression-side companion to the Tier 1 under-length item: an unsized
+      `CONVERT(varchar, …)` silently means 30 characters, which truncates
+      quietly at exactly the sizes real identifiers and dates land on. Only
+      worth doing after the Tier 1 declaration rule lands, since it shares that
+      rule's comparison and reporting path.
 
 ### Hint and index-shape catalog checks
 Folded in from the incumbent-catalog read (`detection-reference.md` Appendix
@@ -958,16 +1129,89 @@ doing before the study can make certain public claims.
   Sort per partition), catalog + syntax detectable, but scoped as an
   index-advisor recommendation rather than a query-defect finding; revisit if
   the tool's scope ever grows to include index suggestions.
+- **The maintainability and correctness bulk of the paid-tier T-SQL analyzer
+  read at source on 2026-08-16** — roughly sixty of its ~83 rules, decided as a
+  block rather than one at a time because they share one disposition and one
+  reason. Grouped by theme, with the reason each group is out:
+  * *Size and complexity metrics* (line length, file length, routine length,
+    parameter count, nesting depth, expression-operator count, branch count,
+    branch-body length) — configurable thresholds over the AST, no catalog, no
+    plan consequence. Generic-linter territory by definition.
+  * *Formatting and layout* (tab characters, one statement per line, one
+    declaration per line, misleading indentation, a branch keyword sharing a
+    line with the end of the previous block, missing `BEGIN…END` around a
+    conditional body, useless parentheses, empty statements, file header
+    comments) — style only.
+  * *Naming and identifiers* (routine name patterns, variable name patterns,
+    a reserved keyword used as an identifier, database/schema qualification on
+    a `CREATE`) — style only.
+  * *Dead and duplicated code* (unreachable code, unused labels, unused local
+    variables, unused parameters, redundant jumps, commented-out code,
+    duplicated string literals, a loop that can only run once, self-assignment,
+    identical operands either side of an operator, duplicated conditions,
+    identical branch bodies, a conditional whose branches are all the same,
+    redundant conditions, mutually exclusive conditions, collapsible nested
+    conditionals, nested conditional-expression functions, a repeated unary
+    operator, a negated comparison written as the negation of its opposite) —
+    correctness-and-tidiness, none of it plan-shape. Note that the
+    always-true/always-false predicate family here is the same one already
+    decided against under the enum-style `CHECK`-constraint entry above; that
+    reasoning covers these too and does not need redoing.
+  * *Task-comment tracking* (`TODO`, `FIXME`) — process tooling, not analysis.
+  * *Non-ANSI and deprecated spellings* (`!=`/`!<`/`!>`, `= NULL` in place of
+    `IS NULL`, a `LIKE` pattern containing no wildcard, legacy system
+    compatibility views, table hints written without `WITH`, index hints with
+    a two-part name, numbered procedures, string literals used as column
+    aliases, unparenthesised error-raising, and an assortment of removed system
+    procedures) — a deprecation list, mechanically derivable from vendor
+    documentation, with no query-level consequence. The one member of this
+    family with real plan teeth, the old non-ANSI outer-join operators, is
+    already queued in Tier 2 on its own merits.
+  * *Statement-shape advice* (`SELECT *`, `INSERT` without a column list,
+    ordinal `ORDER BY`, `TOP` without `ORDER BY`, a table with no primary key,
+    `UPDATE`/`DELETE` with no `WHERE`, an existence check over an unfiltered
+    `SELECT`, more than N tables written in a join, requiring a named session
+    setting at the top of every routine, requiring an explicit constraint-check
+    mode) — already covered by the `SELECT *`/`SET NOCOUNT`/schema-prefix skip
+    at the top of this list, and the two members that do have a real angle when
+    resolved rather than counted (join width after view expansion; `SELECT *`
+    confined to a view) are queued in Tier 2 as their own, differently-scoped
+    items.
+  * *Cursor and control-flow correctness* (a fetch selecting a different column
+    count than its cursor declares, an output parameter never assigned, an
+    empty catch block, output emitted from a trigger, dirty-read isolation
+    hints, duplicated arguments in a call, a legacy identity intrinsic where
+    the scope-limited one was meant) — correctness findings wearing no
+    performance costume at all. Dirty-read hints are separately skipped above;
+    trigger output is already reachable through the queued trigger content
+    scan.
+  * *Security* (dynamic code execution, hard-coded credentials, hard-coded IP
+    addresses, weak hash algorithms in general and in sensitive contexts) —
+    not skipped, deferred: this is the same security-axis question already
+    filed under Open scope questions below, and this read is one more data
+    point for it (a performance-oriented commercial T-SQL analyzer devotes
+    about one rule in sixteen to security) rather than a new decision.
+  The load-bearing result of the read is not any single rule: it is that the
+  richest paid T-SQL rule set found still contains **no implicit-conversion
+  rule of any kind, no collation-aware rule, no lineage-aware rule, and no
+  plan oracle** — the same gap every other surveyed catalog has. That is a
+  citable negative for the study, recorded in `detection-reference.md`.
 - **Query/order hint usage counters** (`sys.dm_exec_query_optimizer_info`
   join/order hint frequency) — inherently a runtime aggregate (counts since
   last restart), not a per-query static fact; the static form is already
   covered by the hard-coded-hints skip above.
-- **SonarQube T-SQL rule coverage** — *resolved, no longer open.*
-  The free-tier SonarQube T-SQL path is a community plugin, read at source: 16
-  enabled T-SQL rules, all declarative ANTLR parse-tree shape matches, dormant
-  since 2024, no implicit-conversion rule of any kind. Its non-sargability rule
-  is `BETA` with no ground truth. The CI-gate niche is effectively unoccupied.
-  Details in `detection-reference.md` → "Named incumbents".
+- **The mainstream CI-analysis platform's T-SQL coverage** — *resolved, no
+  longer open, and now measured on both tiers.* The free tier is a
+  community-maintained analyzer, read at source: 16 enabled T-SQL rules, all
+  declarative parse-tree shape matches, dormant since 2024, no
+  implicit-conversion rule of any kind, and its one non-sargability rule is
+  marked beta with no ground truth. The paid tier is a separate, far larger
+  analyzer with a real hand-written T-SQL grammar — read at source on
+  2026-08-16, ~83 rules — and it too has no conversion, collation, or
+  lineage-aware rule and no plan oracle; its disposition is the block entry
+  above. So the CI-gate niche is unoccupied at both price points, which is a
+  stronger claim than the one this entry originally recorded. Details in
+  `detection-reference.md` → Appendix 7.
 
 ---
 

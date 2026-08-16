@@ -349,6 +349,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<SetOptionFinding> setOptionFindings;
+        using (var setOptionStage = progress.Begin("scanning SET options blocking indexed views/filtered indexes", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = SetOptionScanner.Scan(r, catalog, lineage);
+                    setOptionStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            setOptionFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -471,7 +489,7 @@ public static class ScanReportBuilder
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
-            maxTypedColumnFindings, oversizedParameterFindings, partialCompositeForeignKeyJoinFindings,
+            maxTypedColumnFindings, oversizedParameterFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -73,6 +73,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
+        blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -124,6 +125,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
+        AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -597,6 +599,44 @@ public static class ReadableScanReportWriter
                 string.Join(", ", f.MissingColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}")),
             })]);
     }
+
+    private static IEnumerable<ReadableBlock> SetOption(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SetOptionFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"SET options silently disabling a filtered index/indexed view ({report.SetOptionFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "QUOTED_IDENTIFIER OFF and SET NUMERIC_ROUNDABORT ON each independently make a filtered index or an indexed view unusable by the optimizer, silently falling back to a base-table/heap scan - neither shows up in the query text as anything resembling a predicate, so the plan consequence is invisible at the call site. Oracle-confirmed directly (real seeded data, both a filtered index and an indexed view). Only reported when this module's own body was proven to touch a filtered index or an indexed view (directly, or through a referenced view however many layers down) - see each row's own touched object. SET ARITHABORT OFF was investigated and deliberately excluded: oracle-probed directly, it changed neither plan at all on this engine version/edition, contradicting the checklist's original premise that lumped all three options together.");
+
+        foreach (var group in report.SetOptionFindings
+            .GroupBy(f => f.Kind)
+            .OrderBy(g => g.Key))
+        {
+            var ordered = group.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
+
+            yield return new ReadableBlock.Heading(level + 1, $"{SetOptionTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Module", "Touched object", "Kind"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ModuleQualifiedName,
+                    f.TouchedObjectQualifiedName is { } touched
+                        ? $"{touched}{(f.TouchedIndexName is { } idx ? $".{idx}" : string.Empty)}"
+                        : UnknownDisplay,
+                    f.TouchedIsIndexedView ? "indexed view" : "filtered index",
+                })]);
+        }
+    }
+
+    private static string SetOptionTitle(SetOptionFindingKind kind) => kind switch
+    {
+        SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature => "Module compiled under QUOTED_IDENTIFIER OFF",
+        _ => "SET NUMERIC_ROUNDABORT ON",
+    };
 
     private static string ScalarUdfTitle(ScalarUdfFindingKind kind) => kind switch
     {

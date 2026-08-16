@@ -84,6 +84,16 @@ public static class LiveScanRunner
         var moduleCount = modules.Count;
         var unanalyzable = moduleResult.Unanalyzable;
 
+        // docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
+        // QUOTED_IDENTIFIER OFF is baked in wholesale at CREATE/ALTER compile time
+        // (sys.sql_modules.uses_quoted_identifier), already read by LiveModuleReader for parsing
+        // purposes alone; registered here so a later rule can query it per-module too, instead of
+        // the flag being read once and then discarded.
+        foreach (var module in modules)
+        {
+            catalog.AddModuleUsesQuotedIdentifier(module.QualifiedName, module.UsesQuotedIdentifier);
+        }
+
         // A lazy, re-enumerable query, not a materialized list: every module's parsed AST runs
         // roughly 200x the size of its source text (measured directly: 12MB of module text
         // peaked at 2.5GB RSS), so holding one List<SqlParseResult> for every module for the

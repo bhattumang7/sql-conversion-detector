@@ -27,6 +27,12 @@ public sealed class DatabaseCatalog
 
     private readonly List<ForeignKeyRelationship> _foreignKeys = [];
 
+    private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -143,6 +149,37 @@ public sealed class DatabaseCatalog
     public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
 
     public IReadOnlyList<ForeignKeyRelationship> ForeignKeys => _foreignKeys;
+
+    /// <summary>
+    /// An indexed view's own clustered/nonclustered index shape, keyed by the view's qualified
+    /// name - populated ONLY by <c>LiveCatalogReader</c> reading <c>sys.indexes</c> joined
+    /// against <c>sys.views</c> (a view is never a <see cref="CatalogTable"/> in this codebase's
+    /// model - it is resolved through lineage as a <see cref="Lineage.ResolvedRelation"/> - so an
+    /// indexed view needs this narrow side-registry rather than being folded into <see
+    /// cref="Tables"/>, the same way <see cref="ForeignKeys"/> is kept as a flat side-registry
+    /// rather than attached to a table). Always empty for a file-mode scan: replicating
+    /// <c>CREATE INDEX ... ON aView</c> DDL resolution ourselves is exactly the "reinventing the
+    /// database-project wheel" CLAUDE.md warns against, and the object being indexed at all is
+    /// itself the fact this exists to record.
+    /// </summary>
+    public void AddIndexedView(string qualifiedName, IReadOnlyList<CatalogIndex> indexes) =>
+        _indexedViewIndexesByQualifiedName[qualifiedName] = indexes;
+
+    public bool IsIndexedView(string qualifiedName) => _indexedViewIndexesByQualifiedName.ContainsKey(qualifiedName);
+
+    /// <summary>
+    /// A module's own <c>sys.sql_modules.uses_quoted_identifier</c> flag, baked in wholesale at
+    /// CREATE/ALTER compile time (a mid-body <c>SET QUOTED_IDENTIFIER</c> statement has no
+    /// bearing on this - the catalog flag is the one the engine actually compiled the module
+    /// under). Always empty for a file-mode scan - there is no live <c>sys.sql_modules</c> row to
+    /// read the flag from; file-mode DDL never states an intended compile-time QUOTED_IDENTIFIER
+    /// setting the way a live database's own catalog does.
+    /// </summary>
+    public void AddModuleUsesQuotedIdentifier(string qualifiedName, bool usesQuotedIdentifier) =>
+        _moduleUsesQuotedIdentifierByQualifiedName[qualifiedName] = usesQuotedIdentifier;
+
+    public bool TryGetModuleUsesQuotedIdentifier(string qualifiedName, out bool usesQuotedIdentifier) =>
+        _moduleUsesQuotedIdentifierByQualifiedName.TryGetValue(qualifiedName, out usesQuotedIdentifier);
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the

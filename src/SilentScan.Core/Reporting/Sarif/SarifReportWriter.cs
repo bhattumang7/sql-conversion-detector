@@ -52,6 +52,7 @@ public static class SarifReportWriter
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
+        results.AddRange(report.SetOptionFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -229,6 +230,28 @@ public static class SarifReportWriter
         var matched = string.Join(", ", finding.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
         var missing = string.Join(", ", finding.MissingColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
         var message = $"FK '{finding.ConstraintName}': join between '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' matches [{matched}] but omits [{missing}] - a parent row can match more than one child row than the declared relationship allows.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(SetOptionFinding finding)
+    {
+        // Error, not warning/downgraded-by-index: unlike a sargability finding, this isn't "worth
+        // investigating" - ModuleReachableObjectWalker already proved the module touches a real
+        // filtered index or indexed view, so the SET option genuinely disables a plan feature
+        // this exact module would otherwise use, oracle-confirmable per docs/detection-
+        // checklist.md's own note on the compile-only SHOWPLAN_XML mechanism.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SetOptionRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var touchedDisplay = finding.TouchedObjectQualifiedName is { } touched
+            ? $" - touches {(finding.TouchedIsIndexedView ? "indexed view" : "filtered index")} '{touched}'{(finding.TouchedIndexName is { } idx ? $".{idx}" : string.Empty)}"
+            : string.Empty;
+        var message = finding.Kind switch
+        {
+            SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature =>
+                $"'{finding.ModuleQualifiedName}' was compiled under QUOTED_IDENTIFIER OFF{touchedDisplay}.",
+            _ => $"'{finding.ModuleQualifiedName}': SET NUMERIC_ROUNDABORT ON{touchedDisplay}.",
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
