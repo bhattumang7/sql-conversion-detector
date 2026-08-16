@@ -40,7 +40,25 @@ public static class ProcCallGraphBuilder
         private string? _currentScope;
         private IList<TSqlStatement>? _currentScopeStatements;
 
+        // A variable's DECLARED type never changes after its own DECLARE, unlike its VALUE - so,
+        // unlike ResolvePropagatedLiteral's reaching-definitions walk, this needs no statement-
+        // order/conditional-write tracking at all: every DECLARE in the scope (at any nesting
+        // depth) and the scope's own formal parameters (if it's a proc/function) are recorded
+        // once, seeded fresh per scope.
+        private readonly Dictionary<string, SqlType?> _variableTypes = new(StringComparer.OrdinalIgnoreCase);
+
         public List<ProcCallEdge> Edges { get; } = [];
+
+        public override void ExplicitVisit(DeclareVariableStatement node)
+        {
+            foreach (var declaration in node.Declarations)
+            {
+                _variableTypes[declaration.VariableName.Value] =
+                    Parsing.SqlTypeReferenceResolver.Resolve(declaration.DataType, columnCollation: null, catalog.TypeAliases);
+            }
+
+            node.AcceptChildren(this);
+        }
 
         public override void ExplicitVisit(CreateProcedureStatement node) => VisitScopedBody(node.ProcedureReference.Name, node.StatementList);
 
@@ -78,7 +96,17 @@ public static class ProcCallGraphBuilder
         {
             var previous = _currentScope;
             var previousStatements = _currentScopeStatements;
+            var previousVariableTypes = new Dictionary<string, SqlType?>(_variableTypes, StringComparer.OrdinalIgnoreCase);
             _currentScope = SchemaObjectNameHelper.Qualify(name);
+
+            _variableTypes.Clear();
+            if (catalog.TryGetProcedureParameters(_currentScope, out var ownFormalParameters))
+            {
+                foreach (var parameter in ownFormalParameters)
+                {
+                    _variableTypes[parameter.Name] = parameter.Type;
+                }
+            }
 
             // The overwhelmingly common `AS BEGIN ... END` shape wraps the WHOLE body in a
             // single BeginEndBlockStatement - without unwrapping it, "the scope's own top-level
@@ -93,6 +121,11 @@ public static class ProcCallGraphBuilder
             statementList?.AcceptChildren(this);
             _currentScope = previous;
             _currentScopeStatements = previousStatements;
+            _variableTypes.Clear();
+            foreach (var (variableName, variableType) in previousVariableTypes)
+            {
+                _variableTypes[variableName] = variableType;
+            }
         }
 
         private void VisitProcedureCall(ExecuteStatement node, ExecutableProcedureReference procedureReference, SchemaObjectName calleeName)
@@ -106,7 +139,7 @@ public static class ProcCallGraphBuilder
                 return;
             }
 
-            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node);
+            var arguments = MatchArguments(procedureReference.Parameters, formalParameters, sourcePath, _currentScopeStatements, node, _variableTypes);
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
@@ -119,7 +152,7 @@ public static class ProcCallGraphBuilder
         /// </summary>
         private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
-            IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite)
+            IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes)
         {
             var byName = formalParameters.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
             var positionalCursor = 0;
@@ -146,8 +179,12 @@ public static class ProcCallGraphBuilder
                 var callerVariableName = actual.ParameterValue is VariableReference variableRef ? variableRef.Name : null;
                 var literalArgument = TryGetDirectLiteralArgument(actual.ParameterValue, sourcePath)
                     ?? ResolvePropagatedLiteral(callerVariableName, currentScopeStatements, sourcePath, callSite);
+                var callerArgumentType = callerVariableName is not null
+                    ? variableTypes.GetValueOrDefault(callerVariableName)
+                    : null;
                 matched.Add(new ProcCallArgument(
-                    formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument));
+                    formal.Name, formal.Type, formal.IsOutput, callerVariableName, actual.ParameterValue is Literal, literalArgument,
+                    callerArgumentType));
             }
 
             return matched;

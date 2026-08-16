@@ -235,34 +235,6 @@ Direct reuse of the precedence matrix on new predicate sites.
       indistinguishable from any other typed comparison to the existing
       pipeline. Oracle-tested:
       `TypedPredicateExtractorTests.VarcharColumnVsNVarcharParam_SqlCollation_ScanForced_OracleConfirmed`.
-- [ ] **Call-boundary argument mismatch** (the genuinely new half of the
-      parameter item above) — the value flowing INTO a parameter at an `EXEC`
-      call site has a different type than the parameter's own declaration
-      (e.g. a `varchar` local variable passed into an `nvarchar` param). This
-      doesn't itself lose a seek — EXEC parameter marshalling isn't a
-      predicate — but it's an assignment-shaped conversion (same family as
-      `WriteLossFinding`, not `VerdictClassifier`'s seek/scan vocabulary) that
-      also primes the exact mismatched value the already-shipped in-body rule
-      above will then compare against a column. Needs
-      `ProcCallGraphBuilder` (`src/SilentScan.Core/Predicates/ProcCallGraphBuilder.cs`)
-      extended to type each caller-side argument expression (it currently
-      tracks argument *names*, not resolved types) the same way
-      `TypedPredicateExtractor` already types `DECLARE`/parameter variables,
-      then a `WriteLossClassifier`-shaped comparison (source type vs.
-      declared param type) rather than a new seek/scan verdict. Ships as a
-      standalone catalog+call-graph finding (new kind, e.g.
-      `ProcCallArgumentMismatchFinding`) rather than chaining into a specific
-      predicate finding inside the callee — the cross-referencing needed to
-      chain provenance is real additional machinery, out of scope for this
-      pass; revisit as a follow-up once this standalone version ships. No
-      plan-XML oracle marker applies to a parameter binding the way
-      `CONVERT_IMPLICIT`-on-column does to a predicate, so this rule has no
-      oracle fixture — same as `WriteLossFinding`'s own non-plan-XML oracle
-      shape (a real probe row confirming the assignment's actual runtime
-      behavior). Real-world fixtures for this exact phenomenon (as opposed to
-      the in-body case, which is well-documented) are rare — likely needs an
-      explicitly-labeled synthetic fixture per CLAUDE.md's rare-exception
-      allowance.
 - [x] **Column collation ≠ database collation** — **shipped**:
       `Predicates/ColumnCollationDriftScanner.cs`, catalog-only, no AST
       walking. Wired into `ScanReport.ColumnCollationDriftFindings`
@@ -343,37 +315,51 @@ Direct reuse of the precedence matrix on new predicate sites.
       (`VerdictClassifierTests`) + 2 live oracle tests
       (`TypedPredicateExtractorOracleTests`). 4 columns locally (confirmed
       accurate via live measurement, matching the existing figure).
-- [ ] **Call-boundary argument mismatch** (the genuinely new half of the
-      parameter item above) — the value flowing INTO a parameter at an `EXEC`
-      call site has a different type than the parameter's own declaration
-      (e.g. a `varchar` local variable passed into an `nvarchar` param). This
-      doesn't itself lose a seek — EXEC parameter marshalling isn't a
-      predicate — but it's an assignment-shaped conversion (same family as
-      `WriteLossFinding`, not `VerdictClassifier`'s seek/scan vocabulary) that
-      also primes the exact mismatched value the already-shipped in-body rule
-      above will then compare against a column. Needs
-      `ProcCallGraphBuilder` (`src/SilentScan.Core/Predicates/ProcCallGraphBuilder.cs`)
-      extended to type each caller-side argument expression (it currently
-      tracks argument *names*, not resolved types) the same way
-      `TypedPredicateExtractor` already types `DECLARE`/parameter variables,
-      then a `WriteLossClassifier`-shaped comparison (source type vs.
-      declared param type) rather than a new seek/scan verdict. Ships as a
-      standalone catalog+call-graph finding (new kind, e.g.
-      `ProcCallArgumentMismatchFinding`) rather than chaining into a specific
-      predicate finding inside the callee — the cross-referencing needed to
-      chain provenance is real additional machinery, out of scope for this
-      pass; revisit as a follow-up once this standalone version ships. No
-      plan-XML oracle marker applies to a parameter binding the way
-      `CONVERT_IMPLICIT`-on-column does to a predicate, so this rule has no
-      oracle fixture — same as `WriteLossFinding`'s own non-plan-XML oracle
-      shape (a real probe row confirming the assignment's actual runtime
-      behavior). Real-world fixtures for this exact phenomenon (as opposed to
-      the in-body case, which is well-documented) are rare — likely needs an
-      explicitly-labeled synthetic fixture per CLAUDE.md's rare-exception
-      allowance.
+- [x] **Call-boundary argument mismatch** — **shipped**: the value flowing
+      INTO a parameter at a real `EXEC` call site has a different declared
+      type than the parameter's own declaration (e.g. a `varchar` local
+      variable passed into an `nvarchar` param). Doesn't itself lose a seek —
+      EXEC parameter marshalling isn't a predicate — so it's classified with
+      `Rules.WriteLossClassifier` (same family as `WriteLossFinding`) rather
+      than `VerdictClassifier`'s seek/scan vocabulary. `ProcCallGraphBuilder`
+      now tracks a per-scope variable-type dictionary (a variable's DECLARED
+      type never changes after its own DECLARE, unlike its value, so this
+      needs none of `ResolvePropagatedLiteral`'s reaching-definitions
+      machinery — seeded once per scope from the scope's own formal
+      parameters plus every DECLARE at any nesting depth) and stamps
+      `ProcCallArgument.CallerArgumentType`. New
+      `Predicates/ProcCallArgumentMismatchScanner.cs` walks the built graph
+      and classifies each variable-reference argument. Ships as a standalone
+      catalog+call-graph finding (`ProcCallArgumentMismatchFinding`) rather
+      than chaining into a specific predicate finding inside the callee — the
+      cross-referencing needed to chain provenance is real additional
+      machinery, deliberately out of scope for this pass; revisit as a
+      follow-up. No plan-XML oracle marker applies to a parameter binding the
+      way `CONVERT_IMPLICIT`-on-column does to a predicate, so this rule has
+      no plan-XML oracle fixture — the underlying silent-data-loss runtime
+      behavior each `WriteLossKind` claims is already oracle-proven
+      separately (`WriteLossOracleTests`, self-authored probe rows), so this
+      stream's own tests only needed to prove the call-boundary WIRING: 12
+      unit tests (`ProcCallGraphBuilderTests` for caller-type resolution
+      including scope-isolation and enclosing-parameter cases,
+      `ProcCallArgumentMismatchScannerTests` for the classifier) plus a live
+      end-to-end oracle test through the real engine-authoritative pipeline
+      (`ProcCallArgumentMismatchPipelineTests`) confirming a real deployed
+      caller/callee pair surfaces the finding. Wired into
+      `ScanReport.ProcCallArgumentMismatchFindings` (schema v9), SARIF rule
+      `silentscan/call-graph/argument-type-mismatch`, readable-report
+      section. Real-world fixtures for this exact phenomenon (as opposed to
+      the in-body case, which is well-documented) are rare, so its own
+      fixtures are directly authored rather than internet-sourced, per
+      CLAUDE.md's rare-exception allowance.
 - Oracle: identical `CONVERT_IMPLICIT`-on-column probe as the existing
   stream, except the call-boundary and catalog-only items above, which have
   no plan-XML oracle by construction (see each item).
+
+**This entire section is now closed** — all five sub-rules shipped (two
+turned out to already exist; three genuinely new), leaving only the explicit
+follow-up under cross-table type drift (the join-candidate/observed-
+comparison half).
 
 ### Type-aware upgrade of the sargability stream
 Highest base rate of anything measured: ~1,100 modules with ISNULL/COALESCE

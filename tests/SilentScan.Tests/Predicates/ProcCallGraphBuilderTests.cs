@@ -324,4 +324,98 @@ public sealed class ProcCallGraphBuilderTests
         Assert.True(argument.IsLiteral);
         Assert.Null(argument.LiteralArgument);
     }
+
+    [Fact]
+    public void Build_CallerVariableDeclaredWithType_ResolvesCallerArgumentType()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P nvarchar(20)) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Local varchar(20) = 'x';
+                EXEC dbo.Callee @Local;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@Local", argument.CallerVariableName);
+        Assert.NotNull(argument.CallerArgumentType);
+        Assert.Equal(SqlTypeCategory.VarChar, argument.CallerArgumentType!.Category);
+    }
+
+    [Fact]
+    public void Build_CallerVariableIsCallersOwnParameter_ResolvesCallerArgumentTypeFromEnclosingScope()
+    {
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Caller (@Outer int) AS
+                EXEC dbo.Callee @Outer;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal("@Outer", argument.CallerVariableName);
+        Assert.NotNull(argument.CallerArgumentType);
+        Assert.Equal(SqlTypeCategory.Int, argument.CallerArgumentType!.Category);
+    }
+
+    [Fact]
+    public void Build_CallerVariableUndeclared_CallerArgumentTypeStaysNull()
+    {
+        // A variable this pass never saw a DECLARE/formal-parameter for (e.g. an undeclared name,
+        // or one this scan simply never observed) must never guess a type.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
+            GO
+            EXEC dbo.Callee @Undeclared;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Null(argument.CallerArgumentType);
+    }
+
+    [Fact]
+    public void Build_ScopeChange_DoesNotLeakVariableTypesAcrossProcedures()
+    {
+        // dbo.Other declares its own @Local of a DIFFERENT type - dbo.Caller's own EXEC must
+        // resolve @Local against ITS OWN declaration, never a stale one left over from a
+        // previously-visited, unrelated scope.
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
+            GO
+            CREATE PROCEDURE dbo.Other AS
+                DECLARE @Local varchar(20) = 'x';
+                SELECT @Local;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @Local int = 1;
+                EXEC dbo.Callee @Local;
+            """);
+
+        var edge = Assert.Single(graph.Edges);
+        var argument = Assert.Single(edge.Arguments);
+        Assert.Equal(SqlTypeCategory.Int, argument.CallerArgumentType!.Category);
+    }
+
+    [Fact]
+    public void RealCallerCalleePair_MatchingDeclaredTypes_ArgumentMismatchScannerNeverFires()
+    {
+        // Near-miss sibling of ProcCallArgumentMismatchPipelineTests's oracle-confirmed fires
+        // case - a caller variable whose declared type matches the parameter exactly, run
+        // through the real builder end-to-end (file-mode catalog is enough here; no live DB
+        // needed since this is a pure type-declaration fact, not a runtime one).
+        var (graph, _) = BuildFrom("""
+            CREATE PROCEDURE dbo.Callee (@Code varchar(20)) AS SELECT @Code;
+            GO
+            CREATE PROCEDURE dbo.Caller AS
+                DECLARE @LocalCode varchar(20) = 'abc';
+                EXEC dbo.Callee @LocalCode;
+            """);
+
+        var findings = ProcCallArgumentMismatchScanner.Scan(graph);
+
+        Assert.Empty(findings);
+    }
 }

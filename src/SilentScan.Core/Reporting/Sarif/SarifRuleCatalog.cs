@@ -27,6 +27,7 @@ public static class SarifRuleCatalog
     public const string ScalarUdfProjectionInvocationRuleId = "silentscan/scalar-udf/in-select-or-expression";
     public const string ColumnCollationDriftRuleId = "silentscan/catalog/column-collation-drift";
     public const string CrossTableTypeDriftRuleId = "silentscan/catalog/cross-table-fk-type-drift";
+    public const string ProcCallArgumentMismatchRuleId = "silentscan/call-graph/argument-type-mismatch";
 
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {
@@ -153,6 +154,7 @@ public static class SarifRuleCatalog
             Rule(ScalarUdfProjectionInvocationRuleId, "A scalar UDF is called outside any predicate (SELECT list, ORDER BY, GROUP BY, SET/variable assignment) - per-row execution and (pre-2019, or non-inlineable) a forced-serial plan, but sargability is unaffected."),
             Rule(ColumnCollationDriftRuleId, "A string-family column's own collation differs from the database's default collation (or, for a temp table/table variable, from tempdb's effective collation) - a conversion seed: any future comparison against a column/literal carrying the baseline collation risks a collation-conflict compile error or a forced-scan implicit conversion. Catalog-only, detected before any query reaches the column."),
             Rule(CrossTableTypeDriftRuleId, "A foreign-key column pair's declared types and/or collations genuinely differ - a conversion seed on every JOIN that follows this relationship, detected from the catalog alone (sys.foreign_key_columns), independent of whether any scanned query actually joins on it."),
+            Rule(ProcCallArgumentMismatchRuleId, "A real EXEC call site passes a caller-side variable whose declared type risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate, classified the same way an INSERT/UPDATE assignment's silent data loss is."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

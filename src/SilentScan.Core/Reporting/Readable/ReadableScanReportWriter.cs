@@ -68,6 +68,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ScalarUdf(report, headingLevel, pathBase));
         blocks.AddRange(ColumnCollationDrift(report, headingLevel, pathBase));
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
+        blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -114,6 +115,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Scalar UDF calls (per-row cost, non-sargable when predicate-context)", report.ScalarUdfFindings.Count);
         AddCount(counts, "Columns whose collation drifts from the database/tempdb default", report.ColumnCollationDriftFindings.Count);
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
+        AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -462,6 +464,31 @@ public static class ReadableScanReportWriter
                 $"{f.ParentTableQualifiedName}.{f.ParentColumnName} ({f.ParentTypeDisplay})",
                 $"{f.ReferencedTableQualifiedName}.{f.ReferencedColumnName} ({f.ReferencedTypeDisplay})",
                 f.CollationDiffers.ToString(),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ProcCallArgumentMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ProcCallArgumentMismatchFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"EXEC call-site argument mismatches ({report.ProcCallArgumentMismatchFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A real EXEC call site's caller-side variable has a declared type that risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate. This also primes the exact mismatched value for any comparison the callee's own body makes against a column using this parameter.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Callee", "Parameter", "Caller variable", "Caller type", "Parameter type", "Risk"],
+            [.. report.ProcCallArgumentMismatchFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CalleeQualifiedName,
+                f.FormalParameterName,
+                f.CallerVariableName,
+                f.CallerTypeDisplay,
+                f.FormalParameterTypeDisplay,
+                DescribeWriteLossKind(f.Kind),
             })]);
     }
 

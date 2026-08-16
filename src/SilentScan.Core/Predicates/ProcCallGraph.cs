@@ -29,11 +29,18 @@ public sealed record ProcCallLiteralArgument(string Value, string SourcePath, in
 /// about implicit conversion this project's soundness-first rule forbids.
 /// Neither <paramref name="CallerVariableName"/> nor <paramref name="FormalParameterType"/> claims
 /// to know the caller variable's own value - only <paramref name="LiteralArgument"/> ever supplies
-/// a concrete value for cross-call-edge seeding.
+/// a concrete value for cross-call-edge seeding. <paramref name="CallerArgumentType"/> is the
+/// declared type of <paramref name="CallerVariableName"/> itself (a DECLAREd local, or the
+/// caller scope's OWN formal parameter of that name) - null when the argument isn't a plain
+/// variable reference, or the variable's declared type is unresolvable. This is a TYPE fact only
+/// (docs/detection-checklist.md Tier 1 "call-boundary argument mismatch") - a variable's declared
+/// type never changes after DECLARE, unlike its value, so this needs no reaching-definitions
+/// tracing the way <see cref="LiteralArgument"/>'s constant-propagation does.
 /// </summary>
 public sealed record ProcCallArgument(
     string FormalParameterName, SqlType? FormalParameterType, bool FormalParameterIsOutput,
-    string? CallerVariableName, bool IsLiteral, ProcCallLiteralArgument? LiteralArgument = null);
+    string? CallerVariableName, bool IsLiteral, ProcCallLiteralArgument? LiteralArgument = null,
+    SqlType? CallerArgumentType = null);
 
 /// <summary>
 /// One <c>EXEC</c> call site whose target resolved to a procedure this scan actually saw declared

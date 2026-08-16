@@ -47,6 +47,7 @@ public static class SarifReportWriter
         results.AddRange(report.ScalarUdfFindings.Select(ToResult));
         results.AddRange(report.ColumnCollationDriftFindings.Select(ToResult));
         results.AddRange(report.CrossTableTypeDriftFindings.Select(ToResult));
+        results.AddRange(report.ProcCallArgumentMismatchFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -161,6 +162,18 @@ public static class SarifReportWriter
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(ProcCallArgumentMismatchFinding finding)
+    {
+        // Same severity treatment as a WriteLossFinding - warning, not error/downgraded-by-index,
+        // since "is this indexed" has no bearing on a silent-data-loss assignment.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ProcCallArgumentMismatchRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
+        var message = $"EXEC '{finding.CalleeQualifiedName}': parameter '{finding.FormalParameterName}' ({finding.FormalParameterTypeDisplay}) receives '{finding.CallerVariableName}' ({finding.CallerTypeDisplay}) from {callerLabel} - {DescribeWriteLossKind(finding.Kind)}.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)

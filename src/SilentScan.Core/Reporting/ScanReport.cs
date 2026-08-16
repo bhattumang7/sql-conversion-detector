@@ -15,6 +15,7 @@ public sealed record ScanReport(
     IReadOnlyList<ScalarUdfFinding> ScalarUdfFindings,
     IReadOnlyList<ColumnCollationDriftFinding> ColumnCollationDriftFindings,
     IReadOnlyList<CrossTableTypeDriftFinding> CrossTableTypeDriftFindings,
+    IReadOnlyList<ProcCallArgumentMismatchFinding> ProcCallArgumentMismatchFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -36,7 +37,9 @@ public sealed record ScanReport(
     /// <see cref="ColumnCollationDriftFindings"/> stream (docs/detection-checklist.md Tier 1
     /// "Join-key and cross-object type/collation mismatch": column/temp-object collation !=
     /// database collation). Bumped to 8 for the new <see cref="CrossTableTypeDriftFindings"/>
-    /// stream (same Tier 1 section: FK-linked cross-table type drift).
+    /// stream (same Tier 1 section: FK-linked cross-table type drift). Bumped to 9 for the new
+    /// <see cref="ProcCallArgumentMismatchFindings"/> stream (same Tier 1 section: call-boundary
+    /// argument mismatch).
     /// </summary>
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 }

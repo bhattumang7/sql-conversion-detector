@@ -314,6 +314,13 @@ public static class ScanReportBuilder
             crossTableDriftStage.Complete($"{crossTableTypeDriftFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<ProcCallArgumentMismatchFinding> procCallArgumentMismatchFindings;
+        using (var argumentMismatchStage = progress.Begin("scanning call-boundary argument mismatches"))
+        {
+            procCallArgumentMismatchFindings = ProcCallArgumentMismatchScanner.Scan(procCallGraph);
+            argumentMismatchStage.Complete($"{procCallArgumentMismatchFindings.Count:N0} findings");
+        }
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -423,7 +430,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
-            tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings,
+            tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
