@@ -1951,7 +1951,7 @@ get an oracle fixture for the serial-plan consequence).
       (`NonPersistedComputedColumnScannerTests` — fires, PERSISTED never
       fires, ordinary column never fires, PERSISTED+indexed never fires,
       multi-table ordering). Real coverage against the local RM_ test
-      database: **[RM_COUNT_NONPERSISTED] findings**.
+      database: **41 findings**.
 - [x] **Deprecated `*=`/`=*` outer-join operators — closed, not reachable
       through this tool's own parser dialect, confirmed empirically rather
       than assumed**: probed directly against `TSql160Parser` (the exact
