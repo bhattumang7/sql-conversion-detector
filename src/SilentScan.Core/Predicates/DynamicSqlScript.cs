@@ -66,6 +66,13 @@ public sealed record PlaceholderOccurrence(int InnerStartOffset, int Length, Sql
 /// <see cref="PlaceholderOccurrences"/> is non-null exactly when <see cref="Confidence"/> is below
 /// High - it lets the pipeline classify each placeholder's syntactic position (quoted-literal,
 /// table-reference identifier, or neither) without re-parsing <see cref="InnerText"/> to find them.
+/// <see cref="IsExecString"/> is true only for a genuine <c>EXEC('...')</c>/<c>EXEC(@sql)</c> call
+/// site (an <c>ExecutableStringList</c>) - false for an <c>sp_executesql</c> call, even one whose
+/// own <see cref="ParameterDeclarationText"/> came back null because its <c>@params</c> argument
+/// wasn't itself foldable to a constant. <see cref="ParameterDeclarationText"/> being null is
+/// ambiguous between those two cases on its own; this field is the precise discriminator
+/// (docs/detection-checklist.md Tier 2 "Dynamic SQL quality": "EXEC(string) where sp_executesql
+/// with params was possible" must never fire on a call site that already IS sp_executesql).
 /// </summary>
 public sealed record DynamicSqlScript(
     SourceSpan CallSite,
@@ -75,4 +82,5 @@ public sealed record DynamicSqlScript(
     DynamicSqlScope Scope,
     IReadOnlyDictionary<string, string>? ArgumentBindings = null,
     FindingConfidence Confidence = FindingConfidence.High,
-    IReadOnlyList<PlaceholderOccurrence>? PlaceholderOccurrences = null);
+    IReadOnlyList<PlaceholderOccurrence>? PlaceholderOccurrences = null,
+    bool IsExecString = false);

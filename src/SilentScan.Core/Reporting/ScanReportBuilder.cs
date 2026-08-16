@@ -570,6 +570,17 @@ public static class ScanReportBuilder
         scalarUdfFindings = [.. scalarUdfFindings, .. dynamicSqlResult.ScalarUdfFindings];
         skippedConstructs.AddRange(dynamicSqlResult.SkippedConstructs);
 
+        // docs/detection-checklist.md Tier 2 "Dynamic SQL quality" - purely a dynamic-SQL-pass
+        // finding (a concatenation boundary only exists inside a folded EXEC/sp_executesql
+        // assembly's own reparse), so unlike every other stream above it has no static-file half
+        // to merge with - the dynamic SQL result IS the whole list.
+        var unparameterizedDynamicSqlFindings = dynamicSqlResult.UnparameterizedFindings
+            .Where(f => f.Confidence <= minimumConfidence)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
+            .ThenBy(f => f.Line)
+            .ThenBy(f => f.Kind)
+            .ToList();
+
         // Captured before SeekPreserved findings are dropped below - the report's only
         // denominator for "N flagged out of M comparisons classified" (CLAUDE.md precision
         // discipline: a bare finding count with no base rate can't be checked against
@@ -654,7 +665,7 @@ public static class ScanReportBuilder
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
-            nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings,
+            nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings, unparameterizedDynamicSqlFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

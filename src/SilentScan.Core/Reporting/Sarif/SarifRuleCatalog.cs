@@ -48,6 +48,8 @@ public static class SarifRuleCatalog
     public const string PostExpansionJoinWidthRuleId = "silentscan/lineage/post-expansion-join-width";
     public const string SelectStarViewRuleId = "silentscan/lineage/select-star-view";
     public const string PartialCompositeForeignKeyJoinRuleId = "silentscan/join/partial-composite-fk";
+    public const string ConcatenatedValueInConstantSqlRuleId = "silentscan/dynamic-sql/concatenated-value-in-constant-sql";
+    public const string ExecStringConcatenatesParameterizableValueRuleId = "silentscan/dynamic-sql/exec-string-concatenates-parameterizable-value";
 
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
     {
@@ -57,6 +59,13 @@ public static class SarifRuleCatalog
         SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature => "silentscan/set-option/ansi-warnings-off",
         SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature => "silentscan/set-option/concat-null-yields-null-off",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SetOptionFindingKind."),
+    };
+
+    public static string UnparameterizedDynamicSqlRuleId(UnparameterizedDynamicSqlFindingKind kind) => kind switch
+    {
+        UnparameterizedDynamicSqlFindingKind.ConcatenatedValueInConstantSql => ConcatenatedValueInConstantSqlRuleId,
+        UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue => ExecStringConcatenatesParameterizableValueRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled UnparameterizedDynamicSqlFindingKind."),
     };
 
     public static string ForcedSerialRuleId(ForcedSerialFindingKind kind) => kind switch
@@ -225,6 +234,8 @@ public static class SarifRuleCatalog
             Rule(NestedViewDepthRuleId, "A view/inline TVF nested 2+ view/TVF layers deep before reaching a base table - a change to a base table now has to be traced through 2+ independent view layers before its blast radius is understood, and each layer is a place a SELECT */column-list mismatch or silent type widening can hide."),
             Rule(PostExpansionJoinWidthRuleId, "A query whose written FROM/JOIN table count meaningfully understates how many base tables it actually touches once every view/inline-TVF reference is expanded transitively - a query that looks like a 3-table join can expand to 20."),
             Rule(SelectStarViewRuleId, "A view/inline TVF nested 1+ view/TVF layers deep whose own outermost SELECT is a bare or qualified * - its column list is frozen at CREATE/ALTER time and silently disagrees with the base table after any change, confirmed to survive even a live describe-only probe and real execution until sp_refreshview runs. Only fires when a real consuming query elsewhere explicitly selects a strict, named subset of the view's full column set - a consumer that itself does SELECT * never narrows anything and is never matched."),
+            Rule(ConcatenatedValueInConstantSqlRuleId, "A proven-constant value was spliced into an EXEC/sp_executesql dynamic SQL string via concatenation rather than authored as one whole literal or passed through sp_executesql's own parameter mechanism - every distinct concatenated value compiles its own cached plan, oracle-confirmed against sys.dm_exec_cached_plans."),
+            Rule(ExecStringConcatenatesParameterizableValueRuleId, "An EXEC(string)/EXEC(@sql) call site concatenates a proven-constant value into its SQL text - sp_executesql's own @params mechanism was available and unused, and would have let this call site reuse one cached plan across every distinct value instead of compiling a new one each time."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),
             Rule(SetOptionRuleId(SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature), "The module was compiled under QUOTED_IDENTIFIER OFF (sys.sql_modules.uses_quoted_identifier) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature), "An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),

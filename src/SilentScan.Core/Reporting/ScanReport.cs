@@ -34,6 +34,7 @@ public sealed record ScanReport(
     IReadOnlyList<NestedViewDepthFinding> NestedViewDepthFindings,
     IReadOnlyList<PostExpansionJoinWidthFinding> PostExpansionJoinWidthFindings,
     IReadOnlyList<SelectStarViewFinding> SelectStarViewFindings,
+    IReadOnlyList<UnparameterizedDynamicSqlFinding> UnparameterizedDynamicSqlFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -89,7 +90,10 @@ public sealed record ScanReport(
     /// streams (docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Nested-view depth
     /// report" and "Post-expansion join width"). Bumped to 23 for the new
     /// <see cref="SelectStarViewFindings"/> stream (docs/detection-checklist.md Tier 2
-    /// "Lineage-metric findings": "SELECT * inside a view or inline TVF").
+    /// "Lineage-metric findings": "SELECT * inside a view or inline TVF"). Bumped to 24 for the
+    /// new <see cref="UnparameterizedDynamicSqlFindings"/> stream (docs/detection-checklist.md
+    /// Tier 2 "Dynamic SQL quality": concatenated value in constant dynamic SQL, and
+    /// EXEC(string) where sp_executesql with params was possible).
     /// </summary>
-    public const int CurrentSchemaVersion = 23;
+    public const int CurrentSchemaVersion = 24;
 }

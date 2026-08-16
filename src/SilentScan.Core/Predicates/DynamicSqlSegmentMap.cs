@@ -22,6 +22,19 @@ public sealed class DynamicSqlSegmentMap
 
     public string InnerText => _innerText.ToString();
 
+    /// <summary>
+    /// Inner-text offsets where a new, independently-sourced literal segment begins - one entry
+    /// per literal segment after the first (a lone segment can't be a concatenation boundary with
+    /// itself), placeholder segments excluded. Each offset is a point where two source fragments
+    /// authored/resolved separately (e.g. a string literal, then a folded constant variable's own
+    /// value, then another string literal) were spliced together into <see cref="InnerText"/> -
+    /// exactly what docs/detection-checklist.md's "Dynamic SQL quality" stream needs to find where
+    /// a VALUE was concatenated into otherwise-fixed dynamic SQL text, as opposed to the whole
+    /// script being one single literal with no splicing at all.
+    /// </summary>
+    public IReadOnlyList<int> ConcatenationBoundaryOffsets =>
+        [.. _segments.Skip(1).Where(s => !s.IsPlaceholder).Select(s => s.InnerStart)];
+
     /// <param name="sourcePath">The file the literal came from.</param>
     /// <param name="startLine">The literal token's starting line (1-based, ScriptDOM convention).</param>
     /// <param name="startColumn">The literal token's starting column - the column of its opening quote, or its <c>N</c> prefix character if national.</param>

@@ -890,7 +890,7 @@ public static class DynamicSqlTransfer
             }
         }
 
-        EmitScriptsOrFinding(combined, node, activeGuards, context, parameterDeclarationText: null, argumentBindings: null);
+        EmitScriptsOrFinding(combined, node, activeGuards, context, parameterDeclarationText: null, argumentBindings: null, isExecString: true);
     }
 
     /// <summary>Every named execute-parameter beyond @stmt/@params (e.g. <c>@P = @Code</c>) whose value is a bare variable reference - captured unconditionally, since a NESTED dynamic-SQL pass may need it to seed one of ITS OWN parameters from this outer script's own declared type (see <see cref="DynamicSqlScript.ArgumentBindings"/>'s own doc comment).</summary>
@@ -917,7 +917,7 @@ public static class DynamicSqlTransfer
         var query = ExpressionEvaluator.Fold(statementArg, state, context.SourcePath, context.Cap, context.Catalog);
         var parameterDeclarationText = ResolveParameterDeclarationText(procRef, state, context);
         var argumentBindings = ResolveArgumentBindings(procRef);
-        EmitScriptsOrFinding(query, node, activeGuards, context, parameterDeclarationText, argumentBindings);
+        EmitScriptsOrFinding(query, node, activeGuards, context, parameterDeclarationText, argumentBindings, isExecString: false);
     }
 
     private static Dictionary<string, string>? ResolveArgumentBindings(ExecutableProcedureReference procRef)
@@ -1019,11 +1019,11 @@ public static class DynamicSqlTransfer
     /// analyzed (via those scripts) and NOT also reported Unanalyzable.
     /// </summary>
     private static void EmitScriptsOrFinding(
-        SqlTextValue value, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings)
+        SqlTextValue value, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
     {
         if (TryNarrowByActiveGuard(value, activeGuards) is { } narrowed)
         {
-            TryEmitFromValue(narrowed, node, context, parameterDeclarationText, argumentBindings);
+            TryEmitFromValue(narrowed, node, context, parameterDeclarationText, argumentBindings, isExecString);
             return;
         }
 
@@ -1038,7 +1038,7 @@ public static class DynamicSqlTransfer
             var recovered = false;
             foreach (var alternative in tainted.GuardedAlternatives ?? [])
             {
-                recovered |= TryEmitFromValue(alternative.Value, node, context, parameterDeclarationText, argumentBindings);
+                recovered |= TryEmitFromValue(alternative.Value, node, context, parameterDeclarationText, argumentBindings, isExecString);
             }
 
             if (!recovered)
@@ -1061,7 +1061,7 @@ public static class DynamicSqlTransfer
             return;
         }
 
-        TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings);
+        TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings, isExecString);
     }
 
     private static SqlTextValue.Template? TryNarrowByActiveGuard(SqlTextValue value, IReadOnlyList<string> activeGuards)
@@ -1077,7 +1077,7 @@ public static class DynamicSqlTransfer
     }
 
     private static bool TryEmitFromValue(
-        SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings)
+        SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
     {
         var site = context.Span(node);
         var widened = SqlTextValue.Widen(value, context.Cap, site);
@@ -1120,7 +1120,7 @@ public static class DynamicSqlTransfer
             context.Scripts.Add(new DynamicSqlScript(
                 CallSite(node, context), rendered.InnerText, rendered.SegmentMap, parameterDeclarationText,
                 context.Scope, argumentBindings, confidence,
-                rendered.Placeholders.Count > 0 ? rendered.Placeholders : null));
+                rendered.Placeholders.Count > 0 ? rendered.Placeholders : null, isExecString));
         }
 
         return true;

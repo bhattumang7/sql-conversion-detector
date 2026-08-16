@@ -64,6 +64,7 @@ public static class SarifReportWriter
         results.AddRange(report.NestedViewDepthFindings.Select(ToResult));
         results.AddRange(report.PostExpansionJoinWidthFindings.Select(ToResult));
         results.AddRange(report.SelectStarViewFindings.Select(ToResult));
+        results.AddRange(report.UnparameterizedDynamicSqlFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -456,6 +457,23 @@ public static class SarifReportWriter
         var message = $"'{finding.ViewQualifiedName}' (SELECT * at line {finding.ViewLine}, {finding.ViewFullColumns.Count} columns, {finding.ViewDepth} view/TVF layer(s) deep) is consumed here selecting only [{string.Join(", ", finding.ConsumerSelectedColumns)}] - the view's frozen column list forces the full width regardless.";
 
         return BuildResult(ruleId, level, message, finding.ConsumerSourcePath, finding.ConsumerLine, startColumn: null);
+    }
+
+    private static SarifResult ToResult(UnparameterizedDynamicSqlFinding finding)
+    {
+        // Structural/plan-cache report, not a provably-wrong-result claim - same "informational,
+        // but the underlying fact is exact" tier as CatchAllPredicateFinding/SetOptionFinding:
+        // warning, floored by confidence, never downgraded by index-existence (irrelevant here).
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnparameterizedDynamicSqlRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue =>
+                "This EXEC(string) call concatenates a proven-constant value into its SQL text instead of passing it through sp_executesql's own @params - each distinct value compiles its own cached plan.",
+            _ => "This dynamic SQL call concatenates a proven-constant value into its SQL text rather than a single fixed literal - each distinct value compiles its own cached plan.",
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)

@@ -87,6 +87,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(SelectStarView(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
+        blocks.AddRange(UnparameterizedDynamicSql(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -152,6 +153,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Consumers narrowing a nested SELECT * view's frozen column list", report.SelectStarViewFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
+        AddCount(counts, "Dynamic SQL call sites concatenating a proven-constant value instead of parameterizing it", report.UnparameterizedDynamicSqlFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -910,6 +912,28 @@ public static class ReadableScanReportWriter
                 f.ViewQualifiedName,
                 $"{f.ViewFullColumns.Count} ({string.Join(", ", f.ViewFullColumns)})",
                 string.Join(", ", f.ConsumerSelectedColumns),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> UnparameterizedDynamicSql(ScanReport report, int level, string? pathBase)
+    {
+        if (report.UnparameterizedDynamicSqlFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Concatenated values in dynamic SQL ({report.UnparameterizedDynamicSqlFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A value this scanner proved constant (CLAUDE.md's Tier A dynamic-SQL folding) was spliced into an EXEC/sp_executesql call's own SQL text via string concatenation, rather than authored as one fixed literal or passed through sp_executesql's own @params. Every distinct concatenated value compiles its own cached plan - real plan-cache pollution, oracle-confirmed. The 'EXEC(string), sp_executesql available' kind fires only on a genuine EXEC(string)/EXEC(@sql) call site and names the specific fix: switch to sp_executesql and pass the value as a real parameter.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind"],
+            [.. report.UnparameterizedDynamicSqlFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind == UnparameterizedDynamicSqlFindingKind.ExecStringConcatenatesParameterizableValue
+                    ? "EXEC(string), sp_executesql available"
+                    : "Concatenated value in constant SQL",
             })]);
     }
 

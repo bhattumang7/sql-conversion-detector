@@ -1671,12 +1671,96 @@ latest) compat level.
 ### Dynamic SQL quality (extends the existing dynamic-SQL pass)
 123 modules use `EXEC(...)`, 51 use sp_executesql locally.
 
-- [ ] Concatenated **value** (vs identifier) in proven-constant dynamic SQL —
-      unparameterized: plan-cache pollution + per-literal compiles. We already
-      prove constancy; classifying concatenation operands as value/identifier
-      is incremental.
-- [ ] `EXEC(string)` where sp_executesql with params was possible (only when
-      the taint analysis shows a parameterizable value) — report, don't guess.
+- [x] **Concatenated value (vs identifier) in proven-constant dynamic SQL,
+      and EXEC(string) where sp_executesql with params was possible — shipped
+      together, one finding type.** `UnparameterizedDynamicSqlFinding`
+      (`src/SilentScan.Core/Predicates/UnparameterizedDynamicSqlFinding.cs`),
+      one record with a `Kind` discriminator (`ConcatenatedValueInConstantSql`,
+      `ExecStringConcatenatesParameterizableValue`) — the established "one
+      record, one Kind enum, shared plumbing" shape
+      (`SetOptionFinding`/`ForcedSerialFinding`/`UntrustedConstraintFinding`).
+      Both kinds detect the same underlying fact: a value this scanner already
+      proved constant (CLAUDE.md's Tier A dynamic-SQL folding) was spliced
+      into the assembled SQL text via string concatenation, rather than
+      authored as one whole literal or passed through sp_executesql's own
+      `@params`. New `DynamicSqlSegmentMap.ConcatenationBoundaryOffsets`
+      exposes every point where two independently-sourced literal segments
+      meet in a folded script's `InnerText`; new
+      `DynamicSqlOperandPositionClassifier`
+      (`src/SilentScan.Core/Predicates/DynamicSqlOperandPositionClassifier.cs`)
+      classifies each such offset, against the script's own reparse, as a
+      VALUE position (a `Literal` node — comparison/IN/LIKE/BETWEEN operand,
+      VALUES-row scalar, assignment RHS, function argument, or any other
+      position only a literal can occupy) or an IDENTIFIER position (an
+      `Identifier` node — schema object/column/alias name part) or Ambiguous
+      (declined, never guessed). `ConcatenatedValueInConstantSql` fires on ANY
+      call shape (EXEC or sp_executesql) the moment a boundary lands on a
+      VALUE; `ExecStringConcatenatesParameterizableValue` fires only when the
+      call site is a genuine `EXEC(string)`/`EXEC(@sql)` (never sp_executesql,
+      which already has its own `@params` mechanism to lose) — the sharper,
+      actionable "you had sp_executesql available and didn't use it" claim.
+      New `DynamicSqlScript.IsExecString` (threaded through
+      `DynamicSqlValue/DynamicSqlTransfer.cs`'s `CompileStringList`/
+      `CompileSpExecuteSql`) is the precise discriminator — `sp_executesql`
+      whose own `@params` argument merely failed to fold to a constant also
+      has a null `ParameterDeclarationText`, which is why that field alone
+      couldn't tell the two cases apart. A single `EXEC(string)` call site
+      concatenating a value fires BOTH kinds (different claims about the same
+      fact, not a duplicate).
+      <br><br>
+      **Oracle discovery, load-bearing for the finding's own wording:**
+      confirmed directly against the Docker instance (`sys.dm_exec_cached_plans`)
+      that three `EXEC(@sql)` calls differing only in a concatenated literal
+      value compile **three** distinct cached plans, while three
+      `sp_executesql` calls passing the same three values as a real `@Code`
+      parameter compile **one** — real, measured plan-cache pollution, not
+      blog folklore. Not verdict-bearing (no seek/scan plan-shape claim); SARIF
+      level warning, floored by confidence (structural/plan-cache report, not
+      a provably-wrong-result claim — same tier as
+      `CatchAllPredicateFinding`/`SetOptionFinding`).
+      <br><br>
+      **Scope note on `ScriptDOM`'s own visitor dispatch, found and fixed
+      mid-implementation:** an early version of the classifier overrode only
+      `TSqlFragmentVisitor.ExplicitVisit(Literal node)` (the abstract base
+      type) and silently never fired on any real literal — every literal-type
+      test failed as Ambiguous. Root cause: each of ScriptDOM's 11 concrete
+      `Literal` subclasses (`StringLiteral`, `IntegerLiteral`, ...) has its own
+      `Accept` override that calls `ExplicitVisit` for **its own concrete
+      type** at compile time, never the abstract base — a visitor overriding
+      only the base type is never actually dispatched to for any real node.
+      Fixed by overriding all 11 concrete subclasses explicitly (`Identifier`
+      itself is concrete, so its own override needed no such fix). Caught by
+      a failing unit test before shipping, not discovered against RM_.
+      <br><br>
+      Wired end-to-end: `ScanReport` (schema version 23 → 24), SARIF rule
+      catalog (two new rule IDs) + writer, readable report section, full
+      `DynamicSqlPipeline` nested-recursion plumbing (mirrors
+      `CollationConflictFinding`'s own accumulator/dedupe/remap/nested-remap
+      shape). Tests: 8 unit tests for the classifier itself
+      (`DynamicSqlOperandPositionClassifierTests` — every VALUE/IDENTIFIER/
+      Ambiguous case, including the schema-qualifier-is-an-identifier case)
+      + 4 pipeline tests (`DynamicSqlUnparameterizedTests` — both kinds firing
+      together on a literal EXEC(string) splice, the general kind alone firing
+      on an sp_executesql call that concatenates into its own SQL text instead
+      of using `@params`, no finding on a whole-single-literal EXEC with no
+      splicing, no finding when the spliced boundary is an identifier — a
+      dynamic table name — not a value). Real coverage against the local RM_
+      test database: **4 findings, 2 real call sites** (both kinds fire on
+      each) — genuinely rare, because the rule only fires on the narrow
+      subset of dynamic SQL this scanner can ALREADY prove fully constant
+      (964 of 1,291 real call sites), not blanket EXEC/sp_executesql usage;
+      both real hits are real, non-synthetic antipatterns: one author's own
+      code comment reads "silly to use DSQL but there isn't another choice...
+      bummer" directly at the flagged call site, confirming this is a
+      genuine, self-acknowledged antipattern in real production code, not a
+      false positive. No internet-sourced fixture used — the underlying
+      antipattern (concatenated literal instead of a real sp_executesql
+      parameter) is universally covered advisory material (Erland
+      Sommarskog's dynamic SQL articles are the canonical citation in this
+      space) rather than a single distinct bug report, so test cases are
+      directly authored, matching this codebase's own rare-exception
+      allowance for catalog/mechanism-diff rules with no single "bug repro"
+      to cite.
 - [ ] **Temp-table shape mismatch across a proc-call boundary** — one small
       T-SQL type-checker in the wider tool landscape checks a version of this;
       ours would be catalog+plan-backed, not a type-inference heuristic. T-SQL
