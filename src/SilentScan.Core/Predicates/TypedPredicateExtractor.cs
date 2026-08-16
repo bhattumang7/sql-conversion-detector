@@ -31,7 +31,7 @@ public static class TypedPredicateExtractor
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings);
     }
 
     private sealed class Visitor(
@@ -156,6 +156,8 @@ public static class TypedPredicateExtractor
         public List<OversizedParameterFinding> OversizedParameterFindings { get; } = [];
 
         public List<UnderLengthParameterFinding> UnderLengthParameterFindings { get; } = [];
+
+        public List<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings { get; } = [];
 
         /// <summary>
         /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before <see cref="ExplicitVisit(InsertStatement)"/>
@@ -1212,6 +1214,7 @@ public static class TypedPredicateExtractor
 
             TryAddOversizedParameterFinding(column, other, otherIsLiteral, node);
             TryAddUnderLengthParameterFinding(column, other, otherIsLiteral, operatorText, node);
+            TryAddAnsiPaddingMismatchFinding(column, other, operatorText, node);
         }
 
         /// <summary>
@@ -1283,6 +1286,56 @@ public static class TypedPredicateExtractor
             UnderLengthParameterFindings.Add(new UnderLengthParameterFinding(
                 column.TableQualifiedName, column.ColumnName, columnLength, otherType.Length, isImplicitDefault,
                 operatorText, changesRangeOrPatternShape, sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        /// <summary>
+        /// docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
+        /// "ANSI_PADDING OFF as a second, independent finding". Scoped to LIKE-against-a-literal
+        /// only, narrower than the checklist's original "column vs column, or column vs literal"
+        /// framing: oracle-probed directly (real seeded rows) that a plain equality comparison is
+        /// NOT affected by ANSI_PADDING regardless of trailing whitespace on either side - T-SQL's
+        /// own comparison semantics trim trailing spaces for `=` either way. Only LIKE, where a
+        /// pattern's own trailing whitespace is semantically significant (never trimmed), shows a
+        /// real difference: a non-padded column can never STORE a value ending in whitespace at
+        /// all (stripped at INSERT time), so a pattern with significant trailing whitespace can
+        /// never match anything the column could ever contain.
+        /// </summary>
+        private void TryAddAnsiPaddingMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        {
+            if (operatorText != "LIKE"
+                || column.Type is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.VarBinary }
+                || other is not PredicateOperand.Value { IsLiteral: true, LiteralText: { } literalText }
+                || !LiteralEndsWithSignificantWhitespace(literalText))
+            {
+                return;
+            }
+
+            var catalogColumn = catalog.Find(column.TableQualifiedName, _currentProcScope)?.FindColumn(column.ColumnName);
+            if (catalogColumn is not { IsAnsiPadded: false })
+            {
+                return;
+            }
+
+            AnsiPaddingMismatchFindings.Add(new AnsiPaddingMismatchFinding(
+                column.TableQualifiedName, column.ColumnName, literalText, sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        /// <summary>
+        /// The literal's own content is whatever sits between its FIRST and LAST single-quote
+        /// character - safe regardless of an N-prefix or a trailing ` COLLATE x` suffix, both of
+        /// which <see cref="Rules.LiteralTextRenderer"/> can add outside that quoted span.
+        /// </summary>
+        private static bool LiteralEndsWithSignificantWhitespace(string literalText)
+        {
+            var firstQuote = literalText.IndexOf('\'');
+            var lastQuote = literalText.LastIndexOf('\'');
+            if (firstQuote < 0 || lastQuote <= firstQuote)
+            {
+                return false;
+            }
+
+            var content = literalText[(firstQuote + 1)..lastQuote];
+            return content.Length > 0 && char.IsWhiteSpace(content[^1]);
         }
 
         /// <summary>

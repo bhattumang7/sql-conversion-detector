@@ -627,7 +627,7 @@ public sealed class LiveCatalogReader
         const string sql = """
             SELECT c.object_id, s.name AS schema_name, t.name AS table_name, c.name AS column_name,
                    ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name,
-                   c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted
+                   c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted, c.is_ansi_padded
             FROM sys.columns c
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
             JOIN sys.tables t ON t.object_id = c.object_id
@@ -656,6 +656,7 @@ public sealed class LiveCatalogReader
             var isIdentity = reader.GetBoolean(10);
             var isComputed = reader.GetBoolean(11);
             var isPersisted = !await reader.IsDBNullAsync(12, cancellationToken) && reader.GetBoolean(12);
+            var isAnsiPadded = reader.GetBoolean(13);
 
             var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName);
             if (type is null)
@@ -675,7 +676,7 @@ public sealed class LiveCatalogReader
                 columnsByTable[objectId] = columns;
             }
 
-            columns.Add(new CatalogColumn(columnName, type, isNullable, isIdentity, isComputed, isPersisted));
+            columns.Add(new CatalogColumn(columnName, type, isNullable, isIdentity, isComputed, isPersisted, isAnsiPadded));
         }
 
         return columnsByTable;

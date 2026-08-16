@@ -32,6 +32,7 @@ public static class SarifRuleCatalog
     public const string MaxTypedColumnRuleId = "silentscan/catalog/max-typed-column";
     public const string OversizedParameterRuleId = "silentscan/predicates/oversized-parameter";
     public const string UnderLengthParameterRuleId = "silentscan/predicates/under-length-parameter";
+    public const string AnsiPaddingMismatchRuleId = "silentscan/predicates/ansi-padding-mismatch";
     public const string PartialCompositeForeignKeyJoinRuleId = "silentscan/join/partial-composite-fk";
 
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
@@ -177,6 +178,7 @@ public static class SarifRuleCatalog
             Rule(MaxTypedColumnRuleId, "A string/binary column is declared MAX-typed - it can never be an index key column at all, so any predicate/join on it can never seek regardless of how it's used. Catalog-only structural fact."),
             Rule(OversizedParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate."),
             Rule(UnderLengthParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding's identical class of concern."),
+            Rule(AnsiPaddingMismatchRuleId, "A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace - the column can never store a value ending in whitespace at all (stripped at INSERT time under ANSI_PADDING OFF), so the pattern can never match anything the column could ever contain. Data-semantics finding, not a plan-shape one."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),
             Rule(SetOptionRuleId(SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature), "The module was compiled under QUOTED_IDENTIFIER OFF (sys.sql_modules.uses_quoted_identifier) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature), "An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),

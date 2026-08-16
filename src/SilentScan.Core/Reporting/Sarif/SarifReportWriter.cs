@@ -52,6 +52,7 @@ public static class SarifReportWriter
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
         results.AddRange(report.UnderLengthParameterFindings.Select(ToResult));
+        results.AddRange(report.AnsiPaddingMismatchFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -272,6 +273,22 @@ public static class SarifReportWriter
             ? $" - truncation changes what the '{finding.Operator}' comparison itself means (a shorter pattern/bound), not just which exact value it excludes"
             : " - the compared value is silently truncated before the predicate ever runs, which can exclude rows that should match or match rows that shouldn't";
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (length {finding.ColumnLength}) is compared against a parameter/variable/expression declared with {otherLengthDisplay}{shapeNote}.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(AnsiPaddingMismatchFinding finding)
+    {
+        // Error, not warning - stronger than every other structural report in this section: a
+        // non-padded column can NEVER store a value ending in whitespace at all (stripped at
+        // INSERT time), so a pattern with significant trailing whitespace can never match
+        // anything the column could ever contain. Not a conditional risk dependent on an unknown
+        // runtime value like OversizedParameterFinding/UnderLengthParameterFinding - a provably
+        // always-false predicate, the same certainty tier TemporalBoundaryPrecisionFinding's own
+        // oracle-confirmed row-drop gets.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AnsiPaddingMismatchRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-ANSI-padded column (trailing blanks stripped at INSERT) compared via LIKE against pattern {finding.PatternLiteralText}, whose trailing whitespace is significant - this predicate can never match any value the column could ever store.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

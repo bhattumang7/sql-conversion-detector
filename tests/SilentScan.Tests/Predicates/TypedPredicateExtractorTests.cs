@@ -1888,6 +1888,94 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.UnderLengthParameterFindings);
     }
+
+    // docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
+    // "ANSI_PADDING OFF as a second, independent finding". Catalog fixtures here set
+    // IsAnsiPadded directly (this is live-mode-only in real scans - sys.columns.is_ansi_padded
+    // has no file-mode DDL equivalent this codebase parses, per CatalogColumn's own doc comment),
+    // mirroring CrossTableTypeDriftScannerTests' own "build the catalog directly" pattern for a
+    // live-only fact. Oracle-confirmed mechanism (real seeded rows, real query execution) lives
+    // in AnsiPaddingMismatchOracleTests; these are structural/AST tests for the extraction logic.
+
+    private static IReadOnlyList<AnsiPaddingMismatchFinding> ExtractAnsiPaddingMismatch(bool isAnsiPadded, string sql)
+    {
+        var ddl = "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(new CatalogTable(
+            "dbo", "Customers", CatalogTableKind.Table,
+            [new CatalogColumn("Code", new SqlType(SqlTypeCategory.VarChar, Length: 20), IsNullable: false, IsIdentity: false, IsComputed: false, IsPersisted: false, IsAnsiPadded: isAnsiPadded)],
+            [], SourcePath: "test.sql", SourceLine: 1));
+
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        return TypedPredicateExtractor.Extract(result, catalog, lineage).AnsiPaddingMismatchFindings;
+    }
+
+    [Fact]
+    public void Extract_NonPaddedColumnLikeTrailingWhitespaceLiteral_Fires()
+    {
+        var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code LIKE 'abc ';");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Equal("'abc '", finding.PatternLiteralText);
+    }
+
+    [Fact]
+    public void Extract_NonPaddedColumnLikePatternEndingInWildcardAfterSpace_NeverFires()
+    {
+        // 'abc %' ends in the wildcard '%', not whitespace - the detection deliberately checks
+        // only the literal's OWN final character (matching its own doc comment's narrow, exactly-
+        // provable scope), not "whitespace anywhere before a trailing wildcard", which would need
+        // wildcard-aware pattern parsing this stream doesn't attempt. A real gap (this pattern's
+        // significant internal space still can't match a non-padded column), but a deliberately
+        // uncaught one rather than an overreaching heuristic.
+        var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code LIKE 'abc %';");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_PaddedColumn_NeverFires()
+    {
+        var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: true, "SELECT 1 FROM dbo.Customers WHERE Code LIKE 'abc ';");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_NonPaddedColumnLikePatternWithNoTrailingWhitespace_NeverFires()
+    {
+        var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code LIKE 'abc%';");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_NonPaddedColumnEqualityAgainstTrailingWhitespaceLiteral_NeverFires()
+    {
+        // Oracle-confirmed (this finding's own doc comment): plain equality is NOT affected by
+        // ANSI_PADDING or trailing whitespace either way - T-SQL trims trailing spaces for '='
+        // regardless. Scoped to LIKE only; must never fire on '='.
+        var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code = 'abc ';");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_NonPaddedColumnLikeAgainstVariable_NeverFires()
+    {
+        // Only a LITERAL pattern's own trailing whitespace is statically knowable - a variable's
+        // actual runtime value is never traced (CLAUDE.md "soundness first"), so this must not
+        // fire against a non-literal LIKE pattern.
+        var findings = ExtractAnsiPaddingMismatch(
+            isAnsiPadded: false, "DECLARE @p VARCHAR(20) = 'abc '; SELECT 1 FROM dbo.Customers WHERE Code LIKE @p;");
+
+        Assert.Empty(findings);
+    }
 }
 
 /// <summary>

@@ -761,7 +761,7 @@ nobody resolves it properly.
       the widely documented multi-tenant "always join on tenant_id too"
       SaaS bug class).
 
-### SET options that silently disable plan features — shipped (2 of the originally-proposed 3 kinds)
+### SET options that silently disable plan features — shipped (2 of the originally-proposed 3 plan-feature kinds, plus the independent ANSI_PADDING comparison-seed finding)
 Folded in from the incumbent-catalog read. Universally filed elsewhere as
 style hygiene; the actual consequence is plan-shape, and it's
 catalog-verifiable per module, not a guess.
@@ -861,32 +861,64 @@ exactly the same way ARITHABORT's own assumption just failed one.
       with a catalog half at all, and `ANSI_PADDING`/`ANSI_WARNINGS`/
       `CONCAT_NULL_YIELDS_NULL` are confirmed syntax-scan-only. No need to
       re-check that list; see `detection-reference.md` Appendix 8.
-- [ ] **`ANSI_PADDING OFF` as a second, independent finding — a comparison
-      seed, not just a plan-feature blocker.** With the option off, trailing
-      blanks are stripped on insert into `varchar`/`varbinary` columns, so a
-      column's stored values stop matching the padding semantics the rest of
-      the codebase assumes, and equality/`LIKE` comparisons against that column
-      change meaning. That is the same family as the shipped collation and
-      conversion work — a per-column property that silently changes what a
-      predicate does — and it is catalog-visible per column
-      (`sys.columns.is_ansi_padded`), not just per module. Scope it as: a
-      predicate or join comparing a non-ANSI-padded `varchar` column against a
-      padded one, or against a literal with trailing whitespace. Precision
-      guard: fixed-length and `nvarchar` columns are unaffected; only fire
-      where the catalog actually reports the column as not padded.
-      **Measured 2026-08-16, so the premise here does not need re-deriving
-      (unlike the plan-feature premise this section had to correct above — and
-      note this is a deliberately *different* claim from that one, so the
-      ARITHABORT falsification says nothing about it either way):**
-      `is_ansi_padded` is per column and is captured at CREATE time from the
-      then-current session setting, so one table can hold both kinds; the same
-      insert of `'abc   '` stores 3 bytes in a non-padded `varchar(20)` column
-      and 6 in a padded one. **This is a data-semantics finding, not a
-      plan-shape one** — it changes which rows match, not how they are found,
-      the same posture as the under-length rule in Tier 1. It therefore needs
-      **no oracle** and must not be reported with a verdict; drop the earlier
-      suggestion of a `CONVERT_IMPLICIT`/residual-predicate probe, which was
-      assuming a plan consequence that has no reason to exist.
+- [x] **`ANSI_PADDING OFF` as a second, independent finding — shipped, scope
+      narrowed from the original framing once oracle-checked directly.** With
+      the option off, trailing blanks are stripped on INSERT into
+      `varchar`/`varbinary` columns, catalog-visible per column
+      (`sys.columns.is_ansi_padded`, now on `CatalogColumn.IsAnsiPadded`,
+      read live in `LiveCatalogReader.ReadColumnsAsync`; defaults to `true`
+      for every caller that doesn't know/care, including file mode, which
+      has no session-history to read this from at all). **Oracle-probed
+      directly before implementing (real seeded rows, real query execution) —
+      the original "equality/LIKE comparisons ... change meaning" framing was
+      too broad:** plain `=` is NOT affected regardless of padding or
+      trailing whitespace on either side — T-SQL trims trailing spaces for
+      equality comparisons either way, confirmed both cross-column
+      (non-padded vs. padded) and column-vs-trailing-whitespace-literal, both
+      still matching identically. Only `LIKE`, where a pattern's own trailing
+      whitespace is semantically significant and never trimmed, shows a real
+      difference: `LIKE 'abc '` matched a padded column storing `'abc   '`
+      but not a non-padded column storing the identical value as stripped
+      `'abc'`. **Shipped scope: `LIKE` against a literal pattern with
+      significant trailing whitespace only** — narrower than "column vs
+      column, or column vs literal," since the column-vs-column and equality
+      shapes were investigated and found not to reproduce (CLAUDE.md
+      "precision beats recall everywhere"). `AnsiPaddingMismatchFinding`/
+      `TryAddAnsiPaddingMismatchFinding` in `TypedPredicateExtractor.cs`.
+      **Known, deliberate scope limit:** only the literal's own FINAL
+      character is checked - a pattern with significant whitespace
+      immediately before a trailing wildcard (`'abc %'`, also unmatchable by
+      a non-padded column) is not caught, since catching it would need
+      wildcard-aware pattern parsing this stream doesn't attempt; left
+      honestly uncaught rather than guessed at.
+      Reported at `LevelError` (stronger than every other structural report
+      in this session's other parameter-sizing findings): unlike those, this
+      is not a conditional risk dependent on an unknown runtime value - a
+      non-padded column can never store a value ending in whitespace at all,
+      so the predicate is PROVABLY always false, the same certainty tier the
+      already-shipped `TemporalBoundaryPrecisionFinding` gets. **This is a
+      data-semantics finding, not a plan-shape one** — it changes which rows
+      match, not how they are found. No verdict; needs no compile-only
+      `SET SHOWPLAN_XML` oracle, but a real execution-based oracle DID
+      confirm the general mechanism directly (`AnsiPaddingMismatchOracleTests`,
+      3 tests: trailing-blank stripping at INSERT, the LIKE non-match,
+      and the equality-is-unaffected falsification that scoped this rule),
+      the same self-authored-probe-row-plus-real-execution discipline
+      `WriteLossOracleTests`/`TemporalBoundaryPrecisionOracleTests`/
+      `UnderLengthParameterOracleTests` already use for this class of
+      runtime, not query-plan, claim. Unit-tested (`TypedPredicateExtractorTests`,
+      6 cases: fires on trailing whitespace, never fires on a padded column,
+      never fires with no trailing whitespace, never fires on `=`, never
+      fires against a non-literal pattern, and the known wildcard-adjacent
+      gap documented as a passing negative rather than a silent omission).
+      Wired end-to-end (`ScanReport` schema version 14 → 15, SARIF, readable
+      report). Real coverage against the local RM_ test database: **0
+      findings** — the database has zero non-padded `varchar`/`varbinary`
+      columns at all (`sys.columns.is_ansi_padded = 0` count is 0), a
+      legacy pattern this particular schema never used; the rule is real and
+      shipped, just not exercised by this database (matching the same
+      "coverage-empty, not broken" honesty the `CHARINDEX`/`LEFT` rule
+      documented for itself earlier in this file).
 
 ---
 

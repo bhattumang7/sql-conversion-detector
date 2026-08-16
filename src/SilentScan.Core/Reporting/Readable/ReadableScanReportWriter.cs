@@ -73,6 +73,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
+        blocks.AddRange(AnsiPaddingMismatch(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -126,6 +127,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.UnderLengthParameterFindings.Count);
+        AddCount(counts, "LIKE predicates that can never match a non-ANSI-padded column", report.AnsiPaddingMismatchFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -600,6 +602,27 @@ public static class ReadableScanReportWriter
                 f.IsImplicitDefault ? "none (defaults to 1)" : f.OtherOperandLength!.Value.ToString(CultureInfo.InvariantCulture),
                 f.Operator,
                 f.ChangesRangeOrPatternShape ? "changes pattern/range shape" : "truncates compared value",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AnsiPaddingMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.AnsiPaddingMismatchFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"LIKE predicates that can never match a non-ANSI-padded column ({report.AnsiPaddingMismatchFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CORRECTNESS finding, not a plan-shape one: the column's own catalog flag (sys.columns.is_ansi_padded = 0) means trailing blanks are stripped at INSERT time, so the column can never store a value ending in whitespace at all. The LIKE pattern here has significant trailing whitespace, so this predicate can never match anything the column could ever contain - oracle-confirmed directly (real seeded rows) that a plain equality comparison is NOT affected the same way, since T-SQL trims trailing spaces for '=' regardless of padding; only LIKE, where a pattern's own trailing whitespace is never trimmed, shows the real difference.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Pattern"],
+            [.. report.AnsiPaddingMismatchFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.PatternLiteralText,
             })]);
     }
 

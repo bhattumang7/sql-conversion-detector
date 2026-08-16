@@ -20,6 +20,7 @@ public sealed record ScanReport(
     IReadOnlyList<MaxTypedColumnFinding> MaxTypedColumnFindings,
     IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
     IReadOnlyList<UnderLengthParameterFinding> UnderLengthParameterFindings,
+    IReadOnlyList<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings,
     IReadOnlyList<PartialCompositeForeignKeyJoinFinding> PartialCompositeForeignKeyJoinFindings,
     IReadOnlyList<SetOptionFinding> SetOptionFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
@@ -56,7 +57,10 @@ public sealed record ScanReport(
     /// for the new <see cref="SetOptionFindings"/> stream (docs/detection-checklist.md Tier 1
     /// "SET options that silently disable plan features"). Bumped to 14 for the new
     /// <see cref="UnderLengthParameterFindings"/> stream (docs/detection-checklist.md Tier 1
-    /// "Under-length and length-defaulted string declarations").
+    /// "Under-length and length-defaulted string declarations"). Bumped to 15 for the new
+    /// <see cref="AnsiPaddingMismatchFindings"/> stream (docs/detection-checklist.md Tier 1
+    /// "SET options that silently disable plan features": "ANSI_PADDING OFF as a second,
+    /// independent finding").
     /// </summary>
-    public const int CurrentSchemaVersion = 14;
+    public const int CurrentSchemaVersion = 15;
 }
