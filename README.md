@@ -1,27 +1,63 @@
 # SilentScan
 
-Static analyzer for SQL Server query-level performance defects that only an
-engine-authoritative catalog, a lineage pass, or a plan-XML oracle can detect
-precisely — the ones no purely syntactic linter can see:
+Static analyzer for SQL Server code. If a defect is detectable from the code
+and schema — via an engine-authoritative catalog, a lineage pass, a plan-XML
+oracle, or plain syntax — it's in scope; if it only shows up once the app is
+running in production, it's out. 33 finding streams as of this writing,
+ranging from type-aware, direction-aware, collation-aware implicit-conversion
+detection (the tool's original differentiator, still the template for how
+oracle-backed rules ship) down to cheap, high-precision syntactic checks.
+Grouped by theme:
 
-* **Implicit conversions** that kill an index seek — column-side vs
-  value-side, collation-aware, including ones inherited through layers of
-  views and inline table-valued functions.
-* **MSTVF-as-fence references** — a multi-statement or CLR table-valued
-  function opaque to the optimizer, reached directly, through a correlated
-  `CROSS/OUTER APPLY`, inherited invisibly through a view/iTVF layer, or via
-  `INSERT ... EXEC`.
-* **Scalar UDF cost** — per-row execution, non-sargable predicates, and
-  (pre-2019, or when the engine proves the UDF non-inlineable) a forced-serial
-  plan; reached directly, through view/iTVF lineage, or from a computed
-  column/DEFAULT/CHECK constraint.
+* **Type/collation-aware conversion and write-loss family** — implicit
+  conversions that kill an index seek (column-side vs value-side,
+  collation-aware, `RangeSeek` vs `ScanForced`, inherited through
+  views/iTVFs, dynamic-SQL constant tracing); silent DML data loss with no
+  engine error (unicode-to-non-unicode, approximate-to-exact truncation,
+  numeric scale narrowing, temporal precision loss); collation conflicts
+  (Msg 468); `sql_variant` comparisons; oversized/`MAX`-typed and
+  under-length parameter/column pairings; cross-table and call-boundary type
+  drift; `ANSI_PADDING` comparison-seed mismatches.
+* **Sargability (syntactic + type-aware)** — function-wrapped columns,
+  CAST/CONVERT-on-column, column arithmetic, leading-wildcard `LIKE`,
+  non-literal `LIKE` patterns, date-form functions, case-folding,
+  `CHARINDEX`/`LEFT` rewrite candidates, `ISNULL`/`COALESCE` nullability
+  cases, and a temporal-boundary correctness check (an end-of-period
+  `BETWEEN` literal that silently excludes rows in a precision gap).
+* **Lineage-metric findings** — nested-view depth, post-expansion join
+  width, CTEs referenced 2+ times downstream of their own `WITH` clause,
+  and `SELECT *` inside a view/inline TVF narrowed by a real consumer.
+* **Catalog and constraint findings** — untrusted/disabled FK and CHECK
+  constraints, cascading FK delete/update actions, joins matching only part
+  of a composite FK, non-persisted computed columns, `MAX`-typed predicate
+  columns, `SET` options that silently disable indexed-view/filtered-index
+  plan features, column-collation drift from the database default.
+* **Plan-shape and correctness findings** — MSTVF-as-fence references
+  (direct, correlated `CROSS/OUTER APPLY`, inherited through a view/iTVF,
+  `INSERT ... EXEC`); scalar UDF cost (predicate/projection contexts, plan
+  inlineability, schema-level dependencies); forced-serial constructs (table
+  variables, `FAST_FORWARD` cursors, non-parallelizable intrinsics);
+  catch-all/kitchen-sink predicates; `NOT IN` over a nullable subquery
+  column; `UPDATE ... FROM` with no source-side uniqueness guarantee;
+  self-referencing DML risking Halloween Protection (an extra blocking
+  operator when a DML statement's source reads the table it's writing to).
+* **Dynamic SQL** — proven-constant `EXEC`/`sp_executesql` text re-run
+  through the full pipeline with findings remapped to their true source;
+  concatenated values that should have been parameterized; `EXEC(string)`
+  where `sp_executesql` was available and unused; temp-table shape mismatch
+  across an `INSERT ... EXEC` proc-call boundary
+  (`sys.dm_exec_describe_first_result_set`-backed, live-mode only).
 
 Plus a corpus study pipeline that quantifies prevalence and cost across
 public SQL Server codebases.
 
 Parsing is via `Microsoft.SqlServer.TransactSql.ScriptDom` (SQL Server /
 T-SQL only, no other dialects). Findings are oracle-verified against real
-query plans, never guessed from plan shape.
+query plans wherever a plan-shape or runtime claim is made, never guessed
+from plan shape; a purely structural/catalog fact needs no oracle. Full
+detail, scope decisions, and precision guards for every stream are in
+`docs/detection-checklist.md` (working backlog) and `CLAUDE.md` (project
+contract).
 
 ## Requirements
 
@@ -31,11 +67,15 @@ query plans, never guessed from plan shape.
 ## Build & test
 
 ```
-dotnet build
-dotnet test
+scripts/dotnet-safe.sh build
+scripts/dotnet-safe.sh test
 ```
 
-`Directory.Build.props` treats warnings as errors solution-wide.
+A thin wrapper around `dotnet build`/`dotnet test` that disables MSBuild node
+reuse and reaps stray build-server processes — plain `dotnet build`/`dotnet
+test` can hang or crash on a known VBCSCompiler race under repeated
+invocations; see the script's own header comment for the reproduced failure
+modes. `Directory.Build.props` treats warnings as errors solution-wide.
 
 `tests/SilentScan.Tests/Integration/` requires the Docker SQL Server below to
 be running — there is no mock/skip path.
@@ -47,15 +87,19 @@ dotnet run --project src/SilentScan.Cli -- scan-db <connection-string> [--format
 ```
 
 Connects to a live SQL Server database, reads its catalog directly from
-engine metadata (`sys.tables`/`sys.columns`/`sys.indexes`/`sys.sql_modules`)
-rather than inferring it from parsed DDL text, and runs every readable
-module (views/procs/functions/triggers) through the full detection pipeline
-— implicit conversions, MSTVF-as-fence references, and scalar UDF cost, all
-in one pass. Types, per-column collations, and the indexed flag are all
-facts read from the engine, never guessed. Issues `SELECT`s only — no DDL or
-DML is ever executed against the connected database; with
-`--fetch-sql-from-tables`, some of those `SELECT`s read real row content
-(dynamic SQL text stored in a table), still read-only.
+engine metadata (`sys.tables`/`sys.columns`/`sys.indexes`/`sys.sql_modules`
+and more) rather than inferring it from parsed DDL text, and runs every
+readable module (views/procs/functions/triggers) through the full detection
+pipeline — all 33 finding streams, in one pass. Types, per-column
+collations, and the indexed flag are all facts read from the engine, never
+guessed. Read-only by design (`LiveReadOnlyGuard`): only `SELECT`s are
+issued, plus one narrow, explicitly-scoped exception — a compile-only
+`sys.dm_exec_describe_first_result_set` probe (never executes the batch it's
+handed) against either a bare `SELECT` or a bare named-procedure `EXEC`, used
+only for the temp-table-shape-mismatch stream. No DDL or DML is ever
+executed against the connected database; with `--fetch-sql-from-tables`,
+some of those `SELECT`s read real row content (dynamic SQL text stored in a
+table), still read-only.
 Output defaults to `--format text`: a readable report that groups findings by
 what is wrong with them, explains each group once, and gives every finding its
 location, base column, indexed flag and the view/TVF layer that introduced
@@ -77,10 +121,10 @@ dotnet run --project src/SilentScan.Cli -- scan-corpus-live [--manifest corpus/m
 Deploys every manifest repo's DDL to the disposable Docker oracle, reads its
 catalog and module text back from the engine (never parses repo DDL text
 directly — "everything goes via the database"), and reports per-repo
-findings across all three streams, gated on each repo's ScriptDOM parse-health
-passing the dialect-sniffing bar. The readable formats lead with a
-one-row-per-repo rollup table — findings, parse rate, dialect-sniffing result
-— followed by each repo's full report.
+findings across every stream (the same pipeline `scan-db` runs), gated on
+each repo's ScriptDOM parse-health passing the dialect-sniffing bar. The
+readable formats lead with a one-row-per-repo rollup table — findings, parse
+rate, dialect-sniffing result — followed by each repo's full report.
 
 ```
 dotnet run --project src/SilentScan.Verify -- verify-corpus [--manifest corpus/manifest.json] [--clones-root corpus/_clones] [--repo <name>]
@@ -89,12 +133,15 @@ dotnet run --project src/SilentScan.Verify -- verify-corpus [--manifest corpus/m
 Deploys each repo's DDL to a fresh disposable database, diffs inferred
 view/TVF column types and collations against `sys.columns` (or, for a
 view/inline TVF, `sys.dm_exec_describe_first_result_set`'s live answer),
-and oracle-confirms every stream's findings with a compile-only
+and oracle-confirms the original three streams' findings with a compile-only
 `SET SHOWPLAN_XML ON` probe: `CONVERT_IMPLICIT` on the column side of a
 predicate for implicit-conversion findings, a `Table-valued function`
 plan operator (or `INSERT EXEC` statement type) for MSTVF-as-fence findings,
 and a `UserDefinedFunction` plan element (cross-checked against the engine's
-own inlining behavior) for scalar UDF findings.
+own inlining behavior) for scalar UDF findings. Every stream shipped since
+carries its own oracle test suite (xUnit, against the same Docker instance)
+rather than being folded into this specific per-repo CLI pipeline — see
+`docs/detection-checklist.md` for each stream's own oracle mechanism.
 Corpus DML and stored procedures are never executed — only self-authored
 probes run against the disposable database.
 
@@ -108,13 +155,17 @@ finding may be and still appear in the report; SARIF output maps a
 below-`High` finding to level `note` and gives it a `/medium-confidence`-
 suffixed rule ID, independently filterable from its `High` counterpart.
 
-Nothing in the tool currently emits a below-`High` finding — the tier exists
-ahead of the dynamic-SQL folder's planned symbolic-value inference, so that
-work lands already gated: a finding derived from a value the folder could
-only assume (a placeholder standing in for a variable it could prove had a
-type but not a value — an uninitialized `DECLARE`, a proc parameter with no
-known caller) will report at `Medium` and stay off by default, never mixed
-into a `High` finding's numbers.
+Two kinds of finding report below `High` today. A dynamic-SQL finding
+derived from a value the folder could only assume — a placeholder standing
+in for a variable it could prove had a type but not a value (an
+uninitialized `DECLARE`, a proc parameter with no known caller) — reports at
+`Medium` and stays off by default, never mixed into a `High` finding's
+numbers. Separately, `PartialCompositeForeignKeyJoinFinding` (a JOIN
+matching only part of a composite foreign key) always reports at `Medium`
+regardless of source-text certainty: a narrower join can be a genuine,
+deliberate fan-out that static analysis alone can't always tell apart from a
+forgotten column, so it's flagged for review rather than asserted as a bug.
+`Low` is not yet produced by anything in this tool.
 
 ## Verification oracle (Docker SQL Server)
 
@@ -149,17 +200,25 @@ pwsh ./sonar-scan.ps1 -Verbose     # same, with full scan/build/test output as i
 ## Layout
 
 * `src/SilentScan.Core` — the four analysis passes: `Parsing/`, `Catalog/`
-  (tables, columns, types, collations, indexes, scalar UDF/TVF metadata),
-  `Lineage/` (view/TVF resolution, topo order, column provenance, TVF-fence
-  and scalar-UDF inheritance maps), `Predicates/` + `Rules/` (extraction,
-  precedence, verdicts, the TVF-fence/scalar-UDF scanners), `Reporting/`
-  (JSON + SARIF), `Corpus/`.
+  (tables, columns, types, collations, indexes, check constraints, scalar
+  UDF/TVF metadata), `Lineage/` (view/TVF resolution, topo order, column
+  provenance, TVF-fence/scalar-UDF/view-expansion maps), `Predicates/` +
+  `Rules/` (every scanner and finding type, extraction, precedence,
+  verdicts), `Reporting/` (JSON + SARIF + the readable report), `Corpus/`.
+* `src/SilentScan.Live` — the engine-authoritative catalog reader
+  (`sys.tables`/`sys.columns`/`sys.indexes`/`sys.sql_modules`/foreign keys/
+  check constraints/indexed views and more) and live-mode-only scanners
+  (e.g. plan-cache evidence, `sys.dm_exec_describe_first_result_set` probes)
+  that need a real connected database rather than parsed DDL.
 * `src/SilentScan.Cli` — `scan-db` / `scan-corpus-live` commands.
-* `src/SilentScan.Verify` — Docker-backed oracle: DDL deployment, `sys.columns`
-  diffing, plan-XML confirmation for every stream (`verify-corpus`,
-  `generate-type-matrix`).
+* `src/SilentScan.Verify` — Docker-backed oracle: DDL deployment,
+  `sys.columns` diffing, and plan-XML confirmation for the original three
+  streams (`verify-corpus`, `generate-type-matrix`); `LiveReadOnlyGuard`,
+  the read-only enforcement every live query goes through.
 * `src/SilentScan.Bench` — the benchmark harness.
 * `tests/SilentScan.Tests` — xUnit tests and fixtures.
 
 See `CLAUDE.md` for the full type-rule specification and project contract,
-and `docs/local-dev.md` for further local-dev detail.
+`docs/detection-checklist.md` for the complete, gated list of what's shipped
+and what's next (mechanism, scope decisions, and real coverage numbers for
+every stream), and `docs/local-dev.md` for further local-dev detail.
