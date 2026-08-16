@@ -37,6 +37,9 @@ public static class SarifRuleCatalog
     public const string LocalVariablePredicateRuleId = "silentscan/predicates/local-variable-predicate";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
+    public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
+    public const string ForcedSerialFastForwardCursorRuleId = "silentscan/forced-serial/fast-forward-cursor";
+    public const string ForcedSerialNonParallelizableIntrinsicRuleId = "silentscan/forced-serial/nonparallelizable-intrinsic";
     public const string PartialCompositeForeignKeyJoinRuleId = "silentscan/join/partial-composite-fk";
 
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
@@ -47,6 +50,14 @@ public static class SarifRuleCatalog
         SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature => "silentscan/set-option/ansi-warnings-off",
         SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature => "silentscan/set-option/concat-null-yields-null-off",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SetOptionFindingKind."),
+    };
+
+    public static string ForcedSerialRuleId(ForcedSerialFindingKind kind) => kind switch
+    {
+        ForcedSerialFindingKind.TableVariableModification => ForcedSerialTableVariableModificationRuleId,
+        ForcedSerialFindingKind.FastForwardCursor => ForcedSerialFastForwardCursorRuleId,
+        ForcedSerialFindingKind.NonParallelizableIntrinsic => ForcedSerialNonParallelizableIntrinsicRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ForcedSerialFindingKind."),
     };
 
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
@@ -190,6 +201,9 @@ public static class SarifRuleCatalog
             Rule(LocalVariablePredicateRuleId, "A predicate compares a column against a DECLARE'd local variable's value, never a formal parameter - the value is invisible to the cardinality estimator, which falls back to the column's average-density statistic instead of a value-specific estimate. The predicate is still fully sargable; only the row-count ESTIMATE is at risk, not the access path. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE."),
             Rule(NotInNullableSubqueryRuleId, "WHERE x NOT IN (SELECT y FROM t) where y is a nullable column - a three-valued-logic correctness trap. The instant the subquery produces one NULL row, the whole NOT IN evaluates to UNKNOWN for every outer row, so the query silently returns zero rows instead of the expected anti-join result. Never fires when the subquery column is NOT NULL, or when the subquery already filters it with an unconditional WHERE y IS NOT NULL."),
             Rule(NonUniqueUpdateSourceRuleId, "UPDATE ... FROM ... JOIN where the joined source's own join columns carry no unique index/constraint - if a target row matches more than one source row, SQL Server silently picks a value from an unspecified one of them (plan-dependent, not guaranteed stable across executions). MERGE raises a hard error in this exact situation instead of picking silently. Never fires when the source's join columns are covered by a genuine unique index/constraint, or when the SET clause never reads from the non-unique source."),
+            Rule(ForcedSerialTableVariableModificationRuleId, "A DECLARE'd table variable is the write target of an INSERT/UPDATE/DELETE/MERGE, or the INTO target of an OUTPUT clause - the engine forces that one statement's own plan serial (effective MAXDOP 1), confirmed as NonParallelPlanReason=\"TableVariableTransactionsDoNotSupportParallelNestedTransaction\" in a real executed plan. A read-only reference to the same table variable is unaffected."),
+            Rule(ForcedSerialFastForwardCursorRuleId, "A cursor declared FAST_FORWARD (or the equivalent bare FORWARD_ONLY READ_ONLY without an explicit STATIC/KEYSET/DYNAMIC) forces the cursor's own defining query plan serial, confirmed as NonParallelPlanReason=\"NoParallelFastForwardCursor\". This is the opposite of the common 'always use LOCAL FAST_FORWARD' fetch-overhead advice - that advice is still correct for row-by-row fetch cost, but it is specifically what defeats a parallel plan for the cursor's defining SELECT."),
+            Rule(ForcedSerialNonParallelizableIntrinsicRuleId, "One of a finite, oracle-confirmed list of intrinsic functions/globals (OBJECT_ID, IDENT_CURRENT, ERROR_NUMBER, ERROR_MESSAGE, ERROR_LINE, ERROR_SEVERITY, ERROR_STATE, ERROR_PROCEDURE, @@TRANCOUNT) referenced inside a query with a real FROM clause forces that query's plan serial, confirmed as NonParallelPlanReason=\"NonParallelizableIntrinsicFunction\"."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),
             Rule(SetOptionRuleId(SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature), "The module was compiled under QUOTED_IDENTIFIER OFF (sys.sql_modules.uses_quoted_identifier) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature), "An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),

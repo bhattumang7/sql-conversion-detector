@@ -1251,18 +1251,119 @@ exactly the same way ARITHABORT's own assumption just failed one.
       across all of them.
 
 ### Forced-serial construct inventory
-- [ ] Table-variable **modification** (INSERT/UPDATE/DELETE @t) — whole plan
-      serial; read-only use does not fire (direction-style distinction).
-      821 modules locally use table variables.
-- [ ] Dynamic/keyset cursors; cursor without `LOCAL FAST_FORWARD` as the
-      crisp subrule (197 modules with cursors locally).
-- [ ] The finite serial-forcing intrinsics list (IDENT_CURRENT, ERROR_NUMBER,
-      @@TRANCOUNT, OBJECT_ID, ...) in queries — encodable, documented.
-- [ ] Serial-zone constructs as informational: TOP row goals, recursive CTEs,
-      MSTVF refs (already shipped — MSTVF-as-fence stream), global scalar aggregates.
-- Note: several of these fold naturally into the already-shipped scalar UDF
-  stream or the already-shipped MSTVF-as-fence stream rather than standing
-  alone — decide at design time.
+Fully syntax-only (no catalog needed) — one scanner, one `Kind` enum, the
+same "inventory" shape `SetOptionFinding`/`SetOptionFindingKind` already
+established. A performance-cost finding, not a correctness one: forced-serial
+execution never changes the result, only its cost — `Confidence.High`,
+SARIF `LevelWarning` for all three kinds (the same "structural risk" tier
+`CatchAllPredicateFinding`/`SetOptionFinding` use, not the `LevelError`
+correctness tier `NotInNullableSubqueryFinding`/`NonUniqueUpdateSourceFinding`
+get), never downgraded by indexed-ness (no seek/scan angle to any of these
+three at all). **Version-insensitive**: all three are long-standing,
+documented optimizer restrictions, unaffected by compat level or CE mode —
+table-variable deferred compilation (SQL Server 2019/compat 150+) improves
+only cardinality estimates for table variables and does NOT restore
+parallelism, confirmed directly on this engine at its own default (and
+latest) compat level.
+
+- [x] Table-variable **modification** (INSERT/UPDATE/DELETE/MERGE target, or
+      the INTO target of an OUTPUT clause) — that ONE containing statement's
+      plan is forced serial, confirmed as
+      `NonParallelPlanReason="TableVariableTransactionsDoNotSupportParallelNestedTransaction"`
+      in a real executed plan. **Not the whole batch/procedure** — a
+      correction to the checklist's own original "whole plan serial"
+      phrasing: an unrelated statement later in the same batch that never
+      touches the table variable stayed fully parallel in direct testing.
+      A read-only reference to the same table variable does not fire
+      (direction-style distinction, as originally scoped). OUTPUT INTO a
+      table variable is the same mechanism as a direct DML target (verified,
+      not assumed) — OUTPUT INTO a real table never fires.
+      821 modules locally use table variables (matches the checklist's own
+      original count exactly).
+- [x] `FAST_FORWARD` cursor (or the equivalent bare `FORWARD_ONLY READ_ONLY`
+      lacking an explicit `STATIC`/`KEYSET`/`DYNAMIC`) forces the cursor's
+      own defining query plan serial, confirmed as
+      `NonParallelPlanReason="NoParallelFastForwardCursor"`.
+      **The checklist's own original premise was backwards** — it framed
+      "cursor without `LOCAL FAST_FORWARD`" as the risk shape, but oracle
+      probing showed the opposite: `FAST_FORWARD` itself is what defeats
+      parallelism for the cursor's defining SELECT. `LOCAL FAST_FORWARD`
+      remains the right advice for row-by-row fetch overhead — that claim
+      is unaffected — it's specifically a different, separate cost this
+      finding reports, one the same well-known advice doesn't warn about.
+      `STATIC`/`KEYSET`/`DYNAMIC` cursors were oracle-checked directly and
+      do NOT trigger this mechanism — deliberately never included, rather
+      than assumed unsafe the way the checklist's original "dynamic/keyset
+      cursors" framing did. 202 modules locally declare a cursor, 110 of
+      which already say `FAST_FORWARD` explicitly — i.e. roughly half of
+      all cursor-using modules use the exact option combination that, per
+      this correction, is the one that forces serial execution.
+- [x] The finite, oracle-confirmed serial-forcing intrinsics list:
+      `OBJECT_ID`, `IDENT_CURRENT`, `ERROR_NUMBER`, `ERROR_MESSAGE`,
+      `ERROR_LINE`, `ERROR_SEVERITY`, `ERROR_STATE`, `ERROR_PROCEDURE`,
+      `@@TRANCOUNT` — referenced inside a query with a real FROM clause,
+      confirmed as `NonParallelPlanReason="NonParallelizableIntrinsicFunction"`.
+      Several commonly-cited "always serial" intrinsics
+      (`@@ROWCOUNT`, `@@IDENTITY`, `@@ERROR`, `SCOPE_IDENTITY()`, `NEWID()`)
+      were directly oracle-checked and do NOT trigger this — deliberately
+      excluded rather than guessed into the list, the same precision
+      discipline as everywhere else in this codebase. Additional
+      catalog-metadata candidates (`OBJECTPROPERTY()`, `COL_LENGTH()`,
+      `COL_NAME()`, `DATABASEPROPERTYEX()`) are plausible members of the
+      same family but were not probed — deliberately left out rather than
+      guessed in, a known v1 gap, not a claim they're safe.
+- [ ] Serial-zone constructs as informational: TOP row goals, recursive
+      CTEs, global scalar aggregates — deliberately deferred. MSTVF refs are
+      already covered by the shipped MSTVF-as-fence stream. A recursive CTE
+      was sanity-checked directly and shows no `NonParallelPlanReason`
+      attribute at all (the optimizer never appears to consider a parallel
+      plan for the recursive union in the first place) — a structurally
+      weaker, harder-to-attribute signal than the three shipped kinds above,
+      not pursued further this pass.
+
+      Real internet-sourced references (verified against the oracle, never
+      trusted blind): Adam Machanic's original documentation of the
+      table-variable-forces-serial gotcha; Aaron Bertrand
+      (sqlperformance.com, "Performance Surprises and Assumptions: DOP and
+      Cursors") on the `FAST_FORWARD`-forces-serial mechanism, matching the
+      `NoParallelFastForwardCursor` result exactly; Microsoft's own Query
+      Processing Architecture guide's list of parallelism-restricting
+      functions, treated as a starting point rather than ground truth since
+      several commonly-repeated members of "the list" elsewhere online
+      (`@@ROWCOUNT`, `@@IDENTITY`, `@@ERROR`) were oracle-disproven above.
+
+      Real execution-based oracle proof (three test classes, all passing —
+      a genuine plan-shape claim needing real execution, never compile-only
+      `SHOWPLAN_XML`, the same correction the earlier catch-all-predicate
+      stream's `OPTION (RECOMPILE)` finding needed):
+      `TableVariableModificationOracleTests` (4 tests: INSERT-target and
+      OUTPUT-INTO-table-variable both fire with the exact same reason
+      string; a read-only reference and an OUTPUT INTO a real table both
+      never carry it); `FastForwardCursorOracleTests` (5 tests: bare
+      `FAST_FORWARD` and `FORWARD_ONLY READ_ONLY` both fire;
+      `LOCAL STATIC FORWARD_ONLY READ_ONLY`, `DYNAMIC`, and no-options all
+      never fire); `NonParallelizableIntrinsicOracleTests` (11 tests: all 9
+      confirmed intrinsics/`@@TRANCOUNT` fire individually, `@@ROWCOUNT`
+      and `SCOPE_IDENTITY()` both confirmed never to fire).
+
+      Unit-tested (`ForcedSerialScannerTests`, 19 cases spanning all three
+      kinds: table-variable INSERT/UPDATE/DELETE/OUTPUT-INTO targets firing,
+      OUTPUT INTO a real table never firing, a read-only reference never
+      firing, per-batch scoping (a re-declared `@t` in a later batch never
+      inheriting the first batch's modification), `FAST_FORWARD`/bare
+      `FORWARD_ONLY READ_ONLY` firing, `LOCAL STATIC FORWARD_ONLY READ_ONLY`/
+      no-options/`DYNAMIC` never firing, a cursor-variable
+      (`SET @c = CURSOR FAST_FORWARD FOR ...`) form firing, three confirmed
+      intrinsics/`@@TRANCOUNT` firing only inside a query with a FROM
+      clause, and the two confirmed-safe intrinsics never firing). Wired
+      end-to-end (`ScanReport` schema version 18 → 19, SARIF, readable
+      report). **Real coverage against the local RM_ test database: 4,218
+      findings** (3,828 table-variable modifications, 233 non-parallelizable
+      intrinsics, 157 `FAST_FORWARD` cursors) — cross-checked against raw-
+      text sweeps: 821 modules use table variables (exact match to the
+      checklist's own original count), 202 modules declare a cursor (110 of
+      which already say `FAST_FORWARD`), 208 modules reference
+      `@@TRANCOUNT`, 128 reference `OBJECT_ID(`.
 
 ### Lineage-metric findings (cheap adds on existing passes)
 - [ ] Nested-view depth report — we already compute topo order; emit depth ≥ N

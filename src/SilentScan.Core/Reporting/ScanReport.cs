@@ -27,6 +27,7 @@ public sealed record ScanReport(
     IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings,
     IReadOnlyList<NotInNullableSubqueryFinding> NotInNullableSubqueryFindings,
     IReadOnlyList<NonUniqueUpdateSourceFinding> NonUniqueUpdateSourceFindings,
+    IReadOnlyList<ForcedSerialFinding> ForcedSerialFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -70,7 +71,9 @@ public sealed record ScanReport(
     /// 17 for the new <see cref="NotInNullableSubqueryFindings"/> stream (docs/detection-
     /// checklist.md Tier 2 "NOT IN over a nullable subquery column"). Bumped to 18 for the new
     /// <see cref="NonUniqueUpdateSourceFindings"/> stream (docs/detection-checklist.md Tier 2
-    /// "UPDATE ... FROM without source uniqueness").
+    /// "UPDATE ... FROM without source uniqueness"). Bumped to 19 for the new
+    /// <see cref="ForcedSerialFindings"/> stream (docs/detection-checklist.md Tier 2
+    /// "Forced-serial construct inventory").
     /// </summary>
-    public const int CurrentSchemaVersion = 18;
+    public const int CurrentSchemaVersion = 19;
 }

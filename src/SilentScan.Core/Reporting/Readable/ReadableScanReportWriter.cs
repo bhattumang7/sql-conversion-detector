@@ -78,6 +78,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(LocalVariablePredicate(report, headingLevel, pathBase));
         blocks.AddRange(NotInNullableSubquery(report, headingLevel, pathBase));
         blocks.AddRange(NonUniqueUpdateSource(report, headingLevel, pathBase));
+        blocks.AddRange(ForcedSerial(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -136,6 +137,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
+        AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -727,6 +729,42 @@ public static class ReadableScanReportWriter
                 string.Join(", ", f.SetColumnNames),
             })]);
     }
+
+    private static IEnumerable<ReadableBlock> ForcedSerial(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ForcedSerialFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Forced-serial constructs ({report.ForcedSerialFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Three independent, oracle-confirmed constructs that force SQL Server to disable parallelism (effective MAXDOP 1) for the statement/query that contains them - a performance-cost finding, not a correctness one, since the result never changes, only its cost. A table-variable modification's forced-serial scope is the one containing statement, not the whole batch/procedure. A FAST_FORWARD cursor (or the equivalent bare FORWARD_ONLY READ_ONLY) forces its own defining query serial - the opposite of the common 'always use LOCAL FAST_FORWARD' fetch-overhead advice, which remains correct advice for a different reason. STATIC/KEYSET/DYNAMIC cursors do not trigger this.");
+
+        foreach (var group in report.ForcedSerialFindings
+            .GroupBy(f => f.Kind)
+            .OrderBy(g => g.Key))
+        {
+            var ordered = group.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
+
+            yield return new ReadableBlock.Heading(level + 1, $"{ForcedSerialTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Table(
+                [WhereHeader, "Module", "Detail"],
+                [.. ordered.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    f.ModuleQualifiedName,
+                    f.DetailText ?? UnknownDisplay,
+                })]);
+        }
+    }
+
+    private static string ForcedSerialTitle(ForcedSerialFindingKind kind) => kind switch
+    {
+        ForcedSerialFindingKind.TableVariableModification => "Table variable modification",
+        ForcedSerialFindingKind.FastForwardCursor => "FAST_FORWARD cursor",
+        _ => "Non-parallelizable intrinsic",
+    };
 
     private static IEnumerable<ReadableBlock> PartialCompositeForeignKeyJoin(ScanReport report, int level, string? pathBase)
     {

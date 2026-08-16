@@ -57,6 +57,7 @@ public static class SarifReportWriter
         results.AddRange(report.LocalVariablePredicateFindings.Select(ToResult));
         results.AddRange(report.NotInNullableSubqueryFindings.Select(ToResult));
         results.AddRange(report.NonUniqueUpdateSourceFindings.Select(ToResult));
+        results.AddRange(report.ForcedSerialFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -355,6 +356,26 @@ public static class SarifReportWriter
         var joinColumns = string.Join(", ", finding.JoinColumnNames);
         var setColumns = string.Join(", ", finding.SetColumnNames);
         var message = $"UPDATE '{finding.TargetTableQualifiedName}' sets [{setColumns}] from '{finding.SourceTableQualifiedName}' joined on [{joinColumns}], which carries no unique index/constraint covering those columns - if a target row ever matches more than one source row, SQL Server silently picks a value from an unspecified one of them.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ForcedSerialFinding finding)
+    {
+        // Warning, not error: a performance-cost finding, not a correctness one - forced-serial
+        // execution never changes the result, only its cost, the same "structural risk" tier
+        // CatchAllPredicateFinding/SetOptionFinding get rather than the provably-wrong-result
+        // Error tier NotInNullableSubqueryFinding/NonUniqueUpdateSourceFinding get.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForcedSerialRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            ForcedSerialFindingKind.TableVariableModification =>
+                $"'{finding.ModuleQualifiedName}' writes to table variable '{finding.DetailText}' - this statement's own plan is forced serial (effective MAXDOP 1).",
+            ForcedSerialFindingKind.FastForwardCursor =>
+                $"'{finding.ModuleQualifiedName}': cursor '{finding.DetailText}' is FAST_FORWARD (or the equivalent bare FORWARD_ONLY READ_ONLY) - its own defining query plan is forced serial.",
+            _ => $"'{finding.ModuleQualifiedName}': {finding.DetailText}{(finding.DetailText!.StartsWith("@@", StringComparison.Ordinal) ? string.Empty : "()")} referenced inside a query with a FROM clause forces that query's plan serial.",
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
