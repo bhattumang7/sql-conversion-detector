@@ -31,7 +31,7 @@ public static class TypedPredicateExtractor
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings);
     }
 
     private sealed class Visitor(
@@ -154,6 +154,8 @@ public static class TypedPredicateExtractor
         public List<WriteLossFinding> WriteLossFindings { get; } = [];
 
         public List<OversizedParameterFinding> OversizedParameterFindings { get; } = [];
+
+        public List<UnderLengthParameterFinding> UnderLengthParameterFindings { get; } = [];
 
         /// <summary>
         /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before <see cref="ExplicitVisit(InsertStatement)"/>
@@ -1209,6 +1211,7 @@ public static class TypedPredicateExtractor
                 Fingerprint: TypedPredicateFindingIdentity.ComputeFingerprint(column, other, operatorText)));
 
             TryAddOversizedParameterFinding(column, other, otherIsLiteral, node);
+            TryAddUnderLengthParameterFinding(column, other, otherIsLiteral, operatorText, node);
         }
 
         /// <summary>
@@ -1238,6 +1241,48 @@ public static class TypedPredicateExtractor
 
             OversizedParameterFindings.Add(new OversizedParameterFinding(
                 column.TableQualifiedName, column.ColumnName, columnLength, otherLength, sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        /// <summary>
+        /// docs/detection-checklist.md Tier 1 "Under-length and length-defaulted string
+        /// declarations" - the mirror of <see cref="TryAddOversizedParameterFinding"/>: a
+        /// parameter/variable/expression declared with a meaningfully SHORTER length than the
+        /// column it's compared against (or no explicit length at all, T-SQL's own length-1
+        /// default), within the same string category. Same literal/MAX/category-mismatch
+        /// exclusions as the oversized case - a literal's length is its actual content, not a
+        /// declared one; MAX-typed is item #1's own separate finding; a category mismatch is
+        /// already covered elsewhere.
+        /// </summary>
+        private void TryAddUnderLengthParameterFinding(
+            PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, string operatorText, TSqlFragment node)
+        {
+            if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType })
+            {
+                return;
+            }
+
+            if (column.Type is not { IsStringFamily: true, IsMax: false, Length: { } columnLength }
+                || otherType is not { IsStringFamily: true, IsMax: false })
+            {
+                return;
+            }
+
+            if (column.Type.Category != otherType.Category)
+            {
+                return;
+            }
+
+            var isImplicitDefault = otherType.Length is null;
+            if (!isImplicitDefault && otherType.Length >= columnLength)
+            {
+                return;
+            }
+
+            var changesRangeOrPatternShape = operatorText is "LIKE" or "<" or "<=" or ">" or ">=";
+
+            UnderLengthParameterFindings.Add(new UnderLengthParameterFinding(
+                column.TableQualifiedName, column.ColumnName, columnLength, otherType.Length, isImplicitDefault,
+                operatorText, changesRangeOrPatternShape, sourcePath, node.StartLine, node.StartColumn));
         }
 
         /// <summary>

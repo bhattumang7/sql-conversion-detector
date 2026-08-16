@@ -48,4 +48,5 @@ public sealed record PredicateExtractionResult(
     IReadOnlyList<CollationConflictFinding> CollationConflictFindings,
     IReadOnlyList<WriteLossFinding> WriteLossFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
-    IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings);
+    IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
+    IReadOnlyList<UnderLengthParameterFinding> UnderLengthParameterFindings);

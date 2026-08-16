@@ -385,6 +385,8 @@ public static class ScanReportBuilder
         var writeLossFindings = extractionResults.SelectMany(r => r.WriteLossFindings).ToList();
         var oversizedParameterFindings = extractionResults.SelectMany(r => r.OversizedParameterFindings)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
+        var underLengthParameterFindings = extractionResults.SelectMany(r => r.UnderLengthParameterFindings)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
         var skippedConstructs = new List<SkippedConstruct>();
@@ -489,7 +491,7 @@ public static class ScanReportBuilder
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
-            maxTypedColumnFindings, oversizedParameterFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
+            maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

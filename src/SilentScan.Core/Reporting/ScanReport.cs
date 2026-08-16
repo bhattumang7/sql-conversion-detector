@@ -19,6 +19,7 @@ public sealed record ScanReport(
     IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings,
     IReadOnlyList<MaxTypedColumnFinding> MaxTypedColumnFindings,
     IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
+    IReadOnlyList<UnderLengthParameterFinding> UnderLengthParameterFindings,
     IReadOnlyList<PartialCompositeForeignKeyJoinFinding> PartialCompositeForeignKeyJoinFindings,
     IReadOnlyList<SetOptionFinding> SetOptionFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
@@ -53,7 +54,9 @@ public sealed record ScanReport(
     /// for the new <see cref="PartialCompositeForeignKeyJoinFindings"/> stream (docs/detection-
     /// checklist.md Tier 1 "Join predicate incomplete vs. the backing foreign key"). Bumped to 13
     /// for the new <see cref="SetOptionFindings"/> stream (docs/detection-checklist.md Tier 1
-    /// "SET options that silently disable plan features").
+    /// "SET options that silently disable plan features"). Bumped to 14 for the new
+    /// <see cref="UnderLengthParameterFindings"/> stream (docs/detection-checklist.md Tier 1
+    /// "Under-length and length-defaulted string declarations").
     /// </summary>
-    public const int CurrentSchemaVersion = 13;
+    public const int CurrentSchemaVersion = 14;
 }

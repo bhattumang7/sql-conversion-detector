@@ -1761,6 +1761,133 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.OversizedParameterFindings);
     }
+
+    // docs/detection-checklist.md Tier 1 "Under-length and length-defaulted string declarations" -
+    // the exact mirror of the oversized-parameter tests above. Deliberately NOT verdict-bearing,
+    // same reasoning: this pass never traces the variable's actual assigned VALUE, so it cannot
+    // claim truncation DID happen for a specific query, only that the declared-length pairing
+    // risks it - the same honesty WriteLossFinding already applies to assignment-site truncation.
+    // Real-world source for the "bare-length declaration defaults to 1" gotcha: Erland
+    // Sommarskog's widely-cited parameter-sizing writing
+    // (https://www.sommarskog.se/dynamic_sql.html and his general T-SQL error-handling series)
+    // repeatedly calls out the length-1 default as a common, easy-to-miss accident distinct from
+    // CAST/CONVERT's own length-30 default for the same bare spelling.
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterDeclaredVariable_FiresUnderLengthParameter()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(5) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Equal(20, finding.ColumnLength);
+        Assert.Equal(5, finding.OtherOperandLength);
+        Assert.False(finding.IsImplicitDefault);
+        Assert.Equal("=", finding.Operator);
+        Assert.False(finding.ChangesRangeOrPatternShape);
+    }
+
+    [Fact]
+    public void Extract_ProcedureParameterShorterThanColumn_FiresUnderLengthParameter()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "CREATE PROCEDURE dbo.usp_FindCustomer @Code VARCHAR(5) AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = @Code; END");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal(20, finding.ColumnLength);
+        Assert.Equal(5, finding.OtherOperandLength);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToVariableWithNoExplicitLength_FiresImplicitDefault()
+    {
+        // T-SQL defaults a length-less DECLARE to 1 - a near-universal accident, not an
+        // intentional choice, and distinct from the shorter-but-explicit case above (no declared
+        // length to report, so OtherOperandLength stays null).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR = 'A'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.True(finding.IsImplicitDefault);
+        Assert.Null(finding.OtherOperandLength);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterVariableInLikePredicate_ChangesPatternShape()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(3) = 'AB%'; SELECT 1 FROM dbo.Customers WHERE Code LIKE @p;");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal("LIKE", finding.Operator);
+        Assert.True(finding.ChangesRangeOrPatternShape);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterVariableInRangeComparison_ChangesRangeShape()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(5) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code > @p;");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal(">", finding.Operator);
+        Assert.True(finding.ChangesRangeOrPatternShape);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToEqualOrLongerDeclaredVariable_NeverFiresUnderLength()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(20) = 'ABC'; DECLARE @q VARCHAR(50) = 'AB'; SELECT 1 FROM dbo.Customers WHERE Code = @p OR Code = @q;");
+
+        Assert.Empty(result.UnderLengthParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterLiteral_NeverFiresUnderLength()
+    {
+        // A literal's own length is its actual content length, not a "declared" one distinct
+        // from the column - only a real variable/parameter/expression carries a size independent
+        // of its current value, so literals are excluded outright, same as the oversized case.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.Customers WHERE Code = 'x';");
+
+        Assert.Empty(result.UnderLengthParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterMaxTypedVariable_NeverFiresUnderLength()
+    {
+        // MAX-typed is never "shorter" - a length of -1 would falsely read that way, so MAX-typed
+        // operands are excluded here too, symmetric with the oversized case's own guard.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(MAX) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        Assert.Empty(result.UnderLengthParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterVariableOfDifferentCategory_NeverFiresUnderLength()
+    {
+        // A category mismatch (VARCHAR column vs NVARCHAR variable) is the implicit-conversion
+        // stream's own, already-covered concern - this check only fires within the SAME string
+        // category, where length is the only thing that differs.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p NVARCHAR(5) = N'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        Assert.Empty(result.UnderLengthParameterFindings);
+    }
 }
 
 /// <summary>

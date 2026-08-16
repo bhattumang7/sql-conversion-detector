@@ -72,6 +72,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
+        blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -124,6 +125,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
+        AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.UnderLengthParameterFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -574,6 +576,30 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.ColumnLength.ToString(CultureInfo.InvariantCulture),
                 f.OtherOperandLength.ToString(CultureInfo.InvariantCulture),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> UnderLengthParameter(ScanReport report, int level, string? pathBase)
+    {
+        if (report.UnderLengthParameterFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Predicates comparing a column against an under-length parameter ({report.UnderLengthParameterFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "The mirror of the oversized-parameter section above, but strictly worse: the parameter/variable/expression on the other side is declared SHORTER than the column - or with no explicit length at all (T-SQL defaults a length-less DECLARE/parameter to 1) - so the value is silently truncated before the predicate ever runs. Structural, not a per-instance proof (this pass never traces the variable's actual assigned value): it states the declared-length pairing risks truncation, the same honesty WriteLossFinding already applies to assignment-site truncation. Where the parameter feeds a LIKE pattern or a range bound, truncation changes what the comparison itself means, not just which exact value it excludes - marked in the Effect column.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Column length", "Other operand length", "Operator", "Effect"],
+            [.. report.UnderLengthParameterFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.ColumnLength.ToString(CultureInfo.InvariantCulture),
+                f.IsImplicitDefault ? "none (defaults to 1)" : f.OtherOperandLength!.Value.ToString(CultureInfo.InvariantCulture),
+                f.Operator,
+                f.ChangesRangeOrPatternShape ? "changes pattern/range shape" : "truncates compared value",
             })]);
     }
 

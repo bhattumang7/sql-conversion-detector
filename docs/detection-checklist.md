@@ -611,61 +611,89 @@ All four sub-items wired end-to-end: `ScanReportBuilder` → `ScanReport`
 (`ReadableScanReportWriter`, summary rows + dedicated sections). Full test
 suite green (2,635 tests) after landing.
 
-### Under-length and length-defaulted string declarations
-The third leg of the parameter-sizing stream, and the only one still missing:
-the shipped pair covers *too wide* (`MAX`-typed, and declared longer than the
-column). Nothing covers *too narrow*, which is the strictly worse failure —
-it doesn't just widen an estimate, it silently truncates the compared value so
-the predicate matches the wrong rows or none at all. Found on an incumbent read
-where it exists only as a bare "declaration has no length" syntax check with no
-column awareness at all; resolved against the catalog it becomes a real
-finding, and the machinery is already built.
+### Under-length and length-defaulted string declarations — shipped
+The third leg of the parameter-sizing stream: the shipped pair covers *too
+wide* (`MAX`-typed, and declared longer than the column). This closes *too
+narrow*, which is the strictly worse failure — it doesn't just widen an
+estimate, it silently truncates the compared value so the predicate matches
+the wrong rows or none at all. Found on an incumbent read where it exists
+only as a bare "declaration has no length" syntax check with no column
+awareness at all; resolved against the catalog it becomes a real finding,
+reusing the oversized-parameter rule's own comparison/reporting path almost
+exactly, mirrored for direction.
 
-- [ ] **`varchar`/`nvarchar`/`char`/`binary` declared with no length at all.**
-      Defaults **measured against the engine, not quoted from docs** (probe
-      2026-08-16, recorded in `detection-reference.md` Appendix 8): length **1**
-      in a `DECLARE` or parameter declaration, **30 characters** in
-      `CAST`/`CONVERT` (`nvarchar` 30 characters = 60 bytes). Two different
-      defaults for the same spelling is why this gets written by accident.
-      Detection is syntax-only, but the finding only earns its place once the
-      catalog says what it is compared against, so it must be reported jointly
-      with the compared column, not standalone.
-      **Scope wider than the incumbent's**, which covers only `varchar`/
-      `nvarchar` and only in variable/parameter declarations: include
-      `char`/`nchar`/`binary`/`varbinary`, and resolve `sysname` and other
-      alias types to their underlying type before judging.
-- [ ] **Declared shorter than the compared column** (`varchar(10)` variable or
-      parameter vs a `varchar(100)` column) — the exact mirror of the shipped
-      "declared longer than the compared column" rule, and it should reuse that
-      rule's comparison and reporting path rather than starting a new one.
-      **The seek is preserved** (measured: a `varchar(3)` variable against an
-      indexed `varchar(50)` column still plans an Index Seek with the variable
-      as the seek predicate), so this is emphatically **not** a verdict-bearing
-      rule and must not be reported as one — the defect is in *which rows
-      match*, not in how they are found. Two consequences, and the finding
-      should say which applies:
-      * **Silent truncation of the compared value.** No error and no warning:
-        assigning a 10-character literal to a `varchar(3)` yields `'ABC'`, and
-        to an unsized `varchar` yields `'A'` (both measured).
-      * **A `LIKE` pattern whose wildcard is truncated away** — the sharpest
-        case and the one the fixture should be built from: `'ABCDEF%'` assigned
-        to a `varchar(4)` becomes `'ABCD'`, silently converting a prefix match
-        into an equality match. The predicate still seeks; it just answers a
-        different question. Same shape for a truncated range bound.
-- [ ] **Precision guards (mandatory):** don't fire when the declaration is
-      never actually compared to a catalog-typed column (the sizing is then
-      nobody's business but the author's); don't fire on assignment from a
-      source the pipeline can't type, report `Unknown` instead; treat
-      `sysname` and other aliases by resolving to the underlying type first.
-- [ ] Carry the standard schema — indexed?, depth, and origin (both the
-      declaration site and the predicate site, which are usually different
-      lines and sometimes different modules once dynamic SQL is involved).
-      Engine-version note: no version sensitivity; the defaults are the same
-      across every supported release, which makes this one of the cheaper
-      rules to state honestly.
-- [ ] Oracle: **none — the whole rule is syntactic-plus-catalog**, per the
-      measured seek-preservation above. Ships fire/near-miss fixtures from
-      real, internet-sourced bugs, and nothing else.
+- [x] **`varchar`/`nvarchar`/`char`/`nchar`/`binary`/`varbinary` declared
+      with no length at all.** Defaults measured directly (`SqlTypeReferenceResolver`/
+      `LiveTypeMapper` both already resolve a length-less declaration to
+      `SqlType.Length: null`, never guessed at 1 - this stream is the first
+      consumer to interpret that `null` as "T-SQL will default this to length
+      1 at runtime" rather than "unresolved"): `IsImplicitDefault` on <see
+      cref="UnderLengthParameterFinding"/> is true exactly when the OTHER
+      operand's `Length` is `null` (and it isn't MAX-typed) - a bare
+      `DECLARE @p VARCHAR = 'ABCDEF';` truncates to `'A'`, oracle-confirmed
+      directly (real seeded row, real query execution:
+      `UnderLengthParameterOracleTests.VariableWithNoExplicitLength_DefaultsToOneAndTruncatesJustAsSeverely`).
+      `CAST`/`CONVERT`'s own different length-30 default is a distinct shape
+      (an inline expression, not a declaration) and is NOT covered by this
+      stream - out of scope, not silently missed.
+- [x] **Declared shorter than the compared column** (`varchar(10)` variable
+      or parameter vs a `varchar(100)` column) — the exact mirror of the
+      shipped "declared longer than the compared column" rule
+      (`TryAddOversizedParameterFinding`), reusing its comparison/reporting
+      path directly: `TryAddUnderLengthParameterFinding` in
+      `TypedPredicateExtractor.cs`, same literal/MAX/category-mismatch
+      exclusions. **Deliberately NOT verdict-bearing**, same reasoning as the
+      oversized sibling: this pass never traces the variable's actual
+      assigned VALUE (CLAUDE.md "soundness first"), so it cannot claim
+      truncation DID happen for a specific query, only that the declared-
+      length pairing risks it - the same honesty `WriteLossFinding` already
+      applies to assignment-site truncation. Two consequences, both reported
+      via `ChangesRangeOrPatternShape` (derived structurally from the
+      predicate's own operator, never guessed - true for `LIKE`/`<`/`<=`/
+      `>`/`>=`, false for `=`):
+      * **Silent truncation of the compared value** (`ChangesRangeOrPatternShape:
+        false`, equality/inequality) — no error, no warning. Oracle-confirmed
+        with a real seeded row and real query execution
+        (`UnderLengthParameterOracleTests.ShorterVariableAssignedALongerLiteral_SilentlyTruncatesAndExcludesTheRealMatch`):
+        a `varchar(20)` column holding `'ABCDEF'`, compared via `Code = @p`
+        against a `varchar(3)` variable assigned `'ABCDEF'`, matches ZERO
+        rows (the variable becomes `'ABC'` at assignment) where the same
+        comparison at full length matches one.
+      * **A `LIKE` pattern (or range bound) whose meaning changes, not just
+        its match count** (`ChangesRangeOrPatternShape: true`) — the sharper
+        case: oracle-confirmed
+        (`ShorterVariableAssignedALikePattern_LosesTheWildcardAndChangesWhatMatches`)
+        that `'ABC%'` (4 chars) assigned to a `varchar(3)` variable becomes
+        `'ABC'` with the wildcard silently dropped, converting a prefix match
+        into an exact-equality match — a genuinely different question, not
+        just a narrower answer to the same one.
+- [x] **Precision guards (mandatory):** never fires on a literal (a literal's
+      length is its actual content, not a declared one - matches the
+      oversized sibling's identical guard); never fires on a MAX-typed other
+      operand (that's item #1's own separate `MaxTypedColumnFinding`, not
+      this rule - a declared length of "MAX" must never misread as "shorter"
+      the way a raw `-1` sentinel would); never fires across a category
+      mismatch (the implicit-conversion stream's own, already-covered
+      concern); `sysname` and other aliases resolve to their underlying type
+      first via the same `SqlTypeReferenceResolver`/`catalog.TypeAliases`
+      path every other typed rule in this codebase already uses, not a
+      separate resolution step.
+- [x] Oracle: **not verdict-bearing (no `SET SHOWPLAN_XML` plan claim), but
+      real execution-based oracle confirmation of the general mechanism** -
+      `UnderLengthParameterOracleTests` (3 tests: equality truncation, LIKE
+      wildcard loss, implicit-default truncation), the same self-authored-
+      probe-row-plus-real-execution discipline `WriteLossOracleTests`/
+      `TemporalBoundaryPrecisionOracleTests` already use for this exact class
+      of "runtime DML/query-result behavior, not a query-plan one" claim -
+      this is a general confirmation of the rule's own premise, not a
+      per-finding proof (mirrors how `CaseFoldColumnPipelineTests`/
+      `DateFunctionColumnPipelineTests` confirm a Tier-1 rule's general
+      mechanism once, not per finding). Structural unit tests
+      (`TypedPredicateExtractorTests`, 9 cases: shorter declared variable/
+      procedure parameter, implicit-default, LIKE/range operator detection,
+      and every precision-guard negative). Real coverage against the local
+      RM_ test database: **76 findings** (11 implicit-default, 12 changing
+      LIKE/range shape).
 
 ### Join predicate incomplete vs. the backing foreign key — shipped
 Folded in from the incumbent-catalog read — "strongest single find" there,

@@ -51,6 +51,7 @@ public static class SarifReportWriter
         results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
+        results.AddRange(report.UnderLengthParameterFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -252,6 +253,25 @@ public static class SarifReportWriter
                 $"'{finding.ModuleQualifiedName}' was compiled under QUOTED_IDENTIFIER OFF{touchedDisplay}.",
             _ => $"'{finding.ModuleQualifiedName}': SET NUMERIC_ROUNDABORT ON{touchedDisplay}.",
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(UnderLengthParameterFinding finding)
+    {
+        // Warning, same severity tier as OversizedParameterFinding and WriteLossFinding's own
+        // identical class of concern (a write/comparison silently narrowing a value with no
+        // error raised) - this pass never traces the variable's actual assigned value, so it
+        // cannot claim truncation DID happen for a specific query, only that the declared-length
+        // pairing risks it. Not downgraded by indexed-ness: the risk is about the compared VALUE
+        // being truncated, unrelated to seek loss.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnderLengthParameterRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var otherLengthDisplay = finding.IsImplicitDefault ? "no explicit length (defaults to 1)" : $"length {finding.OtherOperandLength}";
+        var shapeNote = finding.ChangesRangeOrPatternShape
+            ? $" - truncation changes what the '{finding.Operator}' comparison itself means (a shorter pattern/bound), not just which exact value it excludes"
+            : " - the compared value is silently truncated before the predicate ever runs, which can exclude rows that should match or match rows that shouldn't";
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (length {finding.ColumnLength}) is compared against a parameter/variable/expression declared with {otherLengthDisplay}{shapeNote}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
