@@ -69,6 +69,7 @@ them emits is an unverified static claim.
 | `SqlServer.Rules` (DacFx; dormant original + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric (measured, 1/3 precision) |
 | Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule, symmetric per docs; direction-awareness an unverified negative (JS-shell site) — close via trial install before publication |
 | SonarQube T-SQL plugin (ANTLR `grammars-v4`) | No | Dormant since 2024 | none |
+| Same CI platform, paid-tier T-SQL analyzer, ~83 rules (hand-written grammar; source-read 2026-08-16, §7.8) | No — AST shape matches and name lists only | Active (closed source) | none |
 | Oracle PL/SQL analyzer | No (block-scope symbol table, no catalog) | Active | none; **no T-SQL support at all** |
 | Rust multi-dialect linter, 282 rules | Parses DDL types into a field it **never reads** | Active | declared stub, never fires |
 | DacFx rule sample, 9 rules | No | Abandoned 2017 | none |
@@ -550,8 +551,9 @@ notes are opinions; the lists are facts.
 
 Totals: `SqlServer.Rules` (DacFx) 120 · commercial T-SQL catalog (imported by
 the SonarQube plugin) 148 · Rust multi-dialect linter 282 · SonarQube plugin's
-own 22 (16 enabled for T-SQL) · Oracle PL/SQL analyzer 57 · DacFx sample 9.
-**~638 rules total.** None of them resolves conversion direction, collation, or
+own 22 (16 enabled for T-SQL) · paid-tier CI-platform T-SQL analyzer ~83
+(§7.8) · Oracle PL/SQL analyzer 57 · DacFx sample 9.
+**~721 rules total.** None of them resolves conversion direction, collation, or
 lineage; none has a plan oracle.
 
 ### 7.1 What the full sweep changed
@@ -896,3 +898,101 @@ runtime-only-signals skip and the index-advisor skip (both in
 it has, and its implicit-conversion substring test is strictly weaker than
 what this tool already ships (direction-aware, not a same-boolean-both-sides
 read).
+
+### 7.8 Paid-tier T-SQL analyzer of the same CI platform — ~83 rules
+
+Read at source level on 2026-08-16 from a decompiled tree held locally and
+deliberately not committed (same convention as §7.7 — competitors are named
+generically here, real identities and per-rule identifiers stay in the
+gitignored local notes). Distinct from §7.5: that is the free, community
+analyzer with a generated grammar; this is the vendor's own closed-source
+analyzer with a hand-written T-SQL grammar and a proper AST visitor
+framework — the largest single T-SQL rule set found behind a paywall.
+
+**Composition, by our disposition rather than theirs.** ~60 of the ~83 are
+maintainability, formatting, naming, dead-code, deprecation and statement-shape
+rules; 5 are security; 7 are cursor/control-flow correctness; the remainder are
+statement-shape advice with performance framing but no catalog behind it. The
+full thematic breakdown, with the reason each group is out, is the block entry
+in `detection-checklist.md` Tier 3 — not duplicated here.
+
+**What it establishes, and why it was worth reading.** Nothing in it resolves a
+type, consults a catalog, or compiles anything: every rule is a shape match
+over its own parse tree plus, at most, a hard-coded name list. Concretely, and
+these are the facts the study can cite:
+
+* **No implicit-conversion rule of any kind** — not even a symmetric one. The
+  three surveyed catalogs that attempt conversion at all are the two in §7.2
+  and §7.3; this one, the largest, does not try.
+* **No collation awareness** anywhere in the rule set.
+* **No cross-object resolution**: no view expansion, no inline-TVF resolution,
+  no lineage. Rules that inherently need it (join width, projection width) are
+  implemented as counts over the written text instead, which is precisely the
+  gap our lineage pass fills.
+* **No plan oracle and no engine contact.** Its session-setting rules assert
+  what the text says, never what the engine would do with it.
+* Its nearest approaches to our territory are three rules that are useful as
+  *seeds* once resolved against a catalog and useless as written: a bare
+  "string declaration has no length" check with no compared column,
+  a "session option is off" check with no dependency walk behind it, and a
+  "non-deterministic function is evaluated more than once" check that does not
+  separate the foldable intrinsics from the non-foldable ones. All three are
+  queued in the checklist in their resolved forms.
+
+**Sizing note for the study's framing.** Adding this catalog moves the surveyed
+total to ~721 rules across seven tools without changing the headline negative
+at all, which is the more useful thing to be able to say: the gap is not an
+artefact of having surveyed only free tools.
+
+---
+
+## Appendix 8 — Measured engine facts (probes of 2026-08-16)
+
+Facts established by direct probe against the standing Docker instance rather
+than read from documentation, recorded so they are never re-derived and so the
+rules built on them can cite a measurement. Probes were self-authored,
+compile-only where a plan was involved, and confined to `master`/`tempdb` and
+temporary objects.
+
+**`sys.sql_modules` carries exactly two session settings.** Full column list:
+`object_id`, `definition`, `uses_ansi_nulls`, `uses_quoted_identifier`,
+`is_schema_bound`, `uses_database_collation`, `is_recompiled`,
+`null_on_null_input`, `execute_as_principal_id`, `uses_native_compilation`,
+`inline_type`, `is_inlineable`. Consequences: `ANSI_NULLS` is the only
+remaining session option with a catalog half, so `ANSI_PADDING`,
+`ANSI_WARNINGS`, `CONCAT_NULL_YIELDS_NULL` and `NUMERIC_ROUNDABORT` are
+syntax-scan-only; `is_recompiled` makes the queued `WITH RECOMPILE` rule a
+one-column lookup; and `inline_type`/`is_inlineable` are the engine's own
+answer on scalar-UDF inlining, i.e. ground truth against which Appendix 3's
+hand-maintained blocker list can be checked.
+
+**Default string lengths differ by context — the same spelling means two
+things.** Unsized `varchar` is length **1** in a `DECLARE` or parameter
+declaration, but **30 characters** in `CAST`/`CONVERT` (`nvarchar`: 1 character
+in a declaration, 30 characters / 60 bytes in a conversion). Truncation to
+either is silent — no error, no warning: a 10-character literal assigned to
+`varchar(3)` yields `'ABC'`, and to an unsized `varchar` yields `'A'`.
+
+**Under-length comparison does not cost the seek.** A `varchar(3)` variable
+compared to an indexed `varchar(50)` column plans an Index Seek with the
+variable as the seek predicate. The under-length rule is therefore a
+data-semantics finding, not a verdict-bearing one. Its sharpest real failure is
+a `LIKE` pattern whose wildcard is truncated away — `'ABCDEF%'` assigned to a
+`varchar(4)` becomes `'ABCD'`, silently turning a prefix match into an equality
+match while still seeking.
+
+**`ANSI_PADDING` is a per-column property fixed at CREATE time.**
+`sys.columns.is_ansi_padded` records the session setting in force when the
+column was created, so a single table can hold both kinds. The stored data
+genuinely differs: inserting `'abc   '` stores 3 bytes into a non-padded
+`varchar(20)` column and 6 into a padded one. This changes which rows match,
+not how they are found.
+
+**Nondeterministic intrinsics: the folklore list is wrong, and the performance
+premise behind it is also wrong.** Measured across 200 rows in one query, bare
+`RAND()` yields **one** distinct value — it is a runtime constant folded once,
+exactly like `GETDATE()` and `SYSDATETIME()`. `NEWID()`, `CRYPT_GEN_RANDOM()`
+and `RAND(<non-constant expression>)` yield 200. Separately, per-row evaluation
+does not defeat a seek at all: `WHERE indexed_col = NEWID()` compiles to an
+Index Seek with `newid()` as the seek predicate. Both findings together killed
+a proposed rule; see the worked entry in `detection-checklist.md` Tier 2.

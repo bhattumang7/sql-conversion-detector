@@ -622,19 +622,36 @@ column awareness at all; resolved against the catalog it becomes a real
 finding, and the machinery is already built.
 
 - [ ] **`varchar`/`nvarchar`/`char`/`binary` declared with no length at all.**
-      T-SQL's default is length 1 in a `DECLARE` or a parameter declaration,
-      but 30 in `CAST`/`CONVERT` — two different defaults for the same
-      spelling, which is why this is so consistently written by accident.
+      Defaults **measured against the engine, not quoted from docs** (probe
+      2026-08-16, recorded in `detection-reference.md` Appendix 8): length **1**
+      in a `DECLARE` or parameter declaration, **30 characters** in
+      `CAST`/`CONVERT` (`nvarchar` 30 characters = 60 bytes). Two different
+      defaults for the same spelling is why this gets written by accident.
       Detection is syntax-only, but the finding only earns its place once the
       catalog says what it is compared against, so it must be reported jointly
       with the compared column, not standalone.
+      **Scope wider than the incumbent's**, which covers only `varchar`/
+      `nvarchar` and only in variable/parameter declarations: include
+      `char`/`nchar`/`binary`/`varbinary`, and resolve `sysname` and other
+      alias types to their underlying type before judging.
 - [ ] **Declared shorter than the compared column** (`varchar(10)` variable or
       parameter vs a `varchar(100)` column) — the exact mirror of the shipped
       "declared longer than the compared column" rule, and it should reuse that
       rule's comparison and reporting path rather than starting a new one.
-      Two distinct consequences, and the finding should say which applies:
-      truncation of the compared value (correctness), and — where the value
-      flows into a `LIKE` pattern or a range bound — a changed range.
+      **The seek is preserved** (measured: a `varchar(3)` variable against an
+      indexed `varchar(50)` column still plans an Index Seek with the variable
+      as the seek predicate), so this is emphatically **not** a verdict-bearing
+      rule and must not be reported as one — the defect is in *which rows
+      match*, not in how they are found. Two consequences, and the finding
+      should say which applies:
+      * **Silent truncation of the compared value.** No error and no warning:
+        assigning a 10-character literal to a `varchar(3)` yields `'ABC'`, and
+        to an unsized `varchar` yields `'A'` (both measured).
+      * **A `LIKE` pattern whose wildcard is truncated away** — the sharpest
+        case and the one the fixture should be built from: `'ABCDEF%'` assigned
+        to a `varchar(4)` becomes `'ABCD'`, silently converting a prefix match
+        into an equality match. The predicate still seeks; it just answers a
+        different question. Same shape for a truncated range bound.
 - [ ] **Precision guards (mandatory):** don't fire when the declaration is
       never actually compared to a catalog-typed column (the sizing is then
       nobody's business but the author's); don't fire on assignment from a
@@ -646,9 +663,9 @@ finding, and the machinery is already built.
       Engine-version note: no version sensitivity; the defaults are the same
       across every supported release, which makes this one of the cheaper
       rules to state honestly.
-- [ ] Oracle: verdict-bearing only for the range-changing half; the truncation
-      half is syntactic-plus-catalog and ships fire/near-miss fixtures from
-      real, internet-sourced bugs.
+- [ ] Oracle: **none — the whole rule is syntactic-plus-catalog**, per the
+      measured seek-preservation above. Ships fire/near-miss fixtures from
+      real, internet-sourced bugs, and nothing else.
 
 ### Join predicate incomplete vs. the backing foreign key — shipped
 Folded in from the incumbent-catalog read — "strongest single find" there,
@@ -808,6 +825,14 @@ exactly the same way ARITHABORT's own assumption just failed one.
       .uses_ansi_nulls`) if it does turn out to matter; the other three would
       need the same in-body `SET` scan pattern `NUMERIC_ROUNDABORT` already
       uses. Reuse `ModuleReachableObjectWalker` verbatim for the guard.
+      **The catalog-vs-syntax half of that is now settled** (independent of the
+      plan question, which is still open and still needs its own probe):
+      `sys.sql_modules`' full column list was read off the engine on
+      2026-08-16 and carries exactly two session settings, `uses_ansi_nulls`
+      and `uses_quoted_identifier`. So `ANSI_NULLS` is the only one of the four
+      with a catalog half at all, and `ANSI_PADDING`/`ANSI_WARNINGS`/
+      `CONCAT_NULL_YIELDS_NULL` are confirmed syntax-scan-only. No need to
+      re-check that list; see `detection-reference.md` Appendix 8.
 - [ ] **`ANSI_PADDING OFF` as a second, independent finding — a comparison
       seed, not just a plan-feature blocker.** With the option off, trailing
       blanks are stripped on insert into `varchar`/`varbinary` columns, so a
@@ -820,9 +845,20 @@ exactly the same way ARITHABORT's own assumption just failed one.
       predicate or join comparing a non-ANSI-padded `varchar` column against a
       padded one, or against a literal with trailing whitespace. Precision
       guard: fixed-length and `nvarchar` columns are unaffected; only fire
-      where the catalog actually reports the column as not padded. Oracle:
-      compare plans and the `CONVERT_IMPLICIT`/residual-predicate shape for a
-      padded vs non-padded column pair.
+      where the catalog actually reports the column as not padded.
+      **Measured 2026-08-16, so the premise here does not need re-deriving
+      (unlike the plan-feature premise this section had to correct above — and
+      note this is a deliberately *different* claim from that one, so the
+      ARITHABORT falsification says nothing about it either way):**
+      `is_ansi_padded` is per column and is captured at CREATE time from the
+      then-current session setting, so one table can hold both kinds; the same
+      insert of `'abc   '` stores 3 bytes in a non-padded `varchar(20)` column
+      and 6 in a padded one. **This is a data-semantics finding, not a
+      plan-shape one** — it changes which rows match, not how they are found,
+      the same posture as the under-length rule in Tier 1. It therefore needs
+      **no oracle** and must not be reported with a verdict; drop the earlier
+      suggestion of a `CONVERT_IMPLICIT`/residual-predicate probe, which was
+      assuming a plan consequence that has no reason to exist.
 
 ---
 
@@ -981,7 +1017,21 @@ get an oracle fixture for the serial-plan consequence).
 
 ### Small precise adds (each an afternoon, not a stream)
 - [ ] Proc authored `WITH RECOMPILE` — compiles every call, invisible to
-      cache-based monitoring; pure catalog flag (`sys.sql_modules`).
+      cache-based monitoring; pure catalog flag (`sys.sql_modules
+      .is_recompiled`, column existence confirmed 2026-08-16, so this really is
+      the one-column job it was assumed to be).
+- [ ] **Two more `sys.sql_modules` columns nobody has claimed yet**, surfaced
+      while confirming the above and recorded so they are not rediscovered:
+      * `inline_type` / `is_inlineable` give **the engine's own verdict** on
+        whether a scalar UDF is inlineable under 2019+ — i.e. ground truth for
+        the shipped scalar-UDF stream, which currently reasons from our own
+        reimplementation of the blocker list in `detection-reference.md`
+        Appendix 3. Worth a parity check of the two against the local database:
+        any disagreement is a bug in our blocker list, and agreeing lets the
+        stream cite the engine instead of a hand-maintained list.
+      * `uses_database_collation` marks a schema-bound module whose correctness
+        depends on the database collation — a collation dependency the shipped
+        collation work does not currently consider at all.
 - [ ] `RANGE` instead of `ROWS` in window-function frames — on-disk spool per
       partition; purely syntactic, near-zero FP risk.
 - [ ] Trigger content scan — run trigger bodies through the existing pipeline
@@ -1004,21 +1054,29 @@ get an oracle fixture for the serial-plan consequence).
 - [ ] **`IF` statements containing queries inside a procedure** (folded in
       from the incumbent-catalog read) — estimation and recompile
       consequences; nobody frames it as a performance finding.
-- [ ] **Non-foldable nondeterministic intrinsic in a predicate** (`NEWID()`,
-      `RAND()`, `CRYPT_GEN_RANDOM()`). The incumbent framing of this is
-      "evaluated more than once, assign it to a variable" — a correctness
-      argument. The performance fact underneath is sharper and is ours: these
-      cannot be folded to a runtime constant, so a predicate containing one is
-      re-evaluated per row and cannot seek, whatever the index says.
-      **The precision this needs, and the reason it is admissible at all:**
-      the intrinsics that *are* runtime-constant — `GETDATE()`,
-      `SYSDATETIME()`, `CURRENT_TIMESTAMP` and friends — are folded once and
-      are completely harmless in the same position, and every syntax-only rule
-      in this space either lumps them together or ignores the distinction.
-      Fire only on the non-foldable set, weight by whether the predicate's
-      column is indexed (reuse the shipped index-existence weighting), and
-      state the boundary explicitly: the same function in the `SELECT` list or
-      in an `ORDER BY` is not this finding.
+- [x] **Non-foldable nondeterministic intrinsic in a predicate** — *proposed
+      and killed the same session, before any code was written.* Worth keeping
+      as a worked example of the admission rule doing its job. Proposed premise:
+      `NEWID()`/`RAND()`/`CRYPT_GEN_RANDOM()` cannot fold to a runtime constant,
+      so a predicate containing one is re-evaluated per row and cannot seek.
+      Both halves of that premise were probed against the Docker oracle
+      (2026-08-16) and **both are false**:
+      * **Bare `RAND()` is a runtime constant**, folded once per query exactly
+        like `GETDATE()`/`SYSDATETIME()` — measured as one distinct value across
+        200 rows, against 200 distinct values for `NEWID()`,
+        `CRYPT_GEN_RANDOM()` and `RAND(<non-constant>)`. So the incumbent's
+        three-name list is simply wrong, and adopting it would have shipped a
+        false positive on the most commonly written member of it.
+      * **Per-row evaluation does not cost the seek anyway.** `WHERE
+        indexed_col = NEWID()` compiles to an Index Seek with `newid()` as the
+        seek predicate — a per-row seek, not a scan. The plan is fine; the query
+        is merely nonsense. That is a correctness smell, and one already covered
+        by the always-false-predicate family skipped in Tier 3.
+      Nothing survives that is both true and a performance finding, so this is
+      **not** being built. The genuine relatives (`ORDER BY NEWID()` forcing a
+      sort; a nondeterministic call in a correlated position) are ordinary
+      syntax patterns with no need for our machinery. Recorded here rather than
+      in Tier 3 because the value is the falsification, not the verdict.
 - [ ] **Explicit-length audit of `CAST`/`CONVERT` to a string type**, as the
       expression-side companion to the Tier 1 under-length item: an unsized
       `CONVERT(varchar, …)` silently means 30 characters, which truncates
@@ -1248,6 +1306,61 @@ ideas, not rule candidates, so they don't belong in a detection tier.
 - [ ] **Machine-readable rule catalog generated from the rule types**, carrying
       id/severity/rationale/examples/fix-guidance, feeding both docs and the
       SARIF `rules` block — keeps documentation and code from drifting apart.
+
+## Engineering debt (not detections)
+Codebase-structure work, not rule candidates. Assessed 2026-08-16; do the
+pieces opportunistically, ideally next time the touched code is worked on
+anyway — the existing fire/near-miss/oracle fixtures are the safety net that
+makes each move verifiable.
+
+- [ ] **Separate rule decisions from ScriptDom traversal mechanics.** The
+      verdict layer is already clean (`VerdictClassifier`, `TypePairMatrix`,
+      `WriteLossClassifier`, `ExpressionTypeInferencer` are pure); the tangle
+      is duplicated traversal mechanics plus secondary rules decided inline in
+      visitors. Template for the target shape:
+      `ScalarUdfInlineabilityClassifier` (pure facts → decision function,
+      shared by two scanners). Pieces, in dependency order:
+  - [ ] **`ScopeTracker`/`ScopedSqlVisitorBase`** — extract the scope/CTE
+        stack, proc/trigger body scoping, and the nine `CreateOrAlter*`
+        overrides that `NonSargablePredicateScanner` copies verbatim from
+        `TypedPredicateExtractor` (its own comments say "Mirrors
+        TypedPredicateExtractor's identical …" five times). Highest value:
+        kills ~250 duplicated lines and the two-copies-drift hazard.
+  - [ ] **`ResolvedColumnFacts` + one resolver** — one lineage/catalog query
+        returning type/indexed/nullable/collation/depth/origin;
+        `NonSargablePredicateScanner` currently re-resolves the same column
+        up to three times per finding for type, then nullability, then
+        collation.
+  - [ ] **Pure per-rule classifiers** for decisions currently inline in
+        visitors: `NonSargablePredicateScanner`'s case-fold/date-function
+        sets, ISNULL-on-NOT-NULL suppression, CHARINDEX/LEFT rewrite (incl.
+        remediation prose), temporal-boundary digit counting;
+        `TypedPredicateExtractor`'s `TryAddOversizedParameterFinding` and
+        `TryRecordCollationConflict`; `TvfFenceScanner`/`ScalarUdfScanner`
+        kind decisions. Also: `CrossTableTypeDriftScanner` hand-rolls the
+        collation-mismatch test its own doc comment cites
+        `VerdictClassifier` for — route it through the real one. Best done
+        one scanner at a time when that rule is next touched.
+  - [ ] **`SourceSpan` + shared finding emitter** — replaces hand-threaded
+        `(sourcePath, StartLine, StartColumn)` triples, the identical
+        `OrderBy` tails in four catalog scanners, and the copy-pasted
+        nested depth/origin emission in `TvfFenceScanner`/`ScalarUdfScanner`;
+        the natural place for `Confidence` to become a real rule output
+        (today it's a record default no scanner sets from evidence).
+  - [ ] **`IRelocatableFinding`** — normalize the position field name across
+        finding records (`Column` vs `ColumnPosition` is the blocker), then
+        collapse `DynamicSqlPipeline`'s fourteen near-identical remap methods
+        into one generic.
+  - [ ] Shared `TableReferenceFlattener` and generic `CollectorVisitor<T>`
+        (both copy-pasted per scanner today).
+  - Deliberately NOT in scope: a generic self-registering rule engine
+    (scanners genuinely differ in traversal shape — region stacks, polarity
+    tracking, claim sets — and one framework would re-tangle them on a
+    different axis); dismantling `TypedPredicateExtractor` (its verdict path
+    is clean — it only needs the scope harness pulled out and its two inline
+    secondary rules moved); touching `MaxTypedColumnScanner`/
+    `ColumnCollationDriftScanner` beyond the shared emitter (one-line rules;
+    extraction is ceremony).
 
 ---
 
