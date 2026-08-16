@@ -330,6 +330,25 @@ public static class ScanReportBuilder
             maxTypedColumnStage.Complete($"{maxTypedColumnFindings.Count:N0} findings");
         }
 
+        List<PartialCompositeForeignKeyJoinFinding> partialCompositeForeignKeyJoinFindings;
+        using (var partialFkJoinStage = progress.Begin("scanning partial composite-FK joins", usableCount))
+        {
+            var compositeForeignKeys = PartialCompositeForeignKeyJoinScanner.BuildCompositeForeignKeys(catalog);
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = PartialCompositeForeignKeyJoinScanner.Scan(r, catalog, compositeForeignKeys);
+                    partialFkJoinStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            partialCompositeForeignKeyJoinFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -452,7 +471,7 @@ public static class ScanReportBuilder
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
-            maxTypedColumnFindings, oversizedParameterFindings,
+            maxTypedColumnFindings, oversizedParameterFindings, partialCompositeForeignKeyJoinFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -51,6 +51,7 @@ public static class SarifReportWriter
         results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
+        results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -211,6 +212,23 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OversizedParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (length {finding.ColumnLength}) is compared against a parameter/variable/expression declared with length {finding.OtherOperandLength} - risks memory-grant inflation if the value feeds a sort/hash operator.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(PartialCompositeForeignKeyJoinFinding finding)
+    {
+        // Warning, not error/downgraded-by-index - "is this indexed" has no bearing here; the
+        // defect is row multiplication, not a lost seek. Not error either: unlike a collation
+        // conflict (a compile failure) or a temporal-boundary drop (a proven row-count gap this
+        // scanner can directly demonstrate per-finding), whether the omission is a real bug or a
+        // deliberate fan-out is genuinely ambiguous to static analysis alone (see the finding's
+        // own doc comment) - reflected in its default Medium confidence, not just its SARIF level.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.PartialCompositeForeignKeyJoinRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var matched = string.Join(", ", finding.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
+        var missing = string.Join(", ", finding.MissingColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
+        var message = $"FK '{finding.ConstraintName}': join between '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' matches [{matched}] but omits [{missing}] - a parent row can match more than one child row than the declared relationship allows.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

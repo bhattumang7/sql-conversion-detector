@@ -233,6 +233,7 @@ public sealed class ReadableScanReportWriterTests
         var report = new ScanReport(
             new ParseHealthReport([]), [], [], [], [notIndexed, indexed], [], [],
             [], [], [], [], [], [], [], [], [],
+            [],
             SkippedConstructSummary.From([]), TypedPredicateSummary.From([]), DynamicSqlSummary.From([]));
 
         var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
@@ -262,6 +263,7 @@ public sealed class ReadableScanReportWriterTests
             sourcePath,
             1,
             1)],
+        [],
         [],
         [],
         [],

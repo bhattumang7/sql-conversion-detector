@@ -611,15 +611,71 @@ All four sub-items wired end-to-end: `ScanReportBuilder` → `ScanReport`
 (`ReadableScanReportWriter`, summary rows + dedicated sections). Full test
 suite green (2,635 tests) after landing.
 
-### Join predicate incomplete vs. the backing foreign key
+### Join predicate incomplete vs. the backing foreign key — shipped
 Folded in from the incumbent-catalog read — "strongest single find" there,
 nobody resolves it properly.
 
-- [ ] A join missing a backing FK entirely, or joining on fewer columns than
+- [x] A join missing a backing FK entirely, or joining on fewer columns than
       a composite FK defines. The partial-composite case is a real
       correctness *and* plan defect (silent row multiplication); pure catalog
       work (walk `sys.foreign_key_columns` against the query's own join
-      columns).
+      columns). **Scoped to the partial-composite case only, deliberately:**
+      "FK exists but the join matches none of its columns" is a different,
+      much lower-precision claim (bridge tables, hierarchy self-joins, and
+      business-key joins are all legitimate reasons a join wouldn't use a
+      declared FK at all) and is out of scope — this stream only fires when
+      the join already equates at least one of a composite FK's column pairs
+      and still omits at least one other, uncovered anywhere else in the same
+      statement (another JOIN's ON clause, or the WHERE clause — a composite
+      key legitimately split across `ON a.Id = b.Id WHERE a.TenantId =
+      b.TenantId` is not a bug). A further precision guard suppresses the
+      finding when the column subset the join DOES use is itself a superset
+      of a real unique index's key columns on the referenced side — that
+      join can never multiply rows regardless of what the FK's remaining
+      columns would have added. Reported at `FindingConfidence.Medium` by
+      default (not `High`, unlike every other catalog-only stream this
+      session shipped): a narrower join CAN be a genuine, deliberate fan-out
+      (e.g. joining every historical revision), which static analysis alone
+      cannot always tell apart from a forgotten column — this is stated
+      honestly in the finding's own severity rather than overclaimed.
+      `PartialCompositeForeignKeyJoinFinding`/`PartialCompositeForeignKeyJoinScanner`
+      (`src/SilentScan.Core/Predicates/PartialCompositeForeignKeyJoinScanner.cs`)
+      — a hybrid pass: catalog-only for FK discovery (live-mode only, like
+      every other `DatabaseCatalog.ForeignKeys` consumer), but a real
+      per-file AST walk (reusing `FromScopeResolver`/`ScalarExpressionResolver`,
+      the exact machinery the typed-predicate pipeline already uses) to see
+      which columns a JOIN's own ON clause — or a legacy comma join's
+      WHERE-clause condition — actually equates. Covers ANSI `JOIN`, the
+      legacy comma-join shape, and `UPDATE ... FROM`/`DELETE ... FROM`.
+      **Known v1 scope limit:** only a direct, single-table-to-single-table
+      join is inspected — a 3+-way join chain (`A JOIN B ON ... JOIN C ON
+      ...`, where a later join's own two "sides" are themselves composite
+      sub-trees) is skipped rather than guessed about, since the ON clause
+      of the outer join could reference any table from the accumulated left
+      scope, not just the two immediate operands.
+      Not verdict-bearing — a correctness finding (the defect is the ROW
+      COUNT the join produces, not its access path), oracle-confirmed with
+      real seeded data rather than a plan-XML marker: two revisions of the
+      same order, one order line tied to only one revision — a partial join
+      on `OrderId` alone returns 2 rows (COUNT(*) fans the single order line
+      out across both revisions) where the full composite join correctly
+      returns 1 (`PartialCompositeForeignKeyJoinOracleTests`). Version-
+      insensitive: row multiplication from a partial equality join is pure
+      relational algebra, unaffected by CE version, interleaved execution,
+      or UDF inlining. Wired end-to-end (`ScanReport` schema version 11 →
+      12, SARIF rule catalog + writer, readable report). Unit-tested for the
+      matching/suppression logic (`PartialCompositeForeignKeyJoinScannerTests`
+      — 13 cases: full vs. partial coverage, WHERE-split coverage, coverage
+      against an unrelated third table not counting, the unique-index
+      suppression guard, zero-overlap non-firing, comma joins, `UPDATE
+      ... FROM`). Real coverage against the local RM_ test database: **865
+      findings** (214 composite FKs exist in that catalog) — dominated by one
+      recurring, real pattern: a multi-tenant `AgencyID` column consistently
+      present in the FK but omitted from the join, matching the exact
+      SCD2/multi-tenant bug class the fixtures cite as the mechanism's real-
+      world provenance (Kimball's effective-dated dimension-join literature;
+      the widely documented multi-tenant "always join on tenant_id too"
+      SaaS bug class).
 
 ### SET options that silently disable plan features
 Folded in from the incumbent-catalog read. Universally filed elsewhere as

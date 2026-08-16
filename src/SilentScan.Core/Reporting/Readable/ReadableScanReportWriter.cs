@@ -72,6 +72,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
+        blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -122,6 +123,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
+        AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -570,6 +572,29 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.ColumnLength.ToString(CultureInfo.InvariantCulture),
                 f.OtherOperandLength.ToString(CultureInfo.InvariantCulture),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> PartialCompositeForeignKeyJoin(ScanReport report, int level, string? pathBase)
+    {
+        if (report.PartialCompositeForeignKeyJoinFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"JOINs matching part of a composite foreign key ({report.PartialCompositeForeignKeyJoinFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CORRECTNESS and plan defect, not a lost seek: this join equates some but not all of a real composite foreign key's column pairs, and the omitted column(s) are not covered anywhere else in the statement - a parent row can match more than one child row than the declared relationship allows, silently multiplying rows through the join. Reported at MEDIUM confidence by default: a narrower join can be a genuine, deliberate fan-out (e.g. joining every historical revision), which static analysis alone cannot always tell apart from a forgotten column - review each one rather than treating it as a certain bug.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Constraint", "Tables", "Matched columns", "Missing columns"],
+            [.. report.PartialCompositeForeignKeyJoinFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ConstraintName,
+                $"{f.ParentTableQualifiedName} -> {f.ReferencedTableQualifiedName}",
+                string.Join(", ", f.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}")),
+                string.Join(", ", f.MissingColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}")),
             })]);
     }
 

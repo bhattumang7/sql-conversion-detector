@@ -19,6 +19,7 @@ public sealed record ScanReport(
     IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings,
     IReadOnlyList<MaxTypedColumnFinding> MaxTypedColumnFindings,
     IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
+    IReadOnlyList<PartialCompositeForeignKeyJoinFinding> PartialCompositeForeignKeyJoinFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -47,7 +48,9 @@ public sealed record ScanReport(
     /// end-of-period boundary - a correctness finding, not a sargability one, but shares the same
     /// scope-resolution walk as Tier1Findings). Bumped to 11 for the new
     /// <see cref="MaxTypedColumnFindings"/> and <see cref="OversizedParameterFindings"/> streams
-    /// (docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters").
+    /// (docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters"). Bumped to 12
+    /// for the new <see cref="PartialCompositeForeignKeyJoinFindings"/> stream (docs/detection-
+    /// checklist.md Tier 1 "Join predicate incomplete vs. the backing foreign key").
     /// </summary>
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 12;
 }
