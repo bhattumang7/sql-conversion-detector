@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Predicates;
 using SilentScan.Verify.Catalog;
 using SilentScan.Tests.Support;
 
@@ -25,6 +26,16 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
             INDEX IX_Email (Email));
         GO
         CREATE TYPE dbo.PhoneNumber FROM VARCHAR(20) NOT NULL;
+        GO
+        CREATE TABLE dbo.OrdersFk (
+            OrderId INT NOT NULL PRIMARY KEY,
+            CustomerCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+        GO
+        CREATE TABLE dbo.CustomersFk (
+            CustomerCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL PRIMARY KEY);
+        GO
+        ALTER TABLE dbo.OrdersFk ADD CONSTRAINT FK_OrdersFk_CustomersFk
+            FOREIGN KEY (CustomerCode) REFERENCES dbo.CustomersFk (CustomerCode);
         """;
 
     [Fact]
@@ -94,5 +105,39 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
 
         Assert.NotNull(catalog.DefaultCollation);
         Assert.False(string.IsNullOrWhiteSpace(catalog.DefaultCollation!.Name));
+    }
+
+    [Fact]
+    public async Task ReadAsync_ForeignKey_ReadsRealConstraintFromSysForeignKeyColumns()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var fk = Assert.Single(catalog.ForeignKeys, f => f.ConstraintName == "FK_OrdersFk_CustomersFk");
+        Assert.Equal("dbo.OrdersFk", fk.ParentTableQualifiedName);
+        Assert.Equal("CustomerCode", fk.ParentColumnName);
+        Assert.Equal("dbo.CustomersFk", fk.ReferencedTableQualifiedName);
+        Assert.Equal("CustomerCode", fk.ReferencedColumnName);
+    }
+
+    [Fact]
+    public async Task ReadAsync_MatchingForeignKey_CrossTableTypeDriftScannerNeverFires()
+    {
+        // Oracle-discovered while building the fires case (both attempts rejected outright, even
+        // WITH NOCHECK): SQL Server enforces category AND collation equality between an FK's two
+        // sides at ADD CONSTRAINT time (Msg 1757 for a collation mismatch), and blocks an ALTER
+        // COLUMN on either side afterward while the constraint still exists (Msg 5074/4922) - a
+        // genuinely drifted, currently-valid FK relationship cannot exist in a real database at
+        // all. This means the scanner's real-world yield on FK-linked pairs specifically is
+        // structurally zero on any database with intact constraints, not just empirically rare -
+        // explaining why 1,247 real FK pairs measured against the local RM_ test database showed
+        // 0 drift (docs/detection-checklist.md). The scanner's actual "fires" logic is still
+        // proven correct - directly, against a hand-built catalog, in
+        // CrossTableTypeDriftScannerTests, since that's the only way to construct the state at
+        // all. This test locks in the negative: a real, matching FK never produces a finding.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var findings = CrossTableTypeDriftScanner.Scan(catalog);
+
+        Assert.Empty(findings);
     }
 }

@@ -13,6 +13,8 @@ public sealed record ScanReport(
     IReadOnlyList<WriteLossFinding> WriteLossFindings,
     IReadOnlyList<TvfFenceFinding> TvfFenceFindings,
     IReadOnlyList<ScalarUdfFinding> ScalarUdfFindings,
+    IReadOnlyList<ColumnCollationDriftFinding> ColumnCollationDriftFindings,
+    IReadOnlyList<CrossTableTypeDriftFinding> CrossTableTypeDriftFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -30,7 +32,11 @@ public sealed record ScanReport(
     /// a new field might exist deserves the same signal any other new field gets. Bumped to 5
     /// for the new <see cref="TvfFenceFindings"/> stream (docs/detection-checklist.md Tier 1
     /// #2, MSTVF-as-fence). Bumped to 6 for the new <see cref="ScalarUdfFindings"/> stream
-    /// (docs/detection-checklist.md Tier 1 #1, scalar UDF).
+    /// (docs/detection-checklist.md Tier 1 #1, scalar UDF). Bumped to 7 for the new
+    /// <see cref="ColumnCollationDriftFindings"/> stream (docs/detection-checklist.md Tier 1
+    /// "Join-key and cross-object type/collation mismatch": column/temp-object collation !=
+    /// database collation). Bumped to 8 for the new <see cref="CrossTableTypeDriftFindings"/>
+    /// stream (same Tier 1 section: FK-linked cross-table type drift).
     /// </summary>
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 8;
 }

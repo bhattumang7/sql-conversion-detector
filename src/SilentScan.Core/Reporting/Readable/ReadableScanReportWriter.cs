@@ -66,6 +66,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(Tier1(report, headingLevel, pathBase));
         blocks.AddRange(TvfFence(report, headingLevel, pathBase));
         blocks.AddRange(ScalarUdf(report, headingLevel, pathBase));
+        blocks.AddRange(ColumnCollationDrift(report, headingLevel, pathBase));
+        blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -110,6 +112,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Non-sargable predicate patterns", report.Tier1Findings.Count);
         AddCount(counts, "Multi-statement/CLR TVF references acting as optimization fences", report.TvfFenceFindings.Count);
         AddCount(counts, "Scalar UDF calls (per-row cost, non-sargable when predicate-context)", report.ScalarUdfFindings.Count);
+        AddCount(counts, "Columns whose collation drifts from the database/tempdb default", report.ColumnCollationDriftFindings.Count);
+        AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -414,6 +418,51 @@ public static class ReadableScanReportWriter
                     ScalarUdfDetail(f),
                 })]);
         }
+    }
+
+    private static IEnumerable<ReadableBlock> ColumnCollationDrift(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ColumnCollationDriftFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Columns whose collation drifts from the default ({report.ColumnCollationDriftFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A conversion seed, not yet a comparison: this column's own collation differs from the database's default (or, for a temp table/table variable, from tempdb's own effective collation) - the classic setup for a future collation-conflict compile error or a forced-scan implicit conversion once a query actually compares it against something carrying the baseline collation.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Column collation", "Baseline collation", "Object kind"],
+            [.. report.ColumnCollationDriftFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ColumnCollationName,
+                f.BaselineCollationName,
+                f.IsTempObject ? "temp table/table variable" : "table",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CrossTableTypeDrift(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CrossTableTypeDriftFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Foreign-key column pairs whose types drift ({report.CrossTableTypeDriftFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A conversion seed on a real foreign-key relationship: every JOIN that follows it risks the same column-side conversion the implicit-conversion stream classifies, whether or not any scanned query actually joins on it yet. Read live from sys.foreign_key_columns - always empty for a file-mode scan.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Constraint", "Parent column", "Referenced column", "Collation differs"],
+            [.. report.CrossTableTypeDriftFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ConstraintName,
+                $"{f.ParentTableQualifiedName}.{f.ParentColumnName} ({f.ParentTypeDisplay})",
+                $"{f.ReferencedTableQualifiedName}.{f.ReferencedColumnName} ({f.ReferencedTypeDisplay})",
+                f.CollationDiffers.ToString(),
+            })]);
     }
 
     private static string ScalarUdfTitle(ScalarUdfFindingKind kind) => kind switch

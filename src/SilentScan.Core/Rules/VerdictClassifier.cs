@@ -71,6 +71,27 @@ public static class VerdictClassifier
             return (Verdict.Unknown, "operand-type-unresolved");
         }
 
+        // sql_variant is T-SQL's highest-precedence data type (bar none), so unlike the other
+        // out-of-model categories below it participates cleanly in the standard "lower-precedence
+        // side always converts" rule - oracle-verified both directions: an indexed INT column vs.
+        // a sql_variant value shows CONVERT_IMPLICIT landing on the column with an Index Scan and
+        // no RangeColumns/GetRangeThroughConvert anywhere (ScanForced); an indexed sql_variant
+        // column vs. an INT value shows CONVERT_IMPLICIT landing on the value instead, with a
+        // genuine Index Seek (SeekPreserved). Only covers a sql_variant operand paired with an
+        // otherwise in-model category - two sql_variant operands, or sql_variant paired with
+        // another out-of-model category (xml/UDT/text-family), fall through to the general
+        // out-of-model Unknown below: sql_variant-vs-sql_variant comparison semantics depend on
+        // the boxed base type at execution time, not resolvable statically.
+        if (columnType.Category == SqlTypeCategory.SqlVariant && !IsOutOfModelCategory(otherType.Category))
+        {
+            return (Verdict.SeekPreserved, null);
+        }
+
+        if (otherType.Category == SqlTypeCategory.SqlVariant && !IsOutOfModelCategory(columnType.Category))
+        {
+            return (Verdict.ScanForced, null);
+        }
+
         // sql_variant / xml / CLR user-defined types do not participate in the standard
         // conversion/precedence machinery (xml is not even comparable with '='; sql_variant
         // uses its own base-type hierarchy at compare time; text/ntext/image are legacy LOB

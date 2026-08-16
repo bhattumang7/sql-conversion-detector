@@ -45,6 +45,8 @@ public static class SarifReportWriter
         results.AddRange(report.WriteLossFindings.Select(ToResult));
         results.AddRange(report.TvfFenceFindings.Select(ToResult));
         results.AddRange(report.ScalarUdfFindings.Select(ToResult));
+        results.AddRange(report.ColumnCollationDriftFindings.Select(ToResult));
+        results.AddRange(report.CrossTableTypeDriftFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -136,6 +138,29 @@ public static class SarifReportWriter
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
+    }
+
+    private static SarifResult ToResult(ColumnCollationDriftFinding finding)
+    {
+        // Informational, not error/warning - this is a seed, not yet a comparison that's
+        // actually happening; no seek was lost and nothing failed to compile.
+        var kindNote = finding.IsTempObject ? "tempdb's effective" : "the database's default";
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (COLLATE {finding.ColumnCollationName}) differs from {kindNote} collation (COLLATE {finding.BaselineCollationName}) - a conversion seed for any future comparison against a column/literal carrying that collation.";
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnCollationDriftRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(CrossTableTypeDriftFinding finding)
+    {
+        // Informational, not error/warning - a seed on a foreign key relationship, not yet a
+        // query that actually joins on it.
+        var message = $"FK '{finding.ConstraintName}': '{finding.ParentTableQualifiedName}.{finding.ParentColumnName}' ({finding.ParentTypeDisplay}) references '{finding.ReferencedTableQualifiedName}.{finding.ReferencedColumnName}' ({finding.ReferencedTypeDisplay}) - the types differ{(finding.CollationDiffers ? " (collation differs)" : string.Empty)}.";
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CrossTableTypeDriftRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)

@@ -25,6 +25,8 @@ public static class SarifRuleCatalog
     public const string ScalarUdfNestedUnderViewOrTvfRuleId = "silentscan/scalar-udf/nested-under-view-or-tvf";
     public const string ScalarUdfSchemaDependencyRuleId = "silentscan/scalar-udf/in-computed-column-or-constraint";
     public const string ScalarUdfProjectionInvocationRuleId = "silentscan/scalar-udf/in-select-or-expression";
+    public const string ColumnCollationDriftRuleId = "silentscan/catalog/column-collation-drift";
+    public const string CrossTableTypeDriftRuleId = "silentscan/catalog/cross-table-fk-type-drift";
 
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {
@@ -149,6 +151,8 @@ public static class SarifRuleCatalog
             Rule(ScalarUdfNestedUnderViewOrTvfRuleId, "A view or inline TVF referenced here calls a scalar UDF, transitively, somewhere in its own definition - the per-row cost (and, pre-2019, forced-serial plan) is inherited invisibly through however many layers sit between. Pre-2019 an inline TVF's expansion spreads the UDF into every caller; 2019+ a scalar-UDF call inside an iTVF is itself a FROID inlining-blocker interaction."),
             Rule(ScalarUdfSchemaDependencyRuleId, "A computed column, DEFAULT, or CHECK constraint definition calls a scalar UDF - this poisons every query that touches the table with per-row/serial cost, even one that never names the column, and is detected from the catalog alone."),
             Rule(ScalarUdfProjectionInvocationRuleId, "A scalar UDF is called outside any predicate (SELECT list, ORDER BY, GROUP BY, SET/variable assignment) - per-row execution and (pre-2019, or non-inlineable) a forced-serial plan, but sargability is unaffected."),
+            Rule(ColumnCollationDriftRuleId, "A string-family column's own collation differs from the database's default collation (or, for a temp table/table variable, from tempdb's effective collation) - a conversion seed: any future comparison against a column/literal carrying the baseline collation risks a collation-conflict compile error or a forced-scan implicit conversion. Catalog-only, detected before any query reaches the column."),
+            Rule(CrossTableTypeDriftRuleId, "A foreign-key column pair's declared types and/or collations genuinely differ - a conversion seed on every JOIN that follows this relationship, detected from the catalog alone (sys.foreign_key_columns), independent of whether any scanned query actually joins on it."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

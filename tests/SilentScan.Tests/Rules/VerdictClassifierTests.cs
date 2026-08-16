@@ -485,10 +485,47 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
-    public void Classify_SqlVariantColumn_NeverParticipatesInPrecedence_Unknown()
+    public void Classify_SqlVariantColumnVsInModelValue_HighestPrecedence_SeekPreserved()
     {
+        // sql_variant is T-SQL's highest-precedence type - oracle-verified (see
+        // VerdictClassifier's own doc comment): the sql_variant COLUMN never converts, the
+        // in-model value does, so the column keeps its seek.
         var column = new SqlType(SqlTypeCategory.SqlVariant);
         var value = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: SqlCollation);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_InModelColumnVsSqlVariantValue_HighestPrecedence_ScanForced()
+    {
+        // Reverse direction: sql_variant is the highest-precedence side regardless of which
+        // operand it's on, so an in-model COLUMN compared against a sql_variant value always
+        // converts - oracle-verified.
+        var column = new SqlType(SqlTypeCategory.Int);
+        var value = new SqlType(SqlTypeCategory.SqlVariant);
+
+        Assert.Equal(Verdict.ScanForced, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_SqlVariantColumnVsSqlVariantValue_BothOutOfModel_Unknown()
+    {
+        // Two sql_variant operands: runtime comparison semantics depend on the boxed base type,
+        // not resolvable statically - falls through to the general out-of-model Unknown.
+        var column = new SqlType(SqlTypeCategory.SqlVariant);
+        var value = new SqlType(SqlTypeCategory.SqlVariant);
+
+        Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_SqlVariantColumnVsXmlValue_BothOutOfModel_Unknown()
+    {
+        // sql_variant paired with ANOTHER out-of-model category (not just an in-model one) must
+        // still fall through to Unknown rather than the new precedence branch.
+        var column = new SqlType(SqlTypeCategory.SqlVariant);
+        var value = new SqlType(SqlTypeCategory.Xml);
 
         Assert.Equal(Verdict.Unknown, VerdictClassifier.Classify(column, value));
     }
@@ -664,13 +701,16 @@ public sealed class VerdictClassifierTests
     [Fact]
     public void ClassifyWithReason_OutOfModelOtherCategory_ReasonNamesTheCategory()
     {
+        // sql_variant is no longer a usable example here - it now participates in the standard
+        // precedence rule (see the dedicated sql_variant tests above) - xml stays genuinely
+        // out-of-model (not even comparable with '=').
         var column = new SqlType(SqlTypeCategory.Int);
-        var value = new SqlType(SqlTypeCategory.SqlVariant);
+        var value = new SqlType(SqlTypeCategory.Xml);
 
         var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value);
 
         Assert.Equal(Verdict.Unknown, verdict);
-        Assert.Equal("out-of-model-category:SqlVariant", reason);
+        Assert.Equal("out-of-model-category:Xml", reason);
     }
 
     [Fact]

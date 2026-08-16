@@ -65,13 +65,22 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_UnknownVerdict_CarriesAStableReasonCode()
     {
+        // sql_variant vs. an in-model value is no longer Unknown (it now participates in the
+        // standard precedence rule - see the dedicated sql_variant tests) - two sql_variant
+        // operands stays genuinely Unknown, since comparison semantics then depend on the boxed
+        // base type at execution time.
         var findings = Extract(
-            "CREATE TABLE dbo.Docs (Payload sql_variant NOT NULL);",
-            "SELECT 1 FROM dbo.Docs WHERE Payload = 1;");
+            "CREATE TABLE dbo.Docs (Payload sql_variant NOT NULL, Other sql_variant NOT NULL);",
+            "SELECT 1 FROM dbo.Docs WHERE Payload = Other;");
 
-        var finding = Assert.Single(findings);
-        Assert.Equal(Verdict.Unknown, finding.Verdict);
-        Assert.Equal("out-of-model-category:SqlVariant", finding.UnknownReason);
+        // Column-vs-column reports once per side (each side gets its own "this column is the
+        // indexed/classified one" finding) - both must agree.
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, f =>
+        {
+            Assert.Equal(Verdict.Unknown, f.Verdict);
+            Assert.Equal("out-of-model-category:SqlVariant", f.UnknownReason);
+        });
     }
 
     [Fact]
@@ -1794,7 +1803,9 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         CREATE TABLE dbo.RecentUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
         CREATE TABLE dbo.ArchiveUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
         """,
-        "CREATE VIEW dbo.vw_CombinedUnion AS SELECT Code FROM dbo.RecentUnion UNION ALL SELECT Code FROM dbo.ArchiveUnion;");
+        "CREATE VIEW dbo.vw_CombinedUnion AS SELECT Code FROM dbo.RecentUnion UNION ALL SELECT Code FROM dbo.ArchiveUnion;",
+        "CREATE TABLE dbo.OrdersIntCol (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL, INDEX IX_OrdersIntCol_Quantity (Quantity));",
+        "CREATE TABLE dbo.OrdersVariantCol (OrderId INT NOT NULL PRIMARY KEY, Tag SQL_VARIANT NOT NULL, INDEX IX_OrdersVariantCol_Tag (Tag));");
 
     /// <summary>
     /// <see cref="PipelineOracleVerification.VerifyAsync"/>/<c>AssertAllConfirmed</c> only
@@ -3038,5 +3049,45 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task IntColumnVsSqlVariantValue_HighestPrecedence_ScanForced_OracleConfirmed()
+    {
+        // sql_variant is T-SQL's highest-precedence type - the real, indexed int column always
+        // converts, never the sql_variant side, oracle-verified: Index Scan, CONVERT_IMPLICIT on
+        // the column, no RangeColumns/GetRangeThroughConvert anywhere in the plan.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersIntCol (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL, INDEX IX_OrdersIntCol_Quantity (Quantity));",
+            "SELECT 1 FROM dbo.OrdersIntCol WHERE Quantity = CAST(5 AS SQL_VARIANT);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.Equal("dbo.OrdersIntCol", finding.Column.TableQualifiedName);
+        Assert.Equal("Quantity", finding.Column.ColumnName);
+        Assert.True(finding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, findings);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task SqlVariantColumnVsIntValue_HighestPrecedence_SeekPreserved_OracleConfirmed()
+    {
+        // Reverse direction: the sql_variant COLUMN is the highest-precedence side, so the int
+        // value converts instead - the column keeps its seek, oracle-verified: Index Seek, a
+        // real SeekPredicates/RangeColumns entry on the column, CONVERT_IMPLICIT lands on the
+        // value's own ConstExpr, never on the column's ColumnReference.
+        var findings = Extract(
+            "CREATE TABLE dbo.OrdersVariantCol (OrderId INT NOT NULL PRIMARY KEY, Tag SQL_VARIANT NOT NULL, INDEX IX_OrdersVariantCol_Tag (Tag));",
+            "SELECT 1 FROM dbo.OrdersVariantCol WHERE Tag = 5;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+        Assert.Equal("dbo.OrdersVariantCol", finding.Column.TableQualifiedName);
+        Assert.Equal("Tag", finding.Column.ColumnName);
+        Assert.True(finding.Column.Indexed);
+
+        await AssertNoColumnConversionAsync(finding);
     }
 }

@@ -220,29 +220,160 @@ precision bar exists to prevent, and it is in the stream the Tier 1
 ## Tier 1 — build next (high precision, needs our machinery, high base rate)
 
 ### Join-key and cross-object type/collation mismatch
-Direct reuse of the precedence matrix on new predicate sites. Production copy:
-148 column names occur across tables with differing type/length/collation.
+Direct reuse of the precedence matrix on new predicate sites.
 
-- [ ] Type mismatch across JOIN `ON` columns — same column-side/precedence
-      analysis as WHERE, same collation verdicts, same oracle probe.
-- [ ] Proc/function **parameter type vs compared column type** — argument
-      conversion at the call boundary; includes a variable passed to a proc
-      whose param type mismatches downstream columns.
-- [ ] **Column collation ≠ database collation** — schema-side conversion
-      seed; pure catalog diff.
-- [ ] **Temp-table / table-variable collation vs. database and tempdb
-      collation** (folded in from the incumbent-catalog read) — a conversion
-      *seed* on every join between a temp object and a user table, and the
-      classic cause of collation-conflict errors; pairs directly with the
-      column-collation-≠-database-collation item above. We are the
-      collation-aware tool and this is squarely ours.
-- [ ] Cross-table same-name type drift report (FK pairs and join-candidate
-      pairs with differing types) — catalog-only, feeds the study's
-      "conversion seeds" narrative.
-- [ ] `sql_variant` in comparisons — highest precedence, so the real column
-      always converts. Trivial matrix extension; rare (4 columns locally)
-      but zero-cost to add.
-- Oracle: identical `CONVERT_IMPLICIT`-on-column probe as the existing stream.
+- [x] Type mismatch across JOIN `ON` columns — **already shipped**, discovered
+      re-planning this item: `TypedPredicateExtractor.ExplicitVisit(QualifiedJoin)`
+      already sets `Seekable` position over `node.SearchCondition` exactly like
+      WHERE/HAVING, so every JOIN `ON` predicate already flows through the
+      identical classification path. Oracle-tested:
+      `TypedPredicateExtractorTests.JoinOnClausePredicate_IsResolved_OracleConfirmed`.
+- [x] Proc/function **parameter type vs compared column type, inside the
+      callee's own body** — **already shipped**: `RecordParameters` seeds a
+      proc's declared parameters into the same variable-type dictionary a
+      `DECLARE`d variable uses, so `WHERE Col = @Param` inside a proc body is
+      indistinguishable from any other typed comparison to the existing
+      pipeline. Oracle-tested:
+      `TypedPredicateExtractorTests.VarcharColumnVsNVarcharParam_SqlCollation_ScanForced_OracleConfirmed`.
+- [ ] **Call-boundary argument mismatch** (the genuinely new half of the
+      parameter item above) — the value flowing INTO a parameter at an `EXEC`
+      call site has a different type than the parameter's own declaration
+      (e.g. a `varchar` local variable passed into an `nvarchar` param). This
+      doesn't itself lose a seek — EXEC parameter marshalling isn't a
+      predicate — but it's an assignment-shaped conversion (same family as
+      `WriteLossFinding`, not `VerdictClassifier`'s seek/scan vocabulary) that
+      also primes the exact mismatched value the already-shipped in-body rule
+      above will then compare against a column. Needs
+      `ProcCallGraphBuilder` (`src/SilentScan.Core/Predicates/ProcCallGraphBuilder.cs`)
+      extended to type each caller-side argument expression (it currently
+      tracks argument *names*, not resolved types) the same way
+      `TypedPredicateExtractor` already types `DECLARE`/parameter variables,
+      then a `WriteLossClassifier`-shaped comparison (source type vs.
+      declared param type) rather than a new seek/scan verdict. Ships as a
+      standalone catalog+call-graph finding (new kind, e.g.
+      `ProcCallArgumentMismatchFinding`) rather than chaining into a specific
+      predicate finding inside the callee — the cross-referencing needed to
+      chain provenance is real additional machinery, out of scope for this
+      pass; revisit as a follow-up once this standalone version ships. No
+      plan-XML oracle marker applies to a parameter binding the way
+      `CONVERT_IMPLICIT`-on-column does to a predicate, so this rule has no
+      oracle fixture — same as `WriteLossFinding`'s own non-plan-XML oracle
+      shape (a real probe row confirming the assignment's actual runtime
+      behavior). Real-world fixtures for this exact phenomenon (as opposed to
+      the in-body case, which is well-documented) are rare — likely needs an
+      explicitly-labeled synthetic fixture per CLAUDE.md's rare-exception
+      allowance.
+- [x] **Column collation ≠ database collation** — **shipped**:
+      `Predicates/ColumnCollationDriftScanner.cs`, catalog-only, no AST
+      walking. Wired into `ScanReport.ColumnCollationDriftFindings`
+      (schema v7), SARIF rule `silentscan/catalog/column-collation-drift`,
+      readable-report section. Also covers the **temp-table/table-variable
+      vs. tempdb collation** half from the incumbent-catalog read in the same
+      scanner (`DatabaseCatalog.EffectiveTempdbCollation`, `IsTempObject` on
+      the finding) — the two were always the same catalog diff with a
+      different baseline. Tested: 8 unit tests
+      (`ColumnCollationDriftScannerTests`) covering fires/clean/unresolved-
+      baseline/temp-object-baseline-fallback. Measured live against the
+      local RM_ test database: 0 columns diverge there (its collation is
+      uniform) — a real, honest zero; real-world drift (multi-tenant/
+      migrated databases) is exactly what this catches, and its fixtures are
+      directly authored (not internet-sourced) since a catalog-diff rule has
+      no "bug repro" to cite the way a predicate rule does.
+- [x] Cross-table same-name type drift report, **FK-linked half shipped**:
+      `Catalog/ForeignKeyRelationship.cs` + `DatabaseCatalog.ForeignKeys`,
+      populated live-only via `LiveCatalogReader` reading
+      `sys.foreign_key_columns` (always empty in file mode, per CLAUDE.md's
+      "everything goes via the database" rule — replicating FK DDL semantics
+      would be reinventing the database-project wheel).
+      `Predicates/CrossTableTypeDriftScanner.cs` flags a genuine category or
+      collation difference (length/precision-only drift within the same
+      category never fires — no conversion-seed story). Wired into
+      `ScanReport.CrossTableTypeDriftFindings` (schema v8), SARIF rule
+      `silentscan/catalog/cross-table-fk-type-drift`, readable-report
+      section. **Oracle discovery, load-bearing for how this rule is
+      described everywhere it's cited:** SQL Server structurally forbids a
+      drifted FK from existing at all — `ALTER TABLE ADD CONSTRAINT` rejects
+      a category *or collation* mismatch outright (Msg 1757, verified even
+      `WITH NOCHECK`), and `ALTER COLUMN` on either side is blocked while the
+      constraint exists (Msg 5074/4922). This means a currently-valid FK's
+      two sides can **never** actually drift in a real, intact database —
+      explaining why the local RM_ test database's real 1,247 FK pairs show
+      0 drift (not empirical luck, a structural guarantee) — so the FK-linked
+      half's real-world yield is essentially always zero on a healthy schema;
+      its value is as a defensive/completeness check (a drifted FK could
+      still exist behind an orphaned/disabled constraint this pass doesn't
+      currently distinguish) rather than a real finding source. The scanner's
+      own logic is proven correct directly against a hand-built catalog
+      (`CrossTableTypeDriftScannerTests`, 4 tests — the only way to construct
+      the state at all) plus a live oracle test locking in the negative
+      (`LiveCatalogReaderTests.ReadAsync_MatchingForeignKey_CrossTableTypeDriftScannerNeverFires`).
+      **Remaining, explicitly not shipped:** the join-candidate (no-FK,
+      same-name-column) half — scoped to pairs with an actually-observed
+      column-vs-column comparison somewhere in the scanned corpus, not a
+      blanket same-name sweep across every table pair (an unqualified sweep
+      has real false-positive risk: two unrelated tables that happen to both
+      have a `Notes` column, never joined on, is noise). This is where the
+      real-world value of this whole item now concentrates, given the FK-half
+      finding above — needs genuinely new AST machinery (collecting every
+      column-vs-column comparison in the corpus regardless of whether
+      `VerdictClassifier` would itself flag it, unlike the existing typed-
+      predicate pipeline which only records a finding when types actually
+      differ). Of 1,053 same-named columns across ≥2 tables in the local RM_
+      database, 83 have real sargability-relevant type/collation drift (29
+      collation-specific) — the number to cite once the observed-comparison
+      narrowing ships, not the old crude-heuristic "148" (the same live
+      measurement reproduces "148" exactly when length/precision-only
+      differences are also counted, confirming the old number was accurate
+      but over-inclusive for what actually matters).
+- [x] `sql_variant` in comparisons — **shipped**: one new branch pair in
+      `VerdictClassifier.ClassifyWithReason`, before the existing
+      `IsOutOfModelCategory` early-out — sql_variant is T-SQL's highest-
+      precedence type, so unlike every other out-of-model category it
+      participates cleanly in the standard "lower-precedence side converts"
+      rule. Oracle-verified **both directions**: an indexed `int` column vs.
+      a `sql_variant` value produces `Convert DataType="sql_variant"
+      Implicit="1"` directly on the column's `ColumnReference`, an Index
+      Scan with no `RangeColumns`/`GetRangeThroughConvert` anywhere
+      (`ScanForced`); an indexed `sql_variant` column vs. an `int` value
+      converts the *value* instead, with a genuine Index Seek and a real
+      `SeekPredicates`/`RangeColumns` entry on the column (`SeekPreserved`).
+      Two `sql_variant` operands, or `sql_variant` paired with another
+      out-of-model category, correctly stay `Unknown` (execution-time boxed-
+      type semantics, not statically resolvable). Tested: 4 unit tests
+      (`VerdictClassifierTests`) + 2 live oracle tests
+      (`TypedPredicateExtractorOracleTests`). 4 columns locally (confirmed
+      accurate via live measurement, matching the existing figure).
+- [ ] **Call-boundary argument mismatch** (the genuinely new half of the
+      parameter item above) — the value flowing INTO a parameter at an `EXEC`
+      call site has a different type than the parameter's own declaration
+      (e.g. a `varchar` local variable passed into an `nvarchar` param). This
+      doesn't itself lose a seek — EXEC parameter marshalling isn't a
+      predicate — but it's an assignment-shaped conversion (same family as
+      `WriteLossFinding`, not `VerdictClassifier`'s seek/scan vocabulary) that
+      also primes the exact mismatched value the already-shipped in-body rule
+      above will then compare against a column. Needs
+      `ProcCallGraphBuilder` (`src/SilentScan.Core/Predicates/ProcCallGraphBuilder.cs`)
+      extended to type each caller-side argument expression (it currently
+      tracks argument *names*, not resolved types) the same way
+      `TypedPredicateExtractor` already types `DECLARE`/parameter variables,
+      then a `WriteLossClassifier`-shaped comparison (source type vs.
+      declared param type) rather than a new seek/scan verdict. Ships as a
+      standalone catalog+call-graph finding (new kind, e.g.
+      `ProcCallArgumentMismatchFinding`) rather than chaining into a specific
+      predicate finding inside the callee — the cross-referencing needed to
+      chain provenance is real additional machinery, out of scope for this
+      pass; revisit as a follow-up once this standalone version ships. No
+      plan-XML oracle marker applies to a parameter binding the way
+      `CONVERT_IMPLICIT`-on-column does to a predicate, so this rule has no
+      oracle fixture — same as `WriteLossFinding`'s own non-plan-XML oracle
+      shape (a real probe row confirming the assignment's actual runtime
+      behavior). Real-world fixtures for this exact phenomenon (as opposed to
+      the in-body case, which is well-documented) are rare — likely needs an
+      explicitly-labeled synthetic fixture per CLAUDE.md's rare-exception
+      allowance.
+- Oracle: identical `CONVERT_IMPLICIT`-on-column probe as the existing
+  stream, except the call-boundary and catalog-only items above, which have
+  no plan-XML oracle by construction (see each item).
 
 ### Type-aware upgrade of the sargability stream
 Highest base rate of anything measured: ~1,100 modules with ISNULL/COALESCE

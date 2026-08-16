@@ -97,6 +97,11 @@ public sealed class LiveCatalogReader
             catalog.AddSchemaExpression(reference);
         }
 
+        foreach (var foreignKey in await ReadForeignKeysAsync(connection, cancellationToken))
+        {
+            catalog.AddForeignKey(foreignKey);
+        }
+
         return catalog;
     }
 
@@ -345,6 +350,49 @@ public sealed class LiveCatalogReader
         }
 
         return references;
+    }
+
+    /// <summary>
+    /// Every foreign-key column pair, engine-authoritative (docs/detection-checklist.md Tier 1
+    /// "Join-key and cross-object type/collation mismatch": FK-linked pairs for the cross-table
+    /// type-drift report). A composite FK produces one row per column pair here, all sharing the
+    /// same constraint name - <see cref="SilentScan.Core.Catalog.ForeignKeyRelationship"/> keeps
+    /// them as separate entries rather than grouping, matching how <c>sys.foreign_key_columns</c>
+    /// itself represents a composite key: one row per (parent column, referenced column) pair.
+    /// </summary>
+    private static async Task<List<ForeignKeyRelationship>> ReadForeignKeysAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT fk.name AS constraint_name,
+                   ps.name AS parent_schema, pt.name AS parent_table, pc.name AS parent_column,
+                   rs.name AS referenced_schema, rt.name AS referenced_table, rc.name AS referenced_column
+            FROM sys.foreign_key_columns fkc
+            JOIN sys.foreign_keys fk ON fk.object_id = fkc.constraint_object_id
+            JOIN sys.tables pt ON pt.object_id = fkc.parent_object_id
+            JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
+            JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+            JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
+            JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+            JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+            WHERE pt.is_ms_shipped = 0 AND rt.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var relationships = new List<ForeignKeyRelationship>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            relationships.Add(new ForeignKeyRelationship(
+                ConstraintName: reader.GetString(0),
+                ParentTableQualifiedName: $"{reader.GetString(1)}.{reader.GetString(2)}",
+                ParentColumnName: reader.GetString(3),
+                ReferencedTableQualifiedName: $"{reader.GetString(4)}.{reader.GetString(5)}",
+                ReferencedColumnName: reader.GetString(6)));
+        }
+
+        return relationships;
     }
 
     /// <summary>

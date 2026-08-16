@@ -300,6 +300,20 @@ public static class ScanReportBuilder
             schemaDependencyStage.Complete($"{schemaDependencyFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<ColumnCollationDriftFinding> columnCollationDriftFindings;
+        using (var collationDriftStage = progress.Begin("scanning column collation drift"))
+        {
+            columnCollationDriftFindings = ColumnCollationDriftScanner.Scan(catalog);
+            collationDriftStage.Complete($"{columnCollationDriftFindings.Count:N0} findings");
+        }
+
+        IReadOnlyList<CrossTableTypeDriftFinding> crossTableTypeDriftFindings;
+        using (var crossTableDriftStage = progress.Begin("scanning cross-table FK type drift"))
+        {
+            crossTableTypeDriftFindings = CrossTableTypeDriftScanner.Scan(catalog);
+            crossTableDriftStage.Complete($"{crossTableTypeDriftFindings.Count:N0} findings");
+        }
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -409,7 +423,7 @@ public static class ScanReportBuilder
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
-            tvfFenceFindings, scalarUdfFindings,
+            tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -25,6 +25,8 @@ public sealed class DatabaseCatalog
 
     private readonly List<SchemaExpressionReference> _schemaExpressions = [];
 
+    private readonly List<ForeignKeyRelationship> _foreignKeys = [];
+
     private readonly Dictionary<string, string> _synonymTargetsByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -129,6 +131,18 @@ public sealed class DatabaseCatalog
     public void AddSchemaExpression(SchemaExpressionReference reference) => _schemaExpressions.Add(reference);
 
     public IReadOnlyList<SchemaExpressionReference> SchemaExpressions => _schemaExpressions;
+
+    /// <summary>
+    /// Foreign-key column pairs. Per CLAUDE.md's "everything goes via the database" rule, this is
+    /// populated ONLY by <c>LiveCatalogReader</c> reading <c>sys.foreign_key_columns</c> live -
+    /// file mode (<c>CatalogBuilder</c>) deliberately does not parse <c>FOREIGN KEY</c> DDL, since
+    /// replicating the engine's own constraint-resolution semantics (ALTER-added constraints,
+    /// multi-batch definitions) is exactly the "reinventing the database-project wheel" CLAUDE.md
+    /// warns against. Always empty for a file-mode scan.
+    /// </summary>
+    public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
+
+    public IReadOnlyList<ForeignKeyRelationship> ForeignKeys => _foreignKeys;
 
     /// <summary>
     /// A CREATE/ALTER PROCEDURE's own declared parameter list, in declaration order, keyed by the
