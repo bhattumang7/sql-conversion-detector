@@ -863,3 +863,36 @@ header comment.
 * **WinForms regex scorer — 9 regexes.** SELECT *, `= NULL`, `!=`/`<>`, leading
   wildcard, NOT IN, COUNT(col), TOP without ORDER BY, IN predicate, OR
   operator. Toy repo; recorded only to close it out.
+
+### 7.7 A multi-platform commercial response-time analyzer
+
+Read at source from a decompiled tree held locally and deliberately not in
+the repo (per this file's convention of naming competitors generically —
+real identities live in the gitignored `vendor/tool-references.md`), so this
+entry has to stand on its own without that source tree as a citable
+reference. Its entire SQL Server plan-advice surface is **two XPath
+queries** — `//MissingIndexes/MissingIndexGroup` and
+`//UnmatchedIndexes/Parameterization/Object` — which is the whole of its
+advice-type enum for this engine (missing index, unmatched index).
+
+It **does** detect implicit conversions, but as a plain substring test for
+`CONVERT_IMPLICIT` over a plan step's predicate text, yielding one boolean
+per step with no notion of which side converted. That makes it a real
+shipping instance of the failure mode this reference otherwise only poses
+hypothetically higher up in this file ("even a plan-reading tool that greps
+for the marker without checking which side it wraps reproduces both
+errors") — this tool *is* exactly that plan-reading tool, confirmed at
+source rather than inferred. It cannot distinguish `SRP0016`'s own
+false-positive case (the head-to-head table above: a literal converting,
+harmless) from a genuine column-side conversion; both trip the same
+boolean.
+
+Its remaining SQL Server-relevant analyses are all **runtime aggregates** —
+wait events, blocking, plan stability, execution counts — categorically
+outside a compile-only static tool's reach by construction, or specific to
+another DBMS entirely. So it opens no detection gap on our side: the
+runtime-only-signals skip and the index-advisor skip (both in
+`detection-checklist.md` Tier 3) already cover every SQL Server capability
+it has, and its implicit-conversion substring test is strictly weaker than
+what this tool already ships (direction-aware, not a same-boolean-both-sides
+read).
