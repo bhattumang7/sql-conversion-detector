@@ -50,4 +50,5 @@ public sealed record PredicateExtractionResult(
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
     IReadOnlyList<UnderLengthParameterFinding> UnderLengthParameterFindings,
-    IReadOnlyList<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings);
+    IReadOnlyList<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings,
+    IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings);

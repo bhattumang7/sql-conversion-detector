@@ -55,6 +55,15 @@ public abstract record PredicateOperand
     /// literal to begin with" (a parameter/variable; probing with one is already exactly
     /// equivalent) from "was a literal, couldn't render it" (probing with a variable would be a
     /// silent fidelity loss) using this flag, not LiteralText's nullability alone.
+    /// <paramref name="VariableName"/>/<paramref name="IsFormalParameter"/> are populated only
+    /// when this Value came from a genuine <c>VariableReference</c> (docs/detection-checklist.md
+    /// Tier 2 "Local-variable predicates") - null/false for every other source (literal,
+    /// subquery, function call, ...). <paramref name="IsFormalParameter"/> distinguishes a real
+    /// <c>CREATE PROCEDURE</c>/function parameter (or an <c>sp_executesql</c> parameter) from a
+    /// plain <c>DECLARE</c>d local - only the latter is invisible to the cardinality estimator's
+    /// parameter-sniffing path.
     /// </summary>
-    public sealed record Value(SqlType? Type, bool IsLiteral = false, string? LiteralText = null) : PredicateOperand;
+    public sealed record Value(
+        SqlType? Type, bool IsLiteral = false, string? LiteralText = null,
+        string? VariableName = null, bool IsFormalParameter = false) : PredicateOperand;
 }

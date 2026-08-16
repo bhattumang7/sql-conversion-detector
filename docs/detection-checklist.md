@@ -937,20 +937,132 @@ exactly the same way ARITHABORT's own assumption just failed one.
 ### Catch-all / kitchen-sink predicates
 425 modules in the production copy (`... OR @param IS NULL`).
 
-- [ ] `(col = @p OR @p IS NULL)` and COALESCE/ISNULL-disabled optional
-      filters — one plan must serve all parameter combinations.
-- [ ] **Precision guard (mandatory):** `OPTION(RECOMPILE)` on the statement
-      largely neutralizes it — detect and either suppress or downgrade.
-      70 modules locally already use OPTION(RECOMPILE).
+- [x] `(col = @p OR @p IS NULL)` and its swapped-order/chained variants —
+      requires the compared column to be a bare `ColumnReferenceExpression`
+      (no stacking onto the already-shipped function-wrapped-column Tier-1
+      finding) and both OR-leaves to reference the exact same *formal
+      parameter* (never a `DECLARE`'d local — that's the separate
+      Local-variable-predicates item below). Own standalone AST-walking
+      scanner (`CatchAllPredicateScanner`), the same "spans multiple sibling
+      AST nodes" reasoning `PartialCompositeForeignKeyJoinScanner` already
+      documents for not folding into `TypedPredicateExtractor`'s
+      one-comparison-at-a-time walk. A new `FlattenOr`/`FlattenOrLeaves` pair
+      isolates each independent OR-group under a chain of ANDs so
+      `(A OR B) AND (C OR D)` never cross-pairs `A`/`D`. Reported even when
+      the base column is unindexed (ranked last, weaker wording — matches
+      the `Tier1Findings` convention of never suppressing the unindexed
+      case), `Confidence.High` (the shape is unambiguous once matched).
+      COALESCE/ISNULL-disabled variants of the same idiom are a known,
+      explicitly out-of-v1-scope gap (only the direct `OR ... IS NULL` shape
+      is matched) — not silently missed.
+- [x] **Precision guard (mandatory):** `OPTION(RECOMPILE)` on the statement
+      (`StatementWithCtesAndXmlNamespaces.OptimizerHints`) or `WITH
+      RECOMPILE` on the enclosing procedure (`ProcedureStatementBody.Options`
+      — confirmed via reflection against the referenced ScriptDom assembly
+      to live only there, never on the shared `ProcedureStatementBodyBase`,
+      since functions/triggers can never carry it) fully **suppresses** the
+      finding, not merely downgrades it — real execution-based oracle proof
+      (below) confirms RECOMPILE genuinely restores the seek, so a
+      downgraded-but-still-reported finding would be a false positive in
+      spirit. MERGE's own `ON` clause is a known, explicitly out-of-v1-scope
+      gap (RECOMPILE-guard tracking still applies to it; the catch-all match
+      itself does not) — its scope resolution and raw shape differ enough
+      from every other statement kind to need its own dedicated work.
 - [ ] Sibling: parameter overwritten before use in a predicate
       (sniffing-defeat — straight-line dataflow we already have from
-      dynamic-SQL tracing).
+      dynamic-SQL tracing). Deliberately deferred, not attempted this pass —
+      a distinct dataflow question from "does this shape exist," which is
+      what this item's own scanner answers.
+
+      **Oracle correction worth recording (load-bearing, not a footnote):**
+      the compile-only `SET SHOWPLAN_XML ON` oracle every other Tier-1
+      sargability rule in this codebase uses (`PlanXmlCapture`) **cannot
+      observe `OPTION (RECOMPILE)`'s real effect at all** — probed directly,
+      a compile-only plan for `(Region = @p OR @p IS NULL) OPTION
+      (RECOMPILE)` still showed `Table Scan`, identical to the un-guarded
+      shape, because `SHOWPLAN_XML` never reaches the execution-time moment
+      RECOMPILE's real value-embedding happens; it always produces an
+      *estimated* plan regardless of the hint. Confirmed the general claim
+      is still true by switching to **real execution** (`SET STATISTICS XML
+      ON` against a self-authored, seeded probe table in the disposable
+      Docker instance — CLAUDE.md permits this exact case, never
+      scanned-target code): the bare-equality probe seeks, the catch-all
+      shape without RECOMPILE forces a Table Scan, and the identical catch-all
+      shape *with* `OPTION (RECOMPILE)` restores the Index Seek.
+      `CatchAllPredicateOracleTests` (3 tests, all passing) locks this in
+      permanently — no reusable capture helper was built for this (unlike
+      `PlanXmlCapture`'s compile-only pattern), since inline `SqlCommand`
+      use, reading the `ShowPlanXML`-containing result set back off a real
+      execution, was sufficient for the one call site that needs it so far.
+
+      Unit-tested (`CatchAllPredicateScannerTests`, 14 cases covering
+      canonical/swapped/chained order, unindexed columns, `DECLARE`'d
+      locals never firing, mismatched variable names never firing, wrapped
+      columns never firing, unrelated ORs never firing, plain equality
+      never firing, De Morgan's-negated shape never firing, both RECOMPILE
+      guards, UPDATE statements, and ad-hoc batches with no formal-parameter
+      concept). Wired end-to-end (`ScanReport` schema version 15 → 16,
+      SARIF, readable report). **Real coverage against the local RM_ test
+      database: 12 findings across 6 modules** (`dbo.procFRAVL4`,
+      `dbo.spFRDepotSelect`, `dbo.sp_helpdiagrams`, and three
+      scalar-UDF/optional-filter helpers), 10 of 12 against indexed
+      columns — cross-checked against a raw-text sweep of every module
+      containing `IS NULL` for the tight `= @p ... OR @p IS NULL`/swapped
+      shape, which independently found the same modules (plus system-shipped
+      `sp_helpdiagrams`, correctly matched too — it genuinely uses the
+      idiom).
 
 ### Local-variable predicates
-- [ ] `WHERE col = @v` where `@v` is DECLAREd in the batch (not a parameter) —
-      density-vector estimate instead of sniffed value. Distinguishable from
-      parameters purely in the AST; same OPTION(RECOMPILE) guard as the
-      "Catch-all / kitchen-sink predicates" section above.
+- [x] `WHERE col <op> @v` where `@v` is `DECLARE`'d in the batch/procedure,
+      not a formal parameter — the optimizer sees the value at compile time
+      but treats it as opaque (no sniffed-histogram lookup), falling back to
+      a generic density-vector estimate. Covers every comparison operator,
+      not just `=` (`=`, `<`, `<=`, `>`, `>=`, `LIKE` all confirmed present
+      in real RM_ findings — the premise is about the optimizer's own
+      value-blindness, not the comparison shape). Distinguished from a
+      formal parameter purely in the AST: `TypedPredicateExtractor` grew a
+      parallel `_formalParameterNames` tracking set (mirroring the existing
+      `_variables` set), populated by `RecordParameters` and by
+      `externalVariables` (an `sp_executesql`-seeded parameter counts as a
+      genuine formal parameter too, since it really is caller-supplied per
+      execution) — `PredicateOperand.Value` grew trailing
+      `VariableName`/`IsFormalParameter` fields to carry this through.
+      Reuses the existing typed-predicate full-corpus pass rather than
+      adding a new one (no new scanner needed — this is a property of an
+      already-visited comparison, not a new AST shape to search for).
+      Purely informational, `Confidence.Low`, never verdict-bearing — the
+      finding's own doc comment states this explicitly, since it makes no
+      magnitude claim, only "the optimizer is blind here." Same
+      `OPTION(RECOMPILE)`/`WITH RECOMPILE` guard as the "Catch-all /
+      kitchen-sink predicates" section above, and for the identical reason:
+      **fully suppressed**, not downgraded, when active.
+
+      **Oracle note (a genuine compile-time phenomenon, unlike the
+      catch-all stream's RECOMPILE claim):** the divergence between a
+      sniffed/literal value's cardinality estimate and a `DECLARE`'d local's
+      estimate is baked in at *compile* time, not something that only
+      reveals itself at execution — so the existing compile-only
+      `PlanXmlCapture` (`SET SHOWPLAN_XML ON`) is the right tool here, and
+      was used directly (no new execution-based mechanism needed for this
+      one). `LocalVariablePredicateOracleTests` seeds a skewed column
+      (1900/2000 rows sharing one value) and confirms a literal-value probe's
+      `EstimateRows` reflects the real skew (~1900) while the identical
+      value held in a `DECLARE`'d local produces a materially smaller
+      estimate (less than half) — the estimator premise this finding relies
+      on, confirmed directly rather than assumed.
+
+      Unit-tested (`TypedPredicateExtractorTests`, 7 new cases: fires on a
+      declared local, never fires on a formal parameter, fires across a
+      range operator (not just `=`), never fires on a bare literal, never
+      fires under either RECOMPILE guard, and an `sp_executesql`-seeded
+      parameter is correctly treated as a formal parameter rather than a
+      local). Wired end-to-end alongside the catch-all stream (same schema
+      bump, SARIF, readable report). **Real coverage against the local RM_
+      test database: 4,373 findings** across every comparison operator
+      (2,886 `=`, 760 `>=`, 625 `<=`, 52 `<`, 49 `>`, 1 `LIKE`) — cross-checked
+      against a raw-text sweep (1,833 modules contain both `DECLARE @` and
+      `WHERE`, a loose but consistent upper bound the scanner's own
+      depth-0-only, RECOMPILE-guard-respecting count sits well inside of).
 
 ### NOT IN over a nullable subquery column
 346 modules locally use `NOT IN (SELECT ...)`.

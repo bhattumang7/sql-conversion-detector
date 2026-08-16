@@ -31,7 +31,7 @@ public static class TypedPredicateExtractor
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings, visitor.LocalVariablePredicateFindings);
     }
 
     private sealed class Visitor(
@@ -145,6 +145,21 @@ public static class TypedPredicateExtractor
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Which of <see cref="_variables"/>'s keys is a formal parameter (a real
+        /// <c>CREATE PROCEDURE</c>/<c>FUNCTION</c> parameter, or an <c>sp_executesql</c> parameter
+        /// seeded via <c>externalVariables</c> - both are genuinely caller-supplied
+        /// per execution, unlike a <c>DECLARE</c>) rather than a plain local - docs/detection-
+        /// checklist.md Tier 2 "Local-variable predicates": a predicate against a local variable's
+        /// value is invisible to the cardinality estimator (falls back to the column's average-
+        /// density statistic) in a way a formal parameter's sniffed value is not. Cleared at
+        /// exactly the same three sites <see cref="_variables"/> itself is cleared, so the two
+        /// never drift out of sync.
+        /// </summary>
+        private readonly HashSet<string> _formalParameterNames = externalVariables is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(externalVariables.Keys, StringComparer.OrdinalIgnoreCase);
+
         public List<TypedPredicateFinding> Findings { get; } = [];
 
         public List<ExpressionDerivedFinding> ExpressionDerivedFindings { get; } = [];
@@ -158,6 +173,29 @@ public static class TypedPredicateExtractor
         public List<UnderLengthParameterFinding> UnderLengthParameterFindings { get; } = [];
 
         public List<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings { get; } = [];
+
+        public List<LocalVariablePredicateFinding> LocalVariablePredicateFindings { get; } = [];
+
+        /// <summary>
+        /// True for the whole body of a procedure declared <c>WITH RECOMPILE</c>
+        /// (<c>ProcedureStatementBody.Options</c> containing <c>ProcedureOptionKind.Recompile</c> -
+        /// functions/triggers can never carry this option, so it's reset to false whenever their
+        /// own body-visiting helper runs) - every predicate in such a body recompiles against real,
+        /// current values on every call, fully neutralizing both <see
+        /// cref="LocalVariablePredicateFindings"/>'s and the catch-all stream's own premise.
+        /// </summary>
+        private bool _procedureHasWithRecompile;
+
+        /// <summary>
+        /// True only inside the single top-level statement (a subquery/derived table is never its
+        /// own <c>SelectStatement</c>/<c>UpdateStatement</c>/etc in ScriptDOM's object model - it
+        /// wraps a bare <c>QueryExpression</c> - so this never needs a stack, just save/restore
+        /// around the one statement kind that can carry <c>OPTION (RECOMPILE)</c>) that carries an
+        /// explicit <c>OPTION (RECOMPILE)</c> query hint.
+        /// </summary>
+        private bool _statementHasOptionRecompile;
+
+        private bool HasActiveRecompileGuard => _procedureHasWithRecompile || _statementHasOptionRecompile;
 
         /// <summary>
         /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before <see cref="ExplicitVisit(InsertStatement)"/>
@@ -182,7 +220,9 @@ public static class TypedPredicateExtractor
             // derived-table subquery nested inside a CTE-using statement), so this always pushes
             // something - an unchanged copy of the current top when there's nothing new to add.
             PushCteScope(node.WithCtesAndXmlNamespaces);
+            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
+            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
             _cteStack.Pop();
         }
 
@@ -275,7 +315,9 @@ public static class TypedPredicateExtractor
             var spec = node.UpdateSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
             _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
+            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
             _scopeStack.Pop();
             _cteStack.Pop();
         }
@@ -309,7 +351,9 @@ public static class TypedPredicateExtractor
             var spec = node.DeleteSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
             _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
+            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
             _scopeStack.Pop();
             _cteStack.Pop();
         }
@@ -319,9 +363,19 @@ public static class TypedPredicateExtractor
             var spec = node.MergeSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
             _scopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
+            var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
+            _statementHasOptionRecompile = previousStatementHasOptionRecompile;
             _scopeStack.Pop();
             _cteStack.Pop();
+        }
+
+        /// <summary>Shared by every top-level statement kind that can carry <c>OPTION (...)</c> query hints - a subquery/derived table is never its own SelectStatement/UpdateStatement/etc in ScriptDOM's object model, so this never needs a stack.</summary>
+        private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
+        {
+            var previous = _statementHasOptionRecompile;
+            _statementHasOptionRecompile = hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
+            return previous;
         }
 
         /// <summary>
@@ -423,11 +477,13 @@ public static class TypedPredicateExtractor
         public override void ExplicitVisit(TSqlBatch node)
         {
             _variables.Clear();
+            _formalParameterNames.Clear();
             if (externalVariables is not null)
             {
                 foreach (var (name, type) in externalVariables)
                 {
                     _variables[name] = type;
+                    _formalParameterNames.Add(name);
                 }
             }
 
@@ -734,17 +790,29 @@ public static class TypedPredicateExtractor
             // Local declarations and parameters don't cross a proc/function boundary, so every
             // body - however it was introduced - starts with a clean slate.
             _variables.Clear();
+            _formalParameterNames.Clear();
             RecordParameters(node.Parameters);
+
+            // Options (WITH RECOMPILE/ENCRYPTION/...) exists on ProcedureStatementBody (a
+            // procedure), not the shared ProcedureStatementBodyBase this helper also handles
+            // functions/triggers through - a scalar/table function can never carry WITH
+            // RECOMPILE at all, so the check is naturally false for those, no special-casing
+            // needed beyond the type pattern itself.
+            var previousProcedureHasWithRecompile = _procedureHasWithRecompile;
+            _procedureHasWithRecompile = node is ProcedureStatementBody { Options: { } options }
+                && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
 
             var previousScope = _currentProcScope;
             _currentProcScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
             _currentProcScope = previousScope;
+            _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
         private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
         {
             _variables.Clear();
+            _formalParameterNames.Clear();
 
             var previousScope = _currentProcScope;
             _currentProcScope = SchemaObjectNameHelper.Qualify(name);
@@ -1073,6 +1141,7 @@ public static class TypedPredicateExtractor
             foreach (var parameter in parameters)
             {
                 _variables[parameter.VariableName.Value] = SqlTypeReferenceResolver.Resolve(parameter.DataType, columnCollation: null, catalog.TypeAliases);
+                _formalParameterNames.Add(parameter.VariableName.Value);
             }
         }
 
@@ -1215,6 +1284,25 @@ public static class TypedPredicateExtractor
             TryAddOversizedParameterFinding(column, other, otherIsLiteral, node);
             TryAddUnderLengthParameterFinding(column, other, otherIsLiteral, operatorText, node);
             TryAddAnsiPaddingMismatchFinding(column, other, operatorText, node);
+            TryAddLocalVariablePredicateFinding(column, other, operatorText, node);
+        }
+
+        /// <summary>
+        /// docs/detection-checklist.md Tier 2 "Local-variable predicates" - see <see
+        /// cref="LocalVariablePredicateFinding"/>'s own doc comment for the full reasoning,
+        /// including why an active RECOMPILE guard fully suppresses this rather than merely
+        /// downgrading it.
+        /// </summary>
+        private void TryAddLocalVariablePredicateFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        {
+            if (HasActiveRecompileGuard || other is not PredicateOperand.Value { VariableName: { } variableName, IsFormalParameter: false })
+            {
+                return;
+            }
+
+            LocalVariablePredicateFindings.Add(new LocalVariablePredicateFinding(
+                column.TableQualifiedName, column.ColumnName, column.Indexed, column.Depth,
+                variableName, operatorText, sourcePath, node.StartLine, node.StartColumn));
         }
 
         /// <summary>
@@ -1379,7 +1467,9 @@ public static class TypedPredicateExtractor
                     return ResolveColumnOperand(columnRef, scopeChain);
 
                 case VariableReference variableRef:
-                    return new PredicateOperand.Value(_variables.GetValueOrDefault(variableRef.Name));
+                    return new PredicateOperand.Value(
+                        _variables.GetValueOrDefault(variableRef.Name), VariableName: variableRef.Name,
+                        IsFormalParameter: _formalParameterNames.Contains(variableRef.Name));
 
                 case Literal literal:
                     return new PredicateOperand.Value(Rules.LiteralTypeResolver.Resolve(literal), IsLiteral: true, Rules.LiteralTextRenderer.Render(literal));

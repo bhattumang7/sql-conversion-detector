@@ -53,6 +53,8 @@ public static class SarifReportWriter
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
         results.AddRange(report.UnderLengthParameterFindings.Select(ToResult));
         results.AddRange(report.AnsiPaddingMismatchFindings.Select(ToResult));
+        results.AddRange(report.CatchAllPredicateFindings.Select(ToResult));
+        results.AddRange(report.LocalVariablePredicateFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -295,6 +297,31 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AnsiPaddingMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-ANSI-padded column (trailing blanks stripped at INSERT) compared via LIKE against pattern {finding.PatternLiteralText}, whose trailing whitespace is significant - this predicate can never match any value the column could ever store.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(CatchAllPredicateFinding finding)
+    {
+        // Warning, downgraded when not confirmed indexed (matches Tier1Findings' own downgrade
+        // convention) - there was no seek to lose if the column was never indexed in the first
+        // place, even though the catch-all shape itself is real either way.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CatchAllPredicateRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(finding.Indexed ? LevelWarning : LevelNote, finding.Confidence);
+        var indexedNote = finding.Indexed ? string.Empty : " (would defeat an index if one existed - none is confirmed indexed today)";
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' = {finding.ParameterName} OR {finding.ParameterName} IS NULL{indexedNote} - one cached plan must stay correct for every NULL/non-NULL state of this parameter, typically forcing a scan.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(LocalVariablePredicateFinding finding)
+    {
+        // Note, not warning/error: purely informational per the finding's own doc comment - the
+        // predicate is still fully sargable, only the row-count ESTIMATE is at risk, and this
+        // pass has no way to know whether that estimate actually matters for real data.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LocalVariablePredicateRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - a DECLARE'd local, not a formal parameter, so its value is invisible to the cardinality estimator (falls back to average-density statistics). The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

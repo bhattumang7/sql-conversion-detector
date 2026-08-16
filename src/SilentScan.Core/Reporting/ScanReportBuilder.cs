@@ -367,6 +367,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<CatchAllPredicateFinding> catchAllPredicateFindings;
+        using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = CatchAllPredicateScanner.Scan(r, catalog);
+                    catchAllStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            catchAllPredicateFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -388,6 +406,8 @@ public static class ScanReportBuilder
         var underLengthParameterFindings = extractionResults.SelectMany(r => r.UnderLengthParameterFindings)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         var ansiPaddingMismatchFindings = extractionResults.SelectMany(r => r.AnsiPaddingMismatchFindings)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
+        var localVariablePredicateFindings = extractionResults.SelectMany(r => r.LocalVariablePredicateFindings)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
@@ -494,6 +514,7 @@ public static class ScanReportBuilder
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
+            catchAllPredicateFindings, localVariablePredicateFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

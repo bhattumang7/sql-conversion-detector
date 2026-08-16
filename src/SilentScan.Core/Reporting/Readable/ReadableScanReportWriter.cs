@@ -74,6 +74,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
         blocks.AddRange(AnsiPaddingMismatch(report, headingLevel, pathBase));
+        blocks.AddRange(CatchAllPredicate(report, headingLevel, pathBase));
+        blocks.AddRange(LocalVariablePredicate(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -128,6 +130,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.UnderLengthParameterFindings.Count);
         AddCount(counts, "LIKE predicates that can never match a non-ANSI-padded column", report.AnsiPaddingMismatchFindings.Count);
+        AddCount(counts, "Catch-all / kitchen-sink optional-filter predicates", report.CatchAllPredicateFindings.Count);
+        AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -623,6 +627,55 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.PatternLiteralText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CatchAllPredicate(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CatchAllPredicateFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Catch-all / kitchen-sink predicates ({report.CatchAllPredicateFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "The classic '(Col = @p OR @p IS NULL)' optional-filter idiom (Erland Sommarskog, \"Dynamic Search Conditions in T-SQL\") - one cached plan must stay correct for every NULL/non-NULL state of @p, typically forcing a scan regardless of what value a given call actually passes. Not a claim about what a specific already-compiled plan is doing right now - a structural risk report. Suppressed entirely (not merely downgraded) when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, both of which let the optimizer see the real value on each call and fully resolve this risk. Rows on a confirmed-indexed column are listed first.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Parameter", "Indexed"],
+            [.. report.CatchAllPredicateFindings
+                .OrderByDescending(f => f.Indexed)
+                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.ParameterName,
+                f.Indexed ? "yes" : "no",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> LocalVariablePredicate(ScanReport report, int level, string? pathBase)
+    {
+        if (report.LocalVariablePredicateFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Predicates against a local variable, not a parameter ({report.LocalVariablePredicateFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value came from a DECLARE'd local variable, not a formal parameter, so it is invisible to the cardinality estimator (Microsoft's own documented behavior - the optimizer falls back to the column's average-density statistic instead of a value-specific estimate). Whether a bad estimate actually matters depends on data-distribution facts this pass cannot see - listed for awareness, not as a proven defect. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, since a per-execution recompile lets the optimizer see the variable's real current value.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Variable", "Operator", "Indexed"],
+            [.. report.LocalVariablePredicateFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.VariableName,
+                f.Operator,
+                f.Indexed ? "yes" : "no",
             })]);
     }
 

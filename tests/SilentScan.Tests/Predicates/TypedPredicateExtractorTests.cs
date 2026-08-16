@@ -1976,6 +1976,107 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(findings);
     }
+
+    // docs/detection-checklist.md Tier 2 "Local-variable predicates" - a predicate against a
+    // DECLARE'd local variable's value is invisible to the cardinality estimator, unlike a
+    // formal parameter's sniffed value. Purely structural/informational (no estimate magnitude
+    // claimed); the general mechanism is oracle-confirmed once in a dedicated Verify-side test,
+    // not per finding, matching this session's own precedent for this class of claim.
+
+    [Fact]
+    public void Extract_ColumnComparedToDeclaredLocalVariable_FiresLocalVariablePredicate()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @v VARCHAR(20) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @v;");
+
+        var finding = Assert.Single(result.LocalVariablePredicateFindings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Equal("@v", finding.VariableName);
+        Assert.Equal("=", finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToFormalParameter_NeverFiresLocalVariablePredicate()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = @p; END");
+
+        Assert.Empty(result.LocalVariablePredicateFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToDeclaredLocalVariable_RangeOperator_StillFires()
+    {
+        // The density-vector-estimate exposure applies equally to range comparisons, not just
+        // equality - covered from the start rather than artificially scoped to '=' alone.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @v VARCHAR(20) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code > @v;");
+
+        var finding = Assert.Single(result.LocalVariablePredicateFindings);
+        Assert.Equal(">", finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLiteral_NeverFiresLocalVariablePredicate()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.Customers WHERE Code = 'ABC';");
+
+        Assert.Empty(result.LocalVariablePredicateFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToDeclaredLocalVariable_StatementOptionRecompile_NeverFires()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @v VARCHAR(20) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @v OPTION (RECOMPILE);");
+
+        Assert.Empty(result.LocalVariablePredicateFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToDeclaredLocalVariable_ProcedureWithRecompile_NeverFires()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            """
+            CREATE PROCEDURE dbo.usp_Find WITH RECOMPILE AS
+            BEGIN
+                DECLARE @v VARCHAR(20) = 'ABC';
+                SELECT 1 FROM dbo.Customers WHERE Code = @v;
+            END
+            """);
+
+        Assert.Empty(result.LocalVariablePredicateFindings);
+    }
+
+    [Fact]
+    public void Extract_SpExecutesqlSeededParameter_TreatedAsFormalParameter_NeverFiresLocalVariablePredicate()
+    {
+        // externalVariables (sp_executesql's own declared parameter types, seeded by the
+        // dynamic-SQL pipeline) are genuinely caller-supplied per execution, exactly like a
+        // formal CREATE PROCEDURE parameter - never the "invisible local" shape.
+        var ddl = "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);";
+        var sql = "SELECT 1 FROM dbo.Customers WHERE Code = @p;";
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", ddl);
+        var sqlResult = SqlScriptParser.ParseText("sql.sql", sql);
+        Assert.False(ddlResult.HasErrors);
+        Assert.False(sqlResult.HasErrors);
+
+        var catalog = CatalogBuilder.Build([ddlResult, sqlResult]);
+        var lineage = LineageResolver.Resolve(catalog, [ddlResult, sqlResult]);
+        var externalVariables = new Dictionary<string, SqlType?> { ["@p"] = new SqlType(SqlTypeCategory.VarChar, Length: 20) };
+
+        var result = TypedPredicateExtractor.Extract(sqlResult, catalog, lineage, externalVariables: externalVariables);
+
+        Assert.Empty(result.LocalVariablePredicateFindings);
+    }
 }
 
 /// <summary>

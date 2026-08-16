@@ -23,6 +23,8 @@ public sealed record ScanReport(
     IReadOnlyList<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings,
     IReadOnlyList<PartialCompositeForeignKeyJoinFinding> PartialCompositeForeignKeyJoinFindings,
     IReadOnlyList<SetOptionFinding> SetOptionFindings,
+    IReadOnlyList<CatchAllPredicateFinding> CatchAllPredicateFindings,
+    IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -60,7 +62,9 @@ public sealed record ScanReport(
     /// "Under-length and length-defaulted string declarations"). Bumped to 15 for the new
     /// <see cref="AnsiPaddingMismatchFindings"/> stream (docs/detection-checklist.md Tier 1
     /// "SET options that silently disable plan features": "ANSI_PADDING OFF as a second,
-    /// independent finding").
+    /// independent finding"). Bumped to 16 for the new <see cref="CatchAllPredicateFindings"/>
+    /// and <see cref="LocalVariablePredicateFindings"/> streams (docs/detection-checklist.md
+    /// Tier 2 "Catch-all / kitchen-sink predicates" and "Local-variable predicates").
     /// </summary>
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 16;
 }
