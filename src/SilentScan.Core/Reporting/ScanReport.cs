@@ -37,6 +37,7 @@ public sealed record ScanReport(
     IReadOnlyList<UnparameterizedDynamicSqlFinding> UnparameterizedDynamicSqlFindings,
     IReadOnlyList<NonPersistedComputedColumnFinding> NonPersistedComputedColumnFindings,
     IReadOnlyList<TempTableExecShapeFinding> TempTableExecShapeFindings,
+    IReadOnlyList<SelfReferencingDmlFinding> SelfReferencingDmlFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -104,6 +105,8 @@ public sealed record ScanReport(
     /// <c>INSERT INTO #temp EXEC OtherProc</c>). Live-mode only - always empty in a file-mode
     /// scan, exactly like every other stream whose verdict needs a real database round trip
     /// (<see cref="CrossTableTypeDriftFindings"/>'s FK-linked half, the indexed-view registry).
+    /// Bumped to 27 for the new <see cref="SelfReferencingDmlFindings"/> stream
+    /// (docs/detection-checklist.md Tier 2 "Halloween Protection and self-referencing DML").
     /// </summary>
-    public const int CurrentSchemaVersion = 26;
+    public const int CurrentSchemaVersion = 27;
 }

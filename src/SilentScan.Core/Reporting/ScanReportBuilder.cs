@@ -510,6 +510,26 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<SelfReferencingDmlFinding> selfReferencingDmlFindings;
+        using (var selfRefStage = progress.Begin("scanning self-referencing DML", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = SelfReferencingDmlScanner.Scan(r, catalog, viewExpansionMap);
+                    selfRefStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            selfReferencingDmlFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<SelectStarViewFinding> selectStarViewFindings;
         using (var selectStarStage = progress.Begin("scanning SELECT * inside nested views", usableCount))
         {
@@ -677,6 +697,7 @@ public static class ScanReportBuilder
             // TempTableExecShapeFindings needs a live database round trip (sys.dm_exec_describe_first_result_set)
             // this builder never issues - always empty here; LiveScanRunner merges the real result in afterward.
             [],
+            selfReferencingDmlFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

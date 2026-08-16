@@ -67,6 +67,7 @@ public static class SarifReportWriter
         results.AddRange(report.UnparameterizedDynamicSqlFindings.Select(ToResult));
         results.AddRange(report.NonPersistedComputedColumnFindings.Select(ToResult));
         results.AddRange(report.TempTableExecShapeFindings.Select(ToResult));
+        results.AddRange(report.SelfReferencingDmlFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -395,6 +396,23 @@ public static class SarifReportWriter
                 $"'{finding.ModuleQualifiedName}': cursor '{finding.DetailText}' is FAST_FORWARD (or the equivalent bare FORWARD_ONLY READ_ONLY) - its own defining query plan is forced serial.",
             _ => $"'{finding.ModuleQualifiedName}': {finding.DetailText}{(finding.DetailText!.StartsWith("@@", StringComparison.Ordinal) ? string.Empty : "()")} referenced inside a query with a FROM clause forces that query's plan serial.",
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(SelfReferencingDmlFinding finding)
+    {
+        // Warning, not error: a performance-cost finding, not a correctness one - the same
+        // "structural risk, not provably-wrong-result" tier ForcedSerialFinding/CatchAllPredicateFinding
+        // use. Never names one specific operator (spool or sort) in the message - the oracle
+        // confirmed both mechanisms occur depending on statement shape, see this finding's own
+        // doc comment.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SelfReferencingDmlRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var viaDisplay = finding.Kind == SelfReferencingDmlFindingKind.ThroughView
+            ? $" (through view '{finding.ReadSideQualifiedName}')"
+            : string.Empty;
+        var message = $"{finding.StatementKind} on '{finding.TargetTableQualifiedName}' also reads from that same table{viaDisplay} - this forces extra defensive plan work (an Eager Spool or Sort the engine would not otherwise need) to guarantee every write sees a consistent read.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

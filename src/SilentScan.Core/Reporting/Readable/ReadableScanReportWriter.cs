@@ -99,6 +99,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(UnparameterizedDynamicSql(report, headingLevel, pathBase));
         blocks.AddRange(TempTableExecShape(report, headingLevel, pathBase));
+        blocks.AddRange(SelfReferencingDml(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -167,6 +168,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Dynamic SQL call sites concatenating a proven-constant value instead of parameterizing it", report.UnparameterizedDynamicSqlFindings.Count);
         AddCount(counts, "INSERT INTO #temp EXEC proc shape mismatches", report.TempTableExecShapeFindings.Count);
+        AddCount(counts, "Self-referencing DML (Halloween Protection risk)", report.SelfReferencingDmlFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -991,6 +993,30 @@ public static class ReadableScanReportWriter
                 f.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch
                     ? $"{f.TempTableQualifiedName} declares {f.TempTableDeclaredColumnCount} column(s); {f.ExecutedProcQualifiedName} describes {f.DescribedColumnCount}"
                     : $"{f.TempTableQualifiedName} position {f.ColumnPosition} ('{f.ColumnName}', {f.TempColumnTypeDisplay}) <- {f.ExecutedProcQualifiedName} ({f.DescribedColumnTypeDisplay}): {f.WriteLoss}",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SelfReferencingDml(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SelfReferencingDmlFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Self-referencing DML - Halloween Protection risk ({report.SelfReferencingDmlFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An INSERT/UPDATE/DELETE/MERGE whose own read side (a self-join, a WHERE/SET subquery, or a view over the same base table) also names the exact table it writes to. Oracle-confirmed to force extra defensive plan work an otherwise-identical statement reading a different table never pays - a LogicalOp=\"Eager Spool\" for INSERT/DELETE, an extra Sort operator for UPDATE ... FROM self-joins and MERGE (no spool at all in that case). A performance-cost finding, not a correctness one - the result is identical either way.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Statement", "Target", DetailHeader],
+            [.. report.SelfReferencingDmlFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.StatementKind,
+                f.TargetTableQualifiedName,
+                f.Kind == SelfReferencingDmlFindingKind.ThroughView
+                    ? $"read side reaches the target through view '{f.ReadSideQualifiedName}'"
+                    : "read side names the target table directly",
             })]);
     }
 
