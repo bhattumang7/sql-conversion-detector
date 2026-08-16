@@ -86,4 +86,24 @@ public sealed class JsonComputedColumnSuppressionTests : OracleTestFixture
 
         Assert.Contains("PhysicalOp=\"Index Seek\"", planXml);
     }
+
+    [Fact]
+    public async Task MatchingIndexedComputedColumn_MaxTypedComparisonValue_StillSeeksButThroughGetRangeWithMismatchedTypes()
+    {
+        // docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters" #4: the
+        // matched indexed computed column (StatusVal, JSON_VALUE's own bounded NVARCHAR(4000)
+        // return type) removes the syntactic FunctionWrappedColumn finding entirely (asserted
+        // above), but does NOT make the comparison free - a MAX-typed comparison VALUE still
+        // defeats a clean seek on it, per VerdictClassifier.ClassifySameCategory's own oracle-
+        // corrected, collation-independent RangeSeek branch (bounded column vs MAX operand).
+        // Oracle-confirmed directly: still an Index Seek (never degrades all the way to a scan),
+        // but via GetRangeWithMismatchedTypes rather than a plain unmarked seek - the literal-
+        // value test above gets the latter, this one must not.
+        const string probe = "DECLARE @p NVARCHAR(MAX) = N'ACTIVE'; SELECT OrderId FROM dbo.Orders WHERE JSON_VALUE(Payload, '$.status') = @p;";
+
+        var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
+
+        Assert.Contains("PhysicalOp=\"Index Seek\"", planXml);
+        Assert.Contains("GetRangeWithMismatchedTypes", planXml);
+    }
 }

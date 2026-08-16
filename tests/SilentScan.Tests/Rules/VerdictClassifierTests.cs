@@ -736,4 +736,52 @@ public sealed class VerdictClassifierTests
         Assert.Equal(Verdict.SeekPreserved, verdict);
         Assert.Null(reason);
     }
+
+    [Fact]
+    public void Classify_BoundedColumnVsMaxValue_SqlCollation_RangeSeek()
+    {
+        // Oracle-verified WITH REAL DATA (5,000 rows - an empty table is a documented trap for
+        // this exact probe shape elsewhere in this codebase): SQL_* collation compiles a
+        // bounded-vs-MAX same-category comparison to GetRangeWithMismatchedTypes, a real Index
+        // Seek with actual SeekPredicates/RangeColumns range bounds - the collation-asymmetry
+        // GetRangeThroughConvert has does NOT apply here, since a same-category MAX mismatch
+        // never crosses character sets.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 50, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"));
+        var value = new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"));
+
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BoundedColumnVsMaxValue_WindowsCollation_RangeSeek()
+    {
+        // Oracle-verified: Windows collation compiles the identical shape identically to the
+        // SQL_* case above - both use GetRangeWithMismatchedTypes, confirming this is
+        // collation-independent.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 50, Collation: new Collation("Latin1_General_CI_AS"));
+        var value = new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: new Collation("Latin1_General_CI_AS"));
+
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BoundedColumnVsMaxValue_UnresolvedCollation_StillRangeSeek()
+    {
+        // Deliberately does not depend on collation resolution at all - unlike
+        // GetRangeThroughConvert's own collation-family dependency.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 50, Collation: null);
+        var value = new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: null);
+
+        Assert.Equal(Verdict.RangeSeek, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
+    public void Classify_BothMaxSameCategory_SameCollation_SeekPreserved()
+    {
+        // Both sides MAX (no mismatch at all) - unaffected by the new check, same as before.
+        var column = new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"));
+        var value = new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"));
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
 }

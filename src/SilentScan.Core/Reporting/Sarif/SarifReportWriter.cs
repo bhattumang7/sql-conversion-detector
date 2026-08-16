@@ -49,6 +49,8 @@ public static class SarifReportWriter
         results.AddRange(report.CrossTableTypeDriftFindings.Select(ToResult));
         results.AddRange(report.ProcCallArgumentMismatchFindings.Select(ToResult));
         results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
+        results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
+        results.AddRange(report.OversizedParameterFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -184,6 +186,31 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalBoundaryPrecisionRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (scale {finding.ColumnScale}) is compared with BETWEEN against upper bound '{finding.BoundaryLiteralText}' ({finding.BoundaryLiteralFractionalDigits} fractional digit(s)) - rows in the precision gap are silently excluded. Rewrite as >= start AND < (start of the next period).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(MaxTypedColumnFinding finding)
+    {
+        // Informational, not error/warning - a structural catalog fact, not evidence of an
+        // actual predicate/join comparison against it. It can never be an index key column,
+        // but that's an inherent property, not something a query newly triggered.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MaxTypedColumnRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - MAX-typed columns can never be an index key column, so no predicate/join on it can ever seek.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(OversizedParameterFinding finding)
+    {
+        // Warning, not error - oracle-falsified that a bare equality predicate shows any memory-
+        // grant difference; this is a structural report of a length mismatch, not a plan-shape
+        // claim for this specific predicate. Not downgraded by indexed-ness either: the risk is
+        // about the value's declared size feeding a sort/hash operator, unrelated to seek loss.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OversizedParameterRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (length {finding.ColumnLength}) is compared against a parameter/variable/expression declared with length {finding.OtherOperandLength} - risks memory-grant inflation if the value feeds a sort/hash operator.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

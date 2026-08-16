@@ -70,6 +70,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
+        blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
+        blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -118,6 +120,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
+        AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
+        AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -523,6 +527,49 @@ public static class ReadableScanReportWriter
                 f.ColumnScale.ToString(CultureInfo.InvariantCulture),
                 f.BoundaryLiteralText,
                 f.BoundaryLiteralFractionalDigits.ToString(CultureInfo.InvariantCulture),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MaxTypedColumn(ScanReport report, int level, string? pathBase)
+    {
+        if (report.MaxTypedColumnFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"MAX-typed columns ({report.MaxTypedColumnFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact, not a comparison: VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) columns can never be an index key column at all (SQL Server rejects them at CREATE INDEX time), so no predicate or join on them can ever seek, regardless of how they're used.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type"],
+            [.. report.MaxTypedColumnFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> OversizedParameter(ScanReport report, int level, string? pathBase)
+    {
+        if (report.OversizedParameterFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Predicates comparing a column against an oversized parameter ({report.OversizedParameterFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Informational, not a plan-shape claim for this specific predicate - oracle-falsified that a bare equality predicate shows any memory-grant difference on its own. The risk is structural: the parameter/variable/expression on the other side is declared with a meaningfully longer length than the column, which risks memory-grant inflation once that value feeds a sort/hash operator elsewhere in the plan.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Column length", "Other operand length"],
+            [.. report.OversizedParameterFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.ColumnLength.ToString(CultureInfo.InvariantCulture),
+                f.OtherOperandLength.ToString(CultureInfo.InvariantCulture),
             })]);
     }
 

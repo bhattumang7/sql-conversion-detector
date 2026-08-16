@@ -29,6 +29,8 @@ public static class SarifRuleCatalog
     public const string CrossTableTypeDriftRuleId = "silentscan/catalog/cross-table-fk-type-drift";
     public const string ProcCallArgumentMismatchRuleId = "silentscan/call-graph/argument-type-mismatch";
     public const string TemporalBoundaryPrecisionRuleId = "silentscan/correctness/between-end-of-period-boundary";
+    public const string MaxTypedColumnRuleId = "silentscan/catalog/max-typed-column";
+    public const string OversizedParameterRuleId = "silentscan/predicates/oversized-parameter";
 
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {
@@ -163,6 +165,8 @@ public static class SarifRuleCatalog
             Rule(CrossTableTypeDriftRuleId, "A foreign-key column pair's declared types and/or collations genuinely differ - a conversion seed on every JOIN that follows this relationship, detected from the catalog alone (sys.foreign_key_columns), independent of whether any scanned query actually joins on it."),
             Rule(ProcCallArgumentMismatchRuleId, "A real EXEC call site passes a caller-side variable whose declared type risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate, classified the same way an INSERT/UPDATE assignment's silent data loss is."),
             Rule(TemporalBoundaryPrecisionRuleId, "A BETWEEN predicate's upper bound literal has fewer fractional-second digits than the TIME/DATETIME2/DATETIMEOFFSET column's own declared precision - a correctness bug, not a sargability one: rows in the precision gap are silently excluded, oracle-confirmed. Rewrite as >= start AND < (start of the next period) instead."),
+            Rule(MaxTypedColumnRuleId, "A string/binary column is declared MAX-typed - it can never be an index key column at all, so any predicate/join on it can never seek regardless of how it's used. Catalog-only structural fact."),
+            Rule(OversizedParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

@@ -1670,6 +1670,97 @@ public sealed class TypedPredicateExtractorTests
         Assert.Empty(result.TypedFindings);
         Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference" && s.Reason.Contains("sys.dm_exec_requests", StringComparison.Ordinal));
     }
+
+    // docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters" #2. Deliberately
+    // NOT verdict-bearing (see OversizedParameterFinding's own doc comment): oracle-probed
+    // directly (Docker SQL Server, populated table) that a bare equality predicate against an
+    // oversized parameter shows no memory-grant difference in its own plan - the risk is
+    // structural (the value's declared size feeding a sort/hash operator elsewhere), not a
+    // seek/scan claim about THIS predicate. So these are catalog/AST-structural tests, no oracle
+    // probe attached, matching how the finding is actually reported. The pattern itself is the
+    // one Paul White (sqlperformance.com, "Performance Myths: Oversizing String Columns") and
+    // Brent Ozar ("Would You Just Look at the Execution Plan?" memory-grant series) both warn
+    // against: declaring a parameter/variable wider than the column it's compared to costs
+    // nothing on this predicate alone, but the same wide declaration elsewhere sizes memory
+    // grants off the parameter's own length, not the column's.
+
+    [Fact]
+    public void Extract_ColumnComparedToLongerDeclaredVariable_FiresOversizedParameter()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(200) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        var finding = Assert.Single(result.OversizedParameterFindings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Equal(20, finding.ColumnLength);
+        Assert.Equal(200, finding.OtherOperandLength);
+    }
+
+    [Fact]
+    public void Extract_ProcedureParameterLongerThanColumn_FiresOversizedParameter()
+    {
+        // The realistic shape: a stored procedure's own formal parameter, declared wider than
+        // the column it filters, exactly the "just make it NVARCHAR(MAX) to be safe" habit both
+        // cited articles call out.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "CREATE PROCEDURE dbo.usp_FindCustomer @Code VARCHAR(4000) AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = @Code; END");
+
+        var finding = Assert.Single(result.OversizedParameterFindings);
+        Assert.Equal(20, finding.ColumnLength);
+        Assert.Equal(4000, finding.OtherOperandLength);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToShorterOrEqualDeclaredVariable_NeverFires()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(20) = 'ABC'; DECLARE @q VARCHAR(5) = 'AB'; SELECT 1 FROM dbo.Customers WHERE Code = @p OR Code = @q;");
+
+        Assert.Empty(result.OversizedParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLongerLiteral_NeverFires()
+    {
+        // A literal's own length is its actual content length, not a "declared" one distinct
+        // from the column - only a real variable/parameter/expression carries a size
+        // independent of its current value, so literals are excluded outright.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(5) NOT NULL);",
+            "SELECT 1 FROM dbo.Customers WHERE Code = 'a much longer literal than the column';");
+
+        Assert.Empty(result.OversizedParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLongerMaxTypedVariable_NeverFires()
+    {
+        // MAX-typed is item #1's own separate finding (MaxTypedColumnScanner) - a declared
+        // length of -1 here would falsely read as "shorter than the column", so MAX-typed
+        // operands are excluded from this check explicitly rather than by coincidence.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p VARCHAR(MAX) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        Assert.Empty(result.OversizedParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLongerVariableOfDifferentCategory_NeverFires()
+    {
+        // A category mismatch (VARCHAR column vs NVARCHAR variable) is the implicit-conversion
+        // stream's own, already-covered concern - this check only fires within the SAME string
+        // category, where length is the only thing that differs.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @p NVARCHAR(200) = N'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        Assert.Empty(result.OversizedParameterFindings);
+    }
 }
 
 /// <summary>
@@ -1805,7 +1896,9 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         """,
         "CREATE VIEW dbo.vw_CombinedUnion AS SELECT Code FROM dbo.RecentUnion UNION ALL SELECT Code FROM dbo.ArchiveUnion;",
         "CREATE TABLE dbo.OrdersIntCol (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL, INDEX IX_OrdersIntCol_Quantity (Quantity));",
-        "CREATE TABLE dbo.OrdersVariantCol (OrderId INT NOT NULL PRIMARY KEY, Tag SQL_VARIANT NOT NULL, INDEX IX_OrdersVariantCol_Tag (Tag));");
+        "CREATE TABLE dbo.OrdersVariantCol (OrderId INT NOT NULL PRIMARY KEY, Tag SQL_VARIANT NOT NULL, INDEX IX_OrdersVariantCol_Tag (Tag));",
+        "CREATE TABLE dbo.OrdersMaxSql (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(50) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_OrdersMaxSql_Code (Code));",
+        "CREATE TABLE dbo.OrdersMaxWindows (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(50) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_OrdersMaxWindows_Code (Code));");
 
     /// <summary>
     /// <see cref="PipelineOracleVerification.VerifyAsync"/>/<c>AssertAllConfirmed</c> only
@@ -3089,5 +3182,45 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         Assert.True(finding.Column.Indexed);
 
         await AssertNoColumnConversionAsync(finding);
+    }
+
+    [Theory]
+    [InlineData("OrdersMaxSql", "SQL_Latin1_General_CP1_CI_AS")]
+    [InlineData("OrdersMaxWindows", "Latin1_General_CI_AS")]
+    public async Task BoundedColumnVsMaxTypedParameter_RangeSeek_OracleConfirmed(string table, string collation)
+    {
+        // docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters" #1 - oracle-
+        // verified collation-independent (both the SQL_* and Windows collation representative
+        // tables get the identical treatment): the column itself never converts at all here (the
+        // Convert node wraps the PARAMETER, not the column - confirmed directly in the plan XML,
+        // unlike every other RangeSeek case in this codebase) - a real Index Seek via the
+        // GetRangeWithMismatchedTypes intrinsic instead of GetRangeThroughConvert. This needs its
+        // own bespoke plan-XML assertion rather than the standard PipelineOracleVerification/
+        // CorpusFindingVerifier path, since that machinery is built around confirming a claimed
+        // COLUMN-side CONVERT_IMPLICIT, which genuinely does not exist for this shape - requires
+        // real row data to reproduce (an empty/tiny table never triggers this seek strategy,
+        // the same trap documented elsewhere in this codebase for GetRangeThroughConvert).
+        var findings = Extract(
+            $"CREATE TABLE dbo.{table} (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(50) COLLATE {collation} NOT NULL, INDEX IX_{table}_Code (Code));",
+            $"SELECT 1 FROM dbo.{table} WHERE Code = CAST('V1' AS VARCHAR(MAX));");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(Verdict.RangeSeek, finding.Verdict);
+        Assert.Equal($"dbo.{table}", finding.Column.TableQualifiedName);
+        Assert.True(finding.Column.Indexed);
+
+        var seedRows = $"""
+            INSERT INTO dbo.{table} (OrderId, Code)
+            SELECT TOP (2000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)),
+                   'V' + CAST(ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS VARCHAR(10))
+            FROM sys.all_objects a CROSS JOIN sys.all_objects b;
+            UPDATE STATISTICS dbo.{table} WITH FULLSCAN;
+            """;
+        await new ScriptDeployer(Options).DeployAsync(seedRows, DatabaseName);
+
+        var probe = $"DECLARE @p VARCHAR(MAX) = 'V1'; SELECT OrderId FROM dbo.{table} WHERE Code = @p;";
+        var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
+        Assert.Contains("PhysicalOp=\"Index Seek\"", planXml);
+        Assert.Contains("GetRangeWithMismatchedTypes", planXml);
     }
 }

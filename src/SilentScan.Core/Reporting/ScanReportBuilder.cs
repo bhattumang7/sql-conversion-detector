@@ -323,6 +323,13 @@ public static class ScanReportBuilder
             argumentMismatchStage.Complete($"{procCallArgumentMismatchFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<MaxTypedColumnFinding> maxTypedColumnFindings;
+        using (var maxTypedColumnStage = progress.Begin("scanning MAX-typed columns"))
+        {
+            maxTypedColumnFindings = MaxTypedColumnScanner.Scan(catalog);
+            maxTypedColumnStage.Complete($"{maxTypedColumnFindings.Count:N0} findings");
+        }
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -339,6 +346,8 @@ public static class ScanReportBuilder
         var expressionDerivedFindings = extractionResults.SelectMany(r => r.ExpressionDerivedFindings).ToList();
         var collationConflictFindings = extractionResults.SelectMany(r => r.CollationConflictFindings).ToList();
         var writeLossFindings = extractionResults.SelectMany(r => r.WriteLossFindings).ToList();
+        var oversizedParameterFindings = extractionResults.SelectMany(r => r.OversizedParameterFindings)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
         var skippedConstructs = new List<SkippedConstruct>();
@@ -443,6 +452,7 @@ public static class ScanReportBuilder
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
+            maxTypedColumnFindings, oversizedParameterFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

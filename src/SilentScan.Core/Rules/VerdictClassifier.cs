@@ -133,7 +133,7 @@ public static class VerdictClassifier
 
         if (columnType.Category == otherType.Category)
         {
-            return (ClassifySameCategory(columnType, otherType), null);
+            return ClassifySameCategory(columnType, otherType);
         }
 
         return ClassifyCrossCategory(columnType, otherType, otherIsLiteral, operatorText);
@@ -211,20 +211,48 @@ public static class VerdictClassifier
         category is SqlTypeCategory.SqlVariant or SqlTypeCategory.Xml or SqlTypeCategory.UserDefined
             or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image;
 
-    private static Verdict ClassifySameCategory(SqlType columnType, SqlType otherType)
+    private static (Verdict Verdict, string? UnknownReason) ClassifySameCategory(SqlType columnType, SqlType otherType)
     {
-        if (!columnType.IsStringFamily || columnType.Collation is null || otherType.Collation is null)
+        if (!columnType.IsStringFamily)
         {
-            // Same category, no collation to conflict on (or collation unresolved on a
-            // non-comparison-relevant side) - length/precision differences alone don't
-            // defeat sargability (oracle-verified across varchar/nvarchar/decimal facet
-            // pairs: every same-category, same-collation-status pair seeks cleanly).
-            return Verdict.SeekPreserved;
+            // Non-string same-category pair (int-family, decimal-family, ...) - length/precision
+            // differences alone don't defeat sargability there (oracle-verified across decimal
+            // facet pairs: every same-category pair seeks cleanly regardless of precision/scale).
+            return (Verdict.SeekPreserved, null);
+        }
+
+        // MAX-vs-bounded-length mismatch within the SAME string category (docs/detection-
+        // checklist.md Tier 1 "Oversized and MAX-typed parameters" #1) - oracle-verified directly
+        // against the Docker instance WITH REAL DATA (5,000 rows, UPDATE STATISTICS WITH FULLSCAN
+        // - an empty/tiny table is a documented trap elsewhere in this codebase for exactly this
+        // kind of probe, since the optimizer never even considers a dynamic-range seek strategy
+        // without real cardinality to justify it): a bounded-length indexed column compared
+        // against a MAX-typed value/variable compiles to `GetRangeWithMismatchedTypes(...)` with a
+        // real `Index Seek` and actual `SeekPredicates`/`RangeColumns`/`StartRange`/`EndRange`
+        // bounds - the same dynamic-range shape CLAUDE.md already calls RangeSeek for
+        // GetRangeThroughConvert elsewhere (PhysicalOp="Index Seek" backed by a computed range,
+        // not a plain equality seek). Unlike GetRangeThroughConvert, this held identically for
+        // BOTH a SQL_* and a Windows collation representative - collation family governs whether a
+        // CROSS-CHARACTER-SET range can be built (GetRangeThroughConvert's own concern), but a
+        // same-category MAX-vs-bounded mismatch never crosses character sets at all, so it's not
+        // subject to that asymmetry. Deliberately does not depend on collation being resolved.
+        if (columnType.IsMax != otherType.IsMax)
+        {
+            return (Verdict.RangeSeek, null);
+        }
+
+        if (columnType.Collation is null || otherType.Collation is null)
+        {
+            // Same category, same MAX-ness, no collation to conflict on (or collation unresolved
+            // on a non-comparison-relevant side) - length/precision differences alone don't
+            // defeat sargability (oracle-verified across varchar/nvarchar facet pairs: every
+            // same-category, same-MAX-ness, same-collation-status pair seeks cleanly).
+            return (Verdict.SeekPreserved, null);
         }
 
         if (string.Equals(columnType.Collation.Name, otherType.Collation.Name, StringComparison.OrdinalIgnoreCase))
         {
-            return Verdict.SeekPreserved;
+            return (Verdict.SeekPreserved, null);
         }
 
         // Same string category, genuinely different, both-resolved collations. Classify's own
@@ -235,6 +263,6 @@ public static class VerdictClassifier
         // oracle-confirmed ScanForced, never RangeSeek (the dynamic-range-seek optimization is
         // cross-category-only, never observed for a same-category collation mismatch in any
         // probed shape).
-        return Verdict.ScanForced;
+        return (Verdict.ScanForced, null);
     }
 }

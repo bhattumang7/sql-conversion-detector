@@ -17,6 +17,8 @@ public sealed record ScanReport(
     IReadOnlyList<CrossTableTypeDriftFinding> CrossTableTypeDriftFindings,
     IReadOnlyList<ProcCallArgumentMismatchFinding> ProcCallArgumentMismatchFindings,
     IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings,
+    IReadOnlyList<MaxTypedColumnFinding> MaxTypedColumnFindings,
+    IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -43,7 +45,9 @@ public sealed record ScanReport(
     /// argument mismatch). Bumped to 10 for the new <see cref="TemporalBoundaryFindings"/> stream
     /// (docs/detection-checklist.md Tier 1 "Type-aware upgrade of the sargability stream": BETWEEN
     /// end-of-period boundary - a correctness finding, not a sargability one, but shares the same
-    /// scope-resolution walk as Tier1Findings).
+    /// scope-resolution walk as Tier1Findings). Bumped to 11 for the new
+    /// <see cref="MaxTypedColumnFindings"/> and <see cref="OversizedParameterFindings"/> streams
+    /// (docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters").
     /// </summary>
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 }

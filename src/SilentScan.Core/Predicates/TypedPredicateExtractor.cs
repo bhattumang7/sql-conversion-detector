@@ -31,7 +31,7 @@ public static class TypedPredicateExtractor
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings);
     }
 
     private sealed class Visitor(
@@ -152,6 +152,8 @@ public static class TypedPredicateExtractor
         public List<CollationConflictFinding> CollationConflictFindings { get; } = [];
 
         public List<WriteLossFinding> WriteLossFindings { get; } = [];
+
+        public List<OversizedParameterFinding> OversizedParameterFindings { get; } = [];
 
         /// <summary>
         /// Set by <see cref="AnalyzeInsertWriteLoss"/> just before <see cref="ExplicitVisit(InsertStatement)"/>
@@ -1205,6 +1207,37 @@ public static class TypedPredicateExtractor
                 UnknownReason: unknownReason,
                 PredicateFragmentText: _currentPredicateFragment is { } fragment ? Rules.FragmentTextRenderer.Render(fragment) : null,
                 Fingerprint: TypedPredicateFindingIdentity.ComputeFingerprint(column, other, operatorText)));
+
+            TryAddOversizedParameterFinding(column, other, otherIsLiteral, node);
+        }
+
+        /// <summary>
+        /// docs/detection-checklist.md Tier 1 "Oversized and MAX-typed parameters" #2 - a
+        /// parameter/variable/expression declared with a meaningfully LONGER length than the
+        /// column it's compared against, within the same string category (a category MISMATCH is
+        /// a different, already-covered concern; MAX-typed is its own item #1, not this one - a
+        /// declared length of -1 there would falsely read as "shorter", so MAX-typed operands are
+        /// excluded here explicitly). A literal's own length is its actual content length, not a
+        /// "declared" one, so literals are excluded - only a real variable/parameter/expression
+        /// carries a DECLARED length independent of its current value.
+        /// </summary>
+        private void TryAddOversizedParameterFinding(PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, TSqlFragment node)
+        {
+            if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType })
+            {
+                return;
+            }
+
+            if (column.Type is not { IsStringFamily: true, IsMax: false, Length: { } columnLength } columnType
+                || otherType is not { IsStringFamily: true, IsMax: false, Length: { } otherLength }
+                || columnType.Category != otherType.Category
+                || otherLength <= columnLength)
+            {
+                return;
+            }
+
+            OversizedParameterFindings.Add(new OversizedParameterFinding(
+                column.TableQualifiedName, column.ColumnName, columnLength, otherLength, sourcePath, node.StartLine, node.StartColumn));
         }
 
         /// <summary>

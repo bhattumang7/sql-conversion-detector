@@ -523,26 +523,93 @@ wrong once measured with the real parser; corrected below. `CHARINDEX`: 12.
   one, correcting the checklist's original "verdict differs by collation"
   premise).
 
-### Oversized and MAX-typed parameters
+### Oversized and MAX-typed parameters — shipped
 Under-represented in existing rule sets, adjacent to the existing conversion
 code, high precision.
 
-- [ ] `varchar(max)`/`nvarchar(max)` parameter or variable compared to a
+- [x] `varchar(max)`/`nvarchar(max)` parameter or variable compared to a
       `(n)`-typed column — blocks predicate pushdown even when the base type
-      matches; no seek.
-- [ ] Parameter declared longer than the compared column (`varchar(200)` param
+      matches; no seek. **Correction to the item's own premise, oracle-
+      confirmed:** a bounded-length column compared against a MAX-typed value
+      of the same category does NOT force a scan — it still seeks, via
+      `GetRangeWithMismatchedTypes` (`RangeSeek`, the same bound-search
+      mechanism `GetRangeThroughConvert` uses for a Windows-collation implicit
+      conversion), cheaper than a scan but dearer than a clean seek. A first
+      pass, based on an unverified sub-agent oracle claim, coded this as
+      collation-dependent (SQL_\* collations getting a clean `SeekPreserved`,
+      only Windows collations getting `RangeSeek`); independently re-verified
+      against the Docker oracle with real populated tables (2,000 rows,
+      `UPDATE STATISTICS ... WITH FULLSCAN`) and found the claim wrong — BOTH
+      collation families produce `PhysicalOp="Index Seek"` via
+      `GetRangeWithMismatchedTypes` identically. `VerdictClassifier
+      .ClassifySameCategory` (`src/SilentScan.Core/Rules/VerdictClassifier.cs`)
+      now returns `RangeSeek` unconditionally on an `IsMax` mismatch, no
+      collation branch. Oracle-tested in
+      `TypedPredicateExtractorTests.BoundedColumnVsMaxTypedParameter_RangeSeek_OracleConfirmed`
+      (both collation families as theory cases, real deployed tables, real
+      captured plan XML).
+- [x] Parameter declared longer than the compared column (`varchar(200)` param
       vs `varchar(50)` column) — memory-grant inflation; lower severity.
-- [ ] MAX-typed columns used as predicate/join targets (can't be an index
-      key) — catalog-only report.
-- [ ] **A MAX-typed (or otherwise oversized) *comparison value* defeats a seek
+      **Scoped down from a verdict-bearing finding to a purely informational
+      one, oracle-falsified:** probed directly whether a bare equality
+      predicate against an oversized parameter shows any memory-grant
+      difference in `SET SHOWPLAN_XML` output on its own — it does not; only
+      a downstream Sort/Hash-consuming operator would size a memory grant off
+      the parameter's declared length, and a compile-only equality predicate
+      never reaches one. `OversizedParameterFinding`
+      (`src/SilentScan.Core/Predicates/OversizedParameterFinding.cs`) is
+      reported with no verdict field and SARIF level `warning` (structural
+      report, not a plan-shape claim for this specific predicate), matching
+      the pattern Paul White (sqlperformance.com, "Performance Myths:
+      Oversizing String Columns") and Brent Ozar's memory-grant series warn
+      about. Extraction lives in `TypedPredicateExtractor
+      .TryAddOversizedParameterFinding` — same-category string/binary pair,
+      neither side MAX-typed (that's this section's own separate item), the
+      other operand a real variable/parameter/expression (never a literal —
+      a literal's length is its actual content, not a declared size).
+      Future follow-up noted directly in the finding's own doc comment: a
+      live-mode enhancement could rank findings by whether the plan cache
+      shows a real memory-grant-consuming operator downstream, mirroring how
+      `--plan-cache-evidence` already ranks conversion findings by observed
+      cached-plan behavior — not built now, no live signal available yet to
+      justify it. Unit-tested (fires on longer variable/parameter; does not
+      fire on literal, MAX-typed, shorter/equal, or cross-category operands)
+      in `TypedPredicateExtractorTests`. Coverage against the local RM_ test
+      database: **180 findings** (`scan-db --format json`,
+      `OversizedParameterFindings.Count`).
+- [x] MAX-typed columns used as predicate/join targets (can't be an index
+      key) — catalog-only report. `MaxTypedColumnFinding`/
+      `MaxTypedColumnScanner` (`src/SilentScan.Core/Predicates/
+      MaxTypedColumnScanner.cs`) walk `DatabaseCatalog.Tables` directly, no
+      AST or predicate site needed — SQL Server itself enforces this at
+      `CREATE INDEX` time (Msg 1919), so it's a plain catalog-metadata fact,
+      not a plan-behavior claim needing an oracle probe. Unit-tested
+      (`MaxTypedColumnScannerTests`: fires per MAX-typed string/binary
+      subtype, never fires on bounded types, stable table/column ordering).
+      Coverage against the local RM_ test database: **245 findings**
+      (191 `varchar(max)`, 35 `varbinary(max)`, 19 `nvarchar(max)`).
+- [x] **A MAX-typed (or otherwise oversized) *comparison value* defeats a seek
       even against a matching indexed computed column** — oracle-found while
       landing the JSON_VALUE computed-column suppression above: comparing
       `JSON_VALUE(Payload, '$.status')` (matched to an indexed computed
-      column) against an `NVARCHAR(MAX)` variable still forces a scan, even
-      though a literal or bounded-length variable comparison seeks cleanly.
-      Same underlying mechanism as this section's first two items; worth its
-      own fixture pair once this section is picked up rather than being
-      re-discovered from scratch.
+      column) against an `NVARCHAR(MAX)` variable. **Corrected once this
+      section's first item was oracle-corrected:** it does not force a scan —
+      it still seeks, via `GetRangeWithMismatchedTypes`, exactly like any
+      other bounded-column-vs-MAX-value comparison; the matched computed
+      column only removes the syntactic Tier-1 `FunctionWrappedColumn`
+      finding, it does not exempt the comparison from the same MAX-mismatch
+      classifier rule as this section's first item. Oracle-confirmed directly
+      in `JsonComputedColumnSuppressionTests
+      .MatchingIndexedComputedColumn_MaxTypedComparisonValue_StillSeeksButThroughGetRangeWithMismatchedTypes`
+      — real captured plan XML shows both `PhysicalOp="Index Seek"` and
+      `GetRangeWithMismatchedTypes`, reusing the class's already-deployed DDL
+      (no new fixture file needed; the DDL shape was already exactly right).
+
+All four sub-items wired end-to-end: `ScanReportBuilder` → `ScanReport`
+(schema version bumped 10 → 11) → SARIF (`SarifRuleCatalog` +
+`SarifReportWriter.ToResult` overloads) → readable report
+(`ReadableScanReportWriter`, summary rows + dedicated sections). Full test
+suite green (2,635 tests) after landing.
 
 ### Join predicate incomplete vs. the backing foreign key
 Folded in from the incumbent-catalog read — "strongest single find" there,
