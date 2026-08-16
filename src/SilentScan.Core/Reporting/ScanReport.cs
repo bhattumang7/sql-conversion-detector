@@ -30,6 +30,7 @@ public sealed record ScanReport(
     IReadOnlyList<ForcedSerialFinding> ForcedSerialFindings,
     IReadOnlyList<UntrustedConstraintFinding> UntrustedConstraintFindings,
     IReadOnlyList<CascadingForeignKeyFinding> CascadingForeignKeyFindings,
+    IReadOnlyList<MultiReferencedCteFinding> MultiReferencedCteFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -78,7 +79,9 @@ public sealed record ScanReport(
     /// "Forced-serial construct inventory"). Bumped to 20 for the new
     /// <see cref="UntrustedConstraintFindings"/> and <see cref="CascadingForeignKeyFindings"/>
     /// streams (docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Untrusted (WITH
-    /// NOCHECK) FK/CHECK constraints" and "Cascading FK actions").
+    /// NOCHECK) FK/CHECK constraints" and "Cascading FK actions"). Bumped to 21 for the new
+    /// <see cref="MultiReferencedCteFindings"/> stream (docs/detection-checklist.md Tier 2
+    /// "Lineage-metric findings": "Multi-referenced CTE").
     /// </summary>
-    public const int CurrentSchemaVersion = 20;
+    public const int CurrentSchemaVersion = 21;
 }

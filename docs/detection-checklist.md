@@ -1368,8 +1368,51 @@ latest) compat level.
 ### Lineage-metric findings (cheap adds on existing passes)
 - [ ] Nested-view depth report — we already compute topo order; emit depth ≥ N
       as a finding with the chain (57 views reference other views locally).
-- [ ] Multi-referenced CTE — inline macro re-executed per reference; count
+- [x] Multi-referenced CTE — inline macro re-executed per reference; count
       references in the AST. Rarely covered anywhere; high precision.
+      SQL Server does NOT materialize a plain (non-recursive) CTE once and
+      reuse it — each reference re-runs the CTE's own defining query
+      independently. **Load-bearing, not folklore-trusted**: confirmed
+      directly against the Docker oracle (real execution, `SET STATISTICS IO
+      ON`) rather than assumed from documentation — a base table's own scan
+      count went from 1 (one CTE reference) to 2 (two references), matching
+      exactly two independent scans, not one materialized-and-reused result.
+      This same discipline mattered earlier this session: the FAST_FORWARD
+      cursor finding found a piece of "everyone knows this" SQL Server
+      folklore to be backwards once actually checked, so this claim got the
+      same direct verification rather than being trusted on reputation.
+      Standalone syntax-only scanner (`MultiReferencedCteScanner`), no
+      catalog/lineage dependency at all — counts `NamedTableReference`
+      occurrences matching a declared CTE name across the main query body
+      and every OTHER CTE's own body, excluding a self-reference inside a
+      recursive CTE's own defining query (T-SQL has no separate `RECURSIVE`
+      keyword — a CTE that references its own name simply is recursive, and
+      that reference is the structurally mandated recursion mechanism, not
+      the optional re-invocation this rule targets). Fires at reference
+      count ≥ 2. Deliberately scoped to `SELECT` statements in v1 — an
+      `UPDATE`/`DELETE`/`MERGE` statement's own WITH-clause CTEs are a real
+      but comparatively rare shape, left unanalyzed rather than guessed at.
+      `Confidence.High`, SARIF `LevelWarning` (structural risk, matching
+      `ForcedSerialFinding`/`CatchAllPredicateFinding`'s own tier — a real
+      cost, not a correctness claim).
+
+      Unit-tested (`MultiReferencedCteScannerTests`, 8 cases: two references
+      in the main body fires, a single reference never fires, a later CTE
+      referencing an earlier one twice fires, a recursive CTE's own self-
+      reference never counts toward its own total, a recursive CTE
+      genuinely referenced twice downstream still fires, two independent
+      single-reference CTEs never fire, no WITH clause never fires, and a
+      3-reference CTE reports all 3 reference lines). Real execution-based
+      oracle proof (`MultiReferencedCteOracleTests`, 2 tests, both passing):
+      one reference scans the base table once, two references scan it
+      twice — the general mechanism confirmed once, not per finding. Wired
+      end-to-end (`ScanReport` schema version 20 → 21, SARIF, readable
+      report). **Real coverage against the local RM_ test database: 150
+      findings** across many modules (reference counts ranging 2–14, most
+      commonly 2–3) — a raw-text sweep found 1,906 modules containing the
+      loose `WITH ... AS (SELECT` shape, the overwhelming majority of which
+      either declare a CTE referenced only once (safe) or aren't a real CTE
+      match at all, rather than the rule spraying across all of them.
 - [x] Untrusted (WITH NOCHECK) FK/CHECK constraints — optimizer forfeits join
       elimination; pure catalog flag (`is_not_trusted`). `ForeignKeyRelationship`
       gained `IsNotTrusted`/`IsDisabled` fields, `LiveCatalogReader.ReadForeignKeysAsync`

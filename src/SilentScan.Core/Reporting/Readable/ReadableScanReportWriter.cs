@@ -81,6 +81,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ForcedSerial(report, headingLevel, pathBase));
         blocks.AddRange(UntrustedConstraint(report, headingLevel, pathBase));
         blocks.AddRange(CascadingForeignKey(report, headingLevel, pathBase));
+        blocks.AddRange(MultiReferencedCte(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -142,6 +143,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
         AddCount(counts, "Untrusted FK/CHECK constraints", report.UntrustedConstraintFindings.Count);
         AddCount(counts, "Foreign keys with a cascading ON DELETE/UPDATE action", report.CascadingForeignKeyFindings.Count);
+        AddCount(counts, "CTEs referenced 2+ times downstream of their own WITH clause", report.MultiReferencedCteFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -813,6 +815,27 @@ public static class ReadableScanReportWriter
                 f.ReferencedTableQualifiedName,
                 f.DeleteAction.ToString(),
                 f.UpdateAction.ToString(),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MultiReferencedCte(ScanReport report, int level, string? pathBase)
+    {
+        if (report.MultiReferencedCteFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Multi-referenced CTEs ({report.MultiReferencedCteFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "SQL Server does not materialize a plain CTE once and reuse it - each reference downstream of the WITH clause independently re-runs the CTE's own defining query, confirmed directly against the oracle (a base table's own scan count doubled under a CTE referenced twice). A self-reference inside a recursive CTE's own body is never counted - that's the structurally mandated recursion mechanism, not optional re-invocation.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "CTE", "References"],
+            [.. report.MultiReferencedCteFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.CteName,
+                f.ReferenceCount.ToString(CultureInfo.InvariantCulture),
             })]);
     }
 

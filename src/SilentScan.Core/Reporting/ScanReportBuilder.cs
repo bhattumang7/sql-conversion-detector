@@ -453,6 +453,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<MultiReferencedCteFinding> multiReferencedCteFindings;
+        using (var multiCteStage = progress.Begin("scanning multi-referenced CTEs", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = MultiReferencedCteScanner.Scan(r);
+                    multiCteStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            multiReferencedCteFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -583,7 +601,7 @@ public static class ScanReportBuilder
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
-            untrustedConstraintFindings, cascadingForeignKeyFindings,
+            untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -60,6 +60,7 @@ public static class SarifReportWriter
         results.AddRange(report.ForcedSerialFindings.Select(ToResult));
         results.AddRange(report.UntrustedConstraintFindings.Select(ToResult));
         results.AddRange(report.CascadingForeignKeyFindings.Select(ToResult));
+        results.AddRange(report.MultiReferencedCteFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -409,6 +410,18 @@ public static class SarifReportWriter
             finding.UpdateAction != ReferentialAction.NoAction ? $"ON UPDATE {finding.UpdateAction}" : null,
         }.Where(a => a is not null));
         var message = $"'{finding.ConstraintName}' ({finding.ParentTableQualifiedName} -> {finding.ReferencedTableQualifiedName}) carries {actions} - a DML statement against the referenced table silently cascades to the parent's dependent rows too.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(MultiReferencedCteFinding finding)
+    {
+        // Warning, not error: a real, structural cost (each reference re-runs the CTE's own
+        // query), but a performance-cost claim, not a correctness one - the same "structural
+        // risk" tier ForcedSerialFinding/CatchAllPredicateFinding use.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MultiReferencedCteRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"CTE '{finding.CteName}' is referenced {finding.ReferenceCount} times downstream of its own WITH clause - each reference independently re-runs the CTE's own defining query, SQL Server does not materialize it once and reuse it.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
