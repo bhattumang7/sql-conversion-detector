@@ -77,6 +77,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(CatchAllPredicate(report, headingLevel, pathBase));
         blocks.AddRange(LocalVariablePredicate(report, headingLevel, pathBase));
         blocks.AddRange(NotInNullableSubquery(report, headingLevel, pathBase));
+        blocks.AddRange(NonUniqueUpdateSource(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -134,6 +135,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Catch-all / kitchen-sink optional-filter predicates", report.CatchAllPredicateFindings.Count);
         AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
+        AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -700,6 +702,29 @@ public static class ReadableScanReportWriter
                 f.OuterColumnName ?? "<expression>",
                 $"{f.SubqueryTableQualifiedName}.{f.SubqueryColumnName}",
                 f.SubqueryColumnIndexed ? "yes" : "no",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> NonUniqueUpdateSource(ScanReport report, int level, string? pathBase)
+    {
+        if (report.NonUniqueUpdateSourceFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"UPDATE ... FROM without source uniqueness ({report.NonUniqueUpdateSourceFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "The joined source's own join columns carry no unique index/constraint - if a target row ever matches more than one source row, SQL Server silently picks a value from an unspecified one of them (plan-dependent, not guaranteed stable across executions). MERGE raises a hard error in this exact situation instead of picking silently. A structural defect, not a 'wrong for current data' one: no current duplicate has to exist for the statement to be unsafe, only the schema's own absence of a uniqueness guarantee. Never fires when the source's join columns are covered by a genuine unique index/constraint, or when the SET clause never reads from the non-unique source.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Target", "Source", "Join columns", "SET columns"],
+            [.. report.NonUniqueUpdateSourceFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TargetTableQualifiedName,
+                f.SourceTableQualifiedName,
+                string.Join(", ", f.JoinColumnNames),
+                string.Join(", ", f.SetColumnNames),
             })]);
     }
 

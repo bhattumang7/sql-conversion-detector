@@ -1,0 +1,258 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
+using SilentScan.Core.Parsing;
+
+namespace SilentScan.Core.Predicates;
+
+/// <summary>
+/// docs/detection-checklist.md Tier 2 "UPDATE ... FROM without source uniqueness" - a standalone
+/// scanner. Reuses <see cref="Lineage.FromScopeResolver.ResolveForDataModification"/> (the same
+/// UPDATE-scope resolution <c>TypedPredicateExtractor</c>/<c>NotInNullableSubqueryScanner</c>
+/// already use) and the same JOIN-tree-flattening/AND-only-flattening shape
+/// <see cref="PartialCompositeForeignKeyJoinScanner"/> already established for "does a JOIN's own
+/// ON clause equate the columns a catalog structure says it needs to."
+///
+/// Only examines a JOIN where one side is unambiguously the UPDATE's own target (matched by
+/// alias, resolved against the same scope every column reference in the statement resolves
+/// through) - a join two hops away from the target is a materially different claim this scanner
+/// does not make (a known v1 scope limit, not a silently-missed case).
+/// </summary>
+public static class NonUniqueUpdateSourceScanner
+{
+    public static IReadOnlyList<NonUniqueUpdateSourceFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
+    {
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        parseResult.Fragment.Accept(visitor);
+        return
+        [
+            .. visitor.Findings
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ThenBy(f => f.Column),
+        ];
+    }
+
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    {
+        public List<NonUniqueUpdateSourceFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(UpdateStatement node)
+        {
+            var spec = node.UpdateSpecification;
+            if (spec.FromClause is not null)
+            {
+                Inspect(spec);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private void Inspect(UpdateSpecification spec)
+        {
+            if (spec.Target is not NamedTableReference targetRef)
+            {
+                return;
+            }
+
+            var targetAlias = targetRef.Alias?.Value ?? targetRef.SchemaObject.BaseIdentifier.Value;
+
+            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            if (!byAlias.TryGetValue(targetAlias, out var targetEntry) || targetEntry.Relation.QualifiedName is not { } targetQualifiedName)
+            {
+                return;
+            }
+
+            foreach (var join in spec.FromClause!.TableReferences.SelectMany(FlattenJoinNodes))
+            {
+                InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses);
+            }
+        }
+
+        private FromScopeResolver.ResolutionContext ResolutionContext() =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+        private void InspectJoin(QualifiedJoin join, string targetAlias, string targetQualifiedName, IList<SetClause> setClauses)
+        {
+            var (firstAlias, firstQualifiedName) = ResolveDirectBaseTable(join.FirstTableReference);
+            var (secondAlias, secondQualifiedName) = ResolveDirectBaseTable(join.SecondTableReference);
+
+            string sourceAlias, sourceQualifiedName;
+            if (string.Equals(firstAlias, targetAlias, StringComparison.OrdinalIgnoreCase) && secondAlias is not null && secondQualifiedName is not null)
+            {
+                (sourceAlias, sourceQualifiedName) = (secondAlias, secondQualifiedName);
+            }
+            else if (string.Equals(secondAlias, targetAlias, StringComparison.OrdinalIgnoreCase) && firstAlias is not null && firstQualifiedName is not null)
+            {
+                (sourceAlias, sourceQualifiedName) = (firstAlias, firstQualifiedName);
+            }
+            else
+            {
+                return;
+            }
+
+            var sourceTable = catalog.Find(sourceQualifiedName);
+            if (sourceTable is null)
+            {
+                return;
+            }
+
+            // Matched by the join's own ALIAS, not a resolved base-table qualified name - a
+            // self-join aliases the identical table twice, so a qualified-name-only comparison
+            // could not tell the target side's own column from the source side's.
+            var joinColumns = FlattenAnd(join.SearchCondition)
+                .OfType<BooleanComparisonExpression>()
+                .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
+                .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
+                .Select(e => ColumnNameIfQualifiedByAlias(e, sourceAlias))
+                .Where(c => c is not null)
+                .Select(c => c!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (joinColumns.Count == 0)
+            {
+                // No equality this scanner could resolve back to the source alias's own columns -
+                // could be a non-equality join predicate, or a column this pass couldn't resolve.
+                // Left unanalyzed rather than guessed at either way.
+                return;
+            }
+
+            var isProvablyUnique = sourceTable.Indexes.Any(ix =>
+                ix.IsUnique && !ix.IsFiltered && !ix.IsDisabled
+                && ix.KeyColumns.Count > 0
+                && ix.KeyColumns.All(kc => joinColumns.Contains(kc, StringComparer.OrdinalIgnoreCase)));
+            if (isProvablyUnique)
+            {
+                return;
+            }
+
+            var setColumnNames = setClauses
+                .OfType<AssignmentSetClause>()
+                .Where(sc => ReferencesAlias(sc.NewValue, sourceAlias))
+                .Select(sc => sc.Column.MultiPartIdentifier.Identifiers[^1].Value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (setColumnNames.Count == 0)
+            {
+                // The join exists but the SET clause never reads from this source - no observable
+                // risk, since which of the matching source rows "won" changes nothing.
+                return;
+            }
+
+            Findings.Add(new NonUniqueUpdateSourceFinding(
+                targetQualifiedName, sourceQualifiedName, joinColumns, setColumnNames,
+                sourcePath, join.StartLine, join.StartColumn));
+        }
+
+        private static bool ReferencesAlias(ScalarExpression expression, string alias)
+        {
+            var collector = new ColumnReferenceCollector();
+            expression.Accept(collector);
+            return collector.References.Any(columnRef => ColumnNameIfQualifiedByAlias(columnRef, alias) is not null);
+        }
+
+        private static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)
+        {
+            if (expression is not ColumnReferenceExpression columnRef)
+            {
+                return null;
+            }
+
+            var identifiers = columnRef.MultiPartIdentifier.Identifiers;
+            return identifiers.Count >= 2 && string.Equals(identifiers[^2].Value, alias, StringComparison.OrdinalIgnoreCase)
+                ? identifiers[^1].Value
+                : null;
+        }
+
+        private (string? Alias, string? QualifiedName) ResolveDirectBaseTable(TableReference tableReference)
+        {
+            if (tableReference is not NamedTableReference named)
+            {
+                return (null, null);
+            }
+
+            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
+            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } ? (alias, qualifiedName) : (null, null);
+        }
+
+        /// <summary>Yields every <see cref="QualifiedJoin"/> node in the join tree - same shape as <see cref="PartialCompositeForeignKeyJoinScanner"/>'s own flattening.</summary>
+        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
+        {
+            switch (tableReference)
+            {
+                case QualifiedJoin join:
+                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    yield return join;
+                    break;
+
+                case JoinParenthesisTableReference parenthesis:
+                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+            }
+        }
+
+        /// <summary>AND-flattens a search condition, never descending through OR - an equality only reachable through an OR branch doesn't unconditionally establish the join column, so it must never count toward "these columns are equated."</summary>
+        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
+        {
+            switch (expression)
+            {
+                case null:
+                    yield break;
+
+                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
+                    foreach (var e in FlattenAnd(and.FirstExpression))
+                    {
+                        yield return e;
+                    }
+
+                    foreach (var e in FlattenAnd(and.SecondExpression))
+                    {
+                        yield return e;
+                    }
+
+                    break;
+
+                case BooleanParenthesisExpression paren:
+                    foreach (var e in FlattenAnd(paren.Expression))
+                    {
+                        yield return e;
+                    }
+
+                    break;
+
+                default:
+                    yield return expression;
+                    break;
+            }
+        }
+
+        private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
+        {
+            public List<ColumnReferenceExpression> References { get; } = [];
+
+            public override void ExplicitVisit(ColumnReferenceExpression node)
+            {
+                References.Add(node);
+                base.ExplicitVisit(node);
+            }
+        }
+    }
+}

@@ -56,6 +56,7 @@ public static class SarifReportWriter
         results.AddRange(report.CatchAllPredicateFindings.Select(ToResult));
         results.AddRange(report.LocalVariablePredicateFindings.Select(ToResult));
         results.AddRange(report.NotInNullableSubqueryFindings.Select(ToResult));
+        results.AddRange(report.NonUniqueUpdateSourceFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -339,6 +340,21 @@ public static class SarifReportWriter
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var outerColumnDisplay = finding.OuterColumnName ?? "<expression>";
         var message = $"{outerColumnDisplay} NOT IN (SELECT '{finding.SubqueryTableQualifiedName}.{finding.SubqueryColumnName}' ...) - the subquery column is nullable and unfiltered, so the whole predicate evaluates to UNKNOWN and silently returns zero rows the instant the data contains one NULL there, instead of the expected anti-join result.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(NonUniqueUpdateSourceFinding finding)
+    {
+        // Error, not warning - the absence of a uniqueness guarantee is itself the full, provable
+        // defect (no current data has to be inspected or assumed), the same "structural, not
+        // data-dependent" framing PartialCompositeForeignKeyJoinFinding uses. Never downgraded by
+        // indexed-ness - there is no seek/scan angle to this finding at all.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NonUniqueUpdateSourceRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var joinColumns = string.Join(", ", finding.JoinColumnNames);
+        var setColumns = string.Join(", ", finding.SetColumnNames);
+        var message = $"UPDATE '{finding.TargetTableQualifiedName}' sets [{setColumns}] from '{finding.SourceTableQualifiedName}' joined on [{joinColumns}], which carries no unique index/constraint covering those columns - if a target row ever matches more than one source row, SQL Server silently picks a value from an unspecified one of them.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

@@ -26,6 +26,7 @@ public sealed record ScanReport(
     IReadOnlyList<CatchAllPredicateFinding> CatchAllPredicateFindings,
     IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings,
     IReadOnlyList<NotInNullableSubqueryFinding> NotInNullableSubqueryFindings,
+    IReadOnlyList<NonUniqueUpdateSourceFinding> NonUniqueUpdateSourceFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -67,7 +68,9 @@ public sealed record ScanReport(
     /// and <see cref="LocalVariablePredicateFindings"/> streams (docs/detection-checklist.md
     /// Tier 2 "Catch-all / kitchen-sink predicates" and "Local-variable predicates"). Bumped to
     /// 17 for the new <see cref="NotInNullableSubqueryFindings"/> stream (docs/detection-
-    /// checklist.md Tier 2 "NOT IN over a nullable subquery column").
+    /// checklist.md Tier 2 "NOT IN over a nullable subquery column"). Bumped to 18 for the new
+    /// <see cref="NonUniqueUpdateSourceFindings"/> stream (docs/detection-checklist.md Tier 2
+    /// "UPDATE ... FROM without source uniqueness").
     /// </summary>
-    public const int CurrentSchemaVersion = 17;
+    public const int CurrentSchemaVersion = 18;
 }

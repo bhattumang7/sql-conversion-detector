@@ -1146,10 +1146,109 @@ exactly the same way ARITHABORT's own assumption just failed one.
       a syntax-only linter would.
 
 ### UPDATE ... FROM without source uniqueness
-- [ ] Target joined to a source whose join columns carry no PK/unique
+- [x] Target joined to a source whose join columns carry no PK/unique
       constraint — nondeterministic multi-match update (each target row takes
-      an arbitrary source row). Catalog-gated; correctness-first finding with
-      a real perf angle (MERGE raises where UPDATE silently picks).
+      an arbitrary source row). SQL Server's documented behavior: it silently
+      picks a value from ONE of the matching source rows, and which one is
+      unspecified, plan-dependent, and not guaranteed stable even across
+      repeated executions of the identical statement. **A structurally
+      unsafe finding, not a "wrong for current data" one** — a meaningfully
+      *stronger* claim than that distinction usually implies: unlike the
+      NOT-IN-nullable stream, which needs today's data to already contain a
+      NULL, this defect requires no data inspection at all — the statement
+      has no schema guarantee against a future duplicate join-key value, so
+      it can start returning a silently wrong answer the moment a single
+      `INSERT` happens on the source, with zero code or schema change to
+      the statement itself. The absence of the uniqueness guarantee is the
+      full, provable defect. `Confidence.High`, SARIF `LevelError`, never
+      downgraded by indexed-ness (no seek/scan angle to this finding at
+      all). **Version-insensitive**: no compat level or CE mode makes this
+      defined behavior — which specific row wins on a given execution is
+      plan-dependent, and this finding makes no claim about that, only that
+      the statement has no guarantee against it.
+
+      Own standalone scanner (`NonUniqueUpdateSourceScanner`), reusing
+      `FromScopeResolver.ResolveForDataModification` (the same UPDATE-scope
+      resolution `TypedPredicateExtractor`/`NotInNullableSubqueryScanner`
+      already use) and the same JOIN-tree-flattening/AND-only-flattening
+      shape `PartialCompositeForeignKeyJoinScanner` already established.
+      Only examines a JOIN where one side is unambiguously the UPDATE's own
+      target, matched **by alias** rather than resolved base-table name — a
+      self-join aliases the identical table twice, so a qualified-name-only
+      comparison could not tell the target side's own column from the
+      source side's; matching by the JOIN's own alias handles this for
+      free. A join two hops from the target (target→A→B, with the `SET`
+      clause reading from B) is a materially different claim this scanner
+      does not make — a known v1 scope limit, not a silently-missed case.
+      Composite-uniqueness-aware: the source's join columns are provably
+      unique iff a `CatalogIndex` with `IsUnique == true` (not filtered, not
+      disabled) has `KeyColumns` that are a subset of (or exactly equal to)
+      the join's own equality columns on that side — a unique constraint
+      over a strict **superset** of the join columns does NOT suppress the
+      finding (`UNIQUE(TargetId, Cat)` does not make a join on `TargetId`
+      alone safe), confirmed directly against the oracle and covered by its
+      own precision-critical test case. No new catalog surface was needed —
+      `CatalogIndex`/`LiveCatalogReader` already model every PK/unique
+      constraint/unique index with ordered, composite-aware `KeyColumns`.
+      Only fires when the `SET` clause actually reads a value from the
+      unsafe source — a join to a non-unique source used only for filtering
+      carries no observable risk. Deliberately base-table-only: a
+      derived-table/aggregated source (`FROM (SELECT SourceId,
+      MAX(Val)...GROUP BY SourceId) s`, which can be provably unique
+      per-group without any catalog constraint) and a view/CTE-derived
+      source are left unanalyzed rather than guessed at — known v1 scope
+      limits. `MERGE`'s own `USING` source is out of scope by construction:
+      the engine itself raises an error there, so there is nothing silent
+      to detect.
+
+      Real, internet-sourced fire-shape references: a Microsoft Q&A thread,
+      "update statement: one target row, multiple source rows. What are the
+      rules?", confirming directly that "which row is accessed first is up
+      to the developer" (i.e. plan-dependent, not guaranteed); an Experts
+      Exchange thread, "UPDATE Based on Join, nondeterministic example,"
+      discussing the same shape and the MERGE-as-fix pattern; and
+      Microsoft's own `UPDATE (Transact-SQL)` Remarks section, which
+      documents the exact "an unspecified row from the multiple qualifying
+      rows is used" warning — all corroborating, not merely trusted, since
+      the mechanism was directly reproduced against the Docker oracle.
+      **The MERGE contrast is directly confirmed, not assumed from
+      documentation**: the identical non-unique-source shape run as a
+      `MERGE ... WHEN MATCHED THEN UPDATE` genuinely raises SQL Server error
+      8672 ("The MERGE statement attempted to UPDATE or DELETE the same row
+      more than once...") rather than picking silently —
+      `NonUniqueUpdateSourceOracleTests` asserts the exact error number and
+      message substring, not just that *an* exception is thrown.
+
+      Real execution-based oracle proof (`NonUniqueUpdateSourceOracleTests`,
+      4 tests, all passing — a genuine nondeterminism/correctness claim, so
+      plan-XML is irrelevant here): a non-unique source with 3 conflicting
+      rows sharing the join value updates the target to one of the 3 source
+      values (asserted as "one of," never "which one" — the whole point is
+      it's unspecified); the identical shape against a source with a
+      genuine unique index is deterministic every time; the composite-
+      unique-superset case (`UNIQUE(TargetId, Cat)`, joined on `TargetId`
+      alone) still multi-matches at the engine level, confirming the
+      scanner's own precision-critical non-suppression is grounded in real
+      behavior, not just a catalog-shape guess; and the MERGE contrast
+      above.
+
+      Unit-tested (`NonUniqueUpdateSourceScannerTests`, 11 cases covering
+      the non-unique-fires/unique-index-never-fires core pair, the exact-
+      composite-match near-miss, the composite-superset-still-fires
+      precision case, the subset-of-composite-join-safe near-miss, the
+      SET-clause-never-reads-from-source near-miss, no-FROM-clause simple
+      UPDATE never firing, a self-join firing correctly (join on the
+      non-PK column), a SET value that's an expression referencing the
+      source still firing, a filtered unique index treated as not provably
+      unique, and an indirect two-hop join never firing). Wired end-to-end
+      (`ScanReport` schema version 17 → 18, SARIF, readable report). **Real
+      coverage against the local RM_ test database: 2 findings** across 2
+      modules — a raw-text sweep found 704 modules containing the loose
+      `UPDATE...FROM...JOIN` shape, the overwhelming majority of which the
+      catalog correctly rules safe (a genuine unique index/constraint on
+      the join columns) or leaves unanalyzed under the deliberately narrow
+      base-table/direct-join v1 scope above, rather than the rule spraying
+      across all of them.
 
 ### Forced-serial construct inventory
 - [ ] Table-variable **modification** (INSERT/UPDATE/DELETE @t) — whole plan
