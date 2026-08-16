@@ -1971,12 +1971,72 @@ get an oracle fixture for the serial-plan consequence).
 
 **This entire section is now closed.**
 
-### Halloween Protection and self-referencing DML
-- [ ] `INSERT`/`UPDATE`/`DELETE`/`MERGE` whose source query reads the same
+### Halloween Protection and self-referencing DML — shipped
+- [x] `INSERT`/`UPDATE`/`DELETE`/`MERGE` whose source query reads the same
       target table (hole-filling `INSERT ... WHERE NOT EXISTS`,
-      `UPDATE ... FROM` self-join) — forces a blocking eager spool, distinct
-      mechanism from the UDF-in-DML case already covered. Pure syntax: target
-      table object also appears in the statement's read-side FROM/subquery.
+      `UPDATE ... FROM` self-join) — **corrected from "always an eager
+      spool" to "an eager spool OR a sort, depending on statement shape,"
+      oracle-confirmed the hard way, not assumed.** A compile-only `SET
+      SHOWPLAN_XML` probe against all four statement kinds, each cross-
+      checked against an otherwise-identical control reading a DIFFERENT
+      table: INSERT and DELETE really do gain a
+      `PhysicalOp="Table Spool" LogicalOp="Eager Spool"` operator exactly as
+      the checklist's own text claimed — but `UPDATE ... FROM` self-join and
+      MERGE gain NO spool at all; instead the plan gains an extra `Sort`
+      (`LogicalOp="Distinct Sort"` for UPDATE, plain `LogicalOp="Sort"` for
+      MERGE) that is completely absent from the cross-table control. Both
+      mechanisms materialize/reorder the affected rows before any write
+      starts — the same "read fully before you write" correctness guarantee,
+      just a different physical operator depending on shape — so the
+      finding's own message says "extra defensive plan work (a spool or
+      sort)" rather than overclaiming a spool where the real mechanism is a
+      sort. Also oracle-confirmed: reading through a **view** over the same
+      base table triggers the identical Eager Spool a direct reference gets
+      on an INSERT — `SelfReferencingDmlFindingKind.ThroughView` exists
+      because of this, resolved via the already-built
+      `Lineage.ViewExpansionMap`'s own `BaseTables` set, not a guess.
+      `SelfReferencingDmlFinding`/`SelfReferencingDmlScanner`
+      (`src/SilentScan.Core/Predicates/SelfReferencingDmlScanner.cs`) —
+      pure syntax, reuses `FromScopeResolver.ResolveForDataModification`/
+      `ResolveForMerge` (the same UPDATE/MERGE-scope resolution
+      `TypedPredicateExtractor`/`NonUniqueUpdateSourceScanner` already use)
+      purely to learn the write target's own resolved qualified name and
+      FROM-clause alias, never for column resolution. One finding per
+      statement (the fact reported is "does the read side re-read the
+      target," not an occurrence count) — the target's own single canonical
+      FROM-clause entry is skipped exactly once (T-SQL forbids duplicating
+      an alias within one FROM clause, so this is always safe) so it is
+      never mistaken for a re-read of itself; every other match, including
+      one found inside a WHERE/SET-clause subquery (which never contains
+      the target's own entry at all), is a genuine extra read. **Known v1
+      scope limits, stated honestly:** only a `NamedTableReference` match is
+      covered (an inline-TVF-call-syntax read of the target's own MSTVF
+      wrapper is not chased); a WHERE/SET-clause subquery reusing the
+      outer target's own alias for an unrelated table in its own nested
+      scope is not disambiguated from a genuine self-reference sharing that
+      alias (full nested-scope tracking is out of scope for a syntax-only
+      rule); a self-join whose two sides are provably disjoint by a static
+      predicate still fires — proving disjointness statically is out of
+      scope, the same over-reporting trade-off `NonUniqueUpdateSourceFinding`
+      already accepts for its own fan-out risk. A performance-cost finding,
+      not a correctness one (the result is identical either way) —
+      `FindingConfidence.High` by default but SARIF Warning, the same
+      "structural risk, not provably-wrong-result" tier
+      `ForcedSerialFinding`/`CatchAllPredicateFinding` already use. Wired
+      end-to-end (`ScanReport` schema version 26 → 27, SARIF rule
+      `silentscan/dml/self-referencing`, readable-report section). Tested:
+      14 structural unit tests (`SelfReferencingDmlScannerTests` — all four
+      statement kinds, both Direct/ThroughView kinds, every near-miss/control
+      pairing, the one-finding-per-statement dedup guard) + 10 real oracle
+      tests (`SelfReferencingDmlOracleTests`, compile-only `SET SHOWPLAN_XML`
+      against the live Docker instance — a self-referencing DML's defensive
+      plan work is a compile-time structural artifact, not a cardinality-
+      dependent choice, confirmed directly against completely empty tables).
+      Real coverage against the local RM_ test database: **0 findings** — a
+      real, honest zero (this codebase's own DML apparently doesn't use the
+      hole-filling/self-join idioms this rule targets), not a detection gap;
+      the mechanism itself is oracle-proven and the scanner correctly fires
+      on every hand-authored fixture in the unit-test suite.
 
 ### Temporal table history-side index gap
 - [ ] System-versioned temporal table (`sys.tables.temporal_type`) whose
