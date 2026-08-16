@@ -222,6 +222,39 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Equal("DATEDIFF", finding.Detail);
     }
 
+    [Fact]
+    public void CharindexOrLeftOnColumn_CharindexPrefixMatch_FiresWithRewriteAdvice()
+    {
+        var findings = ScanFixture("CHARINDEX_PREFIX_MATCH_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CharindexOrLeftOnColumn, finding.Kind);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Contains("rewritable to col LIKE", finding.Detail);
+    }
+
+    [Fact]
+    public void CharindexOrLeftOnColumn_CharindexSubstringSearch_FiresWithNoRewriteAdvice()
+    {
+        var findings = ScanFixture("CHARINDEX_SUBSTRING_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CharindexOrLeftOnColumn, finding.Kind);
+        Assert.Equal("Code", finding.ColumnName);
+        Assert.Contains("no sargable rewrite exists", finding.Detail);
+    }
+
+    [Fact]
+    public void CharindexOrLeftOnColumn_LeftPrefixMatch_FiresWithRewriteAdvice()
+    {
+        var findings = ScanFixture("LEFT_PREFIX_MATCH_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CharindexOrLeftOnColumn, finding.Kind);
+        Assert.Equal("Sku", finding.ColumnName);
+        Assert.Contains("rewritable to col LIKE", finding.Detail);
+    }
+
     // FUNCTION_WRAPPED_COLUMN_json_value_clean.sql (the suppression itself) and
     // FUNCTION_WRAPPED_COLUMN_json_value_different_path_fires.sql (the precision guard against a
     // similar-but-different computed column) both need a real catalog with computed-column

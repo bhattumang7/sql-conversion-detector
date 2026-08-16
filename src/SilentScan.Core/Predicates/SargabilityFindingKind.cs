@@ -44,4 +44,14 @@ public enum SargabilityFindingKind
     /// shipped for JSON_VALUE and case-folding applies here unchanged).
     /// </summary>
     DateFunctionOnColumn,
+
+    /// <summary>
+    /// <c>CHARINDEX(x, col) = 1</c> or <c>LEFT(col, n) = 'x'</c> (docs/detection-checklist.md
+    /// Tier 1 "Type-aware upgrade of the sargability stream" #3) - rewritable-to-sargable forms:
+    /// both are exactly equivalent to <c>col LIKE 'x%'</c>, a real, always-available rewrite this
+    /// kind's own <see cref="SargabilityFinding.Detail"/> states explicitly, unlike the generic
+    /// <c>CHARINDEX(x, col) &gt; 0</c>/other-comparison substring-search shape (also this kind,
+    /// but no rewrite exists for it - a true substring search has no sargable form).
+    /// </summary>
+    CharindexOrLeftOnColumn,
 }

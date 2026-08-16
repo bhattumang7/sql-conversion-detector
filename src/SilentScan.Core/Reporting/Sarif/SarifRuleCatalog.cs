@@ -75,6 +75,7 @@ public static class SarifRuleCatalog
         SargabilityFindingKind.LikePatternNotLiteral => "silentscan/tier1/like-pattern-not-literal",
         SargabilityFindingKind.CaseFoldOnColumn => "silentscan/tier1/case-fold-on-column",
         SargabilityFindingKind.DateFunctionOnColumn => "silentscan/tier1/date-function-on-column",
+        SargabilityFindingKind.CharindexOrLeftOnColumn => "silentscan/tier1/charindex-or-left-on-column",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SargabilityFindingKind."),
     };
 
@@ -132,6 +133,7 @@ public static class SarifRuleCatalog
             Rule(Tier1RuleId(SargabilityFindingKind.LikePatternNotLiteral), "A LIKE predicate's pattern is not a literal, so a leading wildcard can't be ruled out statically."),
             Rule(Tier1RuleId(SargabilityFindingKind.CaseFoldOnColumn), "UPPER/LOWER wraps a column inside a predicate, forcing a scan under any collation - remediation differs by whether the column's real collation is case-sensitive."),
             Rule(Tier1RuleId(SargabilityFindingKind.DateFunctionOnColumn), "A date-part function (YEAR/MONTH/DAY/DATEPART/DATEDIFF/DATEADD/DATENAME) wraps a column inside a predicate, forcing a scan - a sargable rewrite (a literal date range instead) usually restores the seek."),
+            Rule(Tier1RuleId(SargabilityFindingKind.CharindexOrLeftOnColumn), "CHARINDEX(x, col) or LEFT(col, n) wraps a column inside a predicate - a prefix-match shape (CHARINDEX(...) = 1, or LEFT(col, n) = 'x' with LEN('x') = n) is exactly rewritable to col LIKE 'x%'; any other shape is a genuine substring search with no sargable rewrite."),
             Rule(VerdictRuleId(Verdict.ScanForced), "An implicit type conversion on the column side forces a full scan."),
             Rule(VerdictRuleId(Verdict.RangeSeek), "An implicit type conversion on the column side permits only a dynamic range seek, not a direct seek."),
             Rule(VerdictRuleId(Verdict.Unknown), "A predicate's sargability could not be determined (e.g. unresolved collation) - never guessed."),

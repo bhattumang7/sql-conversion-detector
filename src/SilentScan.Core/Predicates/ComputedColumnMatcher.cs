@@ -119,6 +119,12 @@ internal static class ComputedColumnMatcher
             (FunctionCall fa, FunctionCall fb) => string.Equals(fa.FunctionName.Value, fb.FunctionName.Value, StringComparison.OrdinalIgnoreCase)
                 && fa.Parameters.Count == fb.Parameters.Count
                 && fa.Parameters.Zip(fb.Parameters, StructurallyEqual).All(equal => equal),
+            // LEFT gets its own dedicated ScriptDOM node type (not a generic FunctionCall) -
+            // oracle-verified sys.computed_columns.definition stores it unnormalized as
+            // left([col],(n)), so a plain parameter-list comparison (same shape the generic
+            // FunctionCall case already uses) is correct with no canonicalization needed.
+            (LeftFunctionCall la, LeftFunctionCall lb) => la.Parameters.Count == lb.Parameters.Count
+                && la.Parameters.Zip(lb.Parameters, StructurallyEqual).All(equal => equal),
             (CastCall casta, CastCall castb) => TypeEqual(casta.DataType, castb.DataType) && StructurallyEqual(casta.Parameter, castb.Parameter),
             (ConvertCall converta, ConvertCall convertb) => TypeEqual(converta.DataType, convertb.DataType)
                 && StructurallyEqual(converta.Parameter, convertb.Parameter)

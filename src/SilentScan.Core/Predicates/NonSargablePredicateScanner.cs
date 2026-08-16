@@ -295,8 +295,21 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            InspectSide(node.FirstExpression);
-            InspectSide(node.SecondExpression);
+            // CHARINDEX/LEFT need the COMPARISON's own operator and other-side literal to tell a
+            // rewritable prefix-match shape from a genuine substring search (docs/detection-
+            // checklist.md Tier 1 "Type-aware upgrade of the sargability stream" #3) - InspectSide
+            // only ever sees one side in isolation, so this is intercepted here, before the
+            // generic per-side dispatch, and skips the generic dispatch for whichever side it
+            // already reported on (never double-reports the same wrap under two kinds).
+            if (!TryAddCharindexOrLeftFinding(node.FirstExpression, node.SecondExpression, node.ComparisonType))
+            {
+                InspectSide(node.FirstExpression);
+            }
+
+            if (!TryAddCharindexOrLeftFinding(node.SecondExpression, node.FirstExpression, node.ComparisonType))
+            {
+                InspectSide(node.SecondExpression);
+            }
         }
 
         public override void Visit(BooleanTernaryExpression node)
@@ -592,6 +605,79 @@ public static class NonSargablePredicateScanner
 
             var column = catalog.Find(table, _currentProcScope)?.FindColumn(columnName);
             return column is { IsNullable: false };
+        }
+
+        /// <summary>
+        /// <c>CHARINDEX(x, col) = 1</c> / <c>LEFT(col, n) = 'x'</c> (with <c>LEN('x') == n</c>)
+        /// are both exactly equivalent to <c>col LIKE 'x%'</c> - a real, always-usable sargable
+        /// rewrite. Any other comparison against CHARINDEX/LEFT still wraps the column (still
+        /// non-sargable, still reported) but has no such rewrite - a genuine substring search.
+        /// Returns false (and adds nothing) when <paramref name="candidateSide"/> isn't a
+        /// CHARINDEX/LEFT call wrapping a real column at all, so the caller falls back to the
+        /// generic per-side dispatch for it.
+        /// </summary>
+        private bool TryAddCharindexOrLeftFinding(ScalarExpression candidateSide, ScalarExpression otherSide, BooleanComparisonType comparisonType)
+        {
+            while (candidateSide is ParenthesisExpression parenthesized)
+            {
+                candidateSide = parenthesized.Expression;
+            }
+
+            while (otherSide is ParenthesisExpression otherParenthesized)
+            {
+                otherSide = otherParenthesized.Expression;
+            }
+
+            // ScriptDOM gives LEFT its own dedicated node type (LeftFunctionCall), NOT a generic
+            // FunctionCall the way CHARINDEX gets - found live probing the parser directly (RIGHT
+            // presumably gets the identical treatment, but this rule only ever needed LEFT).
+            if (candidateSide is LeftFunctionCall leftCall)
+            {
+                return TryAddLeftFinding(leftCall, otherSide, comparisonType);
+            }
+
+            if (candidateSide is not FunctionCall { Parameters.Count: > 0 } functionCall
+                || !string.Equals(functionCall.FunctionName.Value, "CHARINDEX", StringComparison.OrdinalIgnoreCase)
+                || FirstNamedColumn(functionCall.Parameters) is not { } named)
+            {
+                return false;
+            }
+
+            var detail = comparisonType == BooleanComparisonType.Equals && otherSide is IntegerLiteral { Value: "1" }
+                ? "CHARINDEX(x, col) = 1 is a prefix match - rewritable to col LIKE 'x%', which restores the seek."
+                : "CHARINDEX(x, col) is a substring search - no sargable rewrite exists (unlike the = 1 prefix-match case).";
+
+            if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } table
+                && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, table, functionCall))
+            {
+                return true;
+            }
+
+            Add(SargabilityFindingKind.CharindexOrLeftOnColumn, named.Name, detail, functionCall, named.Ref);
+            return true;
+        }
+
+        private bool TryAddLeftFinding(LeftFunctionCall leftCall, ScalarExpression otherSide, BooleanComparisonType comparisonType)
+        {
+            if (leftCall.Parameters is not [{ } columnCandidate, IntegerLiteral { Value: { } lengthText }]
+                || FirstNamedColumn([columnCandidate]) is not { } named)
+            {
+                return false;
+            }
+
+            var detail = comparisonType == BooleanComparisonType.Equals
+                && otherSide is StringLiteral { Value: { } literalValue } && literalValue.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) == lengthText
+                ? "LEFT(col, n) = 'x' (LEN('x') = n) is a prefix match - rewritable to col LIKE 'x%', which restores the seek."
+                : "LEFT(col, n) wraps the column - no sargable rewrite applies unless the compared literal's own length exactly matches n.";
+
+            if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } table
+                && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, table, leftCall))
+            {
+                return true;
+            }
+
+            Add(SargabilityFindingKind.CharindexOrLeftOnColumn, named.Name, detail, leftCall, named.Ref);
+            return true;
         }
 
         private static readonly HashSet<string> DateFunctionNames = new(StringComparer.OrdinalIgnoreCase)

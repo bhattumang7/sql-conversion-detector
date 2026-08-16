@@ -460,16 +460,32 @@ wrong once measured with the real parser; corrected below. `CHARINDEX`: 12.
       discipline) before source position, mirroring `TypedFindings`' own
       existing `Indexed` ordering, which `Tier1Findings` never had until now.
       Tested: `ScanReportBuilderTier1OrderingTests`.
-- [ ] `CHARINDEX(x, col)` / `LEFT(col, n) =` — rewritable-to-sargable forms —
-      **not shipped, deliberately deprioritized**: real AST-derived base rate
-      is near-zero locally (12 `CHARINDEX` findings across 5 files, **0**
-      genuine `LEFT(col,n)`-wrapping-a-column findings — the 2 fragments that
-      contain `LEFT(...)` are a `LIKE` pattern built from a variable, not a
-      column being wrapped). A real `CHARINDEX` repro exists (MS Learn forum,
-      "Charindex very bad performance"), but `LEFT(col,n)`'s own fixture
-      sourcing came back borderline (opinion pieces only, no distinct real
-      bug report). Left as explicit follow-up given the low local signal,
-      rather than building a low-value rule under time pressure.
+- [x] `CHARINDEX(x, col)` / `LEFT(col, n) =` — rewritable-to-sargable forms —
+      **shipped**: new `SargabilityFindingKind.CharindexOrLeftOnColumn`, split
+      from the generic catch-all specifically to carry a rewrite verdict in
+      `Detail`: `CHARINDEX(x, col) = 1` / `LEFT(col, n) = 'x'` (with
+      `LEN('x') = n`) are both exactly equivalent to `col LIKE 'x%'`, a real
+      sargable rewrite — any other comparison shape is a genuine substring
+      search with no such rewrite, and the finding says which case applies.
+      Both directions oracle-confirmed (`CharindexLeftRewritePipelineTests`):
+      the original form scans, the rewritten `LIKE 'x%'` form seeks. **Oracle
+      discovery mid-implementation:** `LEFT(col, n)` parses to ScriptDOM's own
+      dedicated `LeftFunctionCall` node, not a generic `FunctionCall` the way
+      `CHARINDEX` does — the first implementation attempt silently produced
+      zero findings for every `LEFT` fixture because of this, caught by a
+      failing unit test before shipping; `ComputedColumnMatcher` gained a
+      matching `LeftFunctionCall` structural-equality case (oracle-confirmed
+      `sys.computed_columns.definition` stores it unnormalized as
+      `left([col],(n))`, unlike `YEAR`/`MONTH`/`DAY`'s `DATEPART` rewrite, so
+      no canonicalization was needed there). Real base rate is near-zero
+      locally (12 `CHARINDEX` findings across 5 files, 0 genuine
+      `LEFT(col,n)`-wrapping-a-column occurrences in the local RM_ corpus —
+      the rule is real and shipped, just not exercised by this particular
+      database) — fixtures: `CHARINDEX_PREFIX_MATCH_fires.sql` +
+      `CHARINDEX_SUBSTRING_fires.sql` (real source: MS Learn forum, "Charindex
+      very bad performance"), `LEFT_PREFIX_MATCH_fires.sql` (labeled
+      synthetic — no distinct real bug report found for this exact shape, per
+      CLAUDE.md's rare-exception allowance).
 - Oracle: seek-vs-scan probes for every rule above; the case-fold rule's own
   CS-vs-CI fixture pair confirms the SAME outcome for both (not a different
   one, correcting the checklist's original "verdict differs by collation"
