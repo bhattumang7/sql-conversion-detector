@@ -375,6 +375,17 @@ public static class NonSargablePredicateScanner
             {
                 case FunctionCall { Parameters.Count: > 0 } functionCall
                     when !AggregateFunctionNames.Contains(functionCall.FunctionName.Value) && FirstNamedColumn(functionCall.Parameters) is { } named:
+                    // JSON_VALUE/JSON_QUERY are the one function-wrap shape that ISN'T always a
+                    // lost seek (checklist "Corrections to shipped work" false-positive fix):
+                    // since SQL Server 2016 the engine can match the call to an indexed computed
+                    // column with an identical definition and seek on it instead of scanning.
+                    if (JsonComputedColumnMatcher.IsJsonPathFunction(functionCall.FunctionName.Value)
+                        && ResolveIndexInfo(named.Ref).TableQualifiedName is { } jsonTable
+                        && JsonComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, jsonTable, named.Name, functionCall))
+                    {
+                        break;
+                    }
+
                     Add(SargabilityFindingKind.FunctionWrappedColumn, named.Name, functionCall.FunctionName.Value, functionCall, named.Ref);
                     break;
 

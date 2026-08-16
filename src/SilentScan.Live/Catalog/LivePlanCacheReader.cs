@@ -207,10 +207,6 @@ public sealed class LivePlanCacheReader
     private static void AccumulateConversions(
         long executionCount, string planXml, Dictionary<(string Table, string Column), ColumnAccumulation> byColumn)
     {
-        // GetRangeThroughConvert applies to the whole plan, not to one specific conversion node
-        // within it - matching how TypeMatrixGenerator's own oracle probe reads this same signal.
-        var hasRangeSeek = planXml.Contains("GetRangeThroughConvert", StringComparison.Ordinal);
-
         foreach (var conversion in ConvertImplicitDetector.FindColumnConversions(planXml))
         {
             if (conversion.Table is null)
@@ -230,14 +226,14 @@ public sealed class LivePlanCacheReader
             var key = (qualifiedTable, conversion.Column ?? string.Empty);
             var existing = byColumn.GetValueOrDefault(key);
             byColumn[key] = new ColumnAccumulation(
-                existing.ExecutionCount + executionCount, existing.HasRangeSeek || hasRangeSeek);
+                existing.ExecutionCount + executionCount, existing.HasRangeSeek || conversion.RangeSeekBound);
         }
     }
 
     private readonly record struct ColumnAccumulation(long ExecutionCount, bool HasRangeSeek);
 }
 
-/// <summary>Roadmap Phase D verdict for a workload-observed finding - only the two outcomes a real plan's XML can actually confirm (RangeSeek if GetRangeThroughConvert appears anywhere in the plan, ScanForced otherwise); SeekPreserved/Unknown/OperandClash never surface here because a column that didn't convert leaves no CONVERT_IMPLICIT for ConvertImplicitDetector to find in the first place.</summary>
+/// <summary>Roadmap Phase D verdict for a workload-observed finding - only the two outcomes a real plan's XML can actually confirm (RangeSeek if this column's own conversion is range-bound via GetRangeThroughConvert, per <see cref="SilentScan.Verify.Oracle.ConvertImplicitFinding.RangeSeekBound"/>; ScanForced otherwise); SeekPreserved/Unknown/OperandClash never surface here because a column that didn't convert leaves no CONVERT_IMPLICIT for ConvertImplicitDetector to find in the first place.</summary>
 public enum WorkloadVerdict
 {
     ScanForced,

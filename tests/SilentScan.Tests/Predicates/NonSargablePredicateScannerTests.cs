@@ -179,6 +179,25 @@ public sealed class NonSargablePredicateScannerTests
     }
 
     [Fact]
+    public void FunctionWrappedColumn_JsonValueNoComputedColumn_Fires()
+    {
+        var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_json_value_fires.sql");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.FunctionWrappedColumn, finding.Kind);
+        Assert.Equal("Payload", finding.ColumnName);
+        Assert.Equal("JSON_VALUE", finding.Detail);
+    }
+
+    // FUNCTION_WRAPPED_COLUMN_json_value_clean.sql (the suppression itself) and
+    // FUNCTION_WRAPPED_COLUMN_json_value_different_path_fires.sql (the precision guard against a
+    // similar-but-different computed column) both need a real catalog with computed-column
+    // definitions - this file's catalog-less ScanFixture always resolves TableQualifiedName to
+    // null for them, which would pass trivially rather than exercising the matcher. Covered in
+    // JsonComputedColumnSuppressionTests instead, against a real catalog (and, for the
+    // suppression case, the live Docker oracle).
+
+    [Fact]
     public void LeadingWildcardLike_PercentPrefix_Fires()
     {
         var findings = ScanFixture("LEADING_WILDCARD_LIKE_fires.sql");

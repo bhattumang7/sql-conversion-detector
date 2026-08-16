@@ -99,4 +99,63 @@ public sealed class ConvertImplicitDetectorTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void FindColumnConversions_TwoConversionsInSamePlanOnlyOneRangeBound_AttributesPerNodeNotPlanWide()
+    {
+        // Reproduces the shape oracle-verified against the Docker instance: a single cached plan
+        // (a two-branch Concatenation, the shape a UNION ALL or a multi-predicate module produces)
+        // carrying one genuinely range-seeking conversion (its own RelOp's SeekPredicates bind the
+        // column via GetRangeThroughConvert) and one genuinely scan-forced conversion elsewhere in
+        // the SAME plan (SQL_* collation - no SeekPredicates entry for that column anywhere). Before
+        // this fix, a plan-wide planXml.Contains("GetRangeThroughConvert") marked BOTH conversions
+        // RangeSeek just because the marker existed somewhere in the document.
+        var xml = $"""
+            <ShowPlanXML xmlns="{ShowPlanNs}">
+              <BatchSequence><Batch><Statements><StmtSimple>
+                <QueryPlan><RelOp PhysicalOp="Concatenation">
+                  <RelOp PhysicalOp="Index Seek">
+                    <IndexScan>
+                      <SeekPredicates>
+                        <SeekPredicateNew>
+                          <SeekKeys>
+                            <Prefix ScanType="EQ">
+                              <RangeColumns>
+                                <ColumnReference Database="[T]" Schema="[dbo]" Table="[Probe]" Column="WindowsColCol" />
+                              </RangeColumns>
+                            </Prefix>
+                          </SeekKeys>
+                        </SeekPredicateNew>
+                      </SeekPredicates>
+                      <Predicate>
+                        <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
+                          <Convert DataType="nvarchar" Length="50" Style="0" Implicit="1">
+                            <ScalarOperator><Identifier><ColumnReference Database="[T]" Schema="[dbo]" Table="[Probe]" Column="WindowsColCol" /></Identifier></ScalarOperator>
+                          </Convert>
+                        </ScalarOperator></Compare></ScalarOperator>
+                      </Predicate>
+                    </IndexScan>
+                  </RelOp>
+                  <RelOp PhysicalOp="Index Scan">
+                    <IndexScan>
+                      <Predicate>
+                        <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
+                          <Convert DataType="nvarchar" Length="50" Style="0" Implicit="1">
+                            <ScalarOperator><Identifier><ColumnReference Database="[T]" Schema="[dbo]" Table="[Probe]" Column="SqlColCol" /></Identifier></ScalarOperator>
+                          </Convert>
+                        </ScalarOperator></Compare></ScalarOperator>
+                      </Predicate>
+                    </IndexScan>
+                  </RelOp>
+                </RelOp></QueryPlan>
+              </StmtSimple></Statements></Batch></BatchSequence>
+            </ShowPlanXML>
+            """;
+
+        var findings = ConvertImplicitDetector.FindColumnConversions(xml);
+
+        Assert.Equal(2, findings.Count);
+        Assert.True(Assert.Single(findings, f => f.Column == "WindowsColCol").RangeSeekBound);
+        Assert.False(Assert.Single(findings, f => f.Column == "SqlColCol").RangeSeekBound);
+    }
 }

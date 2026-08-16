@@ -38,12 +38,49 @@ public static class ConvertImplicitDetector
                 Schema: TrimBrackets((string?)x.ColumnRef.Attribute("Schema")),
                 Table: TrimBrackets((string?)x.ColumnRef.Attribute("Table")),
                 Column: (string?)x.ColumnRef.Attribute("Column"),
-                ConvertedToDataType: (string?)x.Convert.Attribute("DataType") ?? "unknown"))
+                ConvertedToDataType: (string?)x.Convert.Attribute("DataType") ?? "unknown",
+                RangeSeekBound: IsRangeSeekBound(x.Convert, x.ColumnRef)))
             .ToList();
     }
 
     private static string? TrimBrackets(string? bracketedIdentifier) =>
         bracketedIdentifier?.Trim('[', ']');
+
+    // GetRangeThroughConvert only ever bounds the specific column it was invoked for - the
+    // engine surfaces that binding as a RangeColumns/ColumnReference entry inside the
+    // SeekPredicates of the very same RelOp (IndexSeek/IndexScan) whose own residual Predicate
+    // carries this Convert node (oracle-verified: a two-branch UNION ALL plan with one
+    // Windows-collation range-seek column and one SQL_*-collation scan-forced column in the same
+    // cached plan shows GetRangeThroughConvert and this column's own RangeColumns entry both
+    // scoped to the range-seeking branch's RelOp only - never the sibling scan branch's). Walking
+    // up to the nearest ancestor RelOp and checking THAT operator's own SeekPredicates - rather
+    // than a plan.Contains("GetRangeThroughConvert") over the whole document - is what makes this
+    // per-conversion instead of per-plan; both formats the engine emits across compat levels
+    // (SeekPredicateNew and the legacy SeekPredicate) are checked, since a range-bound column can
+    // land in either depending on the plan's compatibility level.
+    private static bool IsRangeSeekBound(XElement convert, XElement columnRef)
+    {
+        var owningRelOp = convert.Ancestors(ShowPlanNs + "RelOp").FirstOrDefault();
+        if (owningRelOp is null)
+        {
+            return false;
+        }
+
+        var database = (string?)columnRef.Attribute("Database");
+        var schema = (string?)columnRef.Attribute("Schema");
+        var table = (string?)columnRef.Attribute("Table");
+        var column = (string?)columnRef.Attribute("Column");
+
+        return owningRelOp.Descendants(ShowPlanNs + "SeekPredicates")
+            .Concat(owningRelOp.Descendants(ShowPlanNs + "SeekPredicate"))
+            .Descendants(ShowPlanNs + "RangeColumns")
+            .Descendants(ShowPlanNs + "ColumnReference")
+            .Any(rangeColumnRef =>
+                string.Equals((string?)rangeColumnRef.Attribute("Database"), database, StringComparison.Ordinal)
+                && string.Equals((string?)rangeColumnRef.Attribute("Schema"), schema, StringComparison.Ordinal)
+                && string.Equals((string?)rangeColumnRef.Attribute("Table"), table, StringComparison.Ordinal)
+                && string.Equals((string?)rangeColumnRef.Attribute("Column"), column, StringComparison.Ordinal));
+    }
 
     // Showplan XML's Implicit attribute is typed xsd:boolean, which permits both the "1"/"0"
     // and "true"/"false" lexical forms - verified against the schema (and this class's own
