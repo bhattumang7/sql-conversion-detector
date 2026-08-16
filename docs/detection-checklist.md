@@ -1577,16 +1577,96 @@ latest) compat level.
       reference, exactly the "looks like nothing, is actually huge" shape
       no written-count-only tool can see. No silent cap: the real count is
       reported honestly rather than truncated for volume's sake.
-- [ ] **`SELECT *` inside a view or inline TVF.** The bare `SELECT *` rule is
+- [x] **`SELECT *` inside a view or inline TVF.** The bare `SELECT *` rule is
       an explicit Tier 3 skip below and stays skipped — but the in-a-view case
       is a different defect with a lineage consequence: the column list is
       frozen at create time, so it silently disagrees with the base table
-      after any change (which is exactly the drift the live parity gate already
-      detects), and it forces every consumer to carry the full width whether or
-      not it selects from it, which is how a covering index stops covering.
-      Fire only at depth ≥ 1 and only when the consuming query selects a strict
-      subset of the expanded columns — that guard is what keeps it out of the
-      style-linting territory the plain rule lives in.
+      after any change, and it forces every consumer to carry the full width
+      whether or not it selects from it, which is how a covering index stops
+      covering. Fire only at depth ≥ 1 (the view's own `ViewExpansionOrigin.Depth`
+      from the already-shipped "Nested-view depth report" — it itself
+      references another view/TVF, not just a base table directly) and only
+      when a real consuming query elsewhere in the corpus selects a strict,
+      named subset of the expanded columns — that guard is what keeps it out
+      of the style-linting territory the plain rule lives in; a consumer that
+      itself does `SELECT *` never narrows anything and is never matched.
+
+      **Stronger than the "live parity gate already detects this" framing
+      originally assumed — confirmed directly, not trusted from that
+      description.** A view's `SELECT *` column list stays frozen not just
+      in `sys.columns` (ordinary catalog staleness) but even through
+      `sys.dm_exec_describe_first_result_set` (the same live, describe-only
+      ground truth this codebase's own live-parity gate otherwise trusts as
+      authoritative) and through a REAL EXECUTION of the view — all three
+      confirmed directly on the Docker oracle: after `ALTER TABLE ... ADD`
+      a new column, `sys.columns`, the describe-only probe, and an actual
+      `SELECT * FROM theView` execution all kept returning only the
+      original, pre-ALTER columns, until `sp_refreshview` ran. This is a
+      genuinely different, current-answer-is-wrong condition, not merely a
+      stale-cache-the-live-answer-still-fixes case.
+
+      New shared foundation reused, not duplicated: `ViewExpansionMap`
+      (already built for "Nested-view depth report"/"Post-expansion join
+      width") supplies the depth gate and the view's already-`*`-expanded
+      full column set via `LineageCatalog.AllRelations`. Own standalone
+      two-step scanner (`SelectStarViewScanner`): `BuildCandidates` finds
+      every view/TVF whose own OUTERMOST query specification's SELECT list
+      contains a bare or qualified `*` (a `*` nested only inside an inner
+      derived-table subquery does not itself qualify the view; a top-level
+      `UNION`ed view declines rather than guessing which branch's star
+      matters) and whose depth is ≥ 1; `Scan` then walks every query site
+      corpus-wide for a consumer whose SELECT list explicitly names a
+      strict, named subset — only a bare `ColumnReferenceExpression`
+      qualified with the view's own alias, or unqualified when it's the
+      query's only FROM source, counts as "selected"; any other shape
+      declines rather than guesses. One finding per (candidate view,
+      consuming query site) pair, matching `PostExpansionJoinWidthFinding`'s
+      own per-query-site granularity. `Confidence.High`, SARIF `LevelWarning`
+      (structural/maintenance risk, not a proven-wrong-result or proven-
+      performance-cost claim — the "covering index defeated" framing is
+      risk-color, not something this stream attempts to prove via an
+      optimizer-inlining oracle). No oracle needed for the shipped claim
+      itself (a pure catalog/lineage/AST fact); the underlying frozen-
+      column-list mechanism got its own one-time oracle confirmation
+      above. Version-insensitive: stable, ancient CREATE/ALTER-VIEW-time
+      binding, unaffected by compat level or CE mode.
+
+      **Bug caught and fixed during real-corpus verification, not left
+      silent:** the scanner's first pass against real data returned 0
+      findings despite a genuine, real consumer existing — traced to
+      `FromScopeResolver.Resolve` being called with an empty resolved-
+      views map (matching `PostExpansionJoinWidthScanner`'s own choice),
+      which is fine for a plain `NamedTableReference` (its qualified name
+      survives even when unresolved) but silently drops the qualified name
+      entirely for a view/TVF invoked with inline-TVF call syntax
+      (`FROM SomeView(@arg1, @arg2)`) — a real, common shape in this
+      corpus. Fixed by passing the real `LineageCatalog.AllRelations` into
+      the resolver instead. A second bug (the finding's own
+      `ViewSourcePath` was accidentally set to the CONSUMER's file, not
+      the view's own) was caught the same way, comparing the debug probe's
+      output against the real CLI's JSON output line by line rather than
+      trusting a single "count > 0" check.
+
+      Unit-tested (`SelectStarViewScannerTests`, 10 cases: a consumer
+      selecting a strict subset fires, a consumer selecting `*` never
+      fires, a consumer explicitly listing every column never fires, a
+      depth-0 view is never a candidate, qualified `alias.*` candidate
+      detection fires the same as bare, a `*` nested only inside a derived
+      subquery never qualifies the view, a view with no `*` at all is
+      never a candidate, an unqualified column reference across multiple
+      joined sources declines rather than guesses, a consumer referencing
+      the view via inline-TVF-call syntax still fires (the real-corpus
+      shape that caught the first bug above), and no consumer at all never
+      fires). Wired end-to-end (`ScanReport` schema version 22 → 23,
+      SARIF, readable report). **Real coverage against the local RM_ test
+      database: 1 finding** — a real inline TVF nested 2 layers deep,
+      consumed by a sibling module that explicitly selects 5 of its 6
+      columns — against a raw-text sweep of 34 views and 589 inline TVFs
+      containing the literal text `SELECT *` anywhere, and 697 views/TVFs
+      sitting at depth ≥ 1 at all; the combination of both structural
+      gates plus a genuine strict-subset consumer is a real, honest,
+      low-volume signal in this codebase, not the rule spraying across
+      every `SELECT *` occurrence the way a plain style linter would.
 
 ### Dynamic SQL quality (extends the existing dynamic-SQL pass)
 123 modules use `EXEC(...)`, 51 use sp_executesql locally.

@@ -124,6 +124,7 @@ public static class ScanReportBuilder
         IReadOnlyDictionary<string, Lineage.TvfFenceOrigin> tvfFenceMap;
         IReadOnlyDictionary<string, Lineage.ScalarUdfOrigin> scalarUdfMap;
         IReadOnlyDictionary<string, Lineage.ViewExpansionOrigin> viewExpansionMap;
+        IReadOnlyDictionary<string, SelectStarViewCandidate> selectStarViewCandidates;
         List<Lineage.ViewDefinition> viewDefinitions;
         using (var fenceMapStage = progress.Begin("mapping TVF fences and scalar UDFs"))
         {
@@ -131,6 +132,7 @@ public static class ScanReportBuilder
             tvfFenceMap = Lineage.TvfFenceMap.Build(viewDefinitions, catalog);
             scalarUdfMap = Lineage.ScalarUdfMap.Build(viewDefinitions, catalog);
             viewExpansionMap = Lineage.ViewExpansionMap.Build(viewDefinitions, catalog);
+            selectStarViewCandidates = SelectStarViewScanner.BuildCandidates(viewDefinitions, viewExpansionMap, lineage);
             fenceMapStage.Complete($"{tvfFenceMap.Count:N0} view/TVF layers inherit a fence, {scalarUdfMap.Count:N0} inherit a scalar UDF");
         }
 
@@ -501,6 +503,26 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<SelectStarViewFinding> selectStarViewFindings;
+        using (var selectStarStage = progress.Begin("scanning SELECT * inside nested views", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = SelectStarViewScanner.Scan(r, catalog, lineage, selectStarViewCandidates);
+                    selectStarStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            selectStarViewFindings = unordered
+                .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
+                .ThenBy(f => f.ConsumerSourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.ConsumerLine)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<PredicateExtractionResult> extractionResults;
         using (var typedStage = progress.Begin("scanning typed predicates", usableCount))
         {
@@ -632,7 +654,7 @@ public static class ScanReportBuilder
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
             catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
-            nestedViewDepthFindings, postExpansionJoinWidthFindings,
+            nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

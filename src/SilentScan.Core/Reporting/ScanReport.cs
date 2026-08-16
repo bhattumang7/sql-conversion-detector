@@ -33,6 +33,7 @@ public sealed record ScanReport(
     IReadOnlyList<MultiReferencedCteFinding> MultiReferencedCteFindings,
     IReadOnlyList<NestedViewDepthFinding> NestedViewDepthFindings,
     IReadOnlyList<PostExpansionJoinWidthFinding> PostExpansionJoinWidthFindings,
+    IReadOnlyList<SelectStarViewFinding> SelectStarViewFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -86,7 +87,9 @@ public sealed record ScanReport(
     /// "Lineage-metric findings": "Multi-referenced CTE"). Bumped to 22 for the new
     /// <see cref="NestedViewDepthFindings"/> and <see cref="PostExpansionJoinWidthFindings"/>
     /// streams (docs/detection-checklist.md Tier 2 "Lineage-metric findings": "Nested-view depth
-    /// report" and "Post-expansion join width").
+    /// report" and "Post-expansion join width"). Bumped to 23 for the new
+    /// <see cref="SelectStarViewFindings"/> stream (docs/detection-checklist.md Tier 2
+    /// "Lineage-metric findings": "SELECT * inside a view or inline TVF").
     /// </summary>
-    public const int CurrentSchemaVersion = 22;
+    public const int CurrentSchemaVersion = 23;
 }

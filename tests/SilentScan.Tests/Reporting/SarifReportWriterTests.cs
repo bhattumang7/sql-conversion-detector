@@ -28,7 +28,7 @@ public sealed class SarifReportWriterTests
             + report.MaxTypedColumnFindings.Count + report.OversizedParameterFindings.Count + report.UnderLengthParameterFindings.Count + report.AnsiPaddingMismatchFindings.Count + report.PartialCompositeForeignKeyJoinFindings.Count + report.SetOptionFindings.Count
             + report.CatchAllPredicateFindings.Count + report.LocalVariablePredicateFindings.Count + report.NotInNullableSubqueryFindings.Count + report.NonUniqueUpdateSourceFindings.Count + report.ForcedSerialFindings.Count
             + report.UntrustedConstraintFindings.Count + report.CascadingForeignKeyFindings.Count + report.MultiReferencedCteFindings.Count
-            + report.NestedViewDepthFindings.Count + report.PostExpansionJoinWidthFindings.Count;
+            + report.NestedViewDepthFindings.Count + report.PostExpansionJoinWidthFindings.Count + report.SelectStarViewFindings.Count;
         Assert.Equal(expectedCount, results.GetArrayLength());
         Assert.True(expectedCount > 0);
     }
@@ -47,6 +47,7 @@ public sealed class SarifReportWriterTests
                 "test.sql",
                 1,
                 1)],
+            [],
             [],
             [],
             [],
@@ -130,6 +131,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -156,6 +158,7 @@ public sealed class SarifReportWriterTests
                 5,
                 [new TransformationSite("vw_outer.sql", 3, "CAST/CONVERT to Int"), new TransformationSite("vw_inner.sql", 2, "CAST/CONVERT to VarChar(20)")],
                 [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)])],
+            [],
             [],
             [],
             [],
@@ -236,6 +239,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -255,6 +259,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)],
+            [],
             [],
             [],
             [],
@@ -301,6 +306,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")],
+            [],
             [],
             [],
             [],
@@ -374,6 +380,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -401,6 +408,7 @@ public sealed class SarifReportWriterTests
                 5,
                 7,
                 new SourceSpan("test.sql", 4, 10))],
+            [],
             [],
             [],
             [],

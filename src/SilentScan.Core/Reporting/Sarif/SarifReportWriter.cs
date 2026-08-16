@@ -63,6 +63,7 @@ public static class SarifReportWriter
         results.AddRange(report.MultiReferencedCteFindings.Select(ToResult));
         results.AddRange(report.NestedViewDepthFindings.Select(ToResult));
         results.AddRange(report.PostExpansionJoinWidthFindings.Select(ToResult));
+        results.AddRange(report.SelectStarViewFindings.Select(ToResult));
         results.AddRange(report.PartialCompositeForeignKeyJoinFindings.Select(ToResult));
         results.AddRange(report.SetOptionFindings.Select(ToResult));
 
@@ -446,6 +447,15 @@ public static class SarifReportWriter
         var message = $"'{finding.ModuleQualifiedName}' writes {finding.WrittenCount} FROM/JOIN reference(s) but expands to {finding.ExpandedCount} base table(s) via [{string.Join(", ", finding.InflatingSources)}]{unexpandedNote}.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(SelectStarViewFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SelectStarViewRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"'{finding.ViewQualifiedName}' (SELECT * at line {finding.ViewLine}, {finding.ViewFullColumns.Count} columns, {finding.ViewDepth} view/TVF layer(s) deep) is consumed here selecting only [{string.Join(", ", finding.ConsumerSelectedColumns)}] - the view's frozen column list forces the full width regardless.";
+
+        return BuildResult(ruleId, level, message, finding.ConsumerSourcePath, finding.ConsumerLine, startColumn: null);
     }
 
     private static SarifResult ToResult(WriteLossFinding finding)

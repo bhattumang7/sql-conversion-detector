@@ -80,23 +80,24 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // SET-option stream, +1 for the catch-all-predicate stream, +1 for the NOT-IN-nullable-
         // subquery stream, +1 for the non-unique-UPDATE-source stream, +1 for the forced-serial-
         // construct-inventory stream, +1 for the multi-referenced-CTE stream, +1 for the post-
-        // expansion-join-width stream (docs/detection-checklist.md Tier 2 "Catch-all / kitchen-
-        // sink predicates", "NOT IN over a nullable subquery column", "UPDATE ... FROM without
-        // source uniqueness", "Forced-serial construct inventory", and "Lineage-metric findings":
-        // "Multi-referenced CTE" and "Post-expansion join width") - the same "one dedicated pass
-        // per stream" shape every other stage in this method already uses; the local-variable-
-        // predicate stream reuses the existing typed-predicate pass instead of adding its own, so
-        // it costs nothing here; the untrusted-constraint/cascading-FK/nested-view-depth streams
-        // are catalog/lineage-only passes with no per-file enumeration at all, so they cost
-        // nothing here either); reverting to re-enumerating per round pushes this fixture's 3
-        // rounds well past that. 18 sits strictly between the two (measured 18 with every fix/
-        // stream landed to date), so this fails the moment the loop stops reusing its one
-        // materialization and starts scaling with round count again, while still tolerating a
-        // future +/-1 shift from unrelated changes elsewhere in the method (e.g. the next new
-        // full-corpus stream).
+        // expansion-join-width stream, +1 for the select-star-in-nested-view stream (docs/
+        // detection-checklist.md Tier 2 "Catch-all / kitchen-sink predicates", "NOT IN over a
+        // nullable subquery column", "UPDATE ... FROM without source uniqueness", "Forced-serial
+        // construct inventory", and "Lineage-metric findings": "Multi-referenced CTE", "Post-
+        // expansion join width", and "SELECT * inside a view or inline TVF") - the same "one
+        // dedicated pass per stream" shape every other stage in this method already uses; the
+        // local-variable-predicate stream reuses the existing typed-predicate pass instead of
+        // adding its own, so it costs nothing here; the untrusted-constraint/cascading-FK/
+        // nested-view-depth streams are catalog/lineage-only passes with no per-file enumeration
+        // at all, so they cost nothing here either); reverting to re-enumerating per round pushes
+        // this fixture's 3 rounds well past that. 19 sits strictly between the two (measured 19
+        // with every fix/stream landed to date), so this fails the moment the loop stops reusing
+        // its one materialization and starts scaling with round count again, while still
+        // tolerating a future +/-1 shift from unrelated changes elsewhere in the method (e.g. the
+        // next new full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 18,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 18 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 19,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 19 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

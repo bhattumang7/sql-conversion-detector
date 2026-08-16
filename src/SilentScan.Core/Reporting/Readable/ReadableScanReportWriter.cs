@@ -84,6 +84,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(MultiReferencedCte(report, headingLevel, pathBase));
         blocks.AddRange(NestedViewDepth(report, headingLevel, pathBase));
         blocks.AddRange(PostExpansionJoinWidth(report, headingLevel, pathBase));
+        blocks.AddRange(SelectStarView(report, headingLevel, pathBase));
         blocks.AddRange(PartialCompositeForeignKeyJoin(report, headingLevel, pathBase));
         blocks.AddRange(SetOption(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
@@ -148,6 +149,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "CTEs referenced 2+ times downstream of their own WITH clause", report.MultiReferencedCteFindings.Count);
         AddCount(counts, "Views/inline TVFs nested 2+ view/TVF layers deep", report.NestedViewDepthFindings.Count);
         AddCount(counts, "Queries whose expanded join width exceeds their written FROM/JOIN count", report.PostExpansionJoinWidthFindings.Count);
+        AddCount(counts, "Consumers narrowing a nested SELECT * view's frozen column list", report.SelectStarViewFindings.Count);
         AddCount(counts, "JOINs matching some but not all of a composite foreign key's columns", report.PartialCompositeForeignKeyJoinFindings.Count);
         AddCount(counts, "SET options silently disabling a filtered index/indexed view the module touches", report.SetOptionFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
@@ -886,6 +888,28 @@ public static class ReadableScanReportWriter
                 f.ExpandedCount.ToString(CultureInfo.InvariantCulture),
                 string.Join(", ", f.InflatingSources),
                 f.PartiallyUnexpanded ? "yes" : "no",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SelectStarView(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SelectStarViewFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"SELECT * inside a nested view/TVF ({report.SelectStarViewFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A view/inline TVF nested 1+ view/TVF layers deep whose own outermost SELECT is a bare or qualified * - its column list is frozen at CREATE/ALTER time and silently disagrees with the base table after any change, confirmed to survive even a live describe-only probe and real execution until sp_refreshview runs. Only listed here where a real consuming query explicitly selects a strict, named subset of the view's full column set - a consumer doing SELECT * from the view never narrows anything and is never matched.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "View", "View columns", "Consumer selects"],
+            [.. report.SelectStarViewFindings.Select(f => new List<string>
+            {
+                Where(f.ConsumerSourcePath, f.ConsumerLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ViewQualifiedName,
+                $"{f.ViewFullColumns.Count} ({string.Join(", ", f.ViewFullColumns)})",
+                string.Join(", ", f.ConsumerSelectedColumns),
             })]);
     }
 
