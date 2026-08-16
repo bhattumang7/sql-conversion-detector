@@ -1170,6 +1170,99 @@ Folded in from the incumbent-catalog read (`detection-reference.md` Appendix
       seek this index"), never as an index recommendation, or it drifts into
       the index-advisor skip.
 
+### Second OSS/commercial sweep (7 repos, 2026-08-16)
+`s01nik/SQL-Performance-Analyzer` (9-rule regex toy), `felipebz/zpa` (Oracle
+PL/SQL, no T-SQL — matches the existing Appendix 7 entry), `ashleyglee/
+TSqlRules` (dead since 2017, 8 rules, naming-only) and the current
+`gretard/sonar-sql-plugin` (confirmed same 16 T-SQL rules already on record,
+no expansion) added nothing new. Two did:
+
+- **`slowql`** — this is `detection-reference.md`'s existing "Rust
+  multi-dialect linter" (§7.4), already surveyed and already recorded at 282
+  rules; re-cloning it confirmed the count and behavior, nothing new. Real,
+  active, 14-dialect Rust analyzer, pattern/regex-based, no live catalog.
+  Only ~10 rules are T-SQL-specific; the rest corroborate rules already
+  shipped or queued (NOCOUNT, ANSI_NULLS/QUOTED_IDENTIFIER, cursor
+  FAST_FORWARD, WAITFOR, `@@IDENTITY`, MERGE/HOLDLOCK).
+- **`gretard/sonar-sql-plugin`** — likewise already `detection-reference.md`'s
+  existing "SonarQube T-SQL plugin" (§7.5), confirmed unchanged at 16 rules.
+- **`ErikEJ/SqlServer.Rules`** (active fork of the dormant `tcartwright/
+  SqlServer.Rules`, itself `detection-reference.md`'s existing "SqlServer.Rules
+  (DacFx)" entry, §7.2) — genuinely bigger than recorded: 135 rules now, not
+  120 (`tcartwright` baseline is 80; the fork adds 56, including exposing
+  DacFx's own built-in SR0001–SR0016 for the first time). Corrects our count.
+
+**The real finding of this round isn't new incumbent rules — it's that several
+were already sitting in `detection-reference.md`'s existing Appendix 7 (from
+the original survey session) and never got promoted into this checklist as
+work items.** Re-cloning these repos mostly re-confirmed what we already had
+on record; queuing them below is what was actually missing.
+
+- [ ] **`SELECT INTO` a temp table later joined/filtered with no index** and
+      **`TRUNCATE TABLE` inside a `TRY` block with no matching `CATCH`** —
+      both already in Appendix 7.4 (`PERF-TSQL-002`, `REL-TSQL-003`), never
+      queued until now. The first needs the same temp-table-lifecycle
+      tracking the queued "temp-table shape mismatch across a proc-call
+      boundary" item already requires — natural to build together. The
+      second is pure syntax: `TRUNCATE` can fail (an untrusted/enforced FK
+      reference is the common case), and unlike a hard error outside any
+      `TRY`, the failure is silently swallowed if nothing catches it.
+- [ ] **`SET DATEFORMAT`/`SET DATEFIRST` changed mid-module** — already in
+      Appendix 7.2 (`SRD0082`/`SRD0083`), never queued. Same family as the
+      shipped/queued SET-option stream, different mechanism: these don't
+      block a plan feature, they change how date *literals* and
+      `DATEPART`-relative comparisons are parsed, so the same literal means a
+      different date depending on which session compiled it first — a
+      direction-of-harm this project is already built to state precisely.
+      Syntax-only (no baked-in `sys.sql_modules` column expected; confirm
+      against the Appendix 8 column list before assuming).
+- [ ] **Unnamed `PRIMARY KEY`/`DEFAULT`/`FOREIGN KEY`/`CHECK` constraint on a
+      `#temp` table** — already in Appendix 7.2 (`SRD0092`–`0095`), never
+      queued. An unnamed constraint gets a system-generated name; two
+      sessions creating the same-shaped temp table concurrently in the same
+      `tempdb` can collide on that generated name, an intermittent,
+      hard-to-reproduce failure. In scope by the same CLAUDE.md carve-out
+      that already covers temp tables created inside proc bodies.
+- [ ] **Database-level configuration flags** — already in Appendix 7.2, never
+      queued; genuinely new finding *category*, not module/predicate-level
+      like everything else in this file: `PAGE_VERIFY <> CHECKSUM` (silent
+      corruption goes undetected), `AUTO_SHRINK = ON` (a well-known, severe
+      anti-pattern — constant fragmentation churn), `AUTO_CLOSE <> OFF`,
+      `TARGET_RECOVERY_TIME` unset, `QUERY_STORE <> READ_WRITE`,
+      `QUERY_STORE_CAPTURE_MODE <> AUTO`. All read directly from
+      `sys.databases` in live mode — no query text involved at all, the
+      simplest possible catalog-only finding, but needs a new finding shape
+      since nothing here today reports at database granularity rather than
+      module/column/predicate granularity.
+- [ ] **True cartesian join — comma-join or explicit `CROSS JOIN` with no
+      predicate anywhere connecting the two sides** — already in Appendix 7.5
+      (`C023`), never queued. Deliberately distinct from the shipped
+      partial-composite-FK-join rule: that fires when a join predicate exists
+      but is incomplete; this fires when there is no predicate joining the
+      pair at all. Pure AST — cheaper and higher-precision than the partial
+      case, worth building even before it if sequencing matters.
+- [ ] **Declared type of size 1 or 2** (`varchar(1)`, `varchar(2)`, etc.) —
+      already in `detection-reference.md`'s hard-cases table (line ~317,
+      previously decided "Skip (lint)" under the now-superseded admission
+      rule; that disposition no longer applies under the current scope rule).
+      A narrow declaration smell distinct from the shipped
+      under-length-vs-column-comparison rule — this one doesn't need a
+      compared column at all, a size that small on its own is almost always
+      a truncated-from-a-larger-source mistake or a leftover placeholder.
+      Lightweight companion to the existing under-length stream.
+- [ ] **Output parameter not populated on every code path** — (`ErikEJ` fork,
+      `SR0013`) — real control-flow strengthening of the already-queued
+      "output parameter never assigned" item (some paths vs. no paths at
+      all); fold into that item rather than building twice.
+- **Two read but not yet understood well enough to scope** — (`ErikEJ` fork):
+  `SR0006` "move a column reference to one side of a comparison operator" —
+  possibly already subsumed by the shipped column-arithmetic non-sargability
+  rule, needs a source-level read of the actual rule (not just its name)
+  before deciding; `SR0015` "extract deterministic function calls from WHERE
+  predicates" — exact trigger condition unclear from the survey alone. Both
+  need a closer read before either gets queued or dropped, same discipline as
+  the two unresolved Tier 4 items from the earlier vendor-plugin sweep.
+
 ---
 
 ## Research gates before publication (not detections)

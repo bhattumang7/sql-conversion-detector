@@ -66,7 +66,7 @@ them emits is an unverified static claim.
 
 | Tool | Type-aware? | Status | Conversion rule |
 |---|---|---|---|
-| `SqlServer.Rules` (DacFx; dormant original + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric (measured, 1/3 precision) |
+| `SqlServer.Rules` (DacFx; dormant original 80 rules + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server — fork re-confirmed 2026-08-16 at **135 rules**, not 120; delta is 56, including exposing DacFx's own built-in SR0001–SR0016 for the first time) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric (measured, 1/3 precision) |
 | Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule, symmetric per docs; direction-awareness an unverified negative (JS-shell site) — close via trial install before publication |
 | SonarQube T-SQL plugin (ANTLR `grammars-v4`) | No | Dormant since 2024 | none |
 | Same CI platform, paid-tier T-SQL analyzer, ~83 rules (hand-written grammar; source-read 2026-08-16, §7.8) | No — AST shape matches and name lists only | Active (closed source) | none |
@@ -549,12 +549,16 @@ nothing is lost to a summariser's judgement about what looked relevant. **Every
 rule is listed, including whole categories out of our scope.** Disposition
 notes are opinions; the lists are facts.
 
-Totals: `SqlServer.Rules` (DacFx) 120 · commercial T-SQL catalog (imported by
-the SonarQube plugin) 148 · Rust multi-dialect linter 282 · SonarQube plugin's
-own 22 (16 enabled for T-SQL) · paid-tier CI-platform T-SQL analyzer ~83
-(§7.8) · Oracle PL/SQL analyzer 57 · DacFx sample 9.
-**~721 rules total.** None of them resolves conversion direction, collation, or
-lineage; none has a plan oracle.
+Totals: `SqlServer.Rules` (DacFx) 135 (re-confirmed 2026-08-16, up from 120 —
+see the incumbent table above) · commercial T-SQL catalog (imported by the
+SonarQube plugin) 148 · Rust multi-dialect linter 282 (re-confirmed unchanged
+2026-08-16) · SonarQube plugin's own 22, 16 enabled for T-SQL (re-confirmed
+unchanged 2026-08-16) · paid-tier CI-platform T-SQL analyzer ~83 (§7.8) ·
+Oracle PL/SQL analyzer 57 (re-confirmed still Oracle-only, no T-SQL, 2026-08-16)
+· DacFx sample 9. Two small/dead tools also checked 2026-08-16 and not worth a
+row: a 9-rule regex-only WinForms toy, and an 8-rule naming-only project dead
+since 2017. **~736 rules total.** None of them resolves conversion direction,
+collation, or lineage; none has a plan oracle.
 
 ### 7.1 What the full sweep changed
 
