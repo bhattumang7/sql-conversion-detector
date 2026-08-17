@@ -122,3 +122,62 @@ public sealed class DatabaseConfigurationReaderAutoCloseOracleTests : OracleTest
         Assert.Contains(DatabaseConfigurationFindingKind.AutoCloseOn, findings.Select(f => f.Kind));
     }
 }
+
+/// <summary>
+/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A "Database-option gaps in
+/// the shipped DatabaseConfigurationFindingKind stream" - the two new AUTO_CREATE/UPDATE_STATISTICS
+/// kinds, each turned OFF explicitly (both default ON on this engine).
+/// </summary>
+[Trait("Category", "Oracle")]
+public sealed class DatabaseConfigurationReaderStatisticsFlagsOracleTests : OracleTestFixture
+{
+    protected override string DatabaseNameSeed => nameof(DatabaseConfigurationReaderStatisticsFlagsOracleTests);
+
+    protected override string Ddl => """
+        CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY);
+        GO
+        ALTER DATABASE CURRENT SET AUTO_CREATE_STATISTICS OFF;
+        GO
+        ALTER DATABASE CURRENT SET AUTO_UPDATE_STATISTICS OFF;
+        GO
+        """;
+
+    [Fact]
+    public async Task BothStatisticsFlagsOff_EachFiresItsOwnKind()
+    {
+        var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var kinds = findings.Select(f => f.Kind).ToHashSet();
+        Assert.Contains(DatabaseConfigurationFindingKind.AutoCreateStatisticsOff, kinds);
+        Assert.Contains(DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff, kinds);
+    }
+}
+
+/// <summary>
+/// docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A - the compatibility-level
+/// kind. <c>SilentScan.Verify.Deployment.DatabaseProvisioner</c> pins every disposable oracle
+/// database's own compatibility level to 160 right after creation (the same level this engine
+/// instance's own <c>model</c> database carries - verified directly), so the ONLY way to get
+/// behind the engine's own current default here is to explicitly ALTER it back down after
+/// provisioning, which this test's own DDL does.
+/// </summary>
+[Trait("Category", "Oracle")]
+public sealed class DatabaseConfigurationReaderCompatibilityLevelOracleTests : OracleTestFixture
+{
+    protected override string DatabaseNameSeed => nameof(DatabaseConfigurationReaderCompatibilityLevelOracleTests);
+
+    protected override string Ddl => """
+        CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY);
+        GO
+        ALTER DATABASE CURRENT SET COMPATIBILITY_LEVEL = 150;
+        GO
+        """;
+
+    [Fact]
+    public async Task CompatibilityLevelBehindModel_Fires()
+    {
+        var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.Contains(DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault, findings.Select(f => f.Kind));
+    }
+}

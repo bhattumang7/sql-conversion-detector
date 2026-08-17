@@ -777,6 +777,7 @@ public sealed class LiveCatalogReader
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
+                   i.is_hypothetical,
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
@@ -807,27 +808,28 @@ public sealed class LiveCatalogReader
                     IsUniqueConstraint: reader.GetBoolean(6),
                     HasFilter: reader.GetBoolean(7),
                     IsDisabled: reader.GetBoolean(8),
+                    IsHypothetical: reader.GetBoolean(9),
                     KeyColumns: [],
                     IncludedColumns: []);
                 rowsByIndex[key] = row;
             }
 
-            if (await reader.IsDBNullAsync(12, cancellationToken))
+            if (await reader.IsDBNullAsync(13, cancellationToken))
             {
                 // No sys.index_columns row at all (clustered columnstore) - the index row above
                 // was already recorded with empty key/included lists; nothing more to add.
                 continue;
             }
 
-            var isIncluded = reader.GetBoolean(10);
-            var columnName = reader.GetString(12);
+            var isIncluded = reader.GetBoolean(11);
+            var columnName = reader.GetString(13);
             if (isIncluded)
             {
                 row.IncludedColumns.Add(columnName);
             }
             else
             {
-                row.KeyColumns.Add((reader.GetByte(9), columnName));
+                row.KeyColumns.Add((reader.GetByte(10), columnName));
             }
         }
 
@@ -847,7 +849,8 @@ public sealed class LiveCatalogReader
                 IsFiltered: row.HasFilter,
                 IsColumnstore: row.TypeDesc.Contains("COLUMNSTORE", StringComparison.OrdinalIgnoreCase),
                 IsDisabled: row.IsDisabled,
-                IsClustered: row.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase));
+                IsClustered: row.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase),
+                IsHypothetical: row.IsHypothetical);
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -880,7 +883,12 @@ public sealed class LiveCatalogReader
         bool HasFilter,
         bool IsDisabled,
         List<(int Ordinal, string Name)> KeyColumns,
-        List<string> IncludedColumns);
+        List<string> IncludedColumns,
+        // Only ReadIndexesAsync's own query reads is_hypothetical - ReadIndexedViewsAsync shares
+        // this same row shape but never sets it (an indexed view's own index is never a DTA/
+        // missing-index-wizard hypothetical row), so it defaults to false rather than every other
+        // caller needing to pass it explicitly.
+        bool IsHypothetical = false);
 
     /// <summary>
     /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead

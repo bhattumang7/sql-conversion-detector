@@ -227,5 +227,14 @@ public sealed record ScanReport(
     /// file-mode scan, same reasoning as <see cref="TempTableExecShapeFindings"/>/<see
     /// cref="DatabaseConfigurationFindings"/> (the new <see cref="Catalog.CatalogIndex.IsClustered"/>
     /// flag it depends on is populated only by a live catalog read).
-    public const int CurrentSchemaVersion = 47;
+    /// Bumped to 48 for the rest of docs/detection-checklist.md "DBA-script family sweep
+    /// (2026-08-17)" §A: nine more <see cref="IndexDesignFindings"/> kinds (duplicate/prefix-
+    /// subsumed indexes, unindexed foreign keys, disabled/hypothetical indexes, over-indexing -
+    /// many nonclustered indexes on one table and any single index with too many key columns -
+    /// and three low-confidence table-shape signals: wide table, high nullable-column ratio, high
+    /// string-column ratio), and three more <see cref="DatabaseConfigurationFindings"/> kinds
+    /// (auto-create/auto-update statistics off, compatibility level behind the connected engine
+    /// instance's own current default). Both streams stay live-mode only, same reasoning as the
+    /// bump to 47.
+    public const int CurrentSchemaVersion = 48;
 }

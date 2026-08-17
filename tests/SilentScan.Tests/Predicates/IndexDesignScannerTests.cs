@@ -298,4 +298,404 @@ public sealed class IndexDesignScannerTests
 
         Assert.Empty(findings);
     }
+
+    // docs/detection-checklist.md §A "Duplicate and prefix-subsumed indexes".
+
+    [Fact]
+    public void ExactDuplicateIndexes_Fire()
+    {
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.DuplicateIndex);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void DifferentUniquenessOrKind_NeverFiresDuplicate()
+    {
+        // The checklist's own precision guard: uniqueness and index kind must both match too.
+        var catalog = new DatabaseCatalog();
+        var unique = new CatalogIndex("UQ_A", CatalogIndexKind.UniqueConstraint, IsUnique: true, ["CustomerId"], []);
+        var nonUnique = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [unique, nonUnique]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is IndexDesignFindingKind.DuplicateIndex or IndexDesignFindingKind.SubsumedIndex);
+    }
+
+    [Fact]
+    public void FilteredIndexes_NeverComparedForDuplicateOrSubsumed()
+    {
+        // Filter predicate TEXT isn't read by this catalog - two filtered indexes' definitions
+        // can never be confirmed equal, so they're excluded from comparison entirely.
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsFiltered: true);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsFiltered: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is IndexDesignFindingKind.DuplicateIndex or IndexDesignFindingKind.SubsumedIndex);
+    }
+
+    [Fact]
+    public void PrefixSubsumedIndex_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var narrow = new CatalogIndex("IX_Narrow", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        var wide = new CatalogIndex("IX_Wide", CatalogIndexKind.Index, IsUnique: false, ["CustomerId", "OrderDate"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType), Column("OrderDate", IntType)], [narrow, wide]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.SubsumedIndex);
+        Assert.Equal("IX_Narrow", finding.IndexName);
+    }
+
+    [Fact]
+    public void SameLengthDifferentColumns_NeverFiresSubsumed()
+    {
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["OrderDate"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType), Column("OrderDate", IntType)], [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is IndexDesignFindingKind.DuplicateIndex or IndexDesignFindingKind.SubsumedIndex);
+    }
+
+    [Fact]
+    public void NonPrefixColumnOrder_NeverFiresSubsumed()
+    {
+        // (OrderDate, CustomerId) is NOT a prefix match for (CustomerId, OrderDate) - order matters.
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["OrderDate"], []);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId", "OrderDate"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType), Column("OrderDate", IntType)], [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.SubsumedIndex);
+    }
+
+    [Fact]
+    public void SubsumedIndexWithUncoveredInclude_NeverFires()
+    {
+        // The narrower index's own INCLUDE column ("Note") is NOT covered by the wider index -
+        // the wider index cannot serve every seek the narrower one could, so this must not fire.
+        var catalog = new DatabaseCatalog();
+        var narrow = new CatalogIndex("IX_Narrow", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Note"]);
+        var wide = new CatalogIndex("IX_Wide", CatalogIndexKind.Index, IsUnique: false, ["CustomerId", "OrderDate"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders",
+            [Column("Id", IntType), Column("CustomerId", IntType), Column("OrderDate", IntType), Column("Note", IntType)],
+            [narrow, wide]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.SubsumedIndex);
+    }
+
+    [Fact]
+    public void DisabledIndex_ExcludedFromDuplicateComparison()
+    {
+        var catalog = new DatabaseCatalog();
+        var active = new CatalogIndex("IX_Active", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        var disabled = new CatalogIndex("IX_Disabled", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsDisabled: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [active, disabled]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is IndexDesignFindingKind.DuplicateIndex or IndexDesignFindingKind.SubsumedIndex);
+    }
+
+    // docs/detection-checklist.md §A "Disabled and hypothetical indexes".
+
+    [Fact]
+    public void DisabledIndex_FiresOwnKind()
+    {
+        var catalog = new DatabaseCatalog();
+        var disabled = new CatalogIndex("IX_Old", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsDisabled: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [disabled]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.DisabledIndex);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void HypotheticalIndex_FiresHypotheticalKindOnly_NeverDisabledToo()
+    {
+        // Microsoft's own documentation: a hypothetical index always carries is_disabled = 1 too -
+        // must never double-report the same row under both kinds.
+        var catalog = new DatabaseCatalog();
+        var hypothetical = new CatalogIndex(
+            "_dta_index_Orders_5_1234", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [],
+            IsDisabled: true, IsHypothetical: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [hypothetical]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Single(findings);
+        Assert.Contains(findings, f => f.Kind == IndexDesignFindingKind.HypotheticalIndex);
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.DisabledIndex);
+    }
+
+    [Fact]
+    public void EnabledIndex_NeverFiresDisabledOrHypothetical()
+    {
+        var catalog = new DatabaseCatalog();
+        var active = new CatalogIndex("IX_Active", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [active]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is IndexDesignFindingKind.DisabledIndex or IndexDesignFindingKind.HypotheticalIndex);
+    }
+
+    // docs/detection-checklist.md §A "Over-indexing".
+
+    [Fact]
+    public void ManyNonclusteredIndexes_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var indexes = Enumerable.Range(0, IndexDesignScanner.ManyNonclusteredIndexesThreshold)
+            .Select(i => new CatalogIndex($"IX_{i}", CatalogIndexKind.Index, IsUnique: false, [$"Col{i}"], []))
+            .ToList();
+        catalog.AddOrReplace(Table("dbo", "Orders",
+            [.. indexes.Select(ix => Column(ix.KeyColumns[0], IntType))], indexes));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.ManyNonclusteredIndexes);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+        Assert.Null(finding.IndexName);
+        Assert.DoesNotContain("drop this", finding.DetailText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FewNonclusteredIndexes_NeverFiresManyKind()
+    {
+        var catalog = new DatabaseCatalog();
+        var indexes = Enumerable.Range(0, IndexDesignScanner.ManyNonclusteredIndexesThreshold - 1)
+            .Select(i => new CatalogIndex($"IX_{i}", CatalogIndexKind.Index, IsUnique: false, [$"Col{i}"], []))
+            .ToList();
+        catalog.AddOrReplace(Table("dbo", "Orders",
+            [.. indexes.Select(ix => Column(ix.KeyColumns[0], IntType))], indexes));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.ManyNonclusteredIndexes);
+    }
+
+    [Fact]
+    public void ManyKeyColumnsIndex_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var columns = Enumerable.Range(0, IndexDesignScanner.ManyKeyColumnsThreshold).Select(i => $"Col{i}").ToArray();
+        var wideIndex = new CatalogIndex("IX_Wide", CatalogIndexKind.Index, IsUnique: false, columns, []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [.. columns.Select(c => Column(c, IntType))], [wideIndex]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.ManyKeyColumnsIndex);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void WideClusteredKey_NeverAlsoFiresManyKeyColumnsIndex()
+    {
+        // Never double-reported: WideClusteredKey already covers the clustered index at its own,
+        // tighter threshold.
+        var catalog = new DatabaseCatalog();
+        var columns = Enumerable.Range(0, IndexDesignScanner.ManyKeyColumnsThreshold).Select(i => $"Col{i}").ToArray();
+        var clustered = new CatalogIndex("CIX_Wide", CatalogIndexKind.Index, IsUnique: true, columns, [], IsClustered: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [.. columns.Select(c => Column(c, IntType))], [clustered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.ManyKeyColumnsIndex);
+        Assert.Contains(findings, f => f.Kind == IndexDesignFindingKind.WideClusteredKey);
+    }
+
+    // docs/detection-checklist.md §A "Unindexed foreign key columns".
+
+    [Fact]
+    public void UnindexedForeignKey_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], []));
+        catalog.AddOrReplace(Table("dbo", "Customers", [Column("Id", IntType)], []));
+        catalog.AddForeignKey(new ForeignKeyRelationship(
+            "FK_Orders_Customers", "dbo.Orders", "CustomerId", "dbo.Customers", "Id"));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.UnindexedForeignKey);
+        Assert.Equal("dbo.Orders", finding.TableQualifiedName);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void ForeignKeyWithLeadingIndex_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var leadingIndex = new CatalogIndex("IX_Orders_CustomerId", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [leadingIndex]));
+        catalog.AddOrReplace(Table("dbo", "Customers", [Column("Id", IntType)], []));
+        catalog.AddForeignKey(new ForeignKeyRelationship(
+            "FK_Orders_Customers", "dbo.Orders", "CustomerId", "dbo.Customers", "Id"));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.UnindexedForeignKey);
+    }
+
+    [Fact]
+    public void CompositeForeignKey_LeadingCompositeIndex_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var compositeIndex = new CatalogIndex("IX_Orders_Composite", CatalogIndexKind.Index, IsUnique: false, ["CustomerId", "RegionId"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders",
+            [Column("Id", IntType), Column("CustomerId", IntType), Column("RegionId", IntType)], [compositeIndex]));
+        catalog.AddOrReplace(Table("dbo", "Customers", [Column("Id", IntType), Column("RegionId", IntType)], []));
+        catalog.AddForeignKey(new ForeignKeyRelationship(
+            "FK_Orders_Customers", "dbo.Orders", "CustomerId", "dbo.Customers", "Id"));
+        catalog.AddForeignKey(new ForeignKeyRelationship(
+            "FK_Orders_Customers", "dbo.Orders", "RegionId", "dbo.Customers", "RegionId"));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.UnindexedForeignKey);
+    }
+
+    [Fact]
+    public void ForeignKeyCoveredOnlyByFilteredIndex_StillFires()
+    {
+        // A filtered index only covers rows matching its predicate - it can never guarantee
+        // coverage for an FK's own RI-check/join usage the way an unfiltered index can.
+        var catalog = new DatabaseCatalog();
+        var filteredIndex = new CatalogIndex("IX_Filtered", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsFiltered: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [filteredIndex]));
+        catalog.AddOrReplace(Table("dbo", "Customers", [Column("Id", IntType)], []));
+        catalog.AddForeignKey(new ForeignKeyRelationship(
+            "FK_Orders_Customers", "dbo.Orders", "CustomerId", "dbo.Customers", "Id"));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Contains(findings, f => f.Kind == IndexDesignFindingKind.UnindexedForeignKey);
+    }
+
+    // docs/detection-checklist.md §A, the three "lower-precision, listed for completeness" table-shape signals.
+
+    [Fact]
+    public void WideTableByColumnCount_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var columns = Enumerable.Range(0, IndexDesignScanner.WideTableMinColumns)
+            .Select(i => Column($"Col{i}", IntType)).ToList();
+        catalog.AddOrReplace(Table("dbo", "Wide", columns, []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.WideTable);
+        Assert.Equal(FindingConfidence.Low, finding.Confidence);
+    }
+
+    [Fact]
+    public void NarrowTable_NeverFiresWideTable()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Narrow", [Column("Id", IntType), Column("Name", IntType)], []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.WideTable);
+    }
+
+    [Fact]
+    public void HighNullableColumnRatio_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var columns = new List<CatalogColumn>
+        {
+            Column("Id", IntType, isNullable: false),
+            Column("A", IntType, isNullable: true),
+            Column("B", IntType, isNullable: true),
+            Column("C", IntType, isNullable: true),
+            Column("D", IntType, isNullable: true),
+        };
+        catalog.AddOrReplace(Table("dbo", "MostlyNull", columns, []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.HighNullableColumnRatio);
+        Assert.Equal(FindingConfidence.Low, finding.Confidence);
+    }
+
+    [Fact]
+    public void TooFewColumns_NeverFiresRatioChecks_EvenAt100Percent()
+    {
+        // Below RatioChecksMinColumns - a trivial 2-column table hitting 100% on a ratio means
+        // nothing.
+        var catalog = new DatabaseCatalog();
+        var columns = new List<CatalogColumn>
+        {
+            Column("A", IntType, isNullable: true),
+            Column("B", IntType, isNullable: true),
+        };
+        catalog.AddOrReplace(Table("dbo", "TinyNullable", columns, []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.HighNullableColumnRatio);
+    }
+
+    [Fact]
+    public void HighStringColumnRatio_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var stringType = new SqlType(SqlTypeCategory.VarChar, Length: 50);
+        var columns = new List<CatalogColumn>
+        {
+            Column("Id", IntType),
+            Column("A", stringType),
+            Column("B", stringType),
+            Column("C", stringType),
+            Column("D", stringType),
+        };
+        catalog.AddOrReplace(Table("dbo", "MostlyString", columns, []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.HighStringColumnRatio);
+        Assert.Equal(FindingConfidence.Low, finding.Confidence);
+    }
+
+    [Fact]
+    public void LowStringColumnRatio_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var stringType = new SqlType(SqlTypeCategory.VarChar, Length: 50);
+        var columns = new List<CatalogColumn>
+        {
+            Column("Id", IntType),
+            Column("A", IntType),
+            Column("B", IntType),
+            Column("C", IntType),
+            Column("D", stringType),
+        };
+        catalog.AddOrReplace(Table("dbo", "MostlyNumeric", columns, []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.HighStringColumnRatio);
+    }
 }

@@ -30,11 +30,15 @@ public sealed class DatabaseConfigurationReader
         bool isAutoShrinkOn;
         bool isAutoCloseOn;
         int targetRecoveryTimeInSeconds;
+        bool isAutoCreateStatsOn;
+        bool isAutoUpdateStatsOn;
+        int compatibilityLevel;
 
         await using (var command = new SqlCommand(
             """
             SELECT name, page_verify_option_desc, is_auto_shrink_on, is_auto_close_on,
-                   target_recovery_time_in_seconds
+                   target_recovery_time_in_seconds, is_auto_create_stats_on, is_auto_update_stats_on,
+                   compatibility_level
             FROM sys.databases
             WHERE database_id = DB_ID();
             """, connection))
@@ -52,6 +56,9 @@ public sealed class DatabaseConfigurationReader
             isAutoShrinkOn = reader.GetBoolean(2);
             isAutoCloseOn = reader.GetBoolean(3);
             targetRecoveryTimeInSeconds = reader.GetInt32(4);
+            isAutoCreateStatsOn = reader.GetBoolean(5);
+            isAutoUpdateStatsOn = reader.GetBoolean(6);
+            compatibilityLevel = reader.GetByte(7);
         }
 
         var findings = new List<DatabaseConfigurationFinding>();
@@ -74,6 +81,40 @@ public sealed class DatabaseConfigurationReader
         if (targetRecoveryTimeInSeconds == 0)
         {
             findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset, databaseName));
+        }
+
+        if (!isAutoCreateStatsOn)
+        {
+            findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.AutoCreateStatisticsOff, databaseName));
+        }
+
+        if (!isAutoUpdateStatsOn)
+        {
+            findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff, databaseName));
+        }
+
+        // "The engine's own current default compat level" is read live from the model system
+        // database (see DatabaseConfigurationFinding's own doc comment for why this is preferred
+        // over a SERVERPROPERTY('ProductMajorVersion')-derived version-number mapping) - model is
+        // an unqualified, server-scoped sys.databases row visible from any database's connection,
+        // no USE/context switch required, and is exactly what the engine itself clones every newly
+        // created database from.
+        await using (var modelCommand = new SqlCommand(
+            "SELECT compatibility_level FROM sys.databases WHERE name = 'model';", connection))
+        await using (var modelReader = await modelCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            if (await modelReader.ReadAsync(cancellationToken))
+            {
+                var engineDefaultCompatibilityLevel = modelReader.GetByte(0);
+                if (compatibilityLevel < engineDefaultCompatibilityLevel)
+                {
+                    findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault, databaseName));
+                }
+            }
+
+            // If model's own row is unreadable (an unusually locked-down permission set that
+            // still allowed the earlier DB_ID() row through), never guess at the engine's default -
+            // silently skip this one kind rather than report a comparison against a made-up level.
         }
 
         // sys.database_query_store_options is scoped to the CURRENT database context (the

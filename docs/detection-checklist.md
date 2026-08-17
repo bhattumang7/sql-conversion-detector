@@ -3450,18 +3450,59 @@ Ordered by precision, not by fame: the first four are deterministic set
 comparisons over catalog rows with no estimation or heuristic anywhere, which
 makes them the cleanest findings in this entire file.
 
-- [ ] **Duplicate and prefix-subsumed indexes** — exact key-list match
+- [x] **Duplicate and prefix-subsumed indexes** — exact key-list match
       (ordering included) is an exact duplicate; index A's key list being a
       proper prefix of B's with A's includes a subset of B's is subsumption.
       Deterministic, zero-estimation. Cost is write amplification on every DML
       touching the table plus wasted space; the fix is mechanical.
       Precision guard: uniqueness, filter definition and index kind must all
       match before calling two indexes duplicates — a unique index and a
-      non-unique index on the same keys are not the same object.
-- [ ] **Unindexed foreign key columns** — every FK column set with no index
+      non-unique index on the same keys are not the same object. Shipped as
+      two new `IndexDesignFindingKind` members, `DuplicateIndex`/
+      `SubsumedIndex`, on the SAME `IndexDesignFinding` type/scanner the
+      clustered-index-flag group already shipped
+      (`src/SilentScan.Core/Predicates/IndexDesignFinding.cs`,
+      `IndexDesignScanner.cs`) rather than a new type — same catalog-only,
+      one-Kind-enum convention. Since this catalog reads
+      `CatalogIndex.IsFiltered` as a bare flag and never the filter
+      predicate's own text, the precision guard is enforced by EXCLUDING any
+      filtered index from comparison entirely (never guessing two filter
+      definitions are equal) — the checklist's "filter definition must match"
+      is honored by never claiming a match is provable when it isn't, not by
+      a text diff. Columnstore indexes are excluded the same way (no ordered
+      B-tree key). Confidence High for both kinds — deterministic once the
+      guard passes.
+      <br><br>
+      Real coverage measured against the local test database (`scan-db`):
+      3 exact-duplicate pairs and 1 prefix-subsumed pair, cross-checked
+      directly against a hand-rolled `sys.indexes`/`sys.index_columns` query
+      independent of this tool's own code before trusting the scanner's
+      count.
+- [x] **Unindexed foreign key columns** — every FK column set with no index
       leading on it. We already read both halves; this is a join over data in
       hand. Costs: RI checks on parent delete/update scan the child, and every
-      join along the relationship has no seek path.
+      join along the relationship has no seek path. Shipped as
+      `IndexDesignFindingKind.UnindexedForeignKey` on the same
+      `IndexDesignFinding` type. Groups the flat, per-column-pair
+      `DatabaseCatalog.ForeignKeys` list into one entry per real constraint
+      (generalizing `PartialCompositeForeignKeyJoinScanner.BuildCompositeForeignKeys`'s
+      own grouping to single-column FKs too), then checks whether any active,
+      unfiltered, non-columnstore index on the child table has the FK's own
+      column SET as its leading key-column prefix — a composite-aware,
+      order-tolerant-on-the-FK-side comparison (the underlying read order of
+      `ForeignKeyRelationship` rows across one constraint was never
+      guaranteed by an `ORDER BY`, so this deliberately compares sets rather
+      than assuming a specific pair order), the same shape
+      `NonUniqueUpdateSourceScanner`'s own uniqueness check already uses.
+      Confidence High — structurally provable, no estimation.
+      <br><br>
+      Real coverage measured against the local test database (`scan-db`):
+      **855 of 1,033 real FK constraints (82.8%) have no leading index** —
+      a striking number, cross-checked directly against a hand-rolled
+      `sys.foreign_keys`/`sys.foreign_key_columns`/`sys.indexes` query
+      independent of this tool's own code before trusting it. Every parent-
+      side DELETE/UPDATE against one of those 855 relationships forces a
+      full scan of the child table for the RI check alone.
 - [x] **Heap (no clustered index) on a table that has nonclustered indexes**,
       the sharper sibling **heap with a nonclustered primary key**, and
       **clustering-key quality** (non-unique clustered index, wide clustered
@@ -3604,20 +3645,71 @@ makes them the cleanest findings in this entire file.
       nonclustered lookups on a heap, GUID-vs-sequential insert locality) are
       long-standing physical storage-engine behavior, not query-optimizer
       behavior, so no compat-level/CE-mode caveat applies.
-- [ ] **Table with no primary key at all** — the one design-bar check the
+- [x] **Table with no primary key at all** — the one design-bar check the
       abandoned DacFx sample (`SRD0001`) and the live-server family agree on.
-- [ ] **Over-indexing**: many nonclustered indexes on one table, and indexes
+      **Already shipped, exact duplicate**: `StatementShapeFindingKind.TableWithNoPrimaryKey`
+      (`src/SilentScan.Core/Predicates/StatementShapeScanner.cs`,
+      `ScanCatalog`) already does exactly this — catalog-only, iterates
+      `catalog.Tables` for `Kind == CatalogTableKind.Table` with no
+      `CatalogIndexKind.PrimaryKey` among its indexes. Cross-referenced here
+      rather than rebuilt as a second finding for the identical fact.
+- [x] **Over-indexing**: many nonclustered indexes on one table, and indexes
       with ≥7 key columns. Threshold-based, so lower precision than the rest of
       this group — ship with the threshold stated in the finding text. Note the
       honest limit: the *count* is decidable at design time, but whether any
       given index earns its write cost is a usage question, so this reports
       "this table carries N indexes, each paid for on every write" and never
       "drop this one" — that second sentence is the one that needs production
-      usage stats we structurally cannot have.
-- [ ] **Disabled and hypothetical indexes** — `ALTER INDEX ... DISABLE` left in
+      usage stats we structurally cannot have. Shipped as two new
+      `IndexDesignFindingKind` members on the same `IndexDesignFinding` type:
+      `ManyNonclusteredIndexes` (table-level) and `ManyKeyColumnsIndex`
+      (single-index-level, excludes the table's own clustered index — that
+      object is already covered by `WideClusteredKey` at its own tighter
+      3-column threshold, never double-reported under both kinds).
+      Confidence Medium for both — threshold-based, same tier as
+      `WideClusteredKey`.
+      <br><br>
+      **Threshold calibration against the real distribution in the local test
+      database**: of 328 tables carrying at least one active nonclustered
+      index, only 5 (~1.5%) carry 7 or more —
+      `IndexDesignScanner.ManyNonclusteredIndexesThreshold = 7`, calibrated
+      rather than guessed. `ManyKeyColumnsThreshold = 7` was the checklist's
+      own proposed number for the key-column half and is kept as-is: of
+      1,227 real indexes, only 1 (~0.08%) carries 7+ key columns, a genuine
+      outlier. Real coverage measured via `scan-db`: 5 `ManyNonclusteredIndexes`
+      findings, 1 `ManyKeyColumnsIndex` finding.
+- [x] **Disabled and hypothetical indexes** — `ALTER INDEX ... DISABLE` left in
       place, and wizard-leftover `_dta_`-style hypothetical indexes. We already
       carry `IsDisabled` and deliberately exclude it from seek eligibility;
-      reporting it as a finding of its own is a few lines.
+      reporting it as a finding of its own is a few lines. Shipped as two new
+      `IndexDesignFindingKind` members, `DisabledIndex`/`HypotheticalIndex`,
+      on the same type. **Investigated the `_dta_`-prefix heuristic vs. the
+      real engine flag before picking one**: `sys.indexes.is_hypothetical`
+      exists and is the precise, engine-authoritative signal (a hypothetical
+      index can legally be named anything at all — the wizard's own default
+      naming convention is a convention, not a guarantee) — used directly
+      instead of a name-prefix guess. New `CatalogIndex.IsHypothetical`
+      field (additive, live-only, same shape as every other field added this
+      session), read from `sys.indexes.is_hypothetical` in
+      `LiveCatalogReader.ReadIndexesAsync`. Microsoft's own documentation
+      states a hypothetical index always carries `is_disabled = 1` too, so
+      `IndexDesignScanner` checks `IsHypothetical` FIRST and only falls
+      through to a plain `DisabledIndex` finding when it's false — never
+      double-reporting the same row under both kinds (a dedicated fixture,
+      `HypotheticalIndex_FiresHypotheticalKindOnly_NeverDisabledToo`,
+      exercises this directly). Confidence High for both — exact catalog
+      flags, no estimation.
+      <br><br>
+      Real coverage measured against the local test database: **0 disabled
+      indexes, 0 hypothetical indexes** — cross-checked directly against
+      `sys.indexes WHERE is_disabled = 1`/`is_hypothetical = 1` before
+      trusting the absence. Not a coverage gap: a mature, actively-maintained
+      codebase with no DTA-wizard leftovers or forgotten `ALTER INDEX ...
+      DISABLE` is a genuinely plausible real state, the same "fixture-only
+      today, real corpus honestly reports zero" precedent
+      `RandomClusteredKeyGuidDefault` already set. Both kinds have real
+      fire/near-miss fixtures in
+      `tests/SilentScan.Tests/Predicates/IndexDesignScannerTests.cs`.
 - [ ] **Filtered index whose filter columns are absent from its own key +
       include list** — the engine cannot use the index for a query that does
       not itself repeat the filter predicate. Needs the filter definition text
@@ -3645,16 +3737,97 @@ makes them the cleanest findings in this entire file.
 - [ ] **Statistics-object flags**: `NO_RECOMPUTE`, and a partitioned table with
       no incremental statistics. Catalog flags, not DMV state — in scope, unlike
       "statistics are stale", which is not.
-- [ ] **Database-option gaps in the shipped `DatabaseConfigurationFindingKind`
+- [x] **Database-option gaps in the shipped `DatabaseConfigurationFindingKind`
       stream** (6 kinds today): auto-create statistics off, auto-update
       statistics off, and compatibility level behind the engine's own current
       level. The last one is what silently keeps a database on an old
-      cardinality estimator nobody chose deliberately.
+      cardinality estimator nobody chose deliberately. Shipped as three new
+      `DatabaseConfigurationFindingKind` members on the SAME
+      `DatabaseConfigurationFinding` type (`src/SilentScan.Core/Predicates/DatabaseConfigurationFinding.cs`,
+      `src/SilentScan.Live/Catalog/DatabaseConfigurationReader.cs`) — database-
+      granularity facts belong with the other database-granularity facts,
+      never `IndexDesignFinding`, which is index/table-granularity. Now 9
+      kinds total.
+      <br><br>
+      **How "the engine's own current default compat level" is determined** —
+      investigated two options: a `SERVERPROPERTY('ProductMajorVersion')`-
+      derived version-number mapping (rejected: silently goes stale the day a
+      new major version, CU, or Azure SQL DB edition changes the mapping,
+      and this codebase would have to know about it ahead of time) vs. a
+      live read of `compatibility_level` on the `model` system database on
+      the SAME connected instance (chosen: `model` is what the engine itself
+      clones every newly created database from, so its compat level IS this
+      specific engine instance's own current default — read from the
+      unqualified, server-scoped `sys.databases` catalog view, no database-
+      context switch needed, confirmed directly that `model`'s own row is
+      visible from any database's connection). Robust to edition/version
+      differences by construction, since it asks the engine instead of a
+      table baked into this codebase.
+      <br><br>
+      Severity: SARIF Warning for all three new kinds — the same
+      "long-established, essentially uncontroversial" tier as
+      `PageVerifyNotChecksum`/`AutoShrinkOn`/`AutoCloseOn` (both stats flags
+      default ON out of the box; being behind the engine's own default is
+      unambiguous once that default is known precisely, even though the
+      finding deliberately never claims a *specific* target level is correct
+      for this workload — a deliberate pin for a known regression is
+      legitimate, the *silent, unchosen* gap is what this reports).
+      <br><br>
+      Real coverage measured against the local test database: `AUTO_CREATE_STATISTICS`
+      and `AUTO_UPDATE_STATISTICS` are both already ON (0 findings, honestly
+      confirmed against `sys.databases` directly, not a coverage gap), but
+      **`CompatibilityLevelBehindEngineDefault` fires — real, not
+      fixture-only**: the local test database's own compatibility level sits
+      behind this connected engine instance's own current default. Oracle
+      tests (`tests/SilentScan.Tests/Integration/DatabaseConfigurationReaderOracleTests.cs`)
+      cover all three new kinds against the disposable Docker instance,
+      including the "all defaults" baseline (which relies on
+      `DatabaseProvisioner`'s own pinned compatibility level, 160, already
+      matching this engine instance's own `model` default — confirmed
+      directly, no test change needed there).
 - [ ] **Non-aligned index on a partitioned table** — breaks partition switching
       outright, which is usually the reason the table was partitioned.
-- [ ] Lower-precision, listed for completeness rather than as priorities: wide
+      **Investigated and deliberately NOT shipped this pass.** This
+      codebase's catalog surface currently reads none of
+      `sys.partition_schemes`/`sys.indexes.data_space_id`/
+      `sys.partition_functions` at all — building it means new catalog
+      fields (a table's/index's own partition scheme, base-vs-index
+      alignment) plus a new live read, a meaningfully larger unit of work
+      than the rest of this dispatch's items, each of which reused catalog
+      surface this codebase already had. Checked the local test database
+      directly first: **zero partitioned tables, zero partition schemes** —
+      confirmed against `sys.partition_schemes`/a join of
+      `sys.tables`/`sys.indexes`/`sys.partition_schemes` before deciding,
+      not assumed. With no real rows to validate correctness against, new
+      plumbing here would ship unexercised against this project's own stated
+      target corpus, which is a worse outcome than an honest "not built yet"
+      — closing this explicitly rather than shipping code nothing here can
+      confirm actually works. Left open for whenever a partitioned-table
+      corpus becomes available to validate against.
+- [x] Lower-precision, listed for completeness rather than as priorities: wide
       tables (35+ columns or >2000 non-LOB bytes), high nullable-column ratio,
-      high string-column ratio.
+      high string-column ratio. Shipped as three new `IndexDesignFindingKind`
+      members on the same `IndexDesignFinding` type: `WideTable`,
+      `HighNullableColumnRatio`, `HighStringColumnRatio` — all table-level,
+      `Confidence.Low` always, worded as informational data-modeling signals
+      rather than proven defects (matching this bullet's own "for
+      completeness rather than as priorities" framing). Both ratio checks
+      require at least `IndexDesignScanner.RatioChecksMinColumns` = 5 columns
+      before evaluating at all, so a trivial 2-column table can't trip a
+      ratio threshold by chance alone. The non-LOB byte estimate reuses
+      `IndexDesignScanner.EstimateColumnKeyBytes` (already built for
+      `WideClusteredKey`) column-by-column; a column whose type never
+      resolves (LOB/MAX, `sql_variant`, unmapped user-defined) contributes 0
+      rather than a guessed width, so the reported total is always a safe
+      lower bound.
+      <br><br>
+      **Measured against the local test database before deciding to ship
+      all three** (per this bullet's own "or decide not to ship" framing):
+      none fires on a large, non-selective fraction of tables — wide table
+      101/835 (12.1%), high-nullable-ratio 33/835 (3.9%), high-string-ratio
+      9/835 (1.1%), all cross-checked directly against `sys.tables`/
+      `sys.columns` before trusting the scanner. All three kept as genuine,
+      if low-confidence, signals rather than dropped.
 
 ### B. Query anti-patterns still unbuilt
 Cross-referenced against a widely-read practitioner code-review post: of its

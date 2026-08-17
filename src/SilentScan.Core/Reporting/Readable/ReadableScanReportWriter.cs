@@ -1011,7 +1011,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Physical/schema index design ({report.IndexDesignFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), a wide clustered key (>3 key columns or >16 estimated bytes - every nonclustered index on the table carries a copy of it), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here).");
+            "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), a wide clustered key (>3 key columns or >16 estimated bytes - every nonclustered index on the table carries a copy of it), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here). Also: duplicate/prefix-subsumed indexes, unindexed foreign keys, disabled/hypothetical indexes, over-indexing (many nonclustered indexes on one table, or a single index with too many key columns), and three low-confidence, listed-for-completeness table-shape signals (wide table, high nullable-column ratio, high string-column ratio).");
 
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Index", "Detail"],
@@ -1019,10 +1019,26 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),
-                f.IndexName ?? "<unnamed>",
+                f.IndexName ?? (IsTableLevelIndexDesignKind(f.Kind) ? "(table-level)" : "<unnamed>"),
                 f.DetailText,
             })]);
     }
+
+    /// <summary>
+    /// The IndexDesign table's own "Index" column renders <see langword="null"/> as "&lt;unnamed&gt;"
+    /// for a real-but-unnamed index object, which would be misleading for the handful of
+    /// <see cref="IndexDesignFindingKind"/> members that are table-granularity facts and never
+    /// carry an index at all - this distinguishes the two rather than showing "&lt;unnamed&gt;" for both.
+    /// </summary>
+    private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
+    {
+        IndexDesignFindingKind.UnindexedForeignKey
+            or IndexDesignFindingKind.ManyNonclusteredIndexes
+            or IndexDesignFindingKind.WideTable
+            or IndexDesignFindingKind.HighNullableColumnRatio
+            or IndexDesignFindingKind.HighStringColumnRatio => true,
+        _ => false,
+    };
 
     private static IEnumerable<ReadableBlock> NotInNullableSubquery(ScanReport report, int level, string? pathBase)
     {
@@ -1616,7 +1632,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Database-level configuration flags ({report.DatabaseConfigurationFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Read once per scan run directly from sys.databases/sys.database_query_store_options - a database-granularity fact, not a per-module one. PAGE_VERIFY/AUTO_SHRINK/AUTO_CLOSE/TARGET_RECOVERY_TIME are well-established anti-patterns; the two Query Store flags are informational since whether Query Store should be on is a real operational choice.");
+            "Read once per scan run directly from sys.databases/sys.database_query_store_options - a database-granularity fact, not a per-module one. PAGE_VERIFY/AUTO_SHRINK/AUTO_CLOSE/TARGET_RECOVERY_TIME/AUTO_CREATE_STATISTICS/AUTO_UPDATE_STATISTICS/compatibility level (compared against the connected engine instance's own current default, read live from the model system database) are well-established anti-patterns; the two Query Store flags are informational since whether Query Store should be on is a real operational choice.");
 
         yield return new ReadableBlock.Table(
             ["Database", "Flag"],
@@ -1635,6 +1651,9 @@ public static class ReadableScanReportWriter
         DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset => "TARGET_RECOVERY_TIME unset (0)",
         DatabaseConfigurationFindingKind.QueryStoreNotReadWrite => "Query Store not READ_WRITE",
         DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto => "Query Store capture mode <> AUTO",
+        DatabaseConfigurationFindingKind.AutoCreateStatisticsOff => "AUTO_CREATE_STATISTICS = OFF",
+        DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff => "AUTO_UPDATE_STATISTICS = OFF",
+        DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => "Compatibility level behind engine default",
         _ => kind.ToString(),
     };
 

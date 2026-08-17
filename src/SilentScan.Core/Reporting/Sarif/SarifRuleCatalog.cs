@@ -185,6 +185,9 @@ public static class SarifRuleCatalog
         DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset => "silentscan/database/target-recovery-time-unset",
         DatabaseConfigurationFindingKind.QueryStoreNotReadWrite => "silentscan/database/query-store-not-read-write",
         DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto => "silentscan/database/query-store-capture-mode-not-auto",
+        DatabaseConfigurationFindingKind.AutoCreateStatisticsOff => "silentscan/database/auto-create-statistics-off",
+        DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff => "silentscan/database/auto-update-statistics-off",
+        DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => "silentscan/database/compatibility-level-behind-engine-default",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -219,6 +222,16 @@ public static class SarifRuleCatalog
         IndexDesignFindingKind.NonUniqueClusteredIndex => "silentscan/index-design/non-unique-clustered-index",
         IndexDesignFindingKind.WideClusteredKey => "silentscan/index-design/wide-clustered-key",
         IndexDesignFindingKind.RandomClusteredKeyGuidDefault => "silentscan/index-design/random-clustered-key-guid-default",
+        IndexDesignFindingKind.DuplicateIndex => "silentscan/index-design/duplicate-index",
+        IndexDesignFindingKind.SubsumedIndex => "silentscan/index-design/subsumed-index",
+        IndexDesignFindingKind.UnindexedForeignKey => "silentscan/index-design/unindexed-foreign-key",
+        IndexDesignFindingKind.DisabledIndex => "silentscan/index-design/disabled-index",
+        IndexDesignFindingKind.HypotheticalIndex => "silentscan/index-design/hypothetical-index",
+        IndexDesignFindingKind.ManyNonclusteredIndexes => "silentscan/index-design/many-nonclustered-indexes",
+        IndexDesignFindingKind.ManyKeyColumnsIndex => "silentscan/index-design/many-key-columns-index",
+        IndexDesignFindingKind.WideTable => "silentscan/index-design/wide-table",
+        IndexDesignFindingKind.HighNullableColumnRatio => "silentscan/index-design/high-nullable-column-ratio",
+        IndexDesignFindingKind.HighStringColumnRatio => "silentscan/index-design/high-string-column-ratio",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -553,6 +566,9 @@ public static class SarifRuleCatalog
             Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset), "TARGET_RECOVERY_TIME is 0 (disabled) - indirect checkpoint is off; confirmed directly against a freshly created database on the same engine that the modern default is 60 seconds, not 0."),
             Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.QueryStoreNotReadWrite), "Query Store is not actively running (actual state is not READ_WRITE) - informational: a real operational choice, not a universal anti-pattern."),
             Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto), "Query Store is running with a capture mode other than AUTO - informational: ALL is a deliberate, real choice some teams prefer for active troubleshooting."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.AutoCreateStatisticsOff), "AUTO_CREATE_STATISTICS is OFF - the optimizer can no longer create a missing single-column statistics object on demand, so a predicate against an unstatted column compiles against a guessed cardinality instead of a real histogram."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff), "AUTO_UPDATE_STATISTICS is OFF - statistics never refresh as the underlying data changes, so every plan compiled against them drifts further from reality the longer the database runs."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault), "The database's compatibility level is behind the connected engine instance's own current default (read live from the model system database, not a hardcoded version-number mapping) - it is silently kept on an older cardinality estimator and query-optimizer behavior nobody chose on purpose."),
             Rule(TempTableExecShapeColumnCountMismatchRuleId, "INSERT INTO #temp EXEC proc, where the executed proc's real, engine-described result-set column count differs from #temp's own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(TempTableExecShapeColumnTypeMismatchRuleId, "INSERT INTO #temp EXEC proc, where column counts match but at least one position's type risks silent data loss between the executed proc's real, engine-described column type and #temp's own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),
@@ -641,6 +657,16 @@ public static class SarifRuleCatalog
             Rule(IndexDesignRuleId(IndexDesignFindingKind.NonUniqueClusteredIndex), "A CLUSTERED index is not unique - the engine adds a hidden 4-byte uniquifier to every duplicate-keyed row, widening the key every nonclustered index on the table also carries in its own leaf rows."),
             Rule(IndexDesignRuleId(IndexDesignFindingKind.WideClusteredKey), "A CLUSTERED index's key is wide (more than 3 key columns, or more than 16 estimated bytes) - every nonclustered index on the table carries a full copy of this key in every leaf row."),
             Rule(IndexDesignRuleId(IndexDesignFindingKind.RandomClusteredKeyGuidDefault), "A CLUSTERED index leads on a uniqueidentifier column defaulted to NEWID() - genuinely random insert order into a clustered B-tree causes severe page splits and fragmentation; NEWSEQUENTIALID() avoids this."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.DuplicateIndex), "Two active indexes on the same table share an identical key list, uniqueness, and index kind - exact duplicates; one is pure write amplification and wasted space with no query benefit."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.SubsumedIndex), "An active index's key list is a leading-column prefix of another index's own key list, with its INCLUDE columns already covered by the wider index - the narrower index is redundant."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.UnindexedForeignKey), "A real FOREIGN KEY constraint's own parent-side column set has no active index leading on it - every parent-side DELETE/UPDATE forces a referential-integrity scan of the child table, and every join along the relationship has no seek path."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.DisabledIndex), "ALTER INDEX ... DISABLE was left in place - unusable by the engine until rebuilt, but still occupies catalog metadata and blocks a same-named CREATE INDEX."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.HypotheticalIndex), "A Database Engine Tuning Advisor/missing-index-wizard hypothetical index (sys.indexes.is_hypothetical = 1) was left behind - no real data behind it, safe to drop."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.ManyNonclusteredIndexes), "A table carries an unusually high number of active nonclustered indexes - each one is paid for on every write; this does not identify which index is safe to drop."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.ManyKeyColumnsIndex), "A single index carries an unusually high number of key columns - every one is carried in every leaf-level lookup and update against this index."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.WideTable), "A table has an unusually large column count or estimated non-LOB row width - a data-modeling signal, not a specific proven defect."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.HighNullableColumnRatio), "A table's columns are mostly nullable - often a sign of several optional sub-entities crammed into one table."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.HighStringColumnRatio), "A table's columns are mostly string-typed - often correlates with under-typed data."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the

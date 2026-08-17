@@ -3,10 +3,11 @@ using SilentScan.Core.Catalog;
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
-/// Catalog-only pass for the five <see cref="IndexDesignFindingKind"/> members - see
+/// Catalog-only pass for all fourteen <see cref="IndexDesignFindingKind"/> members - see
 /// <see cref="IndexDesignFinding"/>'s own doc comment for the full scope/precision story. Walks
-/// <see cref="DatabaseCatalog.Tables"/> once, no AST, no query site involved; live-mode only
-/// because <see cref="CatalogIndex.IsClustered"/> is live-only (see its own doc comment) - never
+/// <see cref="DatabaseCatalog.Tables"/>/<see cref="DatabaseCatalog.ForeignKeys"/> once, no AST, no
+/// query site involved; live-mode only because <see cref="CatalogIndex.IsClustered"/>/
+/// <see cref="CatalogIndex.IsHypothetical"/> are live-only (see their own doc comments) - never
 /// invoked from file-mode <see cref="Reporting.ScanReportBuilder"/>, only from
 /// <c>SilentScan.Live.LiveScanRunner</c> after a real catalog read.
 /// </summary>
@@ -24,6 +25,48 @@ public static class IndexDesignScanner
     /// checklist's original proposed threshold since the measured distribution shows it firing on
     /// a real, non-trivial minority rather than either the routine case or almost nothing.</summary>
     public const int WideClusteredKeyMaxBytes = 16;
+
+    /// <summary>
+    /// Calibrated against the real distribution of active nonclustered indexes per table in this
+    /// project's own local production-shaped test database (docs/detection-checklist.md carries
+    /// the measured numbers): of 328 tables carrying at least one active nonclustered index, only
+    /// 5 (~1.5%) carry 7 or more - a genuinely unusual shape, not the routine case.
+    /// </summary>
+    public const int ManyNonclusteredIndexesThreshold = 7;
+
+    /// <summary>
+    /// The checklist's own stated threshold, kept as proposed after calibration: of 1,227 real
+    /// indexes in the local test database, only 1 (~0.08%) carries 7 or more key columns - fires
+    /// on a genuine outlier, not a routine shape.
+    /// </summary>
+    public const int ManyKeyColumnsThreshold = 7;
+
+    /// <summary>The checklist's own stated threshold for a wide table's column count.</summary>
+    public const int WideTableMinColumns = 35;
+
+    /// <summary>The checklist's own stated threshold for a wide table's estimated non-LOB row width.</summary>
+    public const int WideTableMaxNonLobBytes = 2000;
+
+    /// <summary>
+    /// Shared floor for both ratio-based table-shape checks (<see cref="IndexDesignFindingKind.HighNullableColumnRatio"/>/
+    /// <see cref="IndexDesignFindingKind.HighStringColumnRatio"/>) - a 2-column mapping table where
+    /// both columns happen to be nullable/string-typed trivially hits any ratio threshold without
+    /// meaning anything; calibration against the local test database used this same floor.
+    /// </summary>
+    public const int RatioChecksMinColumns = 5;
+
+    /// <summary>
+    /// Calibrated against the local test database (docs/detection-checklist.md carries the measured
+    /// numbers): of 835 real tables with at least <see cref="RatioChecksMinColumns"/> columns, 33
+    /// (~3.9%) have 80%+ of their columns nullable - a real minority, not the routine case.
+    /// </summary>
+    public const double HighNullableColumnRatioThreshold = 0.8;
+
+    /// <summary>
+    /// Same calibration pass as <see cref="HighNullableColumnRatioThreshold"/>: 9 of 835 tables
+    /// (~1.1%) have 80%+ of their columns string-typed.
+    /// </summary>
+    public const double HighStringColumnRatioThreshold = 0.8;
 
     public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog)
     {
@@ -53,7 +96,13 @@ public static class IndexDesignScanner
 
             ScanHeapFindings(table, findings);
             ScanClusteringKeyQuality(table, defaultTextByColumn, findings);
+            ScanDuplicateAndSubsumedIndexes(table, findings);
+            ScanDisabledAndHypotheticalIndexes(table, findings);
+            ScanOverIndexing(table, findings);
+            ScanTableShape(table, findings);
         }
+
+        ScanUnindexedForeignKeys(catalog, findings);
 
         return
         [
@@ -191,6 +240,297 @@ public static class IndexDesignScanner
             $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? "<unnamed>"}' leads on '{leadingColumnName}', a uniqueidentifier column defaulted to NEWID() - genuinely random insert order into a clustered B-tree causes severe page splits and fragmentation. NEWSEQUENTIALID() avoids this and does not fire here.",
             table.SourcePath,
             table.SourceLine));
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A "Duplicate and prefix-subsumed indexes". Only active
+    /// (non-disabled), unfiltered, non-columnstore, non-empty-key indexes are ever compared - a
+    /// filtered index's own predicate text isn't read by this catalog (only <see
+    /// cref="CatalogIndex.IsFiltered"/> is), so two filtered indexes' definitions can never be
+    /// confirmed equal here and are excluded rather than guessed about; a columnstore index has no
+    /// ordered B-tree key the same way. <see cref="CatalogIndex.IsUnique"/> and
+    /// <see cref="CatalogIndex.Kind"/> must both match too - the checklist's own precision guard,
+    /// "a unique index and a non-unique index on the same keys are not the same object".
+    /// </summary>
+    private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        var candidates = table.Indexes
+            .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0)
+            .ToList();
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            for (var j = i + 1; j < candidates.Count; j++)
+            {
+                var a = candidates[i];
+                var b = candidates[j];
+                if (a.IsUnique != b.IsUnique || a.Kind != b.Kind)
+                {
+                    continue;
+                }
+
+                if (a.KeyColumns.Count == b.KeyColumns.Count)
+                {
+                    if (KeyColumnsEqual(a.KeyColumns, b.KeyColumns))
+                    {
+                        findings.Add(new IndexDesignFinding(
+                            IndexDesignFindingKind.DuplicateIndex,
+                            table.QualifiedName,
+                            b.Name,
+                            $"'{table.QualifiedName}' indexes '{a.Name ?? "<unnamed>"}' and '{b.Name ?? "<unnamed>"}' share the identical key list ({string.Join(", ", a.KeyColumns)}), the same uniqueness, and the same index kind - exact duplicates. One is pure write amplification and wasted space with zero query benefit over the other.",
+                            table.SourcePath,
+                            table.SourceLine));
+                    }
+
+                    continue;
+                }
+
+                // Whichever of the pair has the SHORTER key list is the candidate for being
+                // subsumed by the longer one - order the comparison so it only fires once per
+                // pair, in the "shorter is subsumed by longer" direction.
+                var (shorter, longer) = a.KeyColumns.Count < b.KeyColumns.Count ? (a, b) : (b, a);
+                if (IsProperPrefix(shorter.KeyColumns, longer.KeyColumns)
+                    && shorter.IncludedColumns.All(c => longer.IncludedColumns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+                {
+                    findings.Add(new IndexDesignFinding(
+                        IndexDesignFindingKind.SubsumedIndex,
+                        table.QualifiedName,
+                        shorter.Name,
+                        $"'{table.QualifiedName}' index '{shorter.Name ?? "<unnamed>"}' ({string.Join(", ", shorter.KeyColumns)}) is a leading-column prefix of '{longer.Name ?? "<unnamed>"}' ({string.Join(", ", longer.KeyColumns)}), with its own INCLUDE columns already covered by '{longer.Name ?? "<unnamed>"}' - '{shorter.Name ?? "<unnamed>"}' is redundant, since '{longer.Name ?? "<unnamed>"}' can serve every seek it could.",
+                        table.SourcePath,
+                        table.SourceLine));
+                }
+            }
+        }
+    }
+
+    private static bool KeyColumnsEqual(IReadOnlyList<string> a, IReadOnlyList<string> b) =>
+        a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True iff <paramref name="shorter"/> is a non-empty, strictly shorter, ordered prefix of <paramref name="longer"/>.</summary>
+    private static bool IsProperPrefix(IReadOnlyList<string> shorter, IReadOnlyList<string> longer)
+    {
+        if (shorter.Count == 0 || shorter.Count >= longer.Count)
+        {
+            return false;
+        }
+
+        for (var k = 0; k < shorter.Count; k++)
+        {
+            if (!string.Equals(shorter[k], longer[k], StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A "Disabled and hypothetical indexes". Checks
+    /// <see cref="CatalogIndex.IsHypothetical"/> first - Microsoft's own documentation states a
+    /// hypothetical index always carries <see cref="CatalogIndex.IsDisabled"/> = true too, so
+    /// checking disabled-ness first would misreport every hypothetical index as a plain disabled
+    /// one instead.
+    /// </summary>
+    private static void ScanDisabledAndHypotheticalIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var index in table.Indexes)
+        {
+            if (index.IsHypothetical)
+            {
+                findings.Add(new IndexDesignFinding(
+                    IndexDesignFindingKind.HypotheticalIndex,
+                    table.QualifiedName,
+                    index.Name,
+                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' is hypothetical (sys.indexes.is_hypothetical = 1) - a Database Engine Tuning Advisor/missing-index-wizard artifact with no real data behind it, left over after an analysis session. Safe to drop.",
+                    table.SourcePath,
+                    table.SourceLine));
+            }
+            else if (index.IsDisabled)
+            {
+                findings.Add(new IndexDesignFinding(
+                    IndexDesignFindingKind.DisabledIndex,
+                    table.QualifiedName,
+                    index.Name,
+                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' is disabled (ALTER INDEX ... DISABLE) - unusable by the engine until rebuilt, but still occupies catalog metadata and blocks a same-named CREATE INDEX.",
+                    table.SourcePath,
+                    table.SourceLine));
+            }
+        }
+    }
+
+    /// <summary>docs/detection-checklist.md §A "Over-indexing": many nonclustered indexes on one table, and any single index with too many key columns.</summary>
+    private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        var activeNonclustered = table.Indexes.Where(i => !i.IsClustered && !i.IsDisabled).ToList();
+        if (activeNonclustered.Count >= ManyNonclusteredIndexesThreshold)
+        {
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.ManyNonclusteredIndexes,
+                table.QualifiedName,
+                IndexName: null,
+                $"'{table.QualifiedName}' carries {activeNonclustered.Count} nonclustered indexes - each one is paid for on every INSERT/UPDATE/DELETE against this table. This does not identify which (if any) index is safe to drop - that needs production usage statistics this catalog-only pass cannot see.",
+                table.SourcePath,
+                table.SourceLine,
+                FindingConfidence.Medium));
+        }
+
+        // Never re-reported for the table's own clustered key - WideClusteredKey already covers
+        // that object at its own, tighter 3-column threshold; double-reporting the same physical
+        // index under two kinds would be redundant noise, not two independent findings.
+        foreach (var index in table.Indexes)
+        {
+            if (!index.IsClustered && !index.IsDisabled && !index.IsColumnstore
+                && index.KeyColumns.Count >= ManyKeyColumnsThreshold)
+            {
+                findings.Add(new IndexDesignFinding(
+                    IndexDesignFindingKind.ManyKeyColumnsIndex,
+                    table.QualifiedName,
+                    index.Name,
+                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' has {index.KeyColumns.Count} key columns ({string.Join(", ", index.KeyColumns)}) - every one is carried in every leaf-level lookup and update against this index.",
+                    table.SourcePath,
+                    table.SourceLine,
+                    FindingConfidence.Medium));
+            }
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A, the three "lower-precision, listed for completeness"
+    /// table-shape signals: wide table, high nullable-column ratio, high string-column ratio. All
+    /// three require at least <see cref="RatioChecksMinColumns"/> columns before either ratio
+    /// check is even evaluated, so a trivial 2-column table can never trip a ratio threshold
+    /// merely by chance.
+    /// </summary>
+    private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        var columnCount = table.Columns.Count;
+        if (columnCount == 0)
+        {
+            return;
+        }
+
+        var nonLobBytes = 0;
+        foreach (var column in table.Columns)
+        {
+            // A column whose type never resolved (LOB/MAX, sql_variant, or an unmapped
+            // user-defined type) contributes nothing to this sum rather than a guessed byte count -
+            // the reported total is always a safe lower bound, never an overstatement, so it is
+            // still safe to fire once the resolved portion alone already clears the threshold.
+            nonLobBytes += column.Type is { } type ? EstimateColumnKeyBytes(type) ?? 0 : 0;
+        }
+
+        if (columnCount >= WideTableMinColumns || nonLobBytes > WideTableMaxNonLobBytes)
+        {
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.WideTable,
+                table.QualifiedName,
+                IndexName: null,
+                $"'{table.QualifiedName}' has {columnCount} columns and an estimated {nonLobBytes} non-LOB bytes per row - a data-modeling signal (normalization, or separating hot/cold columns), not a specific, provable defect this pass can point at.",
+                table.SourcePath,
+                table.SourceLine,
+                FindingConfidence.Low));
+        }
+
+        if (columnCount < RatioChecksMinColumns)
+        {
+            return;
+        }
+
+        var nullableCount = table.Columns.Count(c => c.IsNullable);
+        var nullableRatio = (double)nullableCount / columnCount;
+        if (nullableRatio >= HighNullableColumnRatioThreshold)
+        {
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.HighNullableColumnRatio,
+                table.QualifiedName,
+                IndexName: null,
+                $"'{table.QualifiedName}' has {nullableCount}/{columnCount} columns ({nullableRatio:P0}) nullable - often a sign of several optional sub-entities crammed into one table, though this pass cannot confirm that for any specific column here.",
+                table.SourcePath,
+                table.SourceLine,
+                FindingConfidence.Low));
+        }
+
+        var stringCount = table.Columns.Count(c => c.Type?.IsStringFamily == true);
+        var stringRatio = (double)stringCount / columnCount;
+        if (stringRatio >= HighStringColumnRatioThreshold)
+        {
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.HighStringColumnRatio,
+                table.QualifiedName,
+                IndexName: null,
+                $"'{table.QualifiedName}' has {stringCount}/{columnCount} columns ({stringRatio:P0}) string-typed - often correlates with under-typed data (dates/numbers/enums stored as text with no CHECK/FK narrowing), though this pass cannot confirm that for any specific column here.",
+                table.SourcePath,
+                table.SourceLine,
+                FindingConfidence.Low));
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A "Unindexed foreign key columns". Groups the flat, per-column-
+    /// pair <see cref="DatabaseCatalog.ForeignKeys"/> list into one entry per real constraint (the
+    /// same grouping <see cref="PartialCompositeForeignKeyJoinScanner.BuildCompositeForeignKeys"/>
+    /// uses for composite FKs, generalized here to single-column FKs too, since a lone unindexed FK
+    /// column is exactly as real a finding as a composite one). A constraint fires when NO active,
+    /// unfiltered, non-columnstore index on the child (parent-side) table has this exact column set
+    /// as its own leading key-column prefix - a composite-aware, order-tolerant-on-the-FK-side
+    /// comparison (the underlying read order of <see cref="ForeignKeyRelationship"/> rows across one
+    /// constraint is not guaranteed, so this deliberately compares column SETS rather than assuming
+    /// a specific pair order), the same shape <see cref="NonUniqueUpdateSourceScanner"/>'s own
+    /// uniqueness check already uses elsewhere in this codebase.
+    /// </summary>
+    private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<IndexDesignFinding> findings)
+    {
+        var constraints = catalog.ForeignKeys
+            .GroupBy(fk => (fk.ConstraintName, fk.ParentTableQualifiedName), fk => fk, TupleComparer.Instance);
+
+        foreach (var group in constraints)
+        {
+            var parentTable = catalog.Find(group.Key.ParentTableQualifiedName);
+            if (parentTable is null)
+            {
+                // The FK's own parent table isn't in this catalog (an unresolvable cross-database
+                // reference, or a table this scan otherwise skipped) - never guess at its indexes.
+                continue;
+            }
+
+            var fkColumns = new HashSet<string>(group.Select(fk => fk.ParentColumnName), StringComparer.OrdinalIgnoreCase);
+            var referencedTable = group.First().ReferencedTableQualifiedName;
+
+            var hasLeadingIndex = parentTable.Indexes.Any(i =>
+                !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore
+                && i.KeyColumns.Count >= fkColumns.Count
+                && i.KeyColumns.Take(fkColumns.Count).All(c => fkColumns.Contains(c)));
+
+            if (hasLeadingIndex)
+            {
+                continue;
+            }
+
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.UnindexedForeignKey,
+                parentTable.QualifiedName,
+                IndexName: null,
+                $"'{parentTable.QualifiedName}' foreign key '{group.Key.ConstraintName}' ({string.Join(", ", fkColumns)}) referencing '{referencedTable}' has no active index leading on its own column set - every parent-side DELETE/UPDATE forces a referential-integrity scan of this table, and every join along this relationship has no seek path.",
+                parentTable.SourcePath,
+                parentTable.SourceLine));
+        }
+    }
+
+    /// <summary>Equality comparer for the <c>(ConstraintName, ParentTableQualifiedName)</c> GroupBy key above - ordinal-ignore-case on both components, matching every other qualified-name comparison in this codebase.</summary>
+    private sealed class TupleComparer : IEqualityComparer<(string ConstraintName, string ParentTableQualifiedName)>
+    {
+        public static readonly TupleComparer Instance = new();
+
+        public bool Equals((string ConstraintName, string ParentTableQualifiedName) x, (string ConstraintName, string ParentTableQualifiedName) y) =>
+            string.Equals(x.ConstraintName, y.ConstraintName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.ParentTableQualifiedName, y.ParentTableQualifiedName, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string ConstraintName, string ParentTableQualifiedName) obj) =>
+            HashCode.Combine(
+                obj.ConstraintName.ToUpperInvariant(),
+                obj.ParentTableQualifiedName.ToUpperInvariant());
     }
 
     /// <summary>

@@ -33,6 +33,18 @@ namespace SilentScan.Core.Catalog;
 /// <c>SilentScan.Live.LiveScanRunner</c> after a real live catalog read, never from
 /// <c>ScanReportBuilder</c>'s file-mode path - the same live-only-merge pattern
 /// <c>TempTableExecShapeFindings</c>/<c>DatabaseConfigurationFindings</c> already established.
+///
+/// <paramref name="IsHypothetical"/> (docs/detection-checklist.md "DBA-script family sweep" §A,
+/// "Disabled and hypothetical indexes") is <c>sys.indexes.is_hypothetical</c> directly - the
+/// engine's own precise flag for a Database Engine Tuning Advisor/missing-index-wizard artifact,
+/// used instead of a <c>_dta_</c>-name-prefix heuristic once confirmed to exist and be the more
+/// reliable signal (a hypothetical index can be named anything at all; the wizard's own default
+/// naming convention is a convention, not a guarantee). Microsoft's own documentation states a
+/// hypothetical index always carries <c>is_disabled = 1</c> too (it has no real data behind it),
+/// so <c>Predicates.IndexDesignScanner</c> checks <see cref="IsHypothetical"/> first and only
+/// falls through to a plain disabled-index finding when it is false - never double-reporting the
+/// same row under both kinds. Read live-only, same as <see cref="IsClustered"/>; defaults to
+/// <see langword="false"/> so file mode (which never sets it) never misreads an ordinary index.
 /// </summary>
 public sealed record CatalogIndex(
     string? Name,
@@ -43,4 +55,5 @@ public sealed record CatalogIndex(
     bool IsFiltered = false,
     bool IsColumnstore = false,
     bool IsDisabled = false,
-    bool IsClustered = false);
+    bool IsClustered = false,
+    bool IsHypothetical = false);

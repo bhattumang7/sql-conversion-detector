@@ -810,6 +810,15 @@ public static class SarifReportWriter
             DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto => (
                 SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelNote,
                 "Query Store is running with a capture mode other than AUTO - informational only: ALL is a real, deliberate choice some teams prefer for active troubleshooting, not a mistake."),
+            DatabaseConfigurationFindingKind.AutoCreateStatisticsOff => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "AUTO_CREATE_STATISTICS is OFF - the optimizer can no longer create a missing single-column statistics object on demand, so a predicate against an unstatted column compiles against a guessed cardinality instead of a real histogram."),
+            DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "AUTO_UPDATE_STATISTICS is OFF - statistics never refresh as the underlying data changes, so every plan compiled against them drifts further from reality the longer the database runs."),
+            DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "The database's compatibility level is behind the connected engine instance's own current default (read live from the model system database) - it is silently kept on an older cardinality estimator and query-optimizer behavior nobody chose on purpose."),
             _ => throw new ArgumentOutOfRangeException(nameof(finding)),
         };
 
