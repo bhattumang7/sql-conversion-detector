@@ -118,6 +118,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ParameterReassignmentPredicate(report, headingLevel, pathBase));
         blocks.AddRange(CodeMetric(report, headingLevel, pathBase));
         blocks.AddRange(Formatting(report, headingLevel, pathBase));
+        blocks.AddRange(Naming(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -176,6 +177,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Predicates against a reassigned formal parameter (sniffing defeated)", report.ParameterReassignmentPredicateFindings.Count);
         AddCount(counts, "Size/complexity metric thresholds exceeded", report.CodeMetricFindings.Count);
         AddCount(counts, "Formatting and layout risks", report.FormattingFindings.Count);
+        AddCount(counts, "Naming and identifier risks", report.NamingFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -836,6 +838,27 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),
                 f.DetailText ?? f.ModuleQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> Naming(ScanReport report, int level, string? pathBase)
+    {
+        if (report.NamingFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Naming and identifier risks ({report.NamingFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A reserved keyword used as an identifier, a user-defined procedure/function named with the \"sp_\" prefix, a schema-scoped CREATE with no explicit schema qualifier, and a redundant \"dbo.\" qualifier on a type reference.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.NamingFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
             })]);
     }
 

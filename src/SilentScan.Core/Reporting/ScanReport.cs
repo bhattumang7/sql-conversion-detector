@@ -56,6 +56,7 @@ public sealed record ScanReport(
     IReadOnlyList<ParameterReassignmentPredicateFinding> ParameterReassignmentPredicateFindings,
     IReadOnlyList<CodeMetricFinding> CodeMetricFindings,
     IReadOnlyList<FormattingFinding> FormattingFindings,
+    IReadOnlyList<NamingFinding> NamingFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -169,6 +170,11 @@ public sealed record ScanReport(
     /// declarations sharing a line, missing/single-line-unbraced conditional bodies, a statement
     /// visually dangling off an unbraced conditional, an IF sharing a line with a prior block's
     /// own END, redundant parentheses, and a module with no leading comment).
+    /// Bumped to 39 for the new <see cref="NamingFindings"/> stream (docs/detection-checklist.md
+    /// Tier 4 "Naming and identifiers" plus the standalone "redundant database/schema qualifier"
+    /// bullet: a reserved keyword used as a table/column/index/routine identifier, a user-defined
+    /// procedure or function named with the "sp_" prefix, a CREATE with no explicit schema
+    /// qualifier, and a redundant "dbo." qualifier on a user-defined type reference).
     /// </summary>
-    public const int CurrentSchemaVersion = 38;
+    public const int CurrentSchemaVersion = 39;
 }

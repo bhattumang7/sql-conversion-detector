@@ -88,6 +88,7 @@ public static class SarifReportWriter
         results.AddRange(report.ParameterReassignmentPredicateFindings.Select(ToResult));
         results.AddRange(report.CodeMetricFindings.Select(ToResult));
         results.AddRange(report.FormattingFindings.Select(ToResult));
+        results.AddRange(report.NamingFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -441,6 +442,13 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(NamingFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NamingRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(NotInNullableSubqueryFinding finding)

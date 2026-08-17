@@ -708,6 +708,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<NamingFinding> namingFindings;
+        using (var namingStage = progress.Begin("scanning naming and identifier risks", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = NamingScanner.Scan(r);
+                    namingStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            namingFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1009,6 +1027,7 @@ public static class ScanReportBuilder
             parameterReassignmentPredicateFindings,
             codeMetricFindings,
             formattingFindings,
+            namingFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

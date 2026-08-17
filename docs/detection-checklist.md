@@ -3662,9 +3662,98 @@ exactly as originally scoped until its own turn comes up.
     (`dbo.spADHocReportSelectAllTrips`) shows an unconditional `CREATE TABLE`
     visually indented as if it only ran when a preceding unbraced `IF`'s
     `DROP TABLE` ran - exactly the misleading shape this kind targets.
-  * *Naming and identifiers* — routine name patterns, variable name patterns,
-    a reserved keyword used as an identifier, database/schema qualification on
-    a `CREATE`.
+  * *Naming and identifiers — shipped (2026-08-17), scope corrected once
+    cross-checked against the real source rather than this checklist's own
+    paraphrase.* One finding type (`NamingFinding`/`NamingFindingKind`), no
+    catalog, no oracle — every member is a directly observable AST/text fact.
+    <br><br>
+    **The "routine name patterns, variable name patterns" half deliberately
+    does NOT ship as a configurable naming-convention rule with an opinionated
+    default.** Cross-checked directly against the real decompiled source: the
+    variable/parameter naming-pattern rule there ships with a functionally
+    permissive default that matches virtually any valid identifier (a
+    near-no-op unless a caller supplies their own pattern) — shipping an
+    opinionated default here would be inventing a house-style opinion this
+    project has no basis for. The routine-naming rule's own real default is
+    narrower and has real teeth: it specifically targets one well-documented
+    anti-pattern, not a general convention — the `sp_` prefix on a
+    user-defined procedure or function, which is what actually ships (see
+    below), not a generic pattern-matching rule.
+    <br><br>
+    Four kinds shipped:
+    * **`ReservedKeywordAsIdentifier`** — a table/column/index/procedure/
+      function/view/trigger name spelled identically to a T-SQL reserved
+      keyword (the official Microsoft Learn "Reserved Keywords (Transact-SQL)"
+      list — public documentation, hand-verified, not sourced from the
+      decompiled plugin). Deliberately does NOT check local variable/
+      parameter names against this list: they carry a mandatory `@` sigil, so
+      a reserved keyword can never collide with one at all — a real scope
+      correction from a first-pass assumption that turned out wrong.
+      **Oracle-grade correction caught by the fixture suite itself, not
+      assumed:** the check does not gate on whether the identifier is
+      bracket/quote-delimited — T-SQL's own grammar already refuses to parse
+      a true reserved keyword as an UNQUOTED identifier at all (a script
+      using one that way would already fail to parse, never reaching this
+      scanner), so the only real-world shape this ever matches is an
+      already-delimited identifier that still carries the underlying risk
+      (every future reference must remember the delimiting).
+    * **`SpPrefixOnUserRoutine`** — a user-defined procedure or function named
+      with the `sp_` prefix, reserved by long-documented Microsoft convention
+      for system-shipped procedures: SQL Server searches the master database
+      first for any unqualified `sp_`-prefixed call, adding lookup overhead
+      and risking a silent collision with a real (or future) system
+      procedure of the same name. This is the real, well-justified default
+      the vendor source's own routine-naming rule actually ships with, once
+      cross-checked — not a generic convention.
+    * **`UnqualifiedCreate`** — a `CREATE`/`ALTER` for a schema-scoped
+      procedure, function, or view with no explicit schema qualifier — the
+      object's real owning schema then depends on the connecting principal's
+      own default schema at deployment time, a genuine environment-dependent
+      risk with no fixed answer from the script text alone. **Built
+      independently, not mapped from a distinct rule in the real source** —
+      cross-checking turned up no standalone "require schema qualification on
+      CREATE" rule class in the decompiled plugin at all (the checklist's own
+      original paraphrase appears to have conflated this with the reserved-
+      keyword rule's incidental CREATE-context gating) — shipped anyway
+      because it is a real, independently well-documented T-SQL deployment
+      risk on its own merits, not because a vendor rule demanded it.
+      **Known, deliberate scope limit:** triggers are excluded — DML trigger
+      schema-scoping semantics are murkier and conventionally less often
+      qualified even in careful code, so this stays a false-positive risk
+      left honestly out rather than guessed at.
+    * **`RedundantTypeQualifier`** — a data type reference in a column/
+      variable/parameter declaration carries an explicit `dbo.` qualifier
+      that adds nothing. **Deliberately narrower than the checklist's own
+      "reference already in scope" framing once cross-checked against the
+      real source**: the real rule there targets TYPE name qualification
+      specifically, not general object references — general reference
+      qualification would need runtime default-schema knowledge this static
+      pass doesn't have, so it stays out of scope. Only an explicit `dbo.`
+      qualifier is flagged (the overwhelmingly common default schema, and the
+      same baseline `SchemaObjectNameHelper.DefaultSchema` already uses
+      everywhere else in this codebase) — a qualifier naming any OTHER schema
+      is left alone, since whether it's genuinely redundant depends on the
+      connecting principal's own actual default schema, unknowable to a
+      static, no-catalog pass; flagging it would risk a real false positive
+      in a multi-schema database.
+    <br><br>
+    `FindingConfidence.Medium` for all four (a real, provable structural
+    fact, but a maintainability/deployment risk rather than a proven-wrong
+    result). Wired end-to-end (`ScanReport` schema version 38 → 39, SARIF,
+    readable report). Unit-tested (`NamingScannerTests`, 17 cases: fire/
+    near-miss for all four kinds, including the non-`dbo` schema qualifier
+    near-miss and the built-in-type near-miss for `RedundantTypeQualifier`).
+    **Real coverage against the local RM_ test database: 638 findings** (505
+    `RedundantTypeQualifier`, 123 `UnqualifiedCreate`, 7
+    `SpPrefixOnUserRoutine`, 3 `ReservedKeywordAsIdentifier`) — spot-checked:
+    the reserved-keyword hits are a real `Order` column name reused across
+    three sibling procedures; the 7 `sp_`-prefix hits are, honestly, mostly
+    Microsoft's own auto-installed SSMS-diagramming-support procedures
+    (`sp_alterdiagram`/`sp_creatediagram`/`sp_dropdiagram` and siblings) that
+    ship into any database using the legacy Database Diagrams feature, not
+    hand-authored application code — the finding is still factually accurate
+    (they do use the prefix and do incur the lookup cost) but a reader should
+    know the likely explanation before treating it as a code-review item.
   * *Dead and duplicated code* — unreachable code, unused labels, unused local
     variables, unused parameters, redundant jumps, commented-out code,
     duplicated string literals, a loop that can only run once, self-assignment,
@@ -3703,7 +3792,11 @@ exactly as originally scoped until its own turn comes up.
     has one, and the closely related dangling-`IF`-on-a-shared-line ambiguity.
   * `GOTO` usage.
   * A redundant database/schema qualifier on a reference already in scope
-    (the opposite complaint from the qualification-*requiring* rule above).
+    (the opposite complaint from the qualification-*requiring* rule above) —
+    **shipped as `NamingFindingKind.RedundantTypeQualifier` above**, scope
+    narrowed to type-name qualification specifically once cross-checked
+    against the real source (see the "Naming and identifiers" write-up above
+    for the full reasoning and scope limit).
   * A non-deterministic function (`RAND`/`NEWID`/`CRYPT_GEN_RANDOM`) used as a
     `CASE` **input expression** — re-evaluated per `WHEN` comparison, so the
     branch taken can silently disagree with itself. Distinct from the

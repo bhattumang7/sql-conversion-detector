@@ -53,6 +53,10 @@ public static class SarifRuleCatalog
     public const string FormattingIfImmediatelyFollowingPriorBlockEndRuleId = "silentscan/formatting/if-following-prior-block-end";
     public const string FormattingRedundantParenthesesRuleId = "silentscan/formatting/redundant-parentheses";
     public const string FormattingMissingFileHeaderCommentRuleId = "silentscan/formatting/missing-file-header-comment";
+    public const string NamingReservedKeywordAsIdentifierRuleId = "silentscan/naming/reserved-keyword-as-identifier";
+    public const string NamingSpPrefixOnUserRoutineRuleId = "silentscan/naming/sp-prefix-on-user-routine";
+    public const string NamingUnqualifiedCreateRuleId = "silentscan/naming/unqualified-create";
+    public const string NamingRedundantTypeQualifierRuleId = "silentscan/naming/redundant-type-qualifier";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -207,6 +211,15 @@ public static class SarifRuleCatalog
         FormattingFindingKind.RedundantParentheses => FormattingRedundantParenthesesRuleId,
         FormattingFindingKind.MissingFileHeaderComment => FormattingMissingFileHeaderCommentRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled FormattingFindingKind."),
+    };
+
+    public static string NamingRuleId(NamingFindingKind kind) => kind switch
+    {
+        NamingFindingKind.ReservedKeywordAsIdentifier => NamingReservedKeywordAsIdentifierRuleId,
+        NamingFindingKind.SpPrefixOnUserRoutine => NamingSpPrefixOnUserRoutineRuleId,
+        NamingFindingKind.UnqualifiedCreate => NamingUnqualifiedCreateRuleId,
+        NamingFindingKind.RedundantTypeQualifier => NamingRedundantTypeQualifierRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled NamingFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -425,6 +438,10 @@ public static class SarifRuleCatalog
             Rule(FormattingIfImmediatelyFollowingPriorBlockEndRuleId, "An IF immediately follows the closing END of a prior braced IF on the same line - easy to misread as an ELSE IF continuation when it is really a separate, unconditional statement. The statement's own behavior is unaffected - only a future edit relying on the misleading visual shape is at risk."),
             Rule(FormattingRedundantParenthesesRuleId, "A parenthesized expression whose parentheses do not change grouping or precedence at all. Purely a readability signal - no query result or plan is affected."),
             Rule(FormattingMissingFileHeaderCommentRuleId, "A module's own definition does not begin with a comment before its first real statement. Purely advisory - T-SQL modules carry no universal file-header convention the way application source files do."),
+            Rule(NamingReservedKeywordAsIdentifierRuleId, "A declared identifier is spelled identically to a reserved T-SQL keyword, forcing every future reference to remember to bracket- or quote-delimit it."),
+            Rule(NamingSpPrefixOnUserRoutineRuleId, "A user-defined procedure or function is named with the \"sp_\" prefix, reserved by convention for system-shipped procedures - SQL Server searches the master database first for any unqualified call, adding lookup overhead and risking a silent collision with a real system procedure of the same name."),
+            Rule(NamingUnqualifiedCreateRuleId, "A CREATE/ALTER for a schema-scoped procedure/function/view names it with no explicit schema qualifier - the object's real owning schema then depends on the connecting principal's own default schema at deployment time."),
+            Rule(NamingRedundantTypeQualifierRuleId, "A data type reference carries a redundant \"dbo.\" schema qualifier that adds nothing and couples the declaration to a schema it does not need to name."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence
