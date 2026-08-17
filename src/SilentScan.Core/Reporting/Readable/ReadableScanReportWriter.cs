@@ -896,7 +896,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Duplicated/redundant code shapes ({report.DuplicationFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Commented-out code, a duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical operands either side of an operator, a repeated unary operator, or a negated comparison written as the negation of its opposite. Purely a maintainability/readability signal for every kind - the flagged code's own current behavior is unaffected.");
+            "Commented-out code, a duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical operands either side of an operator, a repeated unary operator, a negated comparison written as the negation of its opposite, a duplicated or all-identical conditional branch, a redundant or mutually-exclusive AND-combined numeric bound, a collapsible nested IF, a nested IIF, or an always-true/always-false literal comparison. Purely a maintainability/readability signal for every kind - the flagged code's own current behavior is unaffected.");
 
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],

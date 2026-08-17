@@ -502,6 +502,22 @@ public static class SarifReportWriter
                 $"The \"{finding.DetailText}\" operator is applied twice in a row - simplify to a single application.",
             DuplicationFindingKind.NegatedComparisonAsOpposite =>
                 $"Use the opposite operator (\"{finding.DetailText}\") instead of negating its complement.",
+            DuplicationFindingKind.DuplicateSiblingCondition =>
+                $"Condition \"{finding.DetailText}\" repeats an earlier sibling branch's own condition - this branch can never be reached.",
+            DuplicationFindingKind.IdenticalBranchBodies =>
+                "This branch's body is identical to another sibling branch's - either the conditional is partly pointless or a copy-paste mistake left this branch matching another.",
+            DuplicationFindingKind.AllBranchesIdentical =>
+                "Every branch of this conditional structure, including its ELSE, produces the same outcome - the structure itself is pointless.",
+            DuplicationFindingKind.RedundantAndCondition =>
+                $"This bound on \"{finding.DetailText}\" adds nothing once combined with a stricter sibling bound in the same AND-chain - remove it.",
+            DuplicationFindingKind.MutuallyExclusiveAndCondition =>
+                $"This bound on \"{finding.DetailText}\" can never hold at the same time as a sibling bound in the same AND-chain - the whole condition can never be true.",
+            DuplicationFindingKind.CollapsibleNestedIf =>
+                "This IF's entire body is a single nested IF with no ELSE at either level - combine both conditions with AND into one IF.",
+            DuplicationFindingKind.NestedConditionalExpression =>
+                $"This IIF call is nested inside another IIF's own {finding.DetailText} branch - extract it into an independent expression or statement.",
+            DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison =>
+                $"This comparison between two literal values is {finding.DetailText} regardless of any row's real data.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled DuplicationFindingKind."),
         };
 

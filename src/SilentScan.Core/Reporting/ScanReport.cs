@@ -186,6 +186,14 @@ public sealed record ScanReport(
     /// duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical
     /// operands either side of a comparison/logical/self-referential-arithmetic operator, a
     /// repeated unary operator, and a negated comparison written as the negation of its opposite).
+    /// Bumped to 42 for eight new <see cref="Predicates.DuplicationFindingKind"/> members closing
+    /// out the rest of the same Tier 4 "Dead and duplicated code" bullet (conditional-structure
+    /// comparisons): a duplicated sibling IF/CASE condition, identical/all-identical branch
+    /// bodies, a redundant or mutually-exclusive AND-combined numeric bound, a collapsible nested
+    /// IF, a nested IIF, and an always-true/always-false literal-vs-literal comparison - no new
+    /// finding record or list, but a consumer enumerating this existing field's possible string
+    /// values deserves the same signal any other new content gets, matching the
+    /// <see cref="Predicates.FindingConfidence"/> field's own precedent above.
     /// </summary>
-    public const int CurrentSchemaVersion = 41;
+    public const int CurrentSchemaVersion = 42;
 }

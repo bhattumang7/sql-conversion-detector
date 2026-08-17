@@ -552,4 +552,497 @@ public sealed class DuplicationScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
     }
+
+    // --- Duplicate sibling condition (IF/ELSE IF chain) -----------------------
+
+    [Fact]
+    public void RepeatedElseIfCondition_FiresDuplicateSiblingCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                IF @x = 1 PRINT 'a';
+                ELSE IF @x = 2 PRINT 'b';
+                ELSE IF @x = 1 PRINT 'c';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.DuplicateSiblingCondition);
+    }
+
+    [Fact]
+    public void DistinctElseIfConditions_NeverFireDuplicateSiblingCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                IF @x = 1 PRINT 'a';
+                ELSE IF @x = 2 PRINT 'b';
+                ELSE IF @x = 3 PRINT 'c';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.DuplicateSiblingCondition);
+    }
+
+    [Fact]
+    public void RepeatedCaseWhenCondition_FiresDuplicateSiblingCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT;
+                SET @y = CASE WHEN @x = 1 THEN 10 WHEN @x = 2 THEN 20 WHEN @x = 1 THEN 30 END;
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.DuplicateSiblingCondition);
+    }
+
+    // --- Identical / all-identical branch bodies -------------------------------
+
+    [Fact]
+    public void TwoOfThreeIfBranchesIdentical_FiresIdenticalBranchBodies()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                IF @x = 1 PRINT 'same';
+                ELSE IF @x = 2 PRINT 'different';
+                ELSE PRINT 'same';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.IdenticalBranchBodies);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AllBranchesIdentical);
+    }
+
+    [Fact]
+    public void AllIfElseBranchesIdentical_FiresAllBranchesIdenticalNotPartial()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                IF @x = 1 PRINT 'same';
+                ELSE IF @x = 2 PRINT 'same';
+                ELSE PRINT 'same';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.AllBranchesIdentical);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBranchBodies);
+    }
+
+    [Fact]
+    public void IfChainWithNoElse_NeverFiresAllBranchesIdentical()
+    {
+        // No ELSE means an implicit "do nothing" branch - never guessed to be "identical" to real code.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                IF @x = 1 PRINT 'same';
+                ELSE IF @x = 2 PRINT 'same';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AllBranchesIdentical);
+    }
+
+    [Fact]
+    public void DistinctBranchBodies_NeverFireIdenticalBranchBodies()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                IF @x = 1 PRINT 'a';
+                ELSE PRINT 'b';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBranchBodies);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AllBranchesIdentical);
+    }
+
+    [Fact]
+    public void AllCaseWhenBranchesIdenticalWithElse_FiresAllBranchesIdentical()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT;
+                SET @y = CASE WHEN @x = 1 THEN 5 WHEN @x = 2 THEN 5 ELSE 5 END;
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.AllBranchesIdentical);
+    }
+
+    // --- Collapsible nested IF -------------------------------------------------
+
+    [Fact]
+    public void UnbracedNestedIfWithNoElseEither_FiresCollapsibleNestedIf()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF @x = 1
+                    IF @y = 2 PRINT 'both';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.CollapsibleNestedIf);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void BracedNestedIfWithNoElseEither_FiresCollapsibleNestedIf()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF @x = 1
+                BEGIN
+                    IF @y = 2 PRINT 'both';
+                END
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.CollapsibleNestedIf);
+    }
+
+    [Fact]
+    public void OuterIfHasElse_NeverFiresCollapsibleNestedIf()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF @x = 1
+                    IF @y = 2 PRINT 'both';
+                ELSE
+                    PRINT 'not x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.CollapsibleNestedIf);
+    }
+
+    [Fact]
+    public void InnerNestedIfHasElse_NeverFiresCollapsibleNestedIf()
+    {
+        // Collapsing would silently drop the inner ELSE's own behavior - not a safe rewrite.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF @x = 1
+                    IF @y = 2 PRINT 'both';
+                    ELSE PRINT 'only x';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.CollapsibleNestedIf);
+    }
+
+    [Fact]
+    public void NestedIfBesideOtherStatements_NeverFiresCollapsibleNestedIf()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF @x = 1
+                BEGIN
+                    PRINT 'entering';
+                    IF @y = 2 PRINT 'both';
+                END
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.CollapsibleNestedIf);
+    }
+
+    // --- Nested IIF --------------------------------------------------------
+
+    [Fact]
+    public void IIfNestedInThenBranch_FiresNestedConditionalExpression()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                DECLARE @z INT;
+                SET @z = IIF(@x = 1, IIF(@y = 2, 10, 20), 30);
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.NestedConditionalExpression);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void IIfNestedInElseBranch_FiresNestedConditionalExpression()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                DECLARE @z INT;
+                SET @z = IIF(@x = 1, 10, IIF(@y = 2, 20, 30));
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.NestedConditionalExpression);
+    }
+
+    [Fact]
+    public void FlatIIfNoNesting_NeverFiresNestedConditionalExpression()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @z INT;
+                SET @z = IIF(@x = 1, 10, 20);
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.NestedConditionalExpression);
+    }
+
+    [Fact]
+    public void CaseNestedInCase_NeverFiresNestedConditionalExpression()
+    {
+        // Deliberately excluded - CASE-in-CASE is a common, legitimate T-SQL idiom, unlike IIF.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                DECLARE @z INT;
+                SET @z = CASE WHEN @x = 1 THEN CASE WHEN @y = 2 THEN 10 ELSE 20 END ELSE 30 END;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.NestedConditionalExpression);
+    }
+
+    // --- Redundant / mutually-exclusive AND-combined numeric bounds -----------
+
+    [Fact]
+    public void LooserBoundAndedWithStricterBound_FiresRedundantAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 5 AND @x > 3 PRINT 'y';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void ContradictoryBoundsAnded_FiresMutuallyExclusiveAndCondition()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 10 AND @x < 5 PRINT 'y';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void AdjacentTouchingBoundsExclusiveAndInclusive_FiresMutuallyExclusiveAndCondition()
+    {
+        // x > 5 AND x <= 5 - the boundary point itself is excluded by the first, included by the
+        // second, so the intersection is genuinely empty (not just a single shared point).
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 5 AND @x <= 5 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void NarrowingBoundsAnded_NeverFireEither()
+    {
+        // x > 3 AND x < 100 - genuinely narrows the range on both sides, neither redundant nor
+        // contradictory.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 3 AND @x < 100 PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void BoundsOnDifferentOperands_NeverFireEither()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                DECLARE @y INT = 1;
+                IF @x > 5 AND @y > 3 PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void OrCombinedBounds_NeverFireEither()
+    {
+        // OR-combinations are deliberately out of scope - only the AND case is well-defined here.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 10 OR @x < 5 PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void RedundantAndConditionAlsoDetectedInWhileLoop()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                WHILE @x > 5 AND @x > 3
+                BEGIN
+                    SET @x -= 1;
+                END
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+    }
+
+    // --- Always-true / always-false literal comparison -------------------------
+
+    [Fact]
+    public void DifferentIntegerLiteralsAlwaysFalseEquality_FiresAlwaysTrueOrFalse()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 1 = 0 PRINT 'never';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Equal("always false", finding.DetailText);
+    }
+
+    [Fact]
+    public void NumericLiteralOrderingAlwaysTrue_FiresAlwaysTrueOrFalse()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 5 > 1 PRINT 'always';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+        Assert.Equal("always true", finding.DetailText);
+    }
+
+    [Fact]
+    public void IdenticalNumericLiteralsEquality_FiresAlwaysTrueOrFalseNotIdenticalOperands()
+    {
+        // Literal-vs-literal identical text is this kind's own territory, not
+        // IdenticalBinaryOperands' (which excludes both-literal operands entirely).
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 5 = 5 PRINT 'always';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void IdenticalStringLiteralsEquality_FiresAlwaysTrueOrFalse()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 'abc' = 'abc' PRINT 'always';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+        Assert.Equal("always true", finding.DetailText);
+    }
+
+    [Fact]
+    public void DifferentStringLiteralsEquality_NeverFiresAlwaysTrueOrFalse()
+    {
+        // Declined entirely - a case-insensitive collation could still make these compare equal
+        // at runtime, and this rule never guesses across a collation-dependent boundary.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 'abc' = 'ABC' PRINT 'maybe';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+    }
+
+    [Fact]
+    public void DifferentStringLiteralsNotEqual_NeverFiresAlwaysTrueOrFalse()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 'abc' <> 'xyz' PRINT 'maybe';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+    }
+
+    [Fact]
+    public void LiteralComparedAgainstColumn_NeverFiresAlwaysTrueOrFalse()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 5;
+                IF @x = 5 PRINT 'maybe';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+    }
+
+    [Fact]
+    public void MixedTypeLiteralComparison_NeverFiresAlwaysTrueOrFalse()
+    {
+        // Cross-type literal comparison (int vs string) is declined - implicit conversion nuances
+        // are out of scope for this pure structural rule.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                IF 5 = 'x' PRINT 'maybe';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+    }
 }

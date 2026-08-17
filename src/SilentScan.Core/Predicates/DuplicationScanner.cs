@@ -291,6 +291,8 @@ public static class DuplicationScanner
                 Add(DuplicationFindingKind.SingleIterationLoop, null, node, FindingConfidence.Medium);
             }
 
+            CheckAndChainBounds(node.Predicate);
+
             base.ExplicitVisit(node);
         }
 
@@ -351,13 +353,77 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(BooleanComparisonExpression node)
         {
-            if (!BothLiterals(node.FirstExpression, node.SecondExpression) && SameText(node.FirstExpression, node.SecondExpression))
+            if (BothLiterals(node.FirstExpression, node.SecondExpression))
+            {
+                CheckAlwaysTrueOrFalseLiteralComparison(node);
+            }
+            else if (SameText(node.FirstExpression, node.SecondExpression))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.ComparisonType.ToString(), node, FindingConfidence.High);
             }
 
             base.ExplicitVisit(node);
         }
+
+        // --- Always-true/always-false literal-vs-literal comparison ---
+
+        /// <summary>Only asserts a truth value where collation cannot change the answer - see
+        /// <see cref="DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison"/>'s own doc
+        /// comment for the full collation-safety reasoning.</summary>
+        private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression node)
+        {
+            bool? truth = (node.FirstExpression, node.SecondExpression) switch
+            {
+                (IntegerLiteral or NumericLiteral, IntegerLiteral or NumericLiteral)
+                    when TryGetNumericLiteralValue(node.FirstExpression) is { } a && TryGetNumericLiteralValue(node.SecondExpression) is { } b
+                    => EvaluateNumericComparison(node.ComparisonType, a, b),
+
+                (StringLiteral s1, StringLiteral s2)
+                    when node.ComparisonType is BooleanComparisonType.Equals
+                        or BooleanComparisonType.NotEqualToBrackets
+                        or BooleanComparisonType.NotEqualToExclamation
+                    => EvaluateExactStringMatch(node.ComparisonType, s1, s2),
+
+                _ => null,
+            };
+
+            if (truth is { } value)
+            {
+                Add(DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison, value ? "always true" : "always false", node, FindingConfidence.High);
+            }
+        }
+
+        private static bool? EvaluateNumericComparison(BooleanComparisonType op, decimal a, decimal b) => op switch
+        {
+            BooleanComparisonType.Equals => a == b,
+            BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation => a != b,
+            BooleanComparisonType.GreaterThan => a > b,
+            BooleanComparisonType.GreaterThanOrEqualTo => a >= b,
+            BooleanComparisonType.LessThan => a < b,
+            BooleanComparisonType.LessThanOrEqualTo => a <= b,
+            _ => null,
+        };
+
+        /// <summary>Only a byte-identical (case-sensitive, ordinal) textual match/mismatch is
+        /// collation-proof - two textually DIFFERENT string literals are declined entirely for
+        /// both '=' and '&lt;&gt;', since a case-insensitive collation could still make them
+        /// compare equal at runtime. Never guess.</summary>
+        private static bool? EvaluateExactStringMatch(BooleanComparisonType op, StringLiteral first, StringLiteral second)
+        {
+            if (!string.Equals(first.Value, second.Value, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return op == BooleanComparisonType.Equals;
+        }
+
+        private static decimal? TryGetNumericLiteralValue(ScalarExpression expression) => expression switch
+        {
+            IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
+            NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
+            _ => null,
+        };
 
         public override void ExplicitVisit(BooleanBinaryExpression node)
         {
@@ -469,6 +535,434 @@ public static class DuplicationScanner
             BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation => "=",
             _ => null,
         };
+
+        // --- IF/ELSE IF chain analysis: duplicate conditions, branch-body identity, collapsible nesting ---
+
+        /// <summary>Tracks every IfStatement reached as a PRIOR IfStatement's own ElseStatement -
+        /// the default top-down traversal will visit these nodes again on its own once we recurse
+        /// into them, and they must not be re-analyzed as a fresh chain start (that would re-walk
+        /// and re-report a strict suffix of the same chain this method already covered in full).
+        /// Populated before <c>base.ExplicitVisit</c> descends into the chain, so the check at the
+        /// top of the next visit always sees an up-to-date set.</summary>
+        private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
+
+        public override void ExplicitVisit(IfStatement node)
+        {
+            if (!_ifChainContinuations.Contains(node))
+            {
+                AnalyzeIfChain(node);
+            }
+
+            CheckCollapsibleNestedIf(node);
+
+            base.ExplicitVisit(node);
+        }
+
+        private void AnalyzeIfChain(IfStatement root)
+        {
+            var branches = new List<(BooleanExpression Condition, TSqlStatement Body)>();
+            var current = root;
+            TSqlStatement? finalElseBody;
+            while (true)
+            {
+                branches.Add((current.Predicate, current.ThenStatement));
+                if (current.ElseStatement is IfStatement nextIf)
+                {
+                    _ifChainContinuations.Add(nextIf);
+                    current = nextIf;
+                    continue;
+                }
+
+                finalElseBody = current.ElseStatement;
+                break;
+            }
+
+            // Duplicate sibling conditions: every later branch's condition compared against every
+            // earlier one in the same chain (full rendered-text structural equality).
+            for (var i = 1; i < branches.Count; i++)
+            {
+                var laterText = FragmentTextRenderer.Render(branches[i].Condition);
+                for (var j = 0; j < i; j++)
+                {
+                    if (string.Equals(laterText, FragmentTextRenderer.Render(branches[j].Condition), StringComparison.OrdinalIgnoreCase))
+                    {
+                        Add(DuplicationFindingKind.DuplicateSiblingCondition, laterText, branches[i].Condition, FindingConfidence.Medium);
+                        break;
+                    }
+                }
+            }
+
+            // Branch-body identity compares every real body, INCLUDING the final ELSE (when
+            // present) as just another branch with no condition of its own - needs at least two
+            // bodies total to compare against each other.
+            var allBodies = branches.Select(b => b.Body).ToList();
+            if (finalElseBody is not null)
+            {
+                allBodies.Add(finalElseBody);
+            }
+
+            if (allBodies.Count >= 2)
+            {
+                var bodyTexts = allBodies.Select(FragmentTextRenderer.Render).ToList();
+                var allIdentical = finalElseBody is not null
+                    && bodyTexts.All(t => string.Equals(t, bodyTexts[0], StringComparison.OrdinalIgnoreCase));
+
+                if (allIdentical)
+                {
+                    Add(DuplicationFindingKind.AllBranchesIdentical, null, root, FindingConfidence.High);
+                }
+                else
+                {
+                    var reported = new HashSet<int>();
+                    for (var i = 1; i < bodyTexts.Count; i++)
+                    {
+                        for (var j = 0; j < i; j++)
+                        {
+                            if (string.Equals(bodyTexts[i], bodyTexts[j], StringComparison.OrdinalIgnoreCase) && reported.Add(i))
+                            {
+                                Add(DuplicationFindingKind.IdenticalBranchBodies, null, allBodies[i], FindingConfidence.Medium);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            foreach (var (condition, _) in branches)
+            {
+                CheckAndChainBounds(condition);
+            }
+        }
+
+        /// <summary>An IF with no ELSE whose entire THEN body is a single nested IF, also with no
+        /// ELSE - semantically identical to one IF combining both conditions with AND.</summary>
+        private void CheckCollapsibleNestedIf(IfStatement node)
+        {
+            if (node.ElseStatement is not null)
+            {
+                return;
+            }
+
+            var nested = node.ThenStatement switch
+            {
+                IfStatement inner => inner,
+                BeginEndBlockStatement { StatementList.Statements: [IfStatement inner] } => inner,
+                _ => null,
+            };
+
+            if (nested is { ElseStatement: null })
+            {
+                Add(DuplicationFindingKind.CollapsibleNestedIf, null, node, FindingConfidence.Medium);
+            }
+        }
+
+        // --- CASE expression analysis: duplicate WHEN conditions, branch-result identity ---
+
+        public override void ExplicitVisit(SearchedCaseExpression node)
+        {
+            var whens = node.WhenClauses;
+
+            for (var i = 1; i < whens.Count; i++)
+            {
+                var laterText = FragmentTextRenderer.Render(whens[i].WhenExpression);
+                for (var j = 0; j < i; j++)
+                {
+                    if (string.Equals(laterText, FragmentTextRenderer.Render(whens[j].WhenExpression), StringComparison.OrdinalIgnoreCase))
+                    {
+                        Add(DuplicationFindingKind.DuplicateSiblingCondition, laterText, whens[i].WhenExpression, FindingConfidence.Medium);
+                        break;
+                    }
+                }
+            }
+
+            if (whens.Count >= 2)
+            {
+                var resultTexts = whens.Select(w => FragmentTextRenderer.Render(w.ThenExpression)).ToList();
+                var allSameAsFirst = resultTexts.All(t => string.Equals(t, resultTexts[0], StringComparison.OrdinalIgnoreCase));
+                var allIdentical = allSameAsFirst && node.ElseExpression is not null
+                    && string.Equals(FragmentTextRenderer.Render(node.ElseExpression), resultTexts[0], StringComparison.OrdinalIgnoreCase);
+
+                if (allIdentical)
+                {
+                    Add(DuplicationFindingKind.AllBranchesIdentical, null, node, FindingConfidence.High);
+                }
+                else
+                {
+                    var reported = new HashSet<int>();
+                    for (var i = 1; i < resultTexts.Count; i++)
+                    {
+                        for (var j = 0; j < i; j++)
+                        {
+                            if (string.Equals(resultTexts[i], resultTexts[j], StringComparison.OrdinalIgnoreCase) && reported.Add(i))
+                            {
+                                Add(DuplicationFindingKind.IdenticalBranchBodies, null, whens[i].ThenExpression, FindingConfidence.Medium);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        // --- Nested IIF (T-SQL's ternary equivalent) ---
+
+        /// <summary>Deliberately scoped to IIF specifically, and only a DIRECT nesting in the
+        /// immediate Then/Else branch - see <see cref="DuplicationFindingKind.NestedConditionalExpression"/>'s
+        /// own doc comment for why CASE-inside-CASE is excluded.</summary>
+        public override void ExplicitVisit(IIfCall node)
+        {
+            if (node.ThenExpression is IIfCall)
+            {
+                Add(DuplicationFindingKind.NestedConditionalExpression, "THEN", node, FindingConfidence.Medium);
+            }
+
+            if (node.ElseExpression is IIfCall)
+            {
+                Add(DuplicationFindingKind.NestedConditionalExpression, "ELSE", node, FindingConfidence.Medium);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        // --- Redundant / mutually-exclusive AND-combined numeric bounds ---
+
+        /// <summary>Scoped to IF/WHILE conditions only (not WHERE clauses) - this codebase's
+        /// existing predicate/sargability streams already deeply cover WHERE-clause AND-chains for
+        /// a different purpose (seek/scan verdicts, catch-all predicates); this control-flow-
+        /// adjacent Tier 4 stream targets a distinct, narrower "this specific comparison adds or
+        /// removes nothing once ANDed with a sibling" structural claim instead.</summary>
+        private void CheckAndChainBounds(BooleanExpression condition)
+        {
+            var conjuncts = FlattenAnd(condition);
+            if (conjuncts.Count < 2)
+            {
+                return;
+            }
+
+            var bounds = new List<(BooleanExpression Fragment, string Operand, NumericBound Interval)>();
+            foreach (var conjunct in conjuncts)
+            {
+                if (TryExtractNumericBound(conjunct) is not { } extracted)
+                {
+                    continue;
+                }
+
+                if (NumericBound.FromComparison(extracted.Op, extracted.Literal) is not { } interval)
+                {
+                    continue;
+                }
+
+                bounds.Add((conjunct, extracted.OperandText, interval));
+            }
+
+            for (var i = 1; i < bounds.Count; i++)
+            {
+                for (var j = 0; j < i; j++)
+                {
+                    if (!string.Equals(bounds[i].Operand, bounds[j].Operand, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (bounds[i].Interval.IsEmptyIntersectionWith(bounds[j].Interval))
+                    {
+                        Add(DuplicationFindingKind.MutuallyExclusiveAndCondition, bounds[i].Operand, bounds[i].Fragment, FindingConfidence.High);
+                    }
+                    else if (bounds[i].Interval.IsSubsetOf(bounds[j].Interval))
+                    {
+                        // bounds[j] is the looser bound - it adds nothing once ANDed with the
+                        // stricter bounds[i], so the LOOSER condition is the redundant one.
+                        Add(DuplicationFindingKind.RedundantAndCondition, bounds[j].Operand, bounds[j].Fragment, FindingConfidence.Medium);
+                    }
+                    else if (bounds[j].Interval.IsSubsetOf(bounds[i].Interval))
+                    {
+                        Add(DuplicationFindingKind.RedundantAndCondition, bounds[i].Operand, bounds[i].Fragment, FindingConfidence.Medium);
+                    }
+                }
+            }
+        }
+
+        private static List<BooleanExpression> FlattenAnd(BooleanExpression expression)
+        {
+            var result = new List<BooleanExpression>();
+            void Recurse(BooleanExpression expr)
+            {
+                var unwrapped = Unwrap(expr);
+                if (unwrapped is BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and)
+                {
+                    Recurse(and.FirstExpression);
+                    Recurse(and.SecondExpression);
+                }
+                else
+                {
+                    result.Add(unwrapped);
+                }
+            }
+
+            Recurse(expression);
+            return result;
+        }
+
+        /// <summary>Extracts (operand text, comparison operator, literal value) from a single
+        /// comparison where exactly one side is a numeric literal and the other is anything else -
+        /// a literal-on-the-left form (<c>5 &gt; x</c>) is mirrored to the equivalent operand-
+        /// relative operator (<c>x &lt; 5</c>) so both spellings compare uniformly.</summary>
+        private static (string OperandText, BooleanComparisonType Op, decimal Literal)? TryExtractNumericBound(BooleanExpression expression)
+        {
+            if (expression is not BooleanComparisonExpression comparison)
+            {
+                return null;
+            }
+
+            if (comparison.ComparisonType is not (BooleanComparisonType.GreaterThan or BooleanComparisonType.GreaterThanOrEqualTo
+                or BooleanComparisonType.LessThan or BooleanComparisonType.LessThanOrEqualTo or BooleanComparisonType.Equals))
+            {
+                return null;
+            }
+
+            if (comparison.FirstExpression is not Literal
+                && TryGetNumericLiteralValue(comparison.SecondExpression) is { } rightValue)
+            {
+                return (FragmentTextRenderer.Render(comparison.FirstExpression), comparison.ComparisonType, rightValue);
+            }
+
+            if (comparison.SecondExpression is not Literal
+                && TryGetNumericLiteralValue(comparison.FirstExpression) is { } leftValue)
+            {
+                return (FragmentTextRenderer.Render(comparison.SecondExpression), MirrorOperator(comparison.ComparisonType), leftValue);
+            }
+
+            return null;
+        }
+
+        private static BooleanComparisonType MirrorOperator(BooleanComparisonType op) => op switch
+        {
+            BooleanComparisonType.GreaterThan => BooleanComparisonType.LessThan,
+            BooleanComparisonType.GreaterThanOrEqualTo => BooleanComparisonType.LessThanOrEqualTo,
+            BooleanComparisonType.LessThan => BooleanComparisonType.GreaterThan,
+            BooleanComparisonType.LessThanOrEqualTo => BooleanComparisonType.GreaterThanOrEqualTo,
+            var other => other,
+        };
+
+        /// <summary>A half-open/closed numeric interval representing one comparison bound
+        /// (<c>x &gt; 5</c> ⇒ (5, exclusive, +∞)), used to classify a pair of AND-combined bounds
+        /// on the same operand as redundant (one subsumes the other) or mutually exclusive (their
+        /// ranges cannot both hold).</summary>
+        private readonly record struct NumericBound(decimal? Lower, bool LowerInclusive, decimal? Upper, bool UpperInclusive)
+        {
+            public static NumericBound? FromComparison(BooleanComparisonType comparisonType, decimal literal) => comparisonType switch
+            {
+                BooleanComparisonType.GreaterThan => new NumericBound(literal, false, null, true),
+                BooleanComparisonType.GreaterThanOrEqualTo => new NumericBound(literal, true, null, true),
+                BooleanComparisonType.LessThan => new NumericBound(null, true, literal, false),
+                BooleanComparisonType.LessThanOrEqualTo => new NumericBound(null, true, literal, true),
+                BooleanComparisonType.Equals => new NumericBound(literal, true, literal, true),
+                _ => null,
+            };
+
+            public bool IsEmptyIntersectionWith(NumericBound other)
+            {
+                var (lowerValue, lowerInclusive) = CombineLower(Lower, LowerInclusive, other.Lower, other.LowerInclusive);
+                var (upperValue, upperInclusive) = CombineUpper(Upper, UpperInclusive, other.Upper, other.UpperInclusive);
+                if (lowerValue is null || upperValue is null)
+                {
+                    return false;
+                }
+
+                if (lowerValue.Value > upperValue.Value)
+                {
+                    return true;
+                }
+
+                return lowerValue.Value == upperValue.Value && !(lowerInclusive && upperInclusive);
+            }
+
+            public bool IsSubsetOf(NumericBound other) =>
+                LowerAtLeastAsRestrictive(Lower, LowerInclusive, other.Lower, other.LowerInclusive)
+                && UpperAtLeastAsRestrictive(Upper, UpperInclusive, other.Upper, other.UpperInclusive);
+
+            private static bool LowerAtLeastAsRestrictive(decimal? thisLower, bool thisInclusive, decimal? otherLower, bool otherInclusive)
+            {
+                if (otherLower is null)
+                {
+                    return true;
+                }
+
+                if (thisLower is null)
+                {
+                    return false;
+                }
+
+                if (thisLower.Value != otherLower.Value)
+                {
+                    return thisLower.Value > otherLower.Value;
+                }
+
+                return !thisInclusive || otherInclusive;
+            }
+
+            private static bool UpperAtLeastAsRestrictive(decimal? thisUpper, bool thisInclusive, decimal? otherUpper, bool otherInclusive)
+            {
+                if (otherUpper is null)
+                {
+                    return true;
+                }
+
+                if (thisUpper is null)
+                {
+                    return false;
+                }
+
+                if (thisUpper.Value != otherUpper.Value)
+                {
+                    return thisUpper.Value < otherUpper.Value;
+                }
+
+                return !thisInclusive || otherInclusive;
+            }
+
+            private static (decimal? Value, bool Inclusive) CombineLower(decimal? a, bool aInc, decimal? b, bool bInc)
+            {
+                if (a is null)
+                {
+                    return (b, bInc);
+                }
+
+                if (b is null)
+                {
+                    return (a, aInc);
+                }
+
+                if (a.Value != b.Value)
+                {
+                    return a.Value > b.Value ? (a, aInc) : (b, bInc);
+                }
+
+                return (a, aInc && bInc);
+            }
+
+            private static (decimal? Value, bool Inclusive) CombineUpper(decimal? a, bool aInc, decimal? b, bool bInc)
+            {
+                if (a is null)
+                {
+                    return (b, bInc);
+                }
+
+                if (b is null)
+                {
+                    return (a, aInc);
+                }
+
+                if (a.Value != b.Value)
+                {
+                    return a.Value < b.Value ? (a, aInc) : (b, bInc);
+                }
+
+                return (a, aInc && bInc);
+            }
+        }
 
         // --- Duplicated string literals ---
 

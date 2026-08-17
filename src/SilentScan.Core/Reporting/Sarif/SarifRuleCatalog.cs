@@ -69,6 +69,14 @@ public static class SarifRuleCatalog
     public const string DuplicationIdenticalBinaryOperandsRuleId = "silentscan/duplication/identical-binary-operands";
     public const string DuplicationRepeatedUnaryOperatorRuleId = "silentscan/duplication/repeated-unary-operator";
     public const string DuplicationNegatedComparisonAsOppositeRuleId = "silentscan/duplication/negated-comparison-as-opposite";
+    public const string DuplicationDuplicateSiblingConditionRuleId = "silentscan/duplication/duplicate-sibling-condition";
+    public const string DuplicationIdenticalBranchBodiesRuleId = "silentscan/duplication/identical-branch-bodies";
+    public const string DuplicationAllBranchesIdenticalRuleId = "silentscan/duplication/all-branches-identical";
+    public const string DuplicationRedundantAndConditionRuleId = "silentscan/duplication/redundant-and-condition";
+    public const string DuplicationMutuallyExclusiveAndConditionRuleId = "silentscan/duplication/mutually-exclusive-and-condition";
+    public const string DuplicationCollapsibleNestedIfRuleId = "silentscan/duplication/collapsible-nested-if";
+    public const string DuplicationNestedConditionalExpressionRuleId = "silentscan/duplication/nested-conditional-expression";
+    public const string DuplicationAlwaysTrueOrFalseLiteralComparisonRuleId = "silentscan/duplication/always-true-or-false-literal-comparison";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -253,6 +261,14 @@ public static class SarifRuleCatalog
         DuplicationFindingKind.IdenticalBinaryOperands => DuplicationIdenticalBinaryOperandsRuleId,
         DuplicationFindingKind.RepeatedUnaryOperator => DuplicationRepeatedUnaryOperatorRuleId,
         DuplicationFindingKind.NegatedComparisonAsOpposite => DuplicationNegatedComparisonAsOppositeRuleId,
+        DuplicationFindingKind.DuplicateSiblingCondition => DuplicationDuplicateSiblingConditionRuleId,
+        DuplicationFindingKind.IdenticalBranchBodies => DuplicationIdenticalBranchBodiesRuleId,
+        DuplicationFindingKind.AllBranchesIdentical => DuplicationAllBranchesIdenticalRuleId,
+        DuplicationFindingKind.RedundantAndCondition => DuplicationRedundantAndConditionRuleId,
+        DuplicationFindingKind.MutuallyExclusiveAndCondition => DuplicationMutuallyExclusiveAndConditionRuleId,
+        DuplicationFindingKind.CollapsibleNestedIf => DuplicationCollapsibleNestedIfRuleId,
+        DuplicationFindingKind.NestedConditionalExpression => DuplicationNestedConditionalExpressionRuleId,
+        DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison => DuplicationAlwaysTrueOrFalseLiteralComparisonRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DuplicationFindingKind."),
     };
 
@@ -488,6 +504,14 @@ public static class SarifRuleCatalog
             Rule(DuplicationIdenticalBinaryOperandsRuleId, "The identical expression appears on both sides of a comparison, AND/OR, or a self-referential arithmetic operator - always the same value, a tautology, or a fixed degenerate result."),
             Rule(DuplicationRepeatedUnaryOperatorRuleId, "The same unary operator (NOT, unary minus, bitwise NOT) is applied twice in a row - always simplifiable to a single application or none."),
             Rule(DuplicationNegatedComparisonAsOppositeRuleId, "A negated comparison is written instead of its provably equivalent opposite operator - a readability suggestion, not a correctness claim."),
+            Rule(DuplicationDuplicateSiblingConditionRuleId, "A later branch in an IF/ELSE IF chain or CASE expression repeats an earlier sibling's own condition verbatim - the later branch can never be reached."),
+            Rule(DuplicationIdenticalBranchBodiesRuleId, "Two (but not all) branches of a conditional structure have an identical body or result - either the conditional is partly pointless, or a copy-paste mistake left one branch matching another."),
+            Rule(DuplicationAllBranchesIdenticalRuleId, "Every branch of a conditional structure, including its ELSE, has an identical body or result - the structure produces the same outcome no matter which branch is taken."),
+            Rule(DuplicationRedundantAndConditionRuleId, "Two conjuncts of one AND-combined condition compare the same operand against numeric bounds where one bound's range is already a subset of the other's - the looser bound adds nothing."),
+            Rule(DuplicationMutuallyExclusiveAndConditionRuleId, "Two conjuncts of one AND-combined condition compare the same operand against numeric bounds whose ranges cannot both hold at once - the condition can never be true."),
+            Rule(DuplicationCollapsibleNestedIfRuleId, "An IF with no ELSE whose entire body is a single nested IF, also with no ELSE - semantically identical to one IF combining both conditions with AND."),
+            Rule(DuplicationNestedConditionalExpressionRuleId, "An IIF call is nested inside another IIF call's own THEN or ELSE branch - T-SQL's equivalent of a nested ternary expression."),
+            Rule(DuplicationAlwaysTrueOrFalseLiteralComparisonRuleId, "A comparison between two literal values (never a column or variable) is provable at parse time regardless of any row's real data - the predicate is dead weight or can never match."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the

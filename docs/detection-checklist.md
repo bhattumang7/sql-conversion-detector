@@ -3985,13 +3985,127 @@ exactly as originally scoped until its own turn comes up.
     targets even though this particular instance is intentional rather than
     a bug.
     <br><br>
-    **Still genuinely open, not this pass:** the conditional-structure
-    remainder of this same checklist bullet — duplicated conditions,
-    identical branch bodies, a conditional whose branches are all the same,
-    redundant conditions, mutually exclusive conditions, collapsible nested
-    conditionals, nested conditional-expression functions. The always-true/
-    always-false predicate family here overlaps the enum-style
-    `CHECK`-constraint candidate below — same rule, build once.
+    **Conditional-structure remainder — shipped (2026-08-17), closing out
+    this entire checklist bullet.** Cross-checked against the real
+    decompiled source directly (not just this checklist's own paraphrase),
+    which showed the "mutually exclusive conditions" item is narrower and
+    more precise than its own paraphrase suggested: the real rule pair
+    operates within ONE AND-combined condition's own sibling conjuncts (not
+    across separate `IF`/`ELSE IF` branches), classifying each pair as
+    either a subsumed/redundant bound or a structurally-empty-intersection
+    (mutually exclusive) bound — reimplemented independently as real numeric
+    interval subset/intersection logic, not copied from the decompiled
+    source. Eight new `DuplicationFindingKind` members, same
+    `DuplicationFinding`/`DuplicationScanner` type as the pattern-matching
+    half above (`ScanReport` schema version 41 → 42 — additive only, no
+    finding-record shape change, bumped anyway per this field's own
+    established "a consumer enumerating possible values deserves the same
+    signal as any other new content" precedent):
+    * **Duplicated sibling condition**: a later `IF`/`ELSE IF` branch, or a
+      later CASE `WHEN`, repeats an earlier sibling's own condition
+      verbatim (full rendered-text structural equality) — the later branch
+      can never be reached. `FindingConfidence.Medium`.
+    * **Identical / all-identical branch bodies**: two kinds, mutually
+      exclusive per chain/CASE — a PARTIAL match between some (not all)
+      branches (`FindingConfidence.Medium`), or every branch's body,
+      INCLUDING an explicit `ELSE`, rendering identically
+      (`FindingConfidence.High`, the stronger "this whole structure is
+      pointless" claim). **Real bug caught and fixed before shipping,
+      caught by a failing unit test, not the real corpus:** the first
+      version excluded the final `ELSE` body from the partial-match
+      comparison entirely, so a chain with an `ELSE` sharing its body with
+      one earlier branch (but not all of them) silently never fired for
+      that pairing — fixed to compare every real body, `ELSE` included, as
+      just another branch with no condition of its own. Requires an
+      explicit `ELSE`/CASE-default to exist for the all-identical claim — a
+      chain/CASE with no final `ELSE` has an implicit "do nothing"/NULL
+      branch that is never guessed to be "identical" to the written code.
+    * **Redundant / mutually exclusive AND-combined numeric bound**: two
+      conjuncts of ONE `AND`-chain (in an `IF` or `WHILE` predicate only —
+      deliberately not `WHERE`, which this codebase's existing
+      sargability/predicate streams already deeply cover for a different
+      purpose) compare the identical operand (by rendered text) against a
+      numeric literal via `>`/`>=`/`<`/`<=`/`=`. Each bound is modeled as a
+      real half-open/closed numeric interval; the pair is classified by
+      genuine interval-subset (`RedundantAndCondition`,
+      `FindingConfidence.Medium`) or empty-intersection
+      (`MutuallyExclusiveAndCondition`, `FindingConfidence.High`) logic —
+      correctly handles a touching-boundary case where one bound excludes
+      exactly the point the other includes (`x > 5 AND x <= 5`, empty
+      intersection despite sharing a boundary value). `OR`-combinations,
+      non-numeric literals, and `<>` bounds are all declined rather than
+      approximated.
+    * **Collapsible nested IF**: an `IF` with no `ELSE` whose entire body
+      is a single nested `IF`, also with no `ELSE` (braced or unbraced) —
+      semantically identical to one `IF` combining both conditions with
+      `AND`. `FindingConfidence.Medium`.
+    * **Nested conditional expression**: an `IIF` call nested directly in
+      another `IIF`'s own `THEN` or `ELSE` branch. **Deliberately scoped to
+      `IIF` only** — a `CASE` nested inside another `CASE`'s own
+      `WHEN`/`THEN`/`ELSE` is a far more common and often perfectly
+      legitimate T-SQL idiom (unlike a bare ternary, `CASE` already reads
+      as a real, explicit control structure) and is never flagged, matching
+      the real rule's own narrower scope. `FindingConfidence.Medium`.
+    * **Always-true/always-false literal comparison**: a comparison between
+      two LITERAL values (never a column/variable) whose truth is provable
+      at parse time. **Only asserts a truth value where collation cannot
+      change the answer** — two numeric literals compare arithmetically
+      (collation-independent); two string literals are only judged for
+      EXACT, case-sensitive (ordinal) textual equality/inequality via
+      `=`/`<>` — two textually different string literals are declined
+      entirely for both operators, since a case-insensitive collation could
+      still make them compare equal at runtime, a real "never guess" guard
+      rather than an oversight. Fills a genuine prior gap rather than
+      overlapping `IdenticalBinaryOperands`: that kind explicitly excludes
+      literal-vs-literal operands (so `1 = 1`/`'a' = 'a'` previously matched
+      neither rule at all); this kind now owns exactly that territory, so
+      the two partition disjoint cases instead of double-reporting.
+      `FindingConfidence.High`.
+    <br><br>
+    **The always-true/always-false predicate family's own relationship to
+    the enum-style `CHECK`-constraint candidate, resolved:** investigated
+    the other item directly (the Tier-3-carryover `CHECK (col IN (...))`
+    treated as an enum, flagging a predicate proven false against it) and
+    concluded they are NOT the same rule, despite the checklist's own prior
+    "same rule, build once" framing. The literal-vs-literal comparison
+    shipped here is pure syntax, needs no catalog, and proves nothing about
+    any real column. The `CHECK`-constraint-enum candidate is a genuinely
+    different, catalog-driven claim — a column-vs-literal comparison the
+    column's OWN `CHECK` constraint provably excludes — needing real
+    catalog/constraint-parsing machinery this pure-syntax kind doesn't
+    touch. Only the pure-syntax half ships here; the `CHECK`-constraint-
+    catalog half is left explicitly open for whoever picks up that
+    Tier-3-carryover bullet, cross-referenced from both places so nothing
+    is silently dropped or double-claimed.
+    <br><br>
+    Unit-tested (`DuplicationScannerTests`, 31 new cases added to the
+    existing 68 in this file — the full suite for both halves of this
+    checklist bullet is now 99 cases total): every new kind's fire/near-
+    miss pair, the ELSE-included-in-partial-match regression case, the
+    no-ELSE-never-all-identical guard, the touching-exclusive/inclusive-
+    boundary empty-intersection case, the different-operand and OR-chain
+    declines, a `WHILE`-predicate AND-chain firing the identical bound
+    logic as an `IF`, the CASE-nested-in-CASE exclusion, and the mixed-
+    type/differing-string-literal declines for the always-true/false kind.
+    <br><br>
+    **Real coverage against the local RM_ test database: 8,305 total
+    `DuplicationFindings`** across both halves of this bullet combined —
+    the new conditional-structure kinds contribute 951 (651 identical
+    branch bodies, 154 collapsible nested IFs, 131 always-true/false
+    literal comparisons, 9 all-branches-identical, 6 duplicate sibling
+    conditions, 0 redundant/mutually-exclusive AND-bounds, 0 nested IIFs —
+    real, honest zeros for the three rarest, narrowest kinds, not a
+    detection gap). Spot-checked three of the new kinds directly against
+    real module text: a `CollapsibleNestedIf` in
+    `dbo.TargetInfoResolveForOnboardDevice` confirmed genuine — an `ELSE
+    IF(...) BEGIN IF NOT EXISTS(...) SET ... END` branch really does
+    collapse into one `AND`-combined `IF`; an `AlwaysTrueOrFalseLiteralComparison`
+    in `dbo.GetAllAttributesFromEventTargets` confirmed genuine —
+    `WHILE 1=1`, the classic literal-infinite-loop idiom, factually always
+    true exactly as the finding states (even though the pattern itself is a
+    common, deliberate idiom, not a bug); a `DuplicateSiblingCondition` in
+    `dbo.spExecuteSqlWithAuditInsertsResolvingPK2` confirmed against the
+    real module text.
   * *Task-comment tracking* — `TODO`, `FIXME`.
   * *Non-ANSI and deprecated spellings* — `!=`/`!<`/`!>`, `= NULL` in place of
     `IS NULL`, a `LIKE` pattern containing no wildcard, legacy system
@@ -4050,7 +4164,12 @@ exactly as originally scoped until its own turn comes up.
   clustering-key width (index-advisor space); `NOLOCK`/`READ UNCOMMITTED`;
   `MERGE` pitfalls (`WHEN MATCHED THEN DELETE`, missing `HOLDLOCK`);
   `CHECK (col IN (...))` treated as an enum, flagging a predicate proven
-  false against it; DISTINCT masking a bad join, a correlated subquery that
+  false against it (**a genuinely different, catalog-driven claim from the
+  now-shipped pure-syntax always-true/always-false literal comparison** in
+  the vendor-plugin bullet above — investigated together 2026-08-17 and
+  found NOT to be the same rule despite this file's own earlier "same rule,
+  build once" framing; this catalog half is still open); DISTINCT masking
+  a bad join, a correlated subquery that
   won't unnest, row goals, `UNION` vs `UNION ALL`; indexed-view `NOEXPAND`
   matching; `OR` across different columns; partition-elimination defeat;
   Always Encrypted column-comparison restrictions; Batch Mode on Rowstore
