@@ -37,6 +37,7 @@ public sealed class LiveCatalogReader
         catalog.CurrentDatabaseName = connection.Database;
         catalog.DefaultCollation = await ReadDatabaseDefaultCollationAsync(connection, cancellationToken);
         catalog.CompatibilityLevel = await ReadCompatibilityLevelAsync(connection, cancellationToken);
+        catalog.IsRecursiveTriggersEnabled = await ReadIsRecursiveTriggersEnabledAsync(connection, cancellationToken);
 
         foreach (var (qualifiedName, underlyingType) in await ReadTypeAliasesAsync(connection, cancellationToken))
         {
@@ -602,6 +603,13 @@ public sealed class LiveCatalogReader
         await using var command = connection.CreateReadOnlyCommand("SELECT compatibility_level FROM sys.databases WHERE database_id = DB_ID();");
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is byte level ? level : null;
+    }
+
+    private static async Task<bool?> ReadIsRecursiveTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateReadOnlyCommand("SELECT is_recursive_triggers_on FROM sys.databases WHERE database_id = DB_ID();");
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is bool isOn ? isOn : null;
     }
 
     private static async Task<List<(string QualifiedName, SqlType UnderlyingType)>> ReadTypeAliasesAsync(

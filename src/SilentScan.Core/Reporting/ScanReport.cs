@@ -68,6 +68,8 @@ public sealed record ScanReport(
     IReadOnlyList<FloatEqualityFinding> FloatEqualityFindings,
     IReadOnlyList<QueryAntiPatternFinding> QueryAntiPatternFindings,
     IReadOnlyList<IndexCoverageFinding> IndexCoverageFindings,
+    IReadOnlyList<TriggerCorrectnessFinding> TriggerCorrectnessFindings,
+    IReadOnlyList<CrossModuleLockOrderFinding> CrossModuleLockOrderFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -284,5 +286,30 @@ public sealed record ScanReport(
     /// LinkedServerOrCrossDatabaseReference"/>'s own cross-database (not linked-server) half is
     /// live-mode only, needing the already-existing <see cref="Catalog.DatabaseCatalog.
     /// CurrentDatabaseName"/>.
-    public const int CurrentSchemaVersion = 52;
+    /// Bumped to 53 for docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §C
+    /// "Trigger correctness" and §D "Cross-module analysis", closing out the entire sweep: the new
+    /// <see cref="TriggerCorrectnessFindings"/> stream (a variable assigned from a single,
+    /// unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed to
+    /// silently bind an arbitrary row's value when the trigger's own multi-row DML fires it more
+    /// than once - plus the sharper sub-kind where that variable then drives a keyed UPDATE/DELETE
+    /// straight-line in the same trigger body; a trigger with no IF NOT EXISTS/@@ROWCOUNT-style
+    /// early-out guard, genuinely low-confidence and advisory; and a trigger that writes directly
+    /// back to its own target table, oracle-confirmed to actually re-fire - not silently no-op -
+    /// only when the connected database's own RECURSIVE_TRIGGERS option is live-confirmed on, via
+    /// the new <see cref="Catalog.DatabaseCatalog.IsRecursiveTriggersEnabled"/>, live-mode only)
+    /// and the new <see cref="CrossModuleLockOrderFindings"/> stream (two top-level procedures'
+    /// own direct explicit-transaction write orders disagreeing on the relative lock order of the
+    /// same two base tables - the textbook deadlock shape - deliberately scoped to direct bodies
+    /// only, not the full call-graph-transitive version the checklist first sketched; see that
+    /// finding's own doc comment for the honest scope-down). <see
+    /// cref="TriggerCorrectnessFindings"/>'s <c>DirectRecursiveTrigger</c> kind is live-mode only;
+    /// every other kind in both new streams runs in both file and live mode, matching <see
+    /// cref="QueryAntiPatternFindings"/>'s own precedent for a mixed-mode stream. "SET NOCOUNT ON
+    /// missing from a trigger" was already covered by the existing <see
+    /// cref="StatementShapeFindingKind.MissingSetNocountOn"/> kind - not duplicated, only
+    /// strengthened here by adding the <c>CREATE OR ALTER TRIGGER</c>/<c>CREATE OR ALTER
+    /// PROCEDURE</c> forms <see cref="StatementShapeScanner"/> had never visited (a real, if
+    /// narrow, pre-existing coverage gap found while verifying that claim, not part of the sweep
+    /// itself).
+    public const int CurrentSchemaVersion = 53;
 }

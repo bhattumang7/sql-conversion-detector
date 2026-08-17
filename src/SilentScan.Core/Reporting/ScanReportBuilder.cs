@@ -925,6 +925,36 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<TriggerCorrectnessFinding> triggerCorrectnessFindings;
+        using (var triggerCorrectnessStage = progress.Begin("scanning trigger correctness", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = TriggerCorrectnessScanner.Scan(r, catalog);
+                    triggerCorrectnessStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            triggerCorrectnessFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        IReadOnlyList<CrossModuleLockOrderFinding> crossModuleLockOrderFindings;
+        using (var lockOrderStage = progress.Begin("scanning cross-module lock ordering"))
+        {
+            // A whole-scan pass, not per-file - the same table pair must be seen written in
+            // opposite order by two DIFFERENT top-level procedures, which can live in different
+            // files, so this needs every usable parse result together rather than one file at a
+            // time the way every SelectMany-based stage above works.
+            crossModuleLockOrderFindings = CrossModuleLockOrderScanner.Scan(usableParseResults, catalog);
+            lockOrderStage.Complete($"{crossModuleLockOrderFindings.Count:N0} findings");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<ForcedSerialFinding> forcedSerialFindings;
         using (var forcedSerialStage = progress.Begin("scanning forced-serial constructs", usableCount))
         {
@@ -1212,6 +1242,8 @@ public static class ScanReportBuilder
             floatEqualityFindings,
             queryAntiPatternFindings,
             indexCoverageFindings,
+            triggerCorrectnessFindings,
+            crossModuleLockOrderFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

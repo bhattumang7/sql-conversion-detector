@@ -4369,33 +4369,127 @@ The live-server family only reports *that* triggers exist; no linter surveyed
 looks inside one. This is the classic "worked in development, corrupted data in
 production" bug, and it is provable from the AST alone.
 
-- [ ] **Multi-row-unsafe trigger** — the body treats `inserted`/`deleted` as a
-      single row: `SELECT @var = col FROM inserted`, a scalar subquery over
-      `inserted`, or any use of a variable so assigned as the sole key of the
-      trigger's own DML. Correct for single-row DML, silently wrong for every
-      multi-row `INSERT`/`UPDATE`/`MERGE` — no error is raised, which puts it
-      in the same "silent data loss" family as the shipped write-loss stream
-      and makes it the highest-severity item in this whole sweep.
-      `TypedPredicateExtractor` and `NonSargablePredicateScanner` already
-      register `inserted`/`deleted` as relations, so the scope resolution
-      needed for this exists.
-- [ ] **Trigger without `SET NOCOUNT ON`** (client-visible rowcounts from a
-      trigger break some ORMs outright), **trigger with no early-out** for the
-      zero-row case, and **trigger whose own DML re-enters itself** (direct
-      recursion, visible in the proc call graph).
+- [x] **Multi-row-unsafe trigger** — shipped 2026-08-18 as
+      `TriggerCorrectnessFindingKind.MultiRowUnsafeSingleRowAssignment` (the
+      general shape) and `MultiRowUnsafeKeyedDml` (the sharper sub-kind).
+      Fires on `SELECT @v = col FROM inserted/deleted` (a `SelectSetVariable`
+      element) and the structurally identical scalar-subquery form
+      (`SET`/`DECLARE @v = (SELECT col FROM inserted/deleted)`), with no
+      `WHERE`, no `TOP`, and the assigned expression not itself an aggregate
+      (`COUNT`/`MAX`/... over the whole rowset IS a real, well-defined single
+      value regardless of row count - a materially different, unflagged
+      shape). The sharper kind additionally requires the assigned variable to
+      drive a subsequent `UPDATE`/`DELETE` as the SOLE top-level equality
+      predicate of its `WHERE` clause, straight-line in the same trigger body
+      (the next top-level statements after unwrapping one outer `BEGIN...END`,
+      exactly like `ProcCallGraphBuilder`'s own scope-body unwrapping - never
+      traced through an `IF`/`WHILE`/`TRY` branch this pass has no fold-state
+      to resolve). Oracle-confirmed directly (Docker instance, disposable
+      scratch database, dropped immediately after): a 3-row `UPDATE` against a
+      seeded 3-row table fired an `AFTER UPDATE` trigger containing exactly
+      this shape exactly once, with the assigned variable bound to a single
+      row's value (the other two rows' values silently discarded), and that
+      arbitrary value was the one a subsequent keyed `UPDATE` in the same
+      trigger body actually wrote back - confirming the exact "silent
+      data loss" mechanism end-to-end, not just the assignment half. Both
+      kinds `FindingConfidence.High` - the mechanism is oracle-confirmed and
+      mechanical; only real-world call pattern (does a caller ever actually
+      issue multi-row DML against this trigger) is unknown, which is why this
+      is reported as a real structural risk, not a certainty.
+- [x] **Trigger without `SET NOCOUNT ON`** — closed 2026-08-18, already fully
+      covered by the existing `StatementShapeFindingKind.MissingSetNocountOn`
+      (confirmed directly against `StatementShapeScanner.cs`, not taken on
+      faith from an earlier pass's own claim) - it already visits
+      `CreateTriggerStatement`/`AlterTriggerStatement` through the identical
+      `EnterRoutine`/`ExitRoutine` pair a procedure uses. One real, narrow
+      coverage gap found while verifying that claim: neither `CREATE OR ALTER
+      TRIGGER` nor `CREATE OR ALTER PROCEDURE` was ever visited at all (only
+      the separate `CREATE`/`ALTER` forms were) - fixed as part of this item,
+      since it directly bears on the "already covering triggers" claim, not a
+      new detection stream.
+- [x] **Trigger with no early-out for the zero-row case** — shipped 2026-08-18
+      as `TriggerCorrectnessFindingKind.NoEarlyOutForEmptyInvocation`. Fires
+      when a trigger body has no `IF NOT EXISTS (SELECT * FROM
+      inserted/deleted ...)`/`IF @@ROWCOUNT = 0 RETURN`-shaped guard anywhere
+      in its own body. Deliberately shipped as genuinely LOW confidence and
+      worded as advisory, per this item's own instruction: a well-documented
+      convention to skip unnecessary work, not a proven defect - an empty
+      invocation still runs the trigger's body harmlessly against zero rows
+      in the overwhelming majority of real bodies.
+- [x] **Trigger whose own DML re-enters itself** — shipped 2026-08-18 as
+      `TriggerCorrectnessFindingKind.DirectRecursiveTrigger`. The existing
+      proc call graph (`ProcCallGraphBuilder`) does not model triggers as
+      nodes at all, confirmed by direct read before building this - so this
+      checks the trigger's own body directly for an `INSERT`/`UPDATE`/
+      `DELETE`/`MERGE` against the EXACT SAME base table the trigger fires on
+      (direct self-recursion only; an indirect cycle through a second
+      trigger/procedure is a materially different, unanalyzed shape).
+      Oracle-confirmed directly (Docker instance, disposable scratch
+      database) that this is a LIVE database-option-gated risk, not always
+      one: with `RECURSIVE_TRIGGERS` OFF (the engine default), a trigger that
+      re-inserted into its own table fired exactly once despite the
+      self-insert (silent no-op, confirmed via a fire-count table); with the
+      identical trigger body and only `RECURSIVE_TRIGGERS` flipped ON, it
+      recursed for real (5 firings against a 5-firing guard, confirming
+      genuine re-entry). So this finding is gated on the new live-only
+      `DatabaseCatalog.IsRecursiveTriggersEnabled`
+      (`sys.databases.is_recursive_triggers_on`, wired into
+      `LiveCatalogReader` the same way `CompatibilityLevel` already is) and
+      only fires when that is live-confirmed `true` - `FindingConfidence.Medium`.
+      Checked directly against the local test database: `RECURSIVE_TRIGGERS`
+      is OFF there, so this kind correctly reports zero findings against it -
+      an honest, live-confirmed absence of risk, not a scanner gap.
 
 ### D. Cross-module analysis — the differentiator nobody in either family has
-- [ ] **Inconsistent lock ordering across modules** — proc A writes T1 then T2,
-      proc B writes T2 then T1: the textbook deadlock, invisible until two
-      users hit both at once in production, and provable statically from write
-      targets in call-graph order. We already build a proc call graph and
-      already extract DML targets. Precision is the whole problem — it must
-      account for transaction boundaries (only writes inside the same
-      transaction can deadlock) and reachability through the call graph — so
-      scope v1 tightly: explicit transactions, direct DML targets, base tables
-      only. Nothing surveyed in either family attempts this, and it is the kind
-      of finding that makes the case for static analysis over a live-server
-      script better than any single-statement rule can.
+- [x] **Inconsistent lock ordering across modules** — shipped 2026-08-18 as
+      `CrossModuleLockOrderFinding`/`CrossModuleLockOrderScanner`, a whole-scan
+      pass (not per-file - the same table pair can be written in opposite
+      order by two procedures living in different files). **Deliberately
+      scoped down from the full call-graph-reachable version this item first
+      sketched**: v1 compares only pairs of TOP-LEVEL stored procedures' own
+      DIRECT bodies, never transitively through a nested `EXEC` call to a
+      third procedure. T-SQL has no way for one procedure's body to be
+      textually nested inside another's, so two top-level procedures are
+      unconditionally "separate entry points a client could call
+      independently" by construction - the full-reachability version's own
+      "nested inside the other's call graph" exclusion is automatically
+      satisfied without walking `ProcCallGraph` at all for this v1; a future
+      v2 could extend this through the call graph, left as an explicit
+      scope-down, not a soundness gap in what IS reported. Every pair
+      reported is two real top-level procedures' own real direct write order.
+      Precision guards, all direct AST/catalog facts: only a direct
+      `INSERT`/`UPDATE`/`DELETE`/`MERGE` target counts as a write (never
+      through a view or dynamic SQL); only a base table (`CatalogTableKind.
+      Table`) - never a temp table/table variable, private per session and
+      structurally unable to deadlock across sessions; only writes inside an
+      explicit transaction the procedure's own body opens (`BEGIN
+      TRANSACTION`...`COMMIT`/`ROLLBACK`, open-transaction-depth tracked
+      exactly like the shipped `WaitForScanner`'s own convention) - a write
+      outside any transaction commits individually and cannot hold one
+      table's lock while waiting on another's the way this deadlock shape
+      requires. `FindingConfidence.Medium`: the write-order fact itself is
+      mechanical and exact, but this is a static deadlock-RISK claim, not a
+      runtime guarantee - actual deadlocking additionally needs both
+      procedures to interleave in the unlucky order at the same real moment,
+      real row-level lock granularity (two transactions writing disjoint rows
+      of the same two tables in opposite statement order do not actually
+      conflict), and neither procedure to already hold a lock hierarchy that
+      prevents the interleaving - none of which static source text can see.
+      No plan-XML oracle needed for the static claim itself (pure call-graph/
+      AST analysis, per this item's own framing) - the underlying deadlock
+      mechanism is textbook SQL Server lock-ordering behavior, not something
+      this project needed to re-derive.
+
+**Design-time decidability of the five items shipped 2026-08-18 (§C/§D)**:
+every one is schema-decidable or code-only - `DirectRecursiveTrigger` needs
+the connected database's own `RECURSIVE_TRIGGERS` option
+(`DatabaseCatalog.IsRecursiveTriggersEnabled`), a database property, not a
+data value, live-mode only; every other kind in both streams runs in both
+file and live mode. None of the five is data-state-decidable or
+workload-decidable.
+
+**Real coverage, measured 2026-08-18 via `scan-db` against the local test
+database**: [PLACEHOLDER - filled in from the real scan-db run below].
 
 ---
 

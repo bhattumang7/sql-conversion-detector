@@ -401,6 +401,18 @@ public sealed class DatabaseCatalog
     /// </summary>
     public int? CompatibilityLevel { get; set; }
 
+    /// <summary>
+    /// The connected database's own <c>sys.databases.is_recursive_triggers_on</c> - live-mode
+    /// only, same "live-only, never guessed" shape as <see cref="CompatibilityLevel"/>. T-SQL
+    /// silently no-ops a trigger's own direct self-recursion (an INSERT/UPDATE/DELETE inside a
+    /// trigger targeting the exact table the trigger itself fires on) unless this database option
+    /// is ON - so <see cref="Predicates.TriggerCorrectnessScanner"/>'s own
+    /// <see cref="Predicates.TriggerCorrectnessFindingKind.DirectRecursiveTrigger"/> kind only
+    /// fires when this is provably true; null (file-mode, or a live scan that never read it) means
+    /// the finding stays unreported rather than overclaiming a risk that may not be live.
+    /// </summary>
+    public bool? IsRecursiveTriggersEnabled { get; set; }
+
     /// <summary>Everything Pass 1 saw but could not resolve into catalog data - never silently dropped.</summary>
     public SkipLedger Skipped { get; } = new();
 

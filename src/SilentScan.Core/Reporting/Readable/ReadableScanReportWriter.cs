@@ -130,6 +130,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
+        blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
+        blocks.AddRange(CrossModuleLockOrder(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -200,6 +202,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
         AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
+        AddCount(counts, "Trigger correctness", report.TriggerCorrectnessFindings.Count);
+        AddCount(counts, "Cross-module lock ordering", report.CrossModuleLockOrderFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1132,6 +1136,50 @@ public static class ReadableScanReportWriter
                 f.TableQualifiedName,
                 f.IndexName ?? "<unnamed>",
                 string.Join(", ", f.UncoveredColumns),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TriggerCorrectness(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TriggerCorrectnessFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Trigger correctness ({report.TriggerCorrectnessFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A variable assigned from a single, unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed to silently bind an arbitrary row's value (and discard the rest) the moment the trigger's own DML affects more than one row - plus the sharper sub-kind where that value then drives a keyed UPDATE/DELETE straight-line in the same trigger body; a trigger with no IF NOT EXISTS/@@ROWCOUNT-style early-out guard (advisory, low confidence); and a trigger that writes directly back to its own target table, only reported when the connected database's own RECURSIVE_TRIGGERS option is live-confirmed on (oracle-confirmed the write genuinely re-fires the trigger rather than silently no-oping in that case).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Trigger", "Kind", "Detail"],
+            [.. report.TriggerCorrectnessFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TriggerQualifiedName,
+                f.Kind.ToString(),
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CrossModuleLockOrder(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CrossModuleLockOrderFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Cross-module lock ordering ({report.CrossModuleLockOrderFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Two top-level procedures' own direct explicit-transaction write orders disagree on the relative lock order of the same two base tables - the textbook cross-session deadlock shape. V1 scope: direct DML targets only (never through a view or dynamic SQL), base tables only, writes inside an explicit BEGIN TRANSACTION only, and only top-level procedures' own direct bodies (not traced transitively through the call graph) - see the finding's own doc comment for the full precision story.");
+
+        yield return new ReadableBlock.Table(
+            ["First table", "Second table", "Writes first-then-second", "Writes second-then-first"],
+            [.. report.CrossModuleLockOrderFindings.Select(f => new List<string>
+            {
+                f.FirstTableQualifiedName,
+                f.SecondTableQualifiedName,
+                $"{f.FirstTableFirstOrdering.ProcedureQualifiedName} ({Where(f.FirstTableFirstOrdering.SourcePath, f.FirstTableFirstOrdering.FirstWriteLine, dynamicSqlCallSite: null, pathBase, f.Confidence)})",
+                $"{f.SecondTableFirstOrdering.ProcedureQualifiedName} ({Where(f.SecondTableFirstOrdering.SourcePath, f.SecondTableFirstOrdering.SecondWriteLine, dynamicSqlCallSite: null, pathBase, f.Confidence)})",
             })]);
     }
 

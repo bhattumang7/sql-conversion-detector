@@ -48,6 +48,11 @@ public static class SarifRuleCatalog
     public const string QueryAntiPatternUnboundedTableWriteRuleId = "silentscan/query/unbounded-table-write";
     public const string QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId = "silentscan/query/linked-server-or-cross-database-reference";
     public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
+    public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = "silentscan/trigger/multi-row-unsafe-single-row-assignment";
+    public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = "silentscan/trigger/multi-row-unsafe-keyed-dml";
+    public const string TriggerCorrectnessNoEarlyOutForEmptyInvocationRuleId = "silentscan/trigger/no-early-out-for-empty-invocation";
+    public const string TriggerCorrectnessDirectRecursiveTriggerRuleId = "silentscan/trigger/direct-recursive-trigger";
+    public const string CrossModuleLockOrderRuleId = "silentscan/cross-module/inconsistent-lock-order";
     public const string OversizedParameterRuleId = "silentscan/predicates/oversized-parameter";
     public const string UnderLengthParameterRuleId = "silentscan/predicates/under-length-parameter";
     public const string AnsiPaddingMismatchRuleId = "silentscan/predicates/ansi-padding-mismatch";
@@ -432,6 +437,15 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled IndexCoverageFindingKind."),
     };
 
+    public static string TriggerCorrectnessRuleId(TriggerCorrectnessFindingKind kind) => kind switch
+    {
+        TriggerCorrectnessFindingKind.MultiRowUnsafeSingleRowAssignment => TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId,
+        TriggerCorrectnessFindingKind.MultiRowUnsafeKeyedDml => TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId,
+        TriggerCorrectnessFindingKind.NoEarlyOutForEmptyInvocation => TriggerCorrectnessNoEarlyOutForEmptyInvocationRuleId,
+        TriggerCorrectnessFindingKind.DirectRecursiveTrigger => TriggerCorrectnessDirectRecursiveTriggerRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled TriggerCorrectnessFindingKind."),
+    };
+
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
     {
         UntrustedConstraintFindingKind.ForeignKey => UntrustedForeignKeyRuleId,
@@ -590,6 +604,11 @@ public static class SarifRuleCatalog
             Rule(QueryAntiPatternUnboundedTableWriteRuleId, "An UPDATE/DELETE has no WHERE clause and no TOP - a whole-table write with no row-limiting mechanism at all. Advisory: a deliberate full-table maintenance statement is a legitimate reason this fires."),
             Rule(QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId, "A table reference names a remote linked server (4-part name) or a different database than the one this scan connected to (3-part name) - remote/cross-database statistics are usually unavailable to the optimizer, so any cardinality estimate involving one is close to a guess."),
             Rule(IndexCoverageKeyLookupProneIndexRuleId, "A WHERE-equality seek against a table's own single candidate nonclustered index does not cover every other column the statement references on that table - oracle-confirmed via real plan XML that this shape produces a Key/RID Lookup (Lookup=\"1\") per matched row, and that widening the index to cover those columns removes it."),
+            Rule(TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId, "A variable is assigned from a single, unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed the engine silently binds one arbitrary row's value and discards the rest whenever the trigger's own multi-row DML fires it more than once."),
+            Rule(TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId, "The same unsafe single-row inserted/deleted assignment, where the resulting variable then drives a keyed UPDATE/DELETE straight-line in the same trigger body - the arbitrary single value ends up actually written back instead of every affected row."),
+            Rule(TriggerCorrectnessNoEarlyOutForEmptyInvocationRuleId, "A trigger body has no IF NOT EXISTS(SELECT * FROM inserted/deleted)/IF @@ROWCOUNT = 0 RETURN-style guard - a well-documented convention to skip unnecessary work on an empty invocation, advisory only."),
+            Rule(TriggerCorrectnessDirectRecursiveTriggerRuleId, "A trigger writes directly back to its own target table while the connected database's own RECURSIVE_TRIGGERS option is live-confirmed ON - oracle-confirmed this actually re-fires the trigger rather than silently no-oping."),
+            Rule(CrossModuleLockOrderRuleId, "Two top-level procedures' own direct explicit-transaction write orders disagree on the relative lock order of the same two base tables - the textbook cross-session deadlock shape."),
             Rule(OversizedParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate."),
             Rule(UnderLengthParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding's identical class of concern."),
             Rule(AnsiPaddingMismatchRuleId, "A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace - the column can never store a value ending in whitespace at all (stripped at INSERT time under ANSI_PADDING OFF), so the pattern can never match anything the column could ever contain. Data-semantics finding, not a plan-shape one."),

@@ -100,6 +100,8 @@ public static class SarifReportWriter
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
         results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
         results.AddRange(report.IndexCoverageFindings.Select(ToResult));
+        results.AddRange(report.TriggerCorrectnessFindings.Select(ToResult));
+        results.AddRange(report.CrossModuleLockOrderFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -1079,6 +1081,44 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}' via index '{finding.IndexName ?? "<unnamed>"}' ({string.Join(", ", finding.IndexKeyColumns)}) does not cover ({string.Join(", ", finding.UncoveredColumns)}) - a matched row needs a Key/RID Lookup back to the base table.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(TriggerCorrectnessFinding finding)
+    {
+        // MultiRowUnsafe* are oracle-confirmed silent-wrong-value engine facts, same tier as the
+        // shipped WriteLossFinding stream - error. NoEarlyOutForEmptyInvocation is genuinely
+        // advisory (Low confidence by construction) - note. DirectRecursiveTrigger only ever
+        // fires once the gating live database option is confirmed on, a real mechanical fact once
+        // gated - warning (not error: whether the recursive branch is ever actually reached at
+        // runtime is real control-flow this pass cannot fully resolve, per its own doc comment).
+        var baseLevel = finding.Kind switch
+        {
+            TriggerCorrectnessFindingKind.MultiRowUnsafeSingleRowAssignment => LevelError,
+            TriggerCorrectnessFindingKind.MultiRowUnsafeKeyedDml => LevelError,
+            TriggerCorrectnessFindingKind.NoEarlyOutForEmptyInvocation => LevelNote,
+            TriggerCorrectnessFindingKind.DirectRecursiveTrigger => LevelWarning,
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled TriggerCorrectnessFindingKind."),
+        };
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerCorrectnessRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(CrossModuleLockOrderFinding finding)
+    {
+        // A static deadlock-RISK claim, not a runtime guarantee (the finding's own doc comment
+        // spells out everything real interleaving/row-granularity this pass cannot see) -
+        // warning, floored by confidence like every other stream.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CrossModuleLockOrderRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var first = finding.FirstTableFirstOrdering;
+        var second = finding.SecondTableFirstOrdering;
+        var message =
+            $"'{first.ProcedureQualifiedName}' ({first.SourcePath}:{first.FirstWriteLine}) writes '{finding.FirstTableQualifiedName}' then '{finding.SecondTableQualifiedName}' (line {first.SecondWriteLine}) inside an explicit transaction, but " +
+            $"'{second.ProcedureQualifiedName}' ({second.SourcePath}:{second.SecondWriteLine}) writes them in the opposite order ('{finding.SecondTableQualifiedName}' at line {second.SecondWriteLine} then '{finding.FirstTableQualifiedName}' at line {second.FirstWriteLine}) - the textbook cross-session deadlock shape.";
+
+        return BuildResult(ruleId, level, message, first.SourcePath, first.ProcedureLine, startColumn: null);
     }
 
     private static SarifResult ToResult(TempTableExecShapeFinding finding)

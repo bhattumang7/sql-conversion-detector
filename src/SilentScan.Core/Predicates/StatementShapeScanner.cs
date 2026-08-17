@@ -94,6 +94,13 @@ public static class StatementShapeScanner
             ExitRoutine();
         }
 
+        public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
+        {
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StartColumn);
+            base.ExplicitVisit(node);
+            ExitRoutine();
+        }
+
         public override void ExplicitVisit(CreateTriggerStatement node)
         {
             EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), node.StartLine, node.StartColumn);
@@ -102,6 +109,13 @@ public static class StatementShapeScanner
         }
 
         public override void ExplicitVisit(AlterTriggerStatement node)
+        {
+            EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), node.StartLine, node.StartColumn);
+            base.ExplicitVisit(node);
+            ExitRoutine();
+        }
+
+        public override void ExplicitVisit(CreateOrAlterTriggerStatement node)
         {
             EnterRoutine(SchemaObjectNameHelper.Qualify(node.Name), node.StartLine, node.StartColumn);
             base.ExplicitVisit(node);
