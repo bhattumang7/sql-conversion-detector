@@ -124,6 +124,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(DeprecatedSyntax(report, headingLevel, pathBase));
         blocks.AddRange(StatementShape(report, headingLevel, pathBase));
         blocks.AddRange(ControlFlowRisk(report, headingLevel, pathBase));
+        blocks.AddRange(Security(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -188,6 +189,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Task comments and deprecated syntax", report.DeprecatedSyntaxFindings.Count);
         AddCount(counts, "Statement-shape risks", report.StatementShapeFindings.Count);
         AddCount(counts, "Cursor and control-flow risks", report.ControlFlowRiskFindings.Count);
+        AddCount(counts, "Security", report.SecurityFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -970,6 +972,27 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],
             [.. report.ControlFlowRiskFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> Security(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SecurityFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Security ({report.SecurityFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A credential-suggestive-named variable assigned a literal string, a hardcoded non-benign IP address, a HASHBYTES call naming a weak/deprecated algorithm (general use and, sharper, a security-sensitive context), and a dynamic SQL call site whose assembled text this tool cannot prove is free of runtime/external influence.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.SecurityFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),

@@ -192,6 +192,16 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
+    public static string SecurityRuleId(SecurityFindingKind kind) => kind switch
+    {
+        SecurityFindingKind.HardCodedCredential => "silentscan/security/hard-coded-credential",
+        SecurityFindingKind.HardCodedIpAddress => "silentscan/security/hard-coded-ip-address",
+        SecurityFindingKind.WeakHashAlgorithm => "silentscan/security/weak-hash-algorithm",
+        SecurityFindingKind.WeakHashAlgorithmInSensitiveContext => "silentscan/security/weak-hash-algorithm-sensitive-context",
+        SecurityFindingKind.UnprovableDynamicSqlText => "silentscan/security/unprovable-dynamic-sql-text",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
     public static string ViewOrderingRuleId(ViewOrderingFindingKind kind) => kind switch
     {
         ViewOrderingFindingKind.TopPercentOrderByNeverLimits => "silentscan/view/top-percent-order-by-no-op",
@@ -602,6 +612,11 @@ public static class SarifRuleCatalog
             Rule(ControlFlowRiskDirtyReadIsolationHintRuleId, "NOLOCK/READUNCOMMITTED allows dirty reads and can miss or double-count rows during a concurrent page split."),
             Rule(ControlFlowRiskDuplicatedCallArgumentRuleId, "The same non-literal expression is passed as two different arguments to the same call."),
             Rule(ControlFlowRiskLegacyIdentityIntrinsicRuleId, "@@IDENTITY returns the last identity value inserted in this session across any table/scope - prefer SCOPE_IDENTITY()."),
+            Rule(SecurityRuleId(SecurityFindingKind.HardCodedCredential), "A credential-suggestive-named variable/parameter is assigned a literal string value directly in source text - keep credentials in a secrets store or external configuration."),
+            Rule(SecurityRuleId(SecurityFindingKind.HardCodedIpAddress), "A string literal contains a hardcoded, non-benign IPv4 address - an environment-specific detail embedded in code."),
+            Rule(SecurityRuleId(SecurityFindingKind.WeakHashAlgorithm), "A HASHBYTES call names a cryptographically broken/deprecated algorithm (MD2/MD4/MD5/SHA/SHA1) - prefer SHA2_256/SHA2_512."),
+            Rule(SecurityRuleId(SecurityFindingKind.WeakHashAlgorithmInSensitiveContext), "A HASHBYTES call names a weak/deprecated algorithm in what looks like a security-sensitive context (a credential-named operand, or a direct comparison)."),
+            Rule(SecurityRuleId(SecurityFindingKind.UnprovableDynamicSqlText), "A dynamic SQL call site's assembled text depends on a variable/parameter/expression this tool cannot trace - it cannot be shown, from the code alone, to be free of runtime/external influence."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the

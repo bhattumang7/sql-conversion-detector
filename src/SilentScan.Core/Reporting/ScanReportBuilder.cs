@@ -817,6 +817,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<SecurityFinding> securityFindings;
+        using (var securityStage = progress.Begin("scanning security risks", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = SecurityScanner.Scan(r);
+                    securityStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            securityFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1048,6 +1066,9 @@ public static class ScanReportBuilder
             .ThenBy(f => f.Line)
             .ThenBy(f => f.Column)];
         dynamicSqlFindings = [.. dynamicSqlFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
+        securityFindings = [.. securityFindings, .. SecurityScanner.FromDynamicSqlFindings(dynamicSqlFindings)];
+        securityFindings = [.. securityFindings
+            .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)];
         typedFindings = [.. typedFindings
             .OrderBy(f => VerdictRank(f.Verdict))
             .ThenByDescending(f => f.Column.Indexed)
@@ -1124,6 +1145,7 @@ public static class ScanReportBuilder
             deprecatedSyntaxFindings,
             statementShapeFindings,
             controlFlowRiskFindings,
+            securityFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

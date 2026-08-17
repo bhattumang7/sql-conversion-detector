@@ -34,6 +34,7 @@ public sealed class SarifReportWriterTests
             + report.NamingFindings.Count + report.DeadCodeFindings.Count + report.DuplicationFindings.Count + report.DeprecatedSyntaxFindings.Count
             + report.StatementShapeFindings.Count
             + report.ControlFlowRiskFindings.Count
+            + report.SecurityFindings.Count
             // DatabaseConfigurationFindings is live-mode only, but EngineAuthoritativeScan
             // genuinely runs the full LiveScanRunner pipeline (see its own doc comment) against a
             // real disposable database - and every such database has Query Store deliberately
@@ -59,6 +60,7 @@ public sealed class SarifReportWriterTests
                 "test.sql",
                 1,
                 1)],
+            [],
             [],
             [],
             [],
@@ -200,6 +202,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -226,6 +229,7 @@ public sealed class SarifReportWriterTests
                 5,
                 [new TransformationSite("vw_outer.sql", 3, "CAST/CONVERT to Int"), new TransformationSite("vw_inner.sql", 2, "CAST/CONVERT to VarChar(20)")],
                 [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)])],
+            [],
             [],
             [],
             [],
@@ -364,6 +368,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -383,6 +388,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)],
+            [],
             [],
             [],
             [],
@@ -458,6 +464,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")],
+            [],
             [],
             [],
             [],
@@ -589,6 +596,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -616,6 +624,7 @@ public sealed class SarifReportWriterTests
                 5,
                 7,
                 new SourceSpan("test.sql", 4, 10))],
+            [],
             [],
             [],
             [],

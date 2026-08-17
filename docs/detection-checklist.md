@@ -4626,10 +4626,78 @@ exactly as originally scoped until its own turn comes up.
     nothing in it), and the `TriggerEmitsOutput` false positive itself
     (`dbo.tr_i_tblBreaksScheduled`) that led to the fix above — all three
     genuine, none invented.
-  * *Security* — dynamic code execution, hard-coded credentials, hard-coded IP
-    addresses, weak hash algorithms in general and in sensitive contexts.
-    Still separately tracked under Open scope questions below, since it's a
-    bigger axis question than this reopening covers.
+  * *Security* — **shipped.** New `SecurityFinding`/`SecurityScanner`
+    (`src/SilentScan.Core/Predicates/SecurityScanner.cs`), five kinds, no
+    catalog needed for four of them, no oracle needed for any (each is a
+    structural/pattern fact, not a plan-shape or runtime-behavior claim).
+    `HardCodedCredential`: a `DECLARE`/`SET`/`SELECT`-assigned local variable
+    or parameter whose own name is the whole word `password`/`passwd`/
+    `secret` (never a bare substring — see below) assigned a literal string
+    directly in source text. `HardCodedIpAddress`: a string literal
+    containing an IPv4-shaped address, excluding loopback, the all-zeros/
+    all-ones addresses, and the three IANA RFC 5737 TEST-NET documentation
+    ranges (independently derived from public IANA allocations, not copied
+    from any third party's own exclusion list). `WeakHashAlgorithm` /
+    `WeakHashAlgorithmInSensitiveContext`: a `HASHBYTES` call naming
+    MD2/MD4/MD5/SHA/SHA1 (cryptographically broken/deprecated per NIST/OWASP
+    guidance, independently verifiable, not vendor-specific) — the sharper
+    sensitive-context kind fires additionally when the hashed value is a
+    credential-suggestive-named operand or the call sits inside a direct
+    comparison predicate. `UnprovableDynamicSqlText`: reuses the
+    already-shipped, already-oracle-backed dynamic-SQL pipeline's own
+    `DynamicSqlOutcome.Unanalyzable` classification (a call site whose
+    argument depends on a variable/parameter/expression this pass never
+    guesses at) rather than duplicating its reaching-definitions machinery —
+    the SECURITY framing of exactly the cases the already-shipped,
+    PERFORMANCE-framed `UnparameterizedDynamicSqlFinding` stream declines to
+    analyze further (that stream only fires on the OPPOSITE case: a value
+    proven constant but still spliced via concatenation instead of a real
+    parameter). Deduplicated by (SourcePath, Line, Column): the source
+    pipeline's own multi-round reparse fixpoint loop can revisit and
+    re-report the same unanalyzable call site several times across rounds —
+    measured up to 18x for one real call site before deduplication.
+    <br><br>
+    **Two real false positives caught by spot-checking real findings against
+    real module text before shipping, both load-bearing for the final
+    `HardCodedCredential` word list.** A first version matched `password`/
+    `passwd`/`pwd`/`secret` as a bare case-insensitive SUBSTRING of a
+    variable's name and immediately false-positived on real local-database
+    variables: `@VehInOpWD` ("Operating WeekDays") and `@DaysOpWD` both
+    happen to CONTAIN the letters "pwd" purely as an accident of camelCase
+    concatenation (`...Op` + `WD...`). Fixed by requiring a real
+    camelCase/PascalCase/underscore-delimited WHOLE-WORD token match instead
+    of a substring one — but that alone still left `@GetPWDTrips` (a real,
+    unrelated paratransit-domain term in this corpus, "Persons/People With
+    Disabilities" trips) matching, since "PWD" genuinely tokenizes as its
+    own whole word there. Concluded a bare 3-letter "pwd" abbreviation is
+    inherently too ambiguous across domains to include at all, even as a
+    whole-word match, and dropped it from the list entirely, keeping only
+    the unambiguous full spellings (`password`/`passwd`/`secret`).
+    <br><br>
+    `FindingConfidence.High` for the structurally-unambiguous kinds
+    (`HardCodedIpAddress`, `WeakHashAlgorithm`), `Medium` for the
+    sharper-but-context-dependent kinds (`WeakHashAlgorithmInSensitiveContext`,
+    `UnprovableDynamicSqlText` — neither this pass nor its host tool ever
+    traces as far as an actual external-input boundary), `Low` for
+    `HardCodedCredential` specifically (name-based matching always carries
+    real residual false-positive risk even after the fix above — reported as
+    a lead worth checking, not a confirmed finding). Wired end-to-end
+    (`ScanReport` schema version 45 → 46, SARIF rule catalog + writer,
+    readable-report section). Unit-tested (`SecurityScannerTests`, 19 cases
+    including both real false-positive regressions above). **Real coverage
+    against the local RM_ test database: 242 findings** (241
+    `UnprovableDynamicSqlText`, 1 `WeakHashAlgorithm`; 0
+    `HardCodedCredential`/`HardCodedIpAddress`/`WeakHashAlgorithmInSensitiveContext`
+    — real, honest zeros after the false-positive fix above, not a detection
+    gap). Both a `WeakHashAlgorithm` hit and an `UnprovableDynamicSqlText`
+    hit spot-checked directly against real module text and confirmed genuine
+    true positives (`dbo.spImportFixedRouteData3`'s own code comment
+    explicitly describes hashing text for a non-security dedup purpose,
+    correctly classified as general-use not sensitive-context;
+    `dbo.spAddressSearch`'s `EXEC(@SQL_Statement)` where `@SQL_Statement` is
+    built up dynamically, not provably constant). Also updates the "Open
+    scope questions" section below — security is no longer merely "not built
+    yet."
   * *Missing/ambiguous `ELSE`* — `IF`/`CASE` with no `ELSE` where a sibling
     has one, and the closely related dangling-`IF`-on-a-shared-line ambiguity.
   * `GOTO` usage.
@@ -4693,10 +4761,17 @@ exactly as originally scoped until its own turn comes up.
 
 Resolved by the scope rule above (2026-08-16): security/compliance/
 correctness rules are in scope on the same basis as everything else —
-detectable from code and schema, so admissible. Not built yet; goes in the
-same reopened queue as Tier 4. The old open question here was whether
-CLAUDE.md's identity statement covered this axis at all — it does now, since
-the identity statement itself changed.
+detectable from code and schema, so admissible. The old open question here
+was whether CLAUDE.md's identity statement covered this axis at all — it
+does now, since the identity statement itself changed.
+
+**Shipped 2026-08-17** (four of the concepts the incumbent read below
+surveys): hard-coded credentials, hard-coded IP addresses, weak hash
+algorithms (general and sensitive-context use), and dynamic SQL this tool
+cannot prove is free of runtime/external influence — see Tier 4's own
+"Security" sub-bullet above (`SecurityFinding`/`SecurityScanner`) for the
+full write-up, real numbers, and the two real false-positive fixes that
+shaped the final `HardCodedCredential` word list.
 
 Incumbent security rule lists for reference: `detection-reference.md`
 Appendix 7 §7.4.

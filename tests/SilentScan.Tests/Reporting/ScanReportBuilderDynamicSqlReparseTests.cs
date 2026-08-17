@@ -126,15 +126,17 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // "Statement-shape advice"); +1 for the new ControlFlowRiskScanner full-corpus pass
         // (docs/detection-checklist.md Tier 4 "Cursor and control-flow correctness": cursor
         // FETCH/column-count mismatch, empty CATCH block, trigger output, dirty-read isolation
-        // hint, duplicated call argument, @@IDENTITY). Reverting to re-enumerating per round
-        // pushes this fixture's 3 rounds well past that. 42 sits strictly between the two
-        // (measured 42 with every fix/stream landed to date), so this fails the moment the loop
-        // stops reusing its one materialization and starts scaling with round count again, while
-        // still tolerating a future +/-1 shift from unrelated changes elsewhere in the method
-        // (e.g. the next new full-corpus stream).
+        // hint, duplicated call argument, @@IDENTITY); +1 for the new SecurityScanner full-corpus
+        // pass (docs/detection-checklist.md Tier 4 "Security": hard-coded credential, hard-coded
+        // IP address, weak hash algorithm general/sensitive-context, unprovable dynamic SQL text).
+        // Reverting to re-enumerating per round pushes this fixture's 3 rounds well past that. 43
+        // sits strictly between the two (measured 43 with every fix/stream landed to date), so this
+        // fails the moment the loop stops reusing its one materialization and starts scaling with
+        // round count again, while still tolerating a future +/-1 shift from unrelated changes
+        // elsewhere in the method (e.g. the next new full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 42,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 42 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 43,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 43 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

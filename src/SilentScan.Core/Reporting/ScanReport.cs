@@ -62,6 +62,7 @@ public sealed record ScanReport(
     IReadOnlyList<DeprecatedSyntaxFinding> DeprecatedSyntaxFindings,
     IReadOnlyList<StatementShapeFinding> StatementShapeFindings,
     IReadOnlyList<ControlFlowRiskFinding> ControlFlowRiskFindings,
+    IReadOnlyList<SecurityFinding> SecurityFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -212,5 +213,10 @@ public sealed record ScanReport(
     /// checklist.md Tier 4 "Cursor and control-flow correctness"): a cursor FETCH whose INTO list
     /// doesn't match its own defining SELECT's column count, an empty CATCH block, output emitted
     /// from a trigger, a dirty-read isolation hint, duplicated call arguments, and @@IDENTITY.
-    public const int CurrentSchemaVersion = 45;
+    /// Bumped to 46 for the new <see cref="SecurityFindings"/> stream (docs/detection-checklist.md
+    /// Tier 4 "Security"): a hard-coded credential-suggestive variable assigned a literal, a
+    /// hard-coded IP address, a HASHBYTES call naming a weak/deprecated algorithm (general use and
+    /// sensitive-context use), and a dynamic SQL call site this tool cannot prove is free of
+    /// runtime/external influence.
+    public const int CurrentSchemaVersion = 46;
 }

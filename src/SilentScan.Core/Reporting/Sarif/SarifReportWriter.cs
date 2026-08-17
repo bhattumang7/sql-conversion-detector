@@ -94,6 +94,7 @@ public static class SarifReportWriter
         results.AddRange(report.DeprecatedSyntaxFindings.Select(ToResult));
         results.AddRange(report.StatementShapeFindings.Select(ToResult));
         results.AddRange(report.ControlFlowRiskFindings.Select(ToResult));
+        results.AddRange(report.SecurityFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -563,6 +564,22 @@ public static class SarifReportWriter
         // wrong result in isolation.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ControlFlowRiskRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch or ControlFlowRiskFindingKind.EmptyCatchBlock
+            ? LevelError
+            : LevelWarning;
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(SecurityFinding finding)
+    {
+        // Error for the two structurally-unambiguous, hard-fact kinds (a hardcoded non-benign IP
+        // address; a HASHBYTES call naming a weak algorithm outright) - the same tier
+        // ControlFlowRiskFinding uses for its own hard-fact kinds. Warning for the sharper but
+        // context-dependent/name-based kinds, since none of these is a provable vulnerability in
+        // isolation - this pass never traces as far as an actual external-input boundary.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SecurityRuleId(finding.Kind), finding.Confidence);
+        var baseLevel = finding.Kind is SecurityFindingKind.HardCodedIpAddress or SecurityFindingKind.WeakHashAlgorithm
             ? LevelError
             : LevelWarning;
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
