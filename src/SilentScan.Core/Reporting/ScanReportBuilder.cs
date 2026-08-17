@@ -878,16 +878,7 @@ public static class ScanReportBuilder
                 .AsParallel()
                 .SelectMany(r =>
                 {
-                    IReadOnlyList<FloatEqualityFinding> findings;
-                    try
-                    {
-                        findings = FloatEqualityPredicateScanner.Scan(r, catalog);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine($"DIAG float-equality crash in {r.SourcePath}: {ex}");
-                        throw;
-                    }
+                    var findings = FloatEqualityPredicateScanner.Scan(r, catalog);
                     floatEqualityStage.Advance();
                     return findings;
                 })
