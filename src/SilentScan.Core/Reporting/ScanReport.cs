@@ -54,6 +54,7 @@ public sealed record ScanReport(
     IReadOnlyList<OutputParameterFinding> OutputParameterFindings,
     IReadOnlyList<DatabaseConfigurationFinding> DatabaseConfigurationFindings,
     IReadOnlyList<ParameterReassignmentPredicateFinding> ParameterReassignmentPredicateFindings,
+    IReadOnlyList<CodeMetricFinding> CodeMetricFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -158,6 +159,10 @@ public sealed record ScanReport(
     /// (docs/detection-checklist.md "Catch-all / kitchen-sink predicates" sibling: "parameter
     /// overwritten before use in a predicate" - a formal parameter reassigned on every path
     /// reaching a later predicate use of the same name, defeating the compile-time sniffed value).
+    /// Bumped to 37 for the new <see cref="CodeMetricFindings"/> stream (docs/detection-
+    /// checklist.md Tier 4 "Size and complexity metrics" - eight configurable-threshold
+    /// structural metrics: line length, module length, routine length, parameter count, nesting
+    /// depth, conditional-operator count, CASE branch count, CASE branch length).
     /// </summary>
-    public const int CurrentSchemaVersion = 36;
+    public const int CurrentSchemaVersion = 37;
 }

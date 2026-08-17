@@ -36,6 +36,14 @@ public static class SarifRuleCatalog
     public const string CatchAllPredicateRuleId = "silentscan/predicates/catch-all-parameter";
     public const string LocalVariablePredicateRuleId = "silentscan/predicates/local-variable-predicate";
     public const string ParameterReassignmentPredicateRuleId = "silentscan/predicates/reassigned-parameter";
+    public const string CodeMetricLineTooLongRuleId = "silentscan/metrics/line-too-long";
+    public const string CodeMetricModuleTooLongRuleId = "silentscan/metrics/module-too-long";
+    public const string CodeMetricRoutineTooLongRuleId = "silentscan/metrics/routine-too-long";
+    public const string CodeMetricTooManyParametersRuleId = "silentscan/metrics/too-many-parameters";
+    public const string CodeMetricNestingTooDeepRuleId = "silentscan/metrics/nesting-too-deep";
+    public const string CodeMetricTooManyConditionalOperatorsRuleId = "silentscan/metrics/too-many-conditional-operators";
+    public const string CodeMetricTooManyCaseBranchesRuleId = "silentscan/metrics/too-many-case-branches";
+    public const string CodeMetricCaseBranchTooLongRuleId = "silentscan/metrics/case-branch-too-long";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -163,6 +171,19 @@ public static class SarifRuleCatalog
         ForcedSerialFindingKind.FastForwardCursor => ForcedSerialFastForwardCursorRuleId,
         ForcedSerialFindingKind.NonParallelizableIntrinsic => ForcedSerialNonParallelizableIntrinsicRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ForcedSerialFindingKind."),
+    };
+
+    public static string CodeMetricRuleId(CodeMetricFindingKind kind) => kind switch
+    {
+        CodeMetricFindingKind.LineTooLong => CodeMetricLineTooLongRuleId,
+        CodeMetricFindingKind.ModuleTooLong => CodeMetricModuleTooLongRuleId,
+        CodeMetricFindingKind.RoutineTooLong => CodeMetricRoutineTooLongRuleId,
+        CodeMetricFindingKind.TooManyParameters => CodeMetricTooManyParametersRuleId,
+        CodeMetricFindingKind.NestingTooDeep => CodeMetricNestingTooDeepRuleId,
+        CodeMetricFindingKind.TooManyConditionalOperators => CodeMetricTooManyConditionalOperatorsRuleId,
+        CodeMetricFindingKind.TooManyCaseBranches => CodeMetricTooManyCaseBranchesRuleId,
+        CodeMetricFindingKind.CaseBranchTooLong => CodeMetricCaseBranchTooLongRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled CodeMetricFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -364,6 +385,14 @@ public static class SarifRuleCatalog
             Rule(SetOptionRuleId(SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature), "An explicit SET ANSI_WARNINGS OFF in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature), "An explicit SET CONCAT_NULL_YIELDS_NULL OFF in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(ParameterReassignmentPredicateRuleId, "A formal parameter is reassigned (SET/SELECT) on every statically reachable path before a later predicate use of the same name - the optimizer's compile-time SNIFFED value (from the caller's original argument) is provably stale by the time this predicate executes, unlike a plain DECLARE'd local (which was never sniffable at all). The predicate is still fully sargable; only the row-count ESTIMATE built from the sniffed value is at risk. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE."),
+            Rule(CodeMetricLineTooLongRuleId, "A physical source line exceeds the configured maximum character length. Purely a readability signal - no query result or plan is affected."),
+            Rule(CodeMetricModuleTooLongRuleId, "A module (or, in file-mode, a source file) exceeds the configured maximum line count. Purely a maintainability signal - no query result or plan is affected."),
+            Rule(CodeMetricRoutineTooLongRuleId, "A procedure/function/trigger body exceeds the configured maximum line count. Purely a maintainability signal - no query result or plan is affected."),
+            Rule(CodeMetricTooManyParametersRuleId, "A procedure/function declares more formal parameters than the configured maximum. Purely a maintainability signal - no query result or plan is affected."),
+            Rule(CodeMetricNestingTooDeepRuleId, "An IF/WHILE/TRY nests more than the configured maximum depth inside a routine. Purely a readability signal - no query result or plan is affected."),
+            Rule(CodeMetricTooManyConditionalOperatorsRuleId, "A single IF/WHILE condition chains more AND/OR operators than the configured maximum. Purely a readability signal - no query result or plan is affected."),
+            Rule(CodeMetricTooManyCaseBranchesRuleId, "A single CASE expression has more WHEN branches than the configured maximum. Purely a maintainability signal - no query result or plan is affected."),
+            Rule(CodeMetricCaseBranchTooLongRuleId, "A single CASE WHEN branch's result expression spans more lines than the configured maximum. Purely a readability signal - no query result or plan is affected."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

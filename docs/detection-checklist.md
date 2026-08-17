@@ -3488,13 +3488,75 @@ conversion, collation, or lineage-aware rule, or a plan oracle. Details in
 Was excluded for needing no catalog/lineage/oracle; that's no longer a reason
 to exclude anything (see CLAUDE.md's scope rule). Each item still needs its
 own fixture pair (fire + near-miss) before it ships, same as every rule here.
+Reopened for active work starting 2026-08-17 — sub-bullets get marked
+**shipped**/**closed** in place as each one lands, same discipline every
+other section of this file already uses; the rest of the bullet list stays
+exactly as originally scoped until its own turn comes up.
 
 - **The maintainability/correctness bulk of the paid-tier T-SQL analyzer read
   at source on 2026-08-16** — ~68 of its ~83 rules, grouped by theme:
-  * *Size and complexity metrics* — line length, file length, routine length,
-    parameter count, nesting depth, expression-operator count, branch count,
-    branch-body length. Configurable thresholds over the AST, no catalog
-    needed.
+  * *Size and complexity metrics — shipped (2026-08-17).* Eight
+    configurable-threshold structural metrics, one finding type
+    (`CodeMetricFinding`/`CodeMetricFindingKind`), no catalog, no oracle (a
+    line count or nesting depth is directly observable from the parse, never
+    a plan-shape or runtime-behavior claim) — `FindingConfidence.Low` on
+    every member (a real, measured structural fact, but no magnitude/cost
+    claim). Physical line text is reconstructed losslessly from each
+    fragment's own token stream rather than needing a separate raw-text side
+    channel.
+    <br><br>
+    **Real bug caught and fixed before shipping, not left latent:**
+    ScriptDOM's `ScriptTokenStream` is a single list shared by reference
+    across every fragment/sub-node from the same parse — only
+    `FirstTokenIndex`/`LastTokenIndex` mark which slice actually belongs to
+    a given fragment. An early version of the line-length/module-length
+    reconstruction ignored those bounds and concatenated the fragment's
+    entire (potentially much larger) shared stream. It happened not to
+    matter for *this* codebase's own one-module-per-parse live-mode
+    architecture (confirmed directly: `LiveScanRunner` calls
+    `SqlScriptParser.ParseText` once per module, so `FirstTokenIndex` is
+    already 0 for every top-level fragment today), but was still a latent
+    correctness bug the moment this scanner is ever pointed at a multi-object
+    parse result — fixed to slice by the fragment's own token range instead
+    of trusting an implicit "one parse, one fragment" assumption that isn't
+    actually guaranteed by the type itself. A genuinely enormous real
+    finding surfaced during calibration (a 48,621-character single line in
+    a real procedure — a commented-out sample `EXEC` call with a giant
+    inline literal ID list) was independently verified against the real
+    module text and confirmed correct, not a symptom of the bug above.
+    <br><br>
+    **Real thresholds, calibrated against the corpus's own measured
+    distribution** (via a zero-threshold probe pass across the whole local
+    test database, then picking a defensible cutoff selecting a small, real,
+    selective subset — the same discipline `NestedViewDepthScanner`'s N=2 and
+    `PostExpansionJoinWidthScanner`'s gap≥3 thresholds used):
+    * Line length: p50=32, p90=98, p95=120, p99=179 chars → threshold **200**
+      (selects well under 1% of all lines).
+    * Module length: p90=270, p95=614, p99=3,191 lines → threshold **1000**.
+    * Routine length: p90=293, p95=712, p99=3,596 lines → threshold **400**.
+    * Parameter count: p90=10, p95=20, p99=42 → threshold **15**.
+    * Nesting depth: p50=3, p75=7, p90=16, p95=30 (this corpus's own real
+      procedural T-SQL nests meaningfully deeper than conventional
+      general-purpose-language advice assumes) → threshold **10**, chosen to
+      stay a real, selective signal against this codebase's own actual
+      nesting habits rather than importing an unrelated-language convention
+      that would fire on nearly everything here.
+    * Conditional-operator (AND/OR) count in one IF/WHILE condition: p90=2,
+      p95=3, p99=4 → threshold **4**.
+    * CASE WHEN-branch count: p90=2, p95=3, p99=4 → threshold **5**.
+    * CASE WHEN-branch body length: p95=1, p99=6, p999=15 → threshold **5**.
+    <br><br>
+    Unit-tested (`CodeMetricScannerTests`, 18 cases: fire + near-miss for
+    all eight metrics using small custom thresholds for readable fixtures,
+    plus a real-CREATE-FUNCTION case and an all-defaults-never-fire sanity
+    case). Wired end-to-end (`ScanReport` schema version 36 → 37, SARIF rule
+    catalog + writer, readable report section). **Real coverage against the
+    local RM_ test database: 9,540 findings** (7,825 line-too-long, 503
+    nesting-too-deep, 316 routine-too-long, 309 too-many-parameters, 258
+    case-branch-too-long, 175 module-too-long, 113 too-many-case-branches,
+    41 too-many-conditional-operators) — every threshold genuinely
+    selective against this real corpus, none firing on a majority of the
+    codebase.
   * *Formatting and layout* — tab characters, one statement per line, one
     declaration per line, misleading indentation, a branch keyword sharing a
     line with the end of the previous block, missing `BEGIN…END` around a

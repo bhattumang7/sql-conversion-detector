@@ -86,6 +86,7 @@ public static class SarifReportWriter
         results.AddRange(report.OutputParameterFindings.Select(ToResult));
         results.AddRange(report.DatabaseConfigurationFindings.Select(ToResult));
         results.AddRange(report.ParameterReassignmentPredicateFindings.Select(ToResult));
+        results.AddRange(report.CodeMetricFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -373,6 +374,35 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ParameterReassignmentPredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} @{finding.ParameterName} - {finding.ParameterName} is a formal parameter reassigned at line {finding.ReassignmentLine} before this predicate runs, so the optimizer's compile-time sniffed value (the caller's original argument) is stale by the time this comparison executes. The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(CodeMetricFinding finding)
+    {
+        // Note, not warning/error: a pure maintainability/readability signal - no query result or
+        // plan is ever affected by any of these eight metrics.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CodeMetricRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            CodeMetricFindingKind.LineTooLong =>
+                $"Line is {finding.MeasuredValue} characters long, which is greater than the {finding.Threshold} authorized.",
+            CodeMetricFindingKind.ModuleTooLong =>
+                $"'{finding.ModuleQualifiedName}' has {finding.MeasuredValue} lines, which is greater than the {finding.Threshold} authorized.",
+            CodeMetricFindingKind.RoutineTooLong =>
+                $"{finding.DetailText} '{finding.ModuleQualifiedName}' has {finding.MeasuredValue} lines of code, which is greater than the {finding.Threshold} authorized.",
+            CodeMetricFindingKind.TooManyParameters =>
+                $"{finding.DetailText} '{finding.ModuleQualifiedName}' has {finding.MeasuredValue} parameters, which is greater than the {finding.Threshold} authorized.",
+            CodeMetricFindingKind.NestingTooDeep =>
+                $"Control flow nests {finding.MeasuredValue} levels deep here, which is greater than the {finding.Threshold} authorized.",
+            CodeMetricFindingKind.TooManyConditionalOperators =>
+                $"This condition chains {finding.MeasuredValue} AND/OR operators, which is greater than the {finding.Threshold} authorized.",
+            CodeMetricFindingKind.TooManyCaseBranches =>
+                $"This CASE expression has {finding.MeasuredValue} WHEN branches, which is greater than the {finding.Threshold} authorized.",
+            _ =>
+                $"This CASE WHEN branch spans {finding.MeasuredValue} lines, which is greater than the {finding.Threshold} authorized.",
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

@@ -116,6 +116,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(OutputParameter(report, headingLevel, pathBase));
         blocks.AddRange(DatabaseConfiguration(report, headingLevel, pathBase));
         blocks.AddRange(ParameterReassignmentPredicate(report, headingLevel, pathBase));
+        blocks.AddRange(CodeMetric(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -172,6 +173,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Catch-all / kitchen-sink optional-filter predicates", report.CatchAllPredicateFindings.Count);
         AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
         AddCount(counts, "Predicates against a reassigned formal parameter (sniffing defeated)", report.ParameterReassignmentPredicateFindings.Count);
+        AddCount(counts, "Size/complexity metric thresholds exceeded", report.CodeMetricFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -788,6 +790,29 @@ public static class ReadableScanReportWriter
                 f.Operator,
                 f.Indexed ? "yes" : "no",
                 $"line {f.ReassignmentLine}",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CodeMetric(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CodeMetricFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Size/complexity metric thresholds exceeded ({report.CodeMetricFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Purely a maintainability/readability signal - none of these eight metrics change a query's result or its plan. Every threshold is configurable; the defaults were calibrated against this codebase's own real corpus distribution, not invented arbitrarily.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Measured", "Threshold", "Detail"],
+            [.. report.CodeMetricFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.MeasuredValue.ToString(CultureInfo.InvariantCulture),
+                f.Threshold.ToString(CultureInfo.InvariantCulture),
+                f.DetailText ?? f.ModuleQualifiedName,
             })]);
     }
 

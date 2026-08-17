@@ -672,6 +672,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<CodeMetricFinding> codeMetricFindings;
+        using (var codeMetricStage = progress.Begin("scanning size/complexity metrics", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = CodeMetricScanner.Scan(r);
+                    codeMetricStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            codeMetricFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -971,6 +989,7 @@ public static class ScanReportBuilder
             // TempTableExecShapeFindings already established.
             [],
             parameterReassignmentPredicateFindings,
+            codeMetricFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

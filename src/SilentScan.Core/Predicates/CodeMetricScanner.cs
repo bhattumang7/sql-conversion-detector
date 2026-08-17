@@ -1,0 +1,311 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Parsing;
+
+namespace SilentScan.Core.Predicates;
+
+/// <summary>Configurable thresholds for <see cref="CodeMetricScanner"/> - every default calibrated
+/// against the real local test database's own measured distribution (docs/detection-checklist.md
+/// records the real numbers), not an arbitrarily invented cutoff.</summary>
+public sealed record CodeMetricThresholds(
+    int MaxLineLength = 200,
+    int MaxModuleLines = 1000,
+    int MaxRoutineLines = 400,
+    int MaxParameters = 15,
+    int MaxNestingDepth = 10,
+    int MaxConditionalOperators = 4,
+    int MaxCaseBranches = 5,
+    int MaxCaseBranchLines = 5)
+{
+    public static readonly CodeMetricThresholds Default = new();
+}
+
+/// <summary>
+/// docs/detection-checklist.md Tier 4 "Size and complexity metrics" - eight configurable-threshold
+/// structural metrics over the AST. Fully syntax-only: no <see cref="Catalog.DatabaseCatalog"/>,
+/// no oracle (a line count or nesting depth is directly observable from the parse, never a
+/// plan-shape or runtime-behavior claim).
+///
+/// Physical line text/length is reconstructed losslessly from the fragment's own
+/// <see cref="TSqlFragment.ScriptTokenStream"/> (ScriptDOM's token stream is complete - every
+/// whitespace/comment/newline token is present - so concatenating every token's own
+/// <see cref="TSqlParserToken.Text"/> in order reproduces the exact source text) rather than
+/// requiring a separate raw-text side channel through <see cref="SqlParseResult"/>.
+/// </summary>
+public static class CodeMetricScanner
+{
+    public static IReadOnlyList<CodeMetricFinding> Scan(SqlParseResult parseResult, CodeMetricThresholds? thresholds = null)
+    {
+        thresholds ??= CodeMetricThresholds.Default;
+        var findings = new List<CodeMetricFinding>();
+
+        ScanLineLength(parseResult, thresholds, findings);
+        ScanModuleLength(parseResult, thresholds, findings);
+
+        var visitor = new Visitor(parseResult.SourcePath, thresholds);
+        parseResult.Fragment.Accept(visitor);
+        findings.AddRange(visitor.Findings);
+
+        return
+        [
+            .. findings
+                .OrderBy(f => f.Kind)
+                .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ThenBy(f => f.Column),
+        ];
+    }
+
+    private static void ScanLineLength(SqlParseResult parseResult, CodeMetricThresholds thresholds, List<CodeMetricFinding> findings)
+    {
+        var lines = ReconstructedLines(parseResult.Fragment);
+        var firstLine = FirstLine(parseResult.Fragment);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var length = lines[i].Length;
+            if (length > thresholds.MaxLineLength)
+            {
+                findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.LineTooLong, parseResult.SourcePath, parseResult.SourcePath,
+                    firstLine + i, 1, length, thresholds.MaxLineLength));
+            }
+        }
+    }
+
+    private static int FirstLine(TSqlFragment fragment) =>
+        fragment.ScriptTokenStream is { } tokens && fragment.FirstTokenIndex >= 0 && fragment.FirstTokenIndex < tokens.Count
+            ? tokens[fragment.FirstTokenIndex].Line
+            : fragment.StartLine;
+
+    private static void ScanModuleLength(SqlParseResult parseResult, CodeMetricThresholds thresholds, List<CodeMetricFinding> findings)
+    {
+        var lines = ReconstructedLines(parseResult.Fragment);
+        var lineCount = lines.Length;
+        if (lineCount > thresholds.MaxModuleLines)
+        {
+            findings.Add(new CodeMetricFinding(
+                CodeMetricFindingKind.ModuleTooLong, parseResult.SourcePath, parseResult.SourcePath,
+                1, 1, lineCount, thresholds.MaxModuleLines));
+        }
+    }
+
+    private static string[] ReconstructedLines(TSqlFragment fragment)
+    {
+        // ScriptDOM's ScriptTokenStream is a single shared list for the whole parsed input -
+        // every fragment/sub-node, however small, returns the SAME list reference. Only
+        // FirstTokenIndex/LastTokenIndex mark which slice of it actually belongs to THIS
+        // fragment; iterating the raw stream unbounded would silently pull in every sibling
+        // module's own text too whenever more than one object shares one parse (a real bug
+        // caught by running this against the real corpus before shipping - it inflated every
+        // measurement by however much of the file/batch came after the module being measured).
+        if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
+        {
+            return [];
+        }
+
+        var tokens = fragment.ScriptTokenStream;
+        var text = string.Concat(
+            Enumerable.Range(fragment.FirstTokenIndex, fragment.LastTokenIndex - fragment.FirstTokenIndex + 1)
+                .Select(i => tokens[i].Text ?? string.Empty));
+        return text.Split('\n');
+    }
+
+    private static string QualifiedName(SchemaObjectName name) =>
+        name.SchemaIdentifier is { } schema
+            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+            : name.BaseIdentifier.Value;
+
+    private sealed class Visitor(string sourcePath, CodeMetricThresholds thresholds) : TSqlFragmentVisitor
+    {
+        public List<CodeMetricFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(CreateProcedureStatement node)
+        {
+            AnalyzeRoutine("procedure", QualifiedName(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(AlterProcedureStatement node)
+        {
+            AnalyzeRoutine("procedure", QualifiedName(node.ProcedureReference.Name), node.ProcedureReference.Name, node.Parameters, node.StatementList);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(CreateFunctionStatement node)
+        {
+            AnalyzeRoutine("function", QualifiedName(node.Name), node.Name, node.Parameters, node.StatementList);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(AlterFunctionStatement node)
+        {
+            AnalyzeRoutine("function", QualifiedName(node.Name), node.Name, node.Parameters, node.StatementList);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(CreateTriggerStatement node)
+        {
+            AnalyzeRoutine("trigger", QualifiedName(node.Name), node.Name, [], node.StatementList);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(AlterTriggerStatement node)
+        {
+            AnalyzeRoutine("trigger", QualifiedName(node.Name), node.Name, [], node.StatementList);
+            base.ExplicitVisit(node);
+        }
+
+        private int _nestingDepth;
+
+        public override void ExplicitVisit(IfStatement node)
+        {
+            CheckConditionalOperatorCount(node.Predicate, node.StartLine, node.StartColumn);
+            VisitNested(node, base.ExplicitVisit);
+        }
+
+        public override void ExplicitVisit(WhileStatement node)
+        {
+            CheckConditionalOperatorCount(node.Predicate, node.StartLine, node.StartColumn);
+            VisitNested(node, base.ExplicitVisit);
+        }
+
+        public override void ExplicitVisit(TryCatchStatement node) => VisitNested(node, base.ExplicitVisit);
+
+        private void VisitNested<TNode>(TNode node, Action<TNode> visitChildren)
+            where TNode : TSqlStatement
+        {
+            _nestingDepth++;
+            if (_nestingDepth == thresholds.MaxNestingDepth + 1)
+            {
+                // Fire once, at the exact statement that first breaches the limit - a node nested
+                // 10 levels deep against a threshold of 6 reports one finding at level 7, not four
+                // cascading ones for levels 7 through 10.
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.NestingTooDeep, sourcePath, sourcePath,
+                    node.StartLine, node.StartColumn, _nestingDepth, thresholds.MaxNestingDepth));
+            }
+
+            visitChildren(node);
+            _nestingDepth--;
+        }
+
+        public override void ExplicitVisit(SearchedCaseExpression node)
+        {
+            CheckCaseBranches(node.WhenClauses.Count, node.StartLine, node.StartColumn);
+            foreach (var when in node.WhenClauses)
+            {
+                CheckCaseBranchLength(when.ThenExpression);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(SimpleCaseExpression node)
+        {
+            CheckCaseBranches(node.WhenClauses.Count, node.StartLine, node.StartColumn);
+            foreach (var when in node.WhenClauses)
+            {
+                CheckCaseBranchLength(when.ThenExpression);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private void AnalyzeRoutine(
+            string kindLabel, string qualifiedName, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList)
+        {
+            _nestingDepth = 0;
+
+            if (parameters.Count > thresholds.MaxParameters)
+            {
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.TooManyParameters, qualifiedName, sourcePath,
+                    nameNode.BaseIdentifier.StartLine, nameNode.BaseIdentifier.StartColumn,
+                    parameters.Count, thresholds.MaxParameters, DetailText: kindLabel));
+            }
+
+            if (statementList is null)
+            {
+                // EXTERNAL NAME (CLR) body - nothing to measure.
+                return;
+            }
+
+            var lineCount = RoutineLineCount(statementList);
+            if (lineCount > thresholds.MaxRoutineLines)
+            {
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.RoutineTooLong, qualifiedName, sourcePath,
+                    nameNode.BaseIdentifier.StartLine, nameNode.BaseIdentifier.StartColumn,
+                    lineCount, thresholds.MaxRoutineLines, DetailText: kindLabel));
+            }
+        }
+
+        private static int RoutineLineCount(TSqlFragment fragment)
+        {
+            if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
+            {
+                return 0;
+            }
+
+            var firstLine = fragment.ScriptTokenStream[fragment.FirstTokenIndex].Line;
+            var lastToken = fragment.ScriptTokenStream[fragment.LastTokenIndex];
+            var lastLine = lastToken.Line + (lastToken.Text?.Count(c => c == '\n') ?? 0);
+            return lastLine - firstLine + 1;
+        }
+
+        private void CheckConditionalOperatorCount(BooleanExpression? predicate, int line, int column)
+        {
+            if (predicate is null)
+            {
+                return;
+            }
+
+            var count = CountConditionalOperators(predicate);
+            if (count > thresholds.MaxConditionalOperators)
+            {
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.TooManyConditionalOperators, sourcePath, sourcePath,
+                    line, column, count, thresholds.MaxConditionalOperators));
+            }
+        }
+
+        private static int CountConditionalOperators(BooleanExpression expression) => expression switch
+        {
+            BooleanBinaryExpression binary =>
+                (binary.BinaryExpressionType is BooleanBinaryExpressionType.And or BooleanBinaryExpressionType.Or ? 1 : 0)
+                + CountConditionalOperators(binary.FirstExpression) + CountConditionalOperators(binary.SecondExpression),
+            BooleanParenthesisExpression paren => CountConditionalOperators(paren.Expression),
+            BooleanNotExpression not => CountConditionalOperators(not.Expression),
+            _ => 0,
+        };
+
+        private void CheckCaseBranches(int whenCount, int line, int column)
+        {
+            if (whenCount > thresholds.MaxCaseBranches)
+            {
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.TooManyCaseBranches, sourcePath, sourcePath,
+                    line, column, whenCount, thresholds.MaxCaseBranches));
+            }
+        }
+
+        private void CheckCaseBranchLength(ScalarExpression thenExpression)
+        {
+            if (thenExpression.ScriptTokenStream is null || thenExpression.LastTokenIndex < thenExpression.FirstTokenIndex)
+            {
+                return;
+            }
+
+            var firstLine = thenExpression.ScriptTokenStream[thenExpression.FirstTokenIndex].Line;
+            var lastToken = thenExpression.ScriptTokenStream[thenExpression.LastTokenIndex];
+            var lastLine = lastToken.Line + (lastToken.Text?.Count(c => c == '\n') ?? 0);
+            var lineCount = lastLine - firstLine + 1;
+
+            if (lineCount > thresholds.MaxCaseBranchLines)
+            {
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.CaseBranchTooLong, sourcePath, sourcePath,
+                    thenExpression.StartLine, thenExpression.StartColumn, lineCount, thresholds.MaxCaseBranchLines));
+            }
+        }
+    }
+}
