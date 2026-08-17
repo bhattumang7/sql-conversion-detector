@@ -2301,9 +2301,29 @@ get an oracle fixture for the serial-plan consequence).
       out `RANGE` explicitly; 0 explicit `RANGE` frames, confirming the
       implicit-default half of this rule is the one carrying the real
       finding volume here, not a rarely-hit edge case.
-- [ ] Trigger content scan — run trigger bodies through the existing pipeline
-      so cursors/UDFs/MSTVFs inside triggers surface as hidden per-DML cost
-      (the modules are already in `sys.sql_modules`; this is mostly wiring).
+- [x] **Trigger content scan — investigated and closed: already fully done, no
+      code needed.** `LiveModuleReader.ReadReadableModulesAsync`'s own module
+      query already includes `o.type IN ('V', 'P', 'FN', 'TF', 'IF', 'TR')` —
+      `'TR'` (trigger) has been read alongside every other module kind since
+      before this item was ever queued. `LiveScanRunner` parses every
+      module's text uniformly via `SqlScriptParser.ParseText` with no
+      type-based filtering anywhere downstream — a trigger body flows through
+      exactly the same `ScanReportBuilder.BuildFromParseResults` pipeline
+      every proc/view/function body does. Confirmed empirically against the
+      local RM_ test database rather than just read from the code: 51 real
+      triggers exist there, and cross-referencing every finding stream's own
+      `SourcePath` against those 51 trigger names shows 46 of them (90%)
+      already appear as the source of a real finding today — 60
+      `ScalarUdfFindings`, 43 `LocalVariablePredicateFindings`, 24
+      `Tier1Findings`, 22 `ExpressionDerivedFindings`, 11 `TypedFindings`, 9
+      `ForcedSerialFindings` (cursors/table-variable-modification cost,
+      exactly the "hidden per-DML cost" this item's own text named), 11
+      `PostExpansionJoinWidthFindings`, 3 `DynamicSqlFindings`, 3
+      `WriteLossFindings`, 3 `PartialCompositeForeignKeyJoinFindings`, and
+      219 honestly-ledgered `SkippedConstructs`. Nothing was silently
+      excluded; this item's premise was already satisfied by the existing
+      module-discovery query, and no new wiring, scanner, or test was
+      needed.
 - [x] **`COMPUTE`/`COMPUTE BY` deprecated aggregate constructs — closed, not
       reachable through this tool's own parser dialect, confirmed empirically
       rather than assumed.** Probed directly against `TSql160Parser` (the
@@ -2351,11 +2371,92 @@ get an oracle fixture for the serial-plan consequence).
       T-SQL apparently doesn't use `WAITFOR DELAY`/`WAITFOR TIME` anywhere
       across 4,987 modules), not a detection gap; the scanner correctly
       fires on every hand-authored fixture in the unit-test suite.
-- [ ] Transaction hygiene pair: lengthy work (loops, RBAR, external calls)
-      between an error and its `ROLLBACK` extends lock hold duration;
-      `BEGIN TRANSACTION` with no reachable `ROLLBACK`/`COMMIT` on some path
-      leaves locks held indefinitely. Both are control-flow/dataflow checks
-      over the AST, no catalog needed.
+- [x] **Transaction hygiene pair — first half shipped, second half
+      investigated and descoped.** `BEGIN TRANSACTION` with no reachable
+      `COMMIT`/`ROLLBACK` on some path — a real, sound reachability walk over
+      the module body's control-flow AST (IF/ELSE, TRY/CATCH, WHILE,
+      BEGIN/END, RETURN/THROW), not a heuristic text scan.
+      `TransactionHygieneFinding`/`TransactionHygieneScanner`
+      (`src/SilentScan.Core/Predicates/TransactionHygieneScanner.cs`) visits
+      only procedure and trigger bodies — a function structurally cannot
+      contain `BEGIN TRANSACTION` at all, oracle-confirmed directly (Msg
+      443, "Invalid use of a side-effecting operator 'BEGIN TRANSACTION'
+      within a function") rather than assumed. **Oracle-confirmed the
+      underlying mechanism directly, load-bearing for the finding's own
+      wording:** a real deployed procedure whose only path opens a
+      transaction and `RETURN`s without resolving it leaves the CALLING
+      session's `@@TRANCOUNT` elevated by one, and SQL Server itself raises
+      its own diagnostic the instant such a procedure returns — Msg 266,
+      "Transaction count after EXECUTE indicates a mismatching number of
+      BEGIN and COMMIT statements" — confirmed for both the bare-RETURN
+      shape and the classic real-world "TRY commits, CATCH never rolls
+      back" shape; a correctly try/catch-wrapped procedure never leaves
+      `@@TRANCOUNT` elevated, oracle-confirmed the same way
+      (`TransactionHygieneOracleTests`, 3 tests).
+      <br><br>
+      **Known v1 scope limits, stated honestly (the scanner's own doc
+      comment states each precisely):** only ONE currently-open `BEGIN
+      TRANSACTION` is tracked at a time — a second one found while already
+      tracking one declines the whole enclosing scope rather than guessing
+      which resolves which; any `GOTO` anywhere in the module body declines
+      the WHOLE module's analysis (an arbitrary jump target defeats a
+      structural walk without a real labeled-block CFG); a `CATCH` block is
+      analyzed as entering with whatever state existed at the START of its
+      own `TRY`/`CATCH` construct — **sound, not merely conservative**: an
+      error inside `TRY` can occur at literally the first statement, so this
+      is itself a real, statically reachable entry state for `CATCH`, never
+      an over-claim (the complementary gap — a transaction opened INSIDE its
+      own `TRY` block is not cross-checked into that `TRY`'s own `CATCH` —
+      is a real under-report, never a false positive); a `WHILE` loop body
+      is analyzed as running exactly one representative iteration, OR-merged
+      with the "ran zero times" possibility; no cross-procedure tracking,
+      matching the SET-options stream's own identical "no proc-call-
+      transitive walk" limit for the same reason.
+      <br><br>
+      **Second half ("lengthy work between an error and its ROLLBACK")
+      investigated and explicitly NOT built** — no genuinely precise,
+      non-magnitude-guessing static claim survived independent of the first
+      half: the only structurally sound signal (a loop or external call
+      appearing between a `CATCH` block's own entry and its `ROLLBACK`)
+      still can't distinguish "long-running" from "trivial" without
+      guessing at row counts or call latency this static pass cannot see,
+      and the real, provable defect underneath it — the transaction being
+      left open on some path at all — is exactly what the shipped first
+      half already reports, at real oracle-confirmed severity (Msg 266), not
+      a softer "held longer than ideal" claim. Descoped explicitly rather
+      than forcing a weak rule into existence, the same honest-partial-
+      shipping precedent the ARITHABORT drop and the CHECK-constraint
+      origin-tracking deferral already set elsewhere in this file.
+      <br><br>
+      Not verdict-bearing — a correctness/robustness finding, not a
+      plan-shape one, `FindingConfidence.High`, SARIF Warning (the same
+      "structural risk" tier `ForcedSerialFinding`/`WaitForFinding` already
+      use, not the `LevelError` correctness tier — this defect is a leaked
+      lock/session-state condition, not a wrong row set). Wired end-to-end
+      (`ScanReport` schema version 30 → 31, SARIF rule
+      `silentscan/control-flow/unresolved-transaction`, readable-report
+      section). Version-insensitive: `@@TRANCOUNT` bookkeeping is ANSI/
+      T-SQL session-state semantics, unaffected by compat level or CE mode.
+      Unit-tested (`TransactionHygieneScannerTests`, 19 cases: unresolved
+      fall-off-end, resolved COMMIT/ROLLBACK, RETURN while open, IF/ELSE
+      both-resolve and implicit-else-leaks, TRY/CATCH both-resolve and
+      CATCH-never-rolls-back and CATCH-throws, WHILE zero-iteration leak and
+      unconditional-commit-after-loop clean, nested-BEGIN-TRAN decline,
+      GOTO decline, no-transaction-at-all, `SAVE TRANSACTION` not
+      resolving the outer one, sequential independent transactions, and a
+      trigger body firing the identical shape). **Real coverage against the
+      local RM_ test database: 383 findings.** Spot-checked one directly
+      against the real deployed module text (`dbo.spAbusePointsDelete`):
+      `BEGIN TRANSACTION` at line 28, a validation `IF NOT EXISTS(...) ...
+      RAISERROR(...)` at line 55-58 that sets an error flag WITHOUT
+      terminating the batch (`RAISERROR` at severity 16 does not stop
+      execution), `IF @Error = 0 COMMIT TRANSACTION` at line 80-81 (no
+      `ELSE`), and an unconditional `RETURN @Error` at line 83 — confirming
+      the scanner's own reported anchor lines (28 → 83) exactly, and
+      confirming this is a genuine, real production bug: any call that hits
+      the validation failure path leaves the transaction open indefinitely
+      on return, precisely the shape `TransactionHygieneOracleTests` proves
+      the engine itself flags with Msg 266.
 - [x] **`TOP(100) PERCENT` ignored by the optimizer** and **`ORDER BY` in a
       view / inline TVF — shipped together as one finding type, because T-SQL
       structurally cannot separate them.** Oracle-checked first (Docker
@@ -2463,12 +2564,96 @@ get an oracle fixture for the serial-plan consequence).
       sort; a nondeterministic call in a correlated position) are ordinary
       syntax patterns with no need for our machinery. Recorded here rather than
       in Tier 3 because the value is the falsification, not the verdict.
-- [ ] **Explicit-length audit of `CAST`/`CONVERT` to a string type**, as the
-      expression-side companion to the Tier 1 under-length item: an unsized
-      `CONVERT(varchar, …)` silently means 30 characters, which truncates
-      quietly at exactly the sizes real identifiers and dates land on. Only
-      worth doing after the Tier 1 declaration rule lands, since it shares that
-      rule's comparison and reporting path.
+- [x] **Explicit-length audit of `CAST`/`CONVERT` to a string type — shipped,
+      exactly as scoped: no new finding type, a type-resolution fix that lets
+      the existing under-length/oversized-parameter rules see the real
+      truncation.** Oracle-confirmed directly (never assumed from
+      documentation) that an unsized `CAST`/`CONVERT` to EVERY string- and
+      binary-family type — `CHAR`/`VARCHAR`/`NCHAR`/`NVARCHAR`/`BINARY`/
+      `VARBINARY` — truncates to exactly 30 characters, not the bare-
+      `DECLARE`'s own length-1 default (`UnderLengthParameterFinding`'s own
+      subject). Root cause found in `SqlTypeReferenceResolver.Resolve`
+      (`src/SilentScan.Core/Parsing/SqlTypeReferenceResolver.cs`): an unsized
+      string/binary type resolved `Length: null` regardless of WHICH caller
+      asked — correct for a `DECLARE`/column declaration (where `null` means
+      "T-SQL will default this to length 1," already interpreted specially
+      by `TryAddUnderLengthParameterFinding`'s `IsImplicitDefault` flag), but
+      silently wrong for a `CAST`/`CONVERT` target type, whose real default
+      is a different number entirely. Fixed by threading a new optional
+      `unsizedStringOrBinaryDefaultLength` parameter through `Resolve`
+      (defaults to `null`, unchanged for every other existing caller — a
+      DDL/DECLARE resolution), passed as `30` from the two call sites that
+      actually resolve a `CAST`/`CONVERT` target type:
+      `TypedPredicateExtractor.ResolveCastOrConvertOperand` (the one that
+      matters for this item — a `CAST`/`CONVERT` appearing directly as a
+      predicate comparison operand) and `ExpressionTypeInferencer`'s
+      `CastCall`/`ConvertCall` branches (the nested case, e.g. inside a CASE
+      or arithmetic expression). Once `Length` resolves to a real `30`
+      instead of `null`, `TryAddUnderLengthParameterFinding`/
+      `TryAddOversizedParameterFinding` need no changes at all — they
+      already compare a resolved length against the column's own, so a
+      genuinely narrower-than-30 column now correctly fires
+      `UnderLengthParameterFinding` (`IsImplicitDefault: false`, since 30 is
+      a real resolved length, not "no length at all"), and a column narrower
+      than the CAST/CONVERT's own effective 30 correctly fires
+      `OversizedParameterFinding` instead — sharing the existing rules'
+      comparison and reporting path exactly as this item's own text
+      instructed, with no new finding type.
+      <br><br>
+      **Correction to a genuine, unverified false-positive risk in the
+      PREVIOUS `Length: null` behavior, found while implementing this item:**
+      before this fix, `TryAddUnderLengthParameterFinding`'s
+      `isImplicitDefault = otherType.Length is null` read TRUE for every
+      unsized `CAST`/`CONVERT` operand, and the surrounding logic never
+      early-returns when `isImplicitDefault` is true — so EVERY `CAST`/
+      `CONVERT`-vs-column comparison in the same string category fired as
+      "implicit default" (misleadingly implying a length-1 truncation risk)
+      regardless of whether the column was actually narrower than
+      `CAST`/`CONVERT`'s real 30-character default. A column ≤ 30 characters
+      wide being compared against an unsized `CAST`/`CONVERT` was a real,
+      if minor, false positive under the old resolution — now correctly
+      never fires (30 ≥ column length is a genuine non-risk, matching the
+      already-shipped oversized/under-length rules' own symmetric logic).
+      <br><br>
+      Oracle-confirmed via real execution, not compile-only (the underlying
+      claim is a runtime truncation, the same class of finding
+      `UnderLengthParameterOracleTests` already covers):
+      `CastConvertUnsizedLengthOracleTests` (3 tests) — the 30-character
+      default confirmed directly for `VARCHAR`/`NVARCHAR` and, separately,
+      for all six string/binary-family types at once; and a real seeded
+      row/query execution showing a column wide enough to hold a 35-
+      character value never matches a predicate that routes the comparison
+      value through an unsized `CONVERT` first (silently truncated to 30
+      before the comparison runs), while the identical query through an
+      explicitly `CONVERT(VARCHAR(40), ...)` correctly matches. Structural
+      unit tests in `TypedPredicateExtractorTests` (5 new cases: unsized
+      `CONVERT`/`CAST` vs. a wider column fires `UnderLengthParameterFinding`
+      at length 30 with `IsImplicitDefault: false`, a column already
+      narrower than 30 never fires, an EXPLICITLY sized `CONVERT(VARCHAR(10),
+      ...)` uses the real 10 rather than 30, and an unsized `CONVERT` vs. a
+      column narrower than 30 fires `OversizedParameterFinding` instead).
+      Full suite green (3,006 tests) after landing, no regressions from the
+      resolver change.
+      <br><br>
+      **Real coverage against the local RM_ test database: 1 genuine finding**
+      (`dbo.spAuditOnboardDeviceActivity4`,
+      `RelatedObjectInstanceStr = CAST(@ConversationOwner as varchar)`
+      against a 255-character column) — confirmed directly against the real
+      deployed module text, not inferred from the finding's own numbers
+      alone: a raw-text sweep found 94 modules loosely containing an unsized
+      `CONVERT(VARCHAR,`/`CONVERT(NVARCHAR,`/`CONVERT(CHAR,`/`CONVERT(NCHAR,`
+      call anywhere (most in SELECT-list projections or display formatting,
+      not predicate comparisons this rule targets), and cross-checking every
+      one of the 256 real `UnderLengthParameterFinding`/
+      `OversizedParameterFinding` results against its own reported source
+      line found exactly this one genuine `CAST`-in-a-predicate match — the
+      other apparent length-30 coincidences in that same result set turned
+      out, on inspection of the real source, to be an unrelated parameter
+      explicitly declared `VARCHAR(30)`, not a `CAST`/`CONVERT` at all. A
+      real, small, honest number for a narrow defect, not evidence the rule
+      is inert - matching this file's own "coverage-empty/low-volume is a
+      real result, not a broken rule" precedent set by several other shipped
+      streams.
 
 ### Hint and index-shape catalog checks
 Folded in from the incumbent-catalog read (`detection-reference.md` Appendix

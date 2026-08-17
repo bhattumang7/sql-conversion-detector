@@ -72,6 +72,8 @@ public static class SarifRuleCatalog
 
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
 
+    public const string TransactionHygieneRuleId = "silentscan/control-flow/unresolved-transaction";
+
     public static string ViewOrderingRuleId(ViewOrderingFindingKind kind) => kind switch
     {
         ViewOrderingFindingKind.TopPercentOrderByNeverLimits => "silentscan/view/top-percent-order-by-no-op",
@@ -281,6 +283,7 @@ public static class SarifRuleCatalog
             Rule(WaitForRuleId, "WAITFOR DELAY/WAITFOR TIME holds the calling worker thread idle for the full delay/until-time - a documented, unconditional cost contributing to worker-pool exhaustion under load, and (inside an open transaction) extended lock hold duration."),
             Rule(ViewOrderingRuleId(ViewOrderingFindingKind.TopPercentOrderByNeverLimits), "A view/inline TVF's own outermost query uses TOP (100) PERCENT ... ORDER BY - oracle-confirmed provably meaningless: 100 PERCENT never excludes a row, so the ORDER BY exists purely to satisfy T-SQL's own view-ordering grammar rule (Msg 1033) and is not guaranteed to any consumer that doesn't apply its own ORDER BY."),
             Rule(ViewOrderingRuleId(ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer), "A view/inline TVF's own outermost query uses a genuinely row-limiting TOP (N) or OFFSET ... FETCH together with ORDER BY - the ORDER BY does decide which rows survive, but the FINAL output order is still not guaranteed to a consumer that doesn't apply its own ORDER BY, oracle-observed to sometimes still appear ordered purely as a plan-shape coincidence."),
+            Rule(TransactionHygieneRuleId, "A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK - oracle-confirmed directly: SQL Server itself raises Msg 266 (\"Transaction count after EXECUTE indicates a mismatching number of BEGIN and COMMIT statements\") and leaves the calling session's @@TRANCOUNT elevated by one the instant such a procedure returns, holding that transaction's locks indefinitely."),
             Rule(TempTableExecShapeColumnCountMismatchRuleId, "INSERT INTO #temp EXEC proc, where the executed proc's real, engine-described result-set column count differs from #temp's own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(TempTableExecShapeColumnTypeMismatchRuleId, "INSERT INTO #temp EXEC proc, where column counts match but at least one position's type risks silent data loss between the executed proc's real, engine-described column type and #temp's own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),

@@ -19,7 +19,24 @@ public static class SqlTypeReferenceResolver
     /// available at this point in the pipeline (an alias reference there still resolves via the
     /// sysname special-case below, just not via a user-declared alias).
     /// </param>
-    public static SqlType? Resolve(DataTypeReference dataType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null)
+    /// <param name="unsizedStringOrBinaryDefaultLength">
+    /// The length to resolve to when a string/binary-family <paramref name="dataType"/> carries
+    /// no explicit <c>(n)</c> at all - defaults to null (unresolved), correct for a DECLARE/
+    /// column declaration, where T-SQL's own length-1 default is a DIFFERENT number the caller
+    /// (<c>TypedPredicateExtractor.TryAddUnderLengthParameterFinding</c>) already interprets that
+    /// null specially to mean. <c>CAST</c>/<c>CONVERT</c>'s own target
+    /// type is a genuinely different case - docs/detection-checklist.md "Small precise adds",
+    /// "Explicit-length audit of CAST/CONVERT to a string type": an unsized
+    /// <c>CAST(x AS VARCHAR)</c>/<c>CONVERT(VARCHAR, x)</c> silently means 30 characters, oracle-
+    /// confirmed directly (all six string/binary-family types: CHAR/VARCHAR/NCHAR/NVARCHAR/
+    /// BINARY/VARBINARY), never length 1 - <see cref="Rules.ExpressionTypeInferencer"/> passes 30
+    /// here specifically for <c>CastCall</c>/<c>ConvertCall</c>, so the existing under-length/
+    /// oversized-parameter comparison logic picks up the real effective length automatically,
+    /// with no new finding type needed.
+    /// </param>
+    public static SqlType? Resolve(
+        DataTypeReference dataType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null,
+        int? unsizedStringOrBinaryDefaultLength = null)
     {
         if (dataType is UserDataTypeReference userType)
         {
@@ -45,7 +62,7 @@ public static class SqlTypeReferenceResolver
         return sqlDataType.SqlDataTypeOption switch
         {
             SqlDataTypeOption.Decimal or SqlDataTypeOption.Numeric => ResolveDecimal(category.Value, sqlDataType),
-            _ when IsStringOrBinaryFamily(category.Value) => ResolveStringOrBinary(category.Value, sqlDataType, collation),
+            _ when IsStringOrBinaryFamily(category.Value) => ResolveStringOrBinary(category.Value, sqlDataType, collation, unsizedStringOrBinaryDefaultLength),
             _ when IsFractionalSecondsFamily(category.Value) => ResolveFractionalSeconds(category.Value, sqlDataType),
             _ => new SqlType(category.Value),
         };
@@ -110,7 +127,8 @@ public static class SqlTypeReferenceResolver
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
         or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
 
-    private static SqlType ResolveStringOrBinary(SqlTypeCategory category, SqlDataTypeReference sqlDataType, Collation? collation)
+    private static SqlType ResolveStringOrBinary(
+        SqlTypeCategory category, SqlDataTypeReference sqlDataType, Collation? collation, int? unsizedDefaultLength)
     {
         var lengthParam = sqlDataType.Parameters.Count > 0 ? sqlDataType.Parameters[0] : null;
         if (lengthParam is MaxLiteral)
@@ -118,7 +136,9 @@ public static class SqlTypeReferenceResolver
             return new SqlType(category, Collation: collation, IsMax: true);
         }
 
-        var length = lengthParam is IntegerLiteral intLiteral ? int.Parse(intLiteral.Value, CultureInfo.InvariantCulture) : (int?)null;
+        var length = lengthParam is IntegerLiteral intLiteral
+            ? int.Parse(intLiteral.Value, CultureInfo.InvariantCulture)
+            : unsizedDefaultLength;
         return new SqlType(category, Length: length, Collation: collation);
     }
 

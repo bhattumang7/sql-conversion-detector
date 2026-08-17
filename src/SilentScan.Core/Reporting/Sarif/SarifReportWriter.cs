@@ -75,6 +75,7 @@ public static class SarifReportWriter
         results.AddRange(report.WindowFrameFindings.Select(ToResult));
         results.AddRange(report.WaitForFindings.Select(ToResult));
         results.AddRange(report.ViewOrderingFindings.Select(ToResult));
+        results.AddRange(report.TransactionHygieneFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -516,6 +517,20 @@ public static class SarifReportWriter
             : "WAITFOR DELAY/TIME holds this worker thread idle for the full delay/until-time, contributing to worker-pool exhaustion under load.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(TransactionHygieneFinding finding)
+    {
+        // Warning, not error: a real, oracle-confirmed correctness/robustness defect, but the
+        // same "structural risk" tier ForcedSerialFinding/WaitForFinding already use rather than
+        // the LevelError tier reserved for a proven-wrong-RESULT claim (this finding's defect is
+        // a leaked lock/session-state condition, not a wrong row set).
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TransactionHygieneRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message =
+            $"BEGIN TRANSACTION at line {finding.BeginTransactionLine} reaches this point with no intervening COMMIT/ROLLBACK - @@TRANCOUNT is left elevated by one on this path, holding its locks until the session or connection pool eventually clears it.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.UnresolvedExitLine, finding.UnresolvedExitColumn);
     }
 
     private static SarifResult ToResult(ViewOrderingFinding finding)

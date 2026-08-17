@@ -82,27 +82,27 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // construct-inventory stream, +1 for the multi-referenced-CTE stream, +1 for the post-
         // expansion-join-width stream, +1 for the select-star-in-nested-view stream, +1 for the
         // self-referencing-DML stream, +1 for the module-compile-flag stream, +3 for the
-        // window-frame/WAITFOR/view-ordering streams
+        // window-frame/WAITFOR/view-ordering streams, +1 for the transaction-hygiene stream
         // (docs/detection-checklist.md Tier 2 "Catch-all / kitchen-sink predicates", "NOT IN over
         // a nullable subquery column", "UPDATE ... FROM without source uniqueness", "Forced-serial
         // construct inventory", "Lineage-metric findings": "Multi-referenced CTE",
         // "Post-expansion join width", and "SELECT * inside a view or inline TVF", "Halloween
         // Protection and self-referencing DML", and "Small precise adds": WITH RECOMPILE / TVF
         // database-collation return, RANGE window-function frames, WAITFOR DELAY/TIME, TOP(100)
-        // PERCENT/ORDER BY in a view or inline TVF) - the same "one dedicated pass per stream"
-        // shape every other stage in this method already uses; the local-variable-predicate
-        // stream reuses the existing typed-predicate pass instead of adding its own, so it costs
-        // nothing here; the untrusted-constraint/cascading-FK/nested-view-depth/temporal-table-
-        // history-index-gap streams are catalog/lineage-only passes with no per-file enumeration
-        // at all, so they cost nothing here either); reverting to re-enumerating per round pushes
-        // this fixture's 3 rounds well past that. 24 sits strictly between the two (measured 24
-        // with every fix/stream landed to date), so this fails the moment the loop stops reusing
-        // its one materialization and starts scaling with round count again, while still
-        // tolerating a future +/-1 shift from unrelated changes elsewhere in the method (e.g. the
-        // next new full-corpus stream).
+        // PERCENT/ORDER BY in a view or inline TVF, unresolved BEGIN TRANSACTION) - the same "one
+        // dedicated pass per stream" shape every other stage in this method already uses; the
+        // local-variable-predicate stream reuses the existing typed-predicate pass instead of
+        // adding its own, so it costs nothing here; the untrusted-constraint/cascading-FK/nested-
+        // view-depth/temporal-table-history-index-gap streams are catalog/lineage-only passes with
+        // no per-file enumeration at all, so they cost nothing here either); reverting to
+        // re-enumerating per round pushes this fixture's 3 rounds well past that. 25 sits strictly
+        // between the two (measured 25 with every fix/stream landed to date), so this fails the
+        // moment the loop stops reusing its one materialization and starts scaling with round
+        // count again, while still tolerating a future +/-1 shift from unrelated changes elsewhere
+        // in the method (e.g. the next new full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 24,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 24 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 25,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 25 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

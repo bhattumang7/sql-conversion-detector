@@ -1617,7 +1617,15 @@ public static class TypedPredicateExtractor
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             TSqlFragment node)
         {
-            var type = Parsing.SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases);
+            // An unsized CAST/CONVERT to a string/binary-family type silently means 30
+            // characters (oracle-confirmed - docs/detection-checklist.md "Small precise adds",
+            // "Explicit-length audit of CAST/CONVERT to a string type"), not the length-1
+            // default a bare DECLARE with no length gets - see SqlTypeReferenceResolver.Resolve's
+            // own doc comment. This lets the existing under-length/oversized-parameter
+            // comparison logic (TryAddUnderLengthParameterFinding/TryAddOversizedParameterFinding)
+            // pick up a genuinely truncating unsized CAST/CONVERT automatically, with no new
+            // finding type needed.
+            var type = Parsing.SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases, unsizedStringOrBinaryDefaultLength: 30);
             if (type is null)
             {
                 ledger.Record(

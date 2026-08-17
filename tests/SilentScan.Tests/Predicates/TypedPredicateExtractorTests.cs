@@ -1889,6 +1889,76 @@ public sealed class TypedPredicateExtractorTests
         Assert.Empty(result.UnderLengthParameterFindings);
     }
 
+    // docs/detection-checklist.md "Small precise adds", "Explicit-length audit of CAST/CONVERT to
+    // a string type" - the expression-side companion to the DECLARE case above, sharing the exact
+    // same UnderLengthParameterFinding/OversizedParameterFinding comparison and reporting path
+    // (no new finding type). Oracle-confirmed the underlying mechanism directly in
+    // CastConvertUnsizedLengthOracleTests: an unsized CAST/CONVERT to a string/binary-family type
+    // truncates to 30 characters, never length 1 - a materially different default than the bare
+    // DECLARE case above, so IsImplicitDefault must read false here (30 is a real, resolved
+    // length, not the DECLARE case's "no length at all" signal).
+
+    [Fact]
+    public void Extract_ColumnComparedToUnsizedConvert_FiresUnderLengthParameterAtLength30()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(40) NOT NULL);",
+            "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CONVERT(VARCHAR, @x);");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal(40, finding.ColumnLength);
+        Assert.Equal(30, finding.OtherOperandLength);
+        Assert.False(finding.IsImplicitDefault);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToUnsizedCast_FiresUnderLengthParameterAtLength30()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(40) NOT NULL);",
+            "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CAST(@x AS VARCHAR);");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal(30, finding.OtherOperandLength);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToUnsizedConvert_ColumnShorterThan30_NeverFiresUnderLength()
+    {
+        // The column is already narrower than CONVERT's own 30-character default - no
+        // truncation risk in this direction (that's the oversized-parameter case's own concern).
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
+            "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CONVERT(VARCHAR, @x);");
+
+        Assert.Empty(result.UnderLengthParameterFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToExplicitlySizedConvert_UsesTheExplicitLengthNot30()
+    {
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(40) NOT NULL);",
+            "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CONVERT(VARCHAR(10), @x);");
+
+        var finding = Assert.Single(result.UnderLengthParameterFindings);
+        Assert.Equal(10, finding.OtherOperandLength);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToUnsizedConvertOfNarrowerColumn_FiresOversizedParameter()
+    {
+        // Symmetric with the under-length cases above: CONVERT's own 30-character default is
+        // WIDER than a narrower compared column - the oversized-parameter sibling's own concern.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Customers (Code VARCHAR(10) NOT NULL);",
+            "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CONVERT(VARCHAR, @x);");
+
+        var finding = Assert.Single(result.OversizedParameterFindings);
+        Assert.Equal(10, finding.ColumnLength);
+        Assert.Equal(30, finding.OtherOperandLength);
+    }
+
     // docs/detection-checklist.md Tier 1 "SET options that silently disable plan features" -
     // "ANSI_PADDING OFF as a second, independent finding". Catalog fixtures here set
     // IsAnsiPadded directly (this is live-mode-only in real scans - sys.columns.is_ansi_padded

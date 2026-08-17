@@ -55,9 +55,13 @@ public static class ExpressionTypeInferencer
 
         UnaryExpression unary => Resolve(unary.Expression, resolveLeaf, typeAliases),
 
-        CastCall castCall => SqlTypeReferenceResolver.Resolve(castCall.DataType, columnCollation: null, typeAliases),
+        // An unsized CAST/CONVERT to a string/binary-family type silently means 30 characters
+        // (oracle-confirmed - docs/detection-checklist.md "Small precise adds", "Explicit-length
+        // audit of CAST/CONVERT to a string type"), a materially different default than a bare
+        // DECLARE's own length-1 default - see SqlTypeReferenceResolver.Resolve's own doc comment.
+        CastCall castCall => SqlTypeReferenceResolver.Resolve(castCall.DataType, columnCollation: null, typeAliases, unsizedStringOrBinaryDefaultLength: 30),
 
-        ConvertCall convertCall => SqlTypeReferenceResolver.Resolve(convertCall.DataType, columnCollation: null, typeAliases),
+        ConvertCall convertCall => SqlTypeReferenceResolver.Resolve(convertCall.DataType, columnCollation: null, typeAliases, unsizedStringOrBinaryDefaultLength: 30),
 
         BinaryExpression binary => Combine(
             Resolve(binary.FirstExpression, resolveLeaf, typeAliases),

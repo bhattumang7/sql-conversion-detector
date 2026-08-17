@@ -472,6 +472,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<TransactionHygieneFinding> transactionHygieneFindings;
+        using (var transactionHygieneStage = progress.Begin("scanning transaction hygiene (unresolved BEGIN TRANSACTION)", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = TransactionHygieneScanner.Scan(r);
+                    transactionHygieneStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            transactionHygieneFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.BeginTransactionLine).ThenBy(f => f.BeginTransactionColumn)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<CatchAllPredicateFinding> catchAllPredicateFindings;
         using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
         {
@@ -779,7 +797,7 @@ public static class ScanReportBuilder
             selfReferencingDmlFindings,
             temporalTableHistoryIndexGapFindings,
             moduleCompileFlagFindings,
-            windowFrameFindings, waitForFindings, viewOrderingFindings,
+            windowFrameFindings, waitForFindings, viewOrderingFindings, transactionHygieneFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

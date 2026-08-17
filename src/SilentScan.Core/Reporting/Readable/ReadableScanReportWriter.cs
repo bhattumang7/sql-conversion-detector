@@ -105,6 +105,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
+        blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -179,6 +180,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "RANGE window-function frames", report.WindowFrameFindings.Count);
         AddCount(counts, "WAITFOR DELAY/TIME", report.WaitForFindings.Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.ViewOrderingFindings.Count);
+        AddCount(counts, "Unresolved BEGIN TRANSACTION", report.TransactionHygieneFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1134,6 +1136,26 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.ObjectQualifiedName,
                 f.Kind == ViewOrderingFindingKind.TopPercentOrderByNeverLimits ? "TOP (100) PERCENT (no-op)" : "TOP(N)/OFFSET (order not guaranteed)",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TransactionHygiene(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TransactionHygieneFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unresolved BEGIN TRANSACTION ({report.TransactionHygieneFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK - oracle-confirmed directly that SQL Server raises Msg 266 and leaves @@TRANCOUNT elevated by one the instant such a procedure returns, holding its locks indefinitely.");
+
+        yield return new ReadableBlock.Table(
+            ["BEGIN TRANSACTION at", "Unresolved at"],
+            [.. report.TransactionHygieneFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.BeginTransactionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.SourcePath}:{f.UnresolvedExitLine}",
             })]);
     }
 

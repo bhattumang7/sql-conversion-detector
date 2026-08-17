@@ -43,6 +43,7 @@ public sealed record ScanReport(
     IReadOnlyList<WindowFrameFinding> WindowFrameFindings,
     IReadOnlyList<WaitForFinding> WaitForFindings,
     IReadOnlyList<ViewOrderingFinding> ViewOrderingFindings,
+    IReadOnlyList<TransactionHygieneFinding> TransactionHygieneFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -122,6 +123,9 @@ public sealed record ScanReport(
     /// adds"): <see cref="WindowFrameFindings"/> (RANGE instead of ROWS in window-function
     /// frames), <see cref="WaitForFindings"/> (WAITFOR DELAY/TIME), and
     /// <see cref="ViewOrderingFindings"/> (TOP(100) PERCENT / ORDER BY in a view or inline TVF).
+    /// Bumped to 31 for the new <see cref="TransactionHygieneFindings"/> stream (docs/detection-
+    /// checklist.md "Small precise adds": the first half of the "Transaction hygiene pair" item -
+    /// BEGIN TRANSACTION with no reachable COMMIT/ROLLBACK on some path).
     /// </summary>
-    public const int CurrentSchemaVersion = 30;
+    public const int CurrentSchemaVersion = 31;
 }
