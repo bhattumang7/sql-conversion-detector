@@ -90,6 +90,12 @@ public static class SarifRuleCatalog
     public const string DeprecatedSyntaxStringLiteralColumnAliasRuleId = "silentscan/deprecated-syntax/string-literal-column-alias";
     public const string DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId = "silentscan/deprecated-syntax/removed-security-stored-procedure";
     public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = "silentscan/deprecated-syntax/deprecated-set-rowcount";
+    public const string StatementShapeInsertWithoutColumnListRuleId = "silentscan/statement-shape/insert-without-column-list";
+    public const string StatementShapeOrdinalOrderByRuleId = "silentscan/statement-shape/ordinal-order-by";
+    public const string StatementShapeTopWithoutOrderByRuleId = "silentscan/statement-shape/top-without-order-by";
+    public const string StatementShapeTableWithNoPrimaryKeyRuleId = "silentscan/statement-shape/table-with-no-primary-key";
+    public const string StatementShapeMissingSetNocountOnRuleId = "silentscan/statement-shape/missing-set-nocount-on";
+    public const string StatementShapeBareSelectStarRuleId = "silentscan/statement-shape/bare-select-star";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -301,6 +307,17 @@ public static class SarifRuleCatalog
         DeprecatedSyntaxFindingKind.RemovedSecurityStoredProcedure => DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId,
         DeprecatedSyntaxFindingKind.DeprecatedSetRowcount => DeprecatedSyntaxDeprecatedSetRowcountRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DeprecatedSyntaxFindingKind."),
+    };
+
+    public static string StatementShapeRuleId(StatementShapeFindingKind kind) => kind switch
+    {
+        StatementShapeFindingKind.InsertWithoutColumnList => StatementShapeInsertWithoutColumnListRuleId,
+        StatementShapeFindingKind.OrdinalOrderBy => StatementShapeOrdinalOrderByRuleId,
+        StatementShapeFindingKind.TopWithoutOrderBy => StatementShapeTopWithoutOrderByRuleId,
+        StatementShapeFindingKind.TableWithNoPrimaryKey => StatementShapeTableWithNoPrimaryKeyRuleId,
+        StatementShapeFindingKind.MissingSetNocountOn => StatementShapeMissingSetNocountOnRuleId,
+        StatementShapeFindingKind.BareSelectStar => StatementShapeBareSelectStarRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled StatementShapeFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -556,6 +573,12 @@ public static class SarifRuleCatalog
             Rule(DeprecatedSyntaxStringLiteralColumnAliasRuleId, "A column alias is written as a string literal instead of a real identifier - a deprecated aliasing form still accepted by the parser and engine."),
             Rule(DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId, "A legacy security-administration system stored procedure is invoked, superseded by CREATE LOGIN/CREATE USER/ALTER ROLE - some names in this family are already fully removed from current SQL Server versions."),
             Rule(DeprecatedSyntaxDeprecatedSetRowcountRuleId, "SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release."),
+            Rule(StatementShapeInsertWithoutColumnListRuleId, "An INSERT with no explicit column list silently breaks if the target table's column order/count ever changes."),
+            Rule(StatementShapeOrdinalOrderByRuleId, "An ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list's own column order changes."),
+            Rule(StatementShapeTopWithoutOrderByRuleId, "A TOP row-limiting clause has no ORDER BY anywhere in the query - Microsoft's own documentation states which rows come back is not guaranteed in this shape."),
+            Rule(StatementShapeTableWithNoPrimaryKeyRuleId, "A base table has no PRIMARY KEY constraint - no engine-enforced row uniqueness."),
+            Rule(StatementShapeMissingSetNocountOnRuleId, "A procedure or trigger never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message."),
+            Rule(StatementShapeBareSelectStarRuleId, "A bare SELECT * couples the query to the target's current column set."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the

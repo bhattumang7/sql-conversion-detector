@@ -60,6 +60,7 @@ public sealed record ScanReport(
     IReadOnlyList<DeadCodeFinding> DeadCodeFindings,
     IReadOnlyList<DuplicationFinding> DuplicationFindings,
     IReadOnlyList<DeprecatedSyntaxFinding> DeprecatedSyntaxFindings,
+    IReadOnlyList<StatementShapeFinding> StatementShapeFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -202,5 +203,9 @@ public sealed record ScanReport(
     /// always-false trap, a wildcard-free LIKE pattern, a legacy system compatibility view, a table
     /// hint without WITH, a numbered-procedure-group definition/invocation, a string-literal column
     /// alias, a removed legacy security stored procedure, and SET ROWCOUNT.
-    public const int CurrentSchemaVersion = 43;
+    /// Bumped to 44 for the new <see cref="StatementShapeFindings"/> stream (docs/detection-
+    /// checklist.md Tier 4 "Statement-shape advice"): INSERT without a column list, ordinal
+    /// ORDER BY, TOP without ORDER BY, a table with no primary key, a routine missing SET NOCOUNT
+    /// ON, and a bare SELECT *.
+    public const int CurrentSchemaVersion = 44;
 }

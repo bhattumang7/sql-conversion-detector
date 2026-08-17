@@ -92,6 +92,7 @@ public static class SarifReportWriter
         results.AddRange(report.DeadCodeFindings.Select(ToResult));
         results.AddRange(report.DuplicationFindings.Select(ToResult));
         results.AddRange(report.DeprecatedSyntaxFindings.Select(ToResult));
+        results.AddRange(report.StatementShapeFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -535,6 +536,18 @@ public static class SarifReportWriter
         var baseLevel = finding.Kind is DeprecatedSyntaxFindingKind.TaskCommentTodo or DeprecatedSyntaxFindingKind.TaskCommentFixme
             ? LevelNote
             : LevelWarning;
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(StatementShapeFinding finding)
+    {
+        // Note level for the purely-advisory BareSelectStar kind (Low confidence by
+        // construction); Warning for everything else - a real correctness/maintainability risk,
+        // never itself proof of a wrong result.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StatementShapeRuleId(finding.Kind), finding.Confidence);
+        var baseLevel = finding.Kind == StatementShapeFindingKind.BareSelectStar ? LevelNote : LevelWarning;
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
 
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);

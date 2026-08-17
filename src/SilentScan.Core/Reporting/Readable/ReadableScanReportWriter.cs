@@ -122,6 +122,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(DeadCode(report, headingLevel, pathBase));
         blocks.AddRange(Duplication(report, headingLevel, pathBase));
         blocks.AddRange(DeprecatedSyntax(report, headingLevel, pathBase));
+        blocks.AddRange(StatementShape(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -184,6 +185,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Dead code and control-flow risks", report.DeadCodeFindings.Count);
         AddCount(counts, "Duplicated/redundant code shapes", report.DuplicationFindings.Count);
         AddCount(counts, "Task comments and deprecated syntax", report.DeprecatedSyntaxFindings.Count);
+        AddCount(counts, "Statement-shape risks", report.StatementShapeFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -924,6 +926,27 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],
             [.. report.DeprecatedSyntaxFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> StatementShape(ScanReport report, int level, string? pathBase)
+    {
+        if (report.StatementShapeFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Statement-shape risks ({report.StatementShapeFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An INSERT with no explicit column list, an ordinal ORDER BY, a TOP with no ORDER BY, a base table with no PRIMARY KEY, a routine missing SET NOCOUNT ON, or a bare SELECT *. The first three are correctness-adjacent (silently wrong the moment the target's/source's own column shape changes, or genuinely unspecified row selection); the rest are maintainability/cost signals.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.StatementShapeFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),

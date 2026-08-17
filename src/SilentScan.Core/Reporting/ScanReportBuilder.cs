@@ -780,6 +780,25 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<StatementShapeFinding> statementShapeFindings;
+        using (var statementShapeStage = progress.Begin("scanning statement-shape risks", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = StatementShapeScanner.Scan(r);
+                    statementShapeStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            unordered.AddRange(StatementShapeScanner.ScanCatalog(catalog));
+            statementShapeFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1085,6 +1104,7 @@ public static class ScanReportBuilder
             deadCodeFindings,
             duplicationFindings,
             deprecatedSyntaxFindings,
+            statementShapeFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -3416,6 +3416,35 @@ own database weeks earlier. Same finding, moved left — that is this project's
 actual pitch for the whole group, and it is a stronger one than "another
 index advisor".
 
+**Design-time decidability — a third axis, distinct from the static/runtime
+one, and the one this sweep nearly got wrong.** "Static" has always meant
+"derivable without running the workload". That is not the same question as
+"decidable against a *development* database", and the difference matters
+because this project's stated target is catching problems before production.
+Three levels, and every item in this sweep is tagged against them:
+
+* **Schema-decidable** — the answer is a property of the schema itself, so it
+  is identical on a dev database and a production one. Duplicate indexes, an
+  unindexed FK, a heap, a wide clustering key, a `text` column, a multi-row-
+  unsafe trigger. These are the real design-time findings and they are the
+  reason this sweep is worth doing at all.
+* **Data-state-decidable** — needs a value from the live target's actual data,
+  so it is only meaningful against a production-shaped copy. Identity range
+  consumption is the clear case. Buildable, genuinely useful under `scan-db`,
+  but it must carry that precondition in the finding text rather than
+  pretending to be schema truth. **Never report one of these as a clean pass
+  on a dev database** — a dev copy with an identity at 400 is not evidence.
+* **Workload-decidable — permanently out**, and this is where "unused index"
+  lives. Whether an index is read, how often a proc runs, which plan a
+  parameter got: none of it exists until the workload runs against real data,
+  and no development-time answer to it can be anything but a guess. Same
+  exclusion as Tier 3's runtime-only signals, reached from the other
+  direction. The corollary is worth stating because it is tempting and wrong:
+  "no module in this database references this index's leading column" is NOT a
+  static proxy for "unused" — ad-hoc SQL sent by the application never appears
+  in `sys.sql_modules`, so that claim is unsound the moment the app issues its
+  own queries, which it always does. Precision beats recall: we do not ship it.
+
 ### A. Physical/schema design (catalog-only, no query text) — biggest single gap
 Ordered by precision, not by fame: the first four are deterministic set
 comparisons over catalog rows with no estimation or heuristic anywhere, which
@@ -3450,7 +3479,12 @@ makes them the cleanest findings in this entire file.
       fragmentation; `NEWSEQUENTIALID()` is the near-miss that must not fire).
 - [ ] **Over-indexing**: many nonclustered indexes on one table, and indexes
       with ≥7 key columns. Threshold-based, so lower precision than the rest of
-      this group — ship with the threshold stated in the finding text.
+      this group — ship with the threshold stated in the finding text. Note the
+      honest limit: the *count* is decidable at design time, but whether any
+      given index earns its write cost is a usage question, so this reports
+      "this table carries N indexes, each paid for on every write" and never
+      "drop this one" — that second sentence is the one that needs production
+      usage stats we structurally cannot have.
 - [ ] **Disabled and hypothetical indexes** — `ALTER INDEX ... DISABLE` left in
       place, and wizard-leftover `_dta_`-style hypothetical indexes. We already
       carry `IsDisabled` and deliberately exclude it from seek eligibility;
@@ -3461,9 +3495,17 @@ makes them the cleanest findings in this entire file.
       (not currently read) plus a parse of it.
 - [ ] **Identity/sequence range exhaustion** — current identity value against
       the column type's own maximum, and a negative seed or an increment other
-      than 1. Pure arithmetic, and the failure mode is a hard production
-      outage (insert failure) rather than a slowdown, which makes it exactly a
-      before-prod finding.
+      than 1. The failure mode is a hard outage (insert failure) rather than a
+      slowdown. **Split this in two, and do not ship the halves as one rule:**
+      the seed/increment half is a schema fact and decidable anywhere; the
+      "how close to the ceiling" half reads a current *data* value, so against
+      a development database it is meaningless (a dev copy's identity sits near
+      zero regardless of what production looks like) and reporting it there
+      would be a confidently-wrong verdict. The consumption half is a
+      `scan-db`-against-a-production-shaped-target finding only, and must say
+      so in the finding text; the seed/increment half ships unconditionally.
+      This is the sharpest example of the design-time decidability axis below —
+      use it as the reference case when classifying future candidates.
 - [ ] **Deprecated LOB column types in the schema** — `text`/`ntext`/`image`
       columns (and `timestamp` in favour of `rowversion`). The shipped
       deprecated-syntax stream is statement-level and does not look at column
@@ -4395,13 +4437,83 @@ exactly as originally scoped until its own turn comes up.
     `FOR XML PATH('') ... AS 'data()'` idiom — a true positive either way,
     confirming the finding states a real syntax fact regardless of whether
     a given instance is a mistake or intentional advanced usage.
-  * *Statement-shape advice* — `SELECT *`, `INSERT` without a column list,
-    ordinal `ORDER BY`, `TOP` without `ORDER BY`, a table with no primary key,
-    `UPDATE`/`DELETE` with no `WHERE`, an existence check over an unfiltered
-    `SELECT`, more than N tables written in a join (the resolved,
-    view-expanded version of this is separately queued in Tier 2 and is the
-    one worth building first), requiring a named session setting at the top
-    of every routine, requiring an explicit constraint-check mode.
+  * *Statement-shape advice — 6 of 9 members shipped (2026-08-17), 3 closed
+    with evidence rather than built.* One new finding type
+    (`StatementShapeFinding`/`StatementShapeFindingKind`,
+    `src/SilentScan.Core/Predicates/StatementShapeScanner.cs`) — five
+    AST-only kinds plus one catalog-only kind
+    (`TableWithNoPrimaryKey`, mirroring `MaxTypedColumnScanner`'s own
+    "walk the catalog directly" shape). No oracle needed for any member —
+    each is a directly observable parse/catalog fact, except
+    `TopWithoutOrderBy`'s own "not guaranteed" claim, which is Microsoft's
+    own documented `TOP (Transact-SQL)` behavior, cited directly rather than
+    inferred from a specific plan.
+    <br><br>
+    Shipped: **`InsertWithoutColumnList`** (an `INSERT` with no explicit
+    column list — silently breaks the moment the target's own column
+    order/count changes), **`OrdinalOrderBy`** (`ORDER BY` by SELECT-list
+    position instead of name — silently wrong the moment that list's own
+    order changes), **`TopWithoutOrderBy`** (a `TOP` row-limit with no
+    `ORDER BY` anywhere in the query), **`TableWithNoPrimaryKey`**
+    (catalog-only, once per table), **`MissingSetNocountOn`** (a
+    procedure/trigger body with no `SET NOCOUNT ON` anywhere — folds in
+    the checklist's own "requiring a named session setting at the top of
+    every routine" phrase and the separately-listed Tier-3-carryover `SET
+    NOCOUNT` mention, the same rule described three different ways rather
+    than three distinct ones), and **`BareSelectStar`** (`FindingConfidence.Low`
+    — distinct in scope from the already-shipped, narrower "`SELECT *`
+    inside a view/inline TVF narrowed by a real consumer" lineage finding;
+    this is the general, any-context case, deliberately low-confidence
+    since a one-off ad-hoc `SELECT *` is frequently a harmless, deliberate
+    choice).
+    <br><br>
+    **Closed, investigated and found NOT to survive real oracle checking —
+    the same "kill a false premise before shipping it" discipline this file
+    applies everywhere:**
+    * **"An existence check over an unfiltered `SELECT`"** — oracle-falsified
+      directly. Compared real captured plan XML for `EXISTS (SELECT * FROM
+      T)` against `EXISTS (SELECT TOP 1 1 FROM T)` over the identical table:
+      both produce the IDENTICAL plan (`EstimateRows="1"`, same
+      `Nested Loops`/`Constant Scan`/`Compute Scalar` shape) — the optimizer
+      already recognizes `EXISTS` as a pure existence probe regardless of the
+      inner `SELECT`'s own column list or absence of `TOP`, so there is
+      nothing left for this rule to catch.
+    * **"Requiring an explicit constraint-check mode"** — investigated and
+      found to have no real behavioral consequence beyond the already-shipped
+      `UntrustedConstraintFinding`/"WITH NOCHECK" stream. Oracle-confirmed
+      directly: `ALTER TABLE ... ADD CONSTRAINT` with neither `WITH CHECK`
+      nor `WITH NOCHECK` stated already validates existing data by default
+      (a real Msg 547 conflict on a seeded violating row, identical to
+      writing `WITH CHECK` explicitly) — `WITH CHECK` is already the
+      implicit default, so stating it explicitly changes no behavior at all;
+      the only behaviorally meaningful state (`WITH NOCHECK`) already has
+      its own shipped, sharper finding. A "require the explicit keyword"
+      rule here would be pure style noise with zero correctness/perf story.
+    <br><br>
+    **Closed, superseded by more precisely-scoped work elsewhere (not
+    duplicated here):** "more than N tables written in a join" is superseded
+    by the already-shipped, lineage-resolved `PostExpansionJoinWidthFinding`
+    (exactly as this bullet's own original text anticipated); "`UPDATE`/
+    `DELETE` with no `WHERE`" is superseded by the more precisely-scoped
+    "DBA-script family sweep" entry elsewhere in this file (which also
+    excludes the `TOP`-bounded case and the deliberate-full-table-maintenance
+    near-miss this bullet's own cruder framing didn't); the Tier-3-carryover
+    "`sp_` prefix"/"schema-prefix" mentions are the same concepts as the
+    already-shipped `NamingFindingKind.SpPrefixOnUserRoutine`/
+    `UnqualifiedCreate`.
+    <br><br>
+    Wired end-to-end (`ScanReport` schema version 43 → 44, SARIF rule
+    catalog + writer, readable report section). Unit-tested
+    (`StatementShapeScannerTests`, 15 cases: fire/near-miss pairs for all
+    six shipped kinds, including `SET NOCOUNT OFF` still counting as
+    "missing ON" and a trigger body getting the same NOCOUNT check as a
+    procedure). **Real coverage against the local RM_ test database: 7,103
+    findings** (4,550 `BareSelectStar`, 1,166 `MissingSetNocountOn`, 835
+    `InsertWithoutColumnList`, 459 `TopWithoutOrderBy`, 92
+    `TableWithNoPrimaryKey`, 1 `OrdinalOrderBy`) — spot-checked an
+    `InsertWithoutColumnList` finding (`dbo.CalenderForYear`) against real
+    module text and confirmed a genuine true positive: `INSERT @retArray
+    SELECT CAST(...) - @inc` inside a `WHILE` loop, no column list at all.
   * *Cursor and control-flow correctness* — a fetch selecting a different
     column count than its cursor declares, an output parameter never
     assigned, an empty catch block, output emitted from a trigger, dirty-read
