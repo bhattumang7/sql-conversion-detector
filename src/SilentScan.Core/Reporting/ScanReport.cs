@@ -61,6 +61,7 @@ public sealed record ScanReport(
     IReadOnlyList<DuplicationFinding> DuplicationFindings,
     IReadOnlyList<DeprecatedSyntaxFinding> DeprecatedSyntaxFindings,
     IReadOnlyList<StatementShapeFinding> StatementShapeFindings,
+    IReadOnlyList<ControlFlowRiskFinding> ControlFlowRiskFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -207,5 +208,9 @@ public sealed record ScanReport(
     /// checklist.md Tier 4 "Statement-shape advice"): INSERT without a column list, ordinal
     /// ORDER BY, TOP without ORDER BY, a table with no primary key, a routine missing SET NOCOUNT
     /// ON, and a bare SELECT *.
-    public const int CurrentSchemaVersion = 44;
+    /// Bumped to 45 for the new <see cref="ControlFlowRiskFindings"/> stream (docs/detection-
+    /// checklist.md Tier 4 "Cursor and control-flow correctness"): a cursor FETCH whose INTO list
+    /// doesn't match its own defining SELECT's column count, an empty CATCH block, output emitted
+    /// from a trigger, a dirty-read isolation hint, duplicated call arguments, and @@IDENTITY.
+    public const int CurrentSchemaVersion = 45;
 }

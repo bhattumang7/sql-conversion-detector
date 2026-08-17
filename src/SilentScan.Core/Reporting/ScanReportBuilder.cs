@@ -799,6 +799,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<ControlFlowRiskFinding> controlFlowRiskFindings;
+        using (var controlFlowRiskStage = progress.Begin("scanning cursor and control-flow risks", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = ControlFlowRiskScanner.Scan(r);
+                    controlFlowRiskStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            controlFlowRiskFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1105,6 +1123,7 @@ public static class ScanReportBuilder
             duplicationFindings,
             deprecatedSyntaxFindings,
             statementShapeFindings,
+            controlFlowRiskFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

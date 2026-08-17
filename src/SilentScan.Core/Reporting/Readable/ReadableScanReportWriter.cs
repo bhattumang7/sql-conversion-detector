@@ -123,6 +123,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(Duplication(report, headingLevel, pathBase));
         blocks.AddRange(DeprecatedSyntax(report, headingLevel, pathBase));
         blocks.AddRange(StatementShape(report, headingLevel, pathBase));
+        blocks.AddRange(ControlFlowRisk(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -186,6 +187,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Duplicated/redundant code shapes", report.DuplicationFindings.Count);
         AddCount(counts, "Task comments and deprecated syntax", report.DeprecatedSyntaxFindings.Count);
         AddCount(counts, "Statement-shape risks", report.StatementShapeFindings.Count);
+        AddCount(counts, "Cursor and control-flow risks", report.ControlFlowRiskFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -947,6 +949,27 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],
             [.. report.StatementShapeFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ControlFlowRisk(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ControlFlowRiskFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Cursor and control-flow risks ({report.ControlFlowRiskFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A cursor FETCH whose INTO list doesn't match its own cursor's defining SELECT column count (always fails at runtime, Msg 16924), an empty CATCH block (silently swallows every error), output emitted from a trigger (a SELECT or PRINT sent back to whatever connection fired the DML, not the calling application), a NOLOCK/READUNCOMMITTED dirty-read hint, the same expression passed twice to one call, or a reference to @@IDENTITY (session-wide scope, prefer SCOPE_IDENTITY()).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.ControlFlowRiskFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),

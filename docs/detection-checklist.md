@@ -4514,11 +4514,118 @@ exactly as originally scoped until its own turn comes up.
     `InsertWithoutColumnList` finding (`dbo.CalenderForYear`) against real
     module text and confirmed a genuine true positive: `INSERT @retArray
     SELECT CAST(...) - @inc` inside a `WHILE` loop, no column list at all.
-  * *Cursor and control-flow correctness* — a fetch selecting a different
-    column count than its cursor declares, an output parameter never
-    assigned, an empty catch block, output emitted from a trigger, dirty-read
-    isolation hints, duplicated arguments in a call, a legacy identity
-    intrinsic where the scope-limited one was meant.
+  * *Cursor and control-flow correctness — 6 of 7 members shipped
+    (2026-08-17), the seventh already covered elsewhere.* "An output
+    parameter never assigned" is already fully shipped as <code>OutputParameterFinding</code>
+    (a path-sensitive "assigned on every return path" analysis, a strict
+    superset of the simpler "never assigned at all" case this bullet names)
+    — cross-referenced here, not rebuilt. One new finding type
+    (`ControlFlowRiskFinding`/`ControlFlowRiskFindingKind`,
+    `src/SilentScan.Core/Predicates/ControlFlowRiskScanner.cs`) covers the
+    remaining six, cross-checked against the real decompiled source
+    (`vendor/tsql plugin/`, gitignored) rather than only this checklist's
+    own paraphrase. Pure AST checks throughout — no catalog needed for any
+    member; no plan-XML oracle applies to any of these (none make a
+    plan-shape claim).
+    <br><br>
+    **`CursorFetchColumnCountMismatch`** — a `FETCH ... INTO` variable list
+    whose count differs from its own cursor's defining `SELECT`'s
+    statically-countable column count. **Oracle-confirmed before shipping,
+    not assumed:** a real seeded probe against the Docker instance
+    (`DECLARE cur CURSOR FOR SELECT 1, 2; ... FETCH NEXT FROM cur INTO @a,
+    @b, @c;`) raises Msg 16924 ("Cursorfetch: The number of variables
+    declared in the INTO list must match that of selected columns") every
+    time — a real, always-reproducible runtime error, the same
+    "names a query that provably fails" value `TempTableExecShapeFinding
+    .ColumnCountMismatch` already established for an analogous call-boundary
+    shape. Declines rather than guesses when the cursor's own defining
+    `SELECT` is `SELECT *`, a set operator, or anything else whose column
+    count isn't directly countable from the parse. `FindingConfidence.High`,
+    SARIF Error (the same provably-wrong-outcome tier
+    `NotInNullableSubqueryFinding`/`TempTableExecShapeFinding` use).
+    <br><br>
+    **`EmptyCatchBlock`** — a `BEGIN CATCH...END CATCH` with zero
+    statements, silently swallowing every error that reaches it.
+    `FindingConfidence.High`, SARIF Error. **Real bug caught and fixed
+    before this could ship broken, not left latent:** ScriptDOM leaves an
+    empty `StatementList`'s own `StartLine`/`StartColumn` at `-1` (it
+    carries no real token span) — a first version reported that raw `-1`
+    straight through every downstream consumer of the finding's location.
+    Fixed to report against the enclosing `TRY`/`CATCH` statement's own
+    location instead (the `BEGIN TRY` keyword — a real, valid position,
+    not exactly at the empty `CATCH` but unambiguous given the finding's
+    own wording). Caught by a targeted regression test
+    (`EmptyCatchBlock_ReportsARealLineNotASentinel`) before the real-corpus
+    measurement below, which independently confirmed the fix (three real
+    hits, all with genuine positive line numbers pointing at the actual
+    routine).
+    <br><br>
+    **`TriggerEmitsOutput`** — a `SELECT` with a real (non-assignment-only)
+    result set, or a `PRINT`, directly inside a `CREATE/ALTER TRIGGER` body
+    — sends output back to whatever connection fired the triggering DML,
+    not the application that issued it. A `SELECT @x = expr`/`SELECT ...
+    INTO` assignment-only form never fires (sends no client-visible result
+    set at all). **A second real false positive caught only by running
+    against the real corpus, not by the unit suite alone, and fixed before
+    shipping:** a trigger's own `DECLARE cur CURSOR FOR SELECT ...` — the
+    cursor's defining query, never itself sent to the client — was
+    originally flagged identically to a genuine output-emitting `SELECT`.
+    Fixed by tracking each cursor-defining `SELECT` by reference and
+    excluding it from this one check specifically, while still letting
+    every OTHER check (a `NOLOCK` hint, a duplicated call argument,
+    `@@IDENTITY`) fire normally inside the same `SELECT` if genuinely
+    present — covered by two regression tests, one confirming the
+    exclusion, one confirming it doesn't over-exclude. `FindingConfidence.Medium`,
+    SARIF Warning (a real, well-documented risk, not provably a bug in
+    isolation). Only a trigger's own top-level body is inspected — a
+    statement inside a procedure the trigger merely calls is not chased,
+    the same "no cross-module AST held simultaneously" constraint the
+    SET-options stream's own reachable-object walk already documented.
+    <br><br>
+    **`DirtyReadIsolationHint`** — a `NOLOCK`/`READUNCOMMITTED` table hint,
+    or `SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED`. Reported as
+    advisory (`FindingConfidence.Low`, SARIF Warning), not an error — a
+    real, well-documented risk (dirty reads; missed/double-counted rows
+    during a concurrent page split), but sometimes a deliberate, reasonable
+    tradeoff for a reporting/analytics workload, not always a bug.
+    <br><br>
+    **`DuplicatedCallArgument`** — the same non-literal expression (a
+    variable, column reference, or complex expression — a bare literal is
+    deliberately excluded, since repeating `NULL`/`0`/an empty string
+    across several optional arguments is completely normal) passed as two
+    different arguments to the same `EXEC` or function call — a
+    well-documented copy-paste-bug smell. `FORMATMESSAGE` is excluded
+    (deliberately repeating a format substitution value is its own normal
+    usage). `FindingConfidence.Medium`, SARIF Warning.
+    <br><br>
+    **`LegacyIdentityIntrinsic`** — `@@IDENTITY` referenced anywhere:
+    returns the last identity value inserted in the CURRENT SESSION across
+    ANY table/scope, including one inserted by a trigger fired as a side
+    effect — a well-documented, sharp correctness trap (returns the WRONG
+    identity value silently, no error). Worded honestly as "prefer
+    `SCOPE_IDENTITY()` unless that broader semantics is specifically
+    wanted," never as a definite bug, since this pass cannot prove a
+    trigger-caused collision is actually present for any specific
+    reference. `FindingConfidence.Medium`, SARIF Warning.
+    <br><br>
+    Wired end-to-end (`ScanReport` schema version 44 → 45, SARIF rule
+    catalog + writer, readable report section). Unit-tested
+    (`ControlFlowRiskScannerTests`, 26 cases: every kind's fire/near-miss
+    pair, both regression guards above, the cursor-source-column-count
+    decline case, `SET TRANSACTION ISOLATION LEVEL READ COMMITTED` never
+    firing, `FORMATMESSAGE`'s repeated-argument exemption). **Real coverage
+    against the local RM_ test database: 402 findings** (234
+    `LegacyIdentityIntrinsic`, 107 `DuplicatedCallArgument`, 58
+    `DirtyReadIsolationHint`, 3 `EmptyCatchBlock`, 0
+    `CursorFetchColumnCountMismatch` — a real, honest zero) — spot-checked
+    three findings directly against real module text: a `DuplicatedCallArgument`
+    hit where `@CalculationDate` is genuinely passed twice as two different
+    arguments to the same function call (`dbo.GetEstimatedDistanceAndTime`),
+    an `EmptyCatchBlock` hit confirmed against the real source
+    (`dbo.spUnLockVehicleAndDate`, a real `BEGIN CATCH END CATCH` with
+    nothing in it), and the `TriggerEmitsOutput` false positive itself
+    (`dbo.tr_i_tblBreaksScheduled`) that led to the fix above — all three
+    genuine, none invented.
   * *Security* — dynamic code execution, hard-coded credentials, hard-coded IP
     addresses, weak hash algorithms in general and in sensitive contexts.
     Still separately tracked under Open scope questions below, since it's a

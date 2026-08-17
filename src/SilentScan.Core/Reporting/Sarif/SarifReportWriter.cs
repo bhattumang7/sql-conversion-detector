@@ -93,6 +93,7 @@ public static class SarifReportWriter
         results.AddRange(report.DuplicationFindings.Select(ToResult));
         results.AddRange(report.DeprecatedSyntaxFindings.Select(ToResult));
         results.AddRange(report.StatementShapeFindings.Select(ToResult));
+        results.AddRange(report.ControlFlowRiskFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -548,6 +549,22 @@ public static class SarifReportWriter
         // never itself proof of a wrong result.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StatementShapeRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind == StatementShapeFindingKind.BareSelectStar ? LevelNote : LevelWarning;
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ControlFlowRiskFinding finding)
+    {
+        // Error for the two structurally-unambiguous, hard-fact kinds (a cursor FETCH that always
+        // fails at runtime; a CATCH block that swallows every error with zero statements) - the
+        // same "provably-wrong-outcome" tier NotInNullableSubqueryFinding/TempTableExecShapeFinding
+        // use. Warning for everything else - a real, well-documented risk, never itself proof of a
+        // wrong result in isolation.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ControlFlowRiskRuleId(finding.Kind), finding.Confidence);
+        var baseLevel = finding.Kind is ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch or ControlFlowRiskFindingKind.EmptyCatchBlock
+            ? LevelError
+            : LevelWarning;
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
 
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);

@@ -96,6 +96,12 @@ public static class SarifRuleCatalog
     public const string StatementShapeTableWithNoPrimaryKeyRuleId = "silentscan/statement-shape/table-with-no-primary-key";
     public const string StatementShapeMissingSetNocountOnRuleId = "silentscan/statement-shape/missing-set-nocount-on";
     public const string StatementShapeBareSelectStarRuleId = "silentscan/statement-shape/bare-select-star";
+    public const string ControlFlowRiskCursorFetchColumnCountMismatchRuleId = "silentscan/control-flow/cursor-fetch-column-count-mismatch";
+    public const string ControlFlowRiskEmptyCatchBlockRuleId = "silentscan/control-flow/empty-catch-block";
+    public const string ControlFlowRiskTriggerEmitsOutputRuleId = "silentscan/control-flow/trigger-emits-output";
+    public const string ControlFlowRiskDirtyReadIsolationHintRuleId = "silentscan/control-flow/dirty-read-isolation-hint";
+    public const string ControlFlowRiskDuplicatedCallArgumentRuleId = "silentscan/control-flow/duplicated-call-argument";
+    public const string ControlFlowRiskLegacyIdentityIntrinsicRuleId = "silentscan/control-flow/legacy-identity-intrinsic";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -318,6 +324,17 @@ public static class SarifRuleCatalog
         StatementShapeFindingKind.MissingSetNocountOn => StatementShapeMissingSetNocountOnRuleId,
         StatementShapeFindingKind.BareSelectStar => StatementShapeBareSelectStarRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled StatementShapeFindingKind."),
+    };
+
+    public static string ControlFlowRiskRuleId(ControlFlowRiskFindingKind kind) => kind switch
+    {
+        ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch => ControlFlowRiskCursorFetchColumnCountMismatchRuleId,
+        ControlFlowRiskFindingKind.EmptyCatchBlock => ControlFlowRiskEmptyCatchBlockRuleId,
+        ControlFlowRiskFindingKind.TriggerEmitsOutput => ControlFlowRiskTriggerEmitsOutputRuleId,
+        ControlFlowRiskFindingKind.DirtyReadIsolationHint => ControlFlowRiskDirtyReadIsolationHintRuleId,
+        ControlFlowRiskFindingKind.DuplicatedCallArgument => ControlFlowRiskDuplicatedCallArgumentRuleId,
+        ControlFlowRiskFindingKind.LegacyIdentityIntrinsic => ControlFlowRiskLegacyIdentityIntrinsicRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ControlFlowRiskFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -579,6 +596,12 @@ public static class SarifRuleCatalog
             Rule(StatementShapeTableWithNoPrimaryKeyRuleId, "A base table has no PRIMARY KEY constraint - no engine-enforced row uniqueness."),
             Rule(StatementShapeMissingSetNocountOnRuleId, "A procedure or trigger never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message."),
             Rule(StatementShapeBareSelectStarRuleId, "A bare SELECT * couples the query to the target's current column set."),
+            Rule(ControlFlowRiskCursorFetchColumnCountMismatchRuleId, "A cursor FETCH INTO variable count doesn't match its own cursor's defining SELECT column count - always fails at runtime."),
+            Rule(ControlFlowRiskEmptyCatchBlockRuleId, "A CATCH block has no statements - every error reaching it is silently swallowed."),
+            Rule(ControlFlowRiskTriggerEmitsOutputRuleId, "A trigger emits a result set or message back to whatever connection fired the DML, not the calling application."),
+            Rule(ControlFlowRiskDirtyReadIsolationHintRuleId, "NOLOCK/READUNCOMMITTED allows dirty reads and can miss or double-count rows during a concurrent page split."),
+            Rule(ControlFlowRiskDuplicatedCallArgumentRuleId, "The same non-literal expression is passed as two different arguments to the same call."),
+            Rule(ControlFlowRiskLegacyIdentityIntrinsicRuleId, "@@IDENTITY returns the last identity value inserted in this session across any table/scope - prefer SCOPE_IDENTITY()."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the
