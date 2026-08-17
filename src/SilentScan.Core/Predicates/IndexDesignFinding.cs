@@ -169,6 +169,67 @@ public enum IndexDesignFindingKind
     /// pass cannot confirm that for any specific column. <see cref="FindingConfidence.Low"/> always.
     /// </summary>
     HighStringColumnRatio,
+
+    /// <summary>
+    /// A filtered index (<see cref="Catalog.CatalogIndex.IsFiltered"/>) whose own filter predicate
+    /// (<see cref="Catalog.CatalogIndex.FilterDefinition"/>, reparsed through the same throwaway-
+    /// wrapper-statement technique <see cref="SchemaDependencyScanner"/> uses for a CHECK
+    /// constraint's own definition text) references at least one column that is NOT among this
+    /// index's own <see cref="Catalog.CatalogIndex.KeyColumns"/>/<see cref="Catalog.CatalogIndex.IncludedColumns"/>.
+    /// The engine can only substitute a filtered index for a query whose own WHERE clause restates
+    /// (or logically implies) the filter predicate - when the filter references a column the index
+    /// itself does not carry, the optimizer would additionally need to re-derive that column's
+    /// value from the base table to even confirm the filter still holds, which defeats the covering
+    /// benefit a filtered index exists for in the first place. Only fires when the filter text
+    /// reparses cleanly - a filter this pass cannot parse is left unanalyzed rather than guessed
+    /// at, the same "never guess" discipline <see cref="DuplicateIndex"/>/<see cref="SubsumedIndex"/>
+    /// already apply to an unfiltered index's own definition.
+    /// </summary>
+    FilterColumnNotInIndex,
+
+    /// <summary>
+    /// A column declared <c>text</c>, <c>ntext</c>, or <c>image</c> - all three formally deprecated
+    /// by Microsoft since SQL Server 2005 in favor of <c>varchar(max)</c>/<c>nvarchar(max)</c>/
+    /// <c>varbinary(max)</c>, and Microsoft's own documentation states outright that a future
+    /// version may remove them entirely. A genuine functional deprecation, not merely a naming
+    /// recommendation: these three types cannot be used in most string functions, cannot appear in
+    /// a WHERE/GROUP BY/ORDER BY without extra casting gymnastics, and cannot be a variable/
+    /// parameter type in many contexts the MAX-length equivalents support natively. Catalog-only -
+    /// a structural fact about the column's declared type, independent of whether any scanned query
+    /// touches it (the same shape <see cref="MaxTypedColumnFinding"/> already established).
+    /// </summary>
+    DeprecatedLobColumnType,
+
+    /// <summary>
+    /// A column declared <c>timestamp</c> - deliberately NOT grouped with <see cref="DeprecatedLobColumnType"/>:
+    /// unlike <c>text</c>/<c>ntext</c>/<c>image</c>, <c>timestamp</c> is not a distinct, functionally
+    /// deprecated type at all. Since SQL Server 2005, <c>rowversion</c> is literally a synonym for
+    /// the exact same underlying 8-byte auto-incrementing binary type - <c>sys.columns</c>/<c>sys.types</c>
+    /// report a <c>rowversion</c>-declared column identically to a <c>timestamp</c>-declared one (both
+    /// resolve to system type id 80, name "timestamp"; there is no separate "rowversion" row in
+    /// <c>sys.types</c> to tell them apart at the catalog level - confirmed directly against the
+    /// engine, not assumed). Microsoft's own documentation recommends <c>rowversion</c> for new
+    /// development purely because the name no longer collides with the unrelated SQL-standard
+    /// `TIMESTAMP` datetime type and reads correctly - a naming-only recommendation, not a functional
+    /// deprecation, and worded/confidence-scored accordingly (<see cref="FindingConfidence.Low"/>,
+    /// informational).
+    /// </summary>
+    TimestampColumnNaming,
+
+    /// <summary>
+    /// A <c>float</c> or <c>real</c> (approximate, IEEE-754 binary floating-point) column used as an
+    /// index key column - structurally risky regardless of any specific query, since an approximate
+    /// type cannot represent every decimal value exactly, and a value computed two logically-
+    /// equivalent-but-differently-rounded ways can compare unequal under <c>=</c> even though a
+    /// person would call them "the same number". An index built on such a column still works as a
+    /// B-tree (the bytes it stores are exact even though the values they represent are not), but any
+    /// equality seek/comparison against it inherits the same representation-error correctness risk
+    /// the sibling AST-level finding (a `float`/`real` column compared with `=`) targets more
+    /// specifically - this catalog-only half flags the structural shape (the column is a key at
+    /// all), the AST-level half flags an actual equality predicate against one. Catalog-only,
+    /// independent of whether any scanned query happens to compare on it.
+    /// </summary>
+    FloatOrRealIndexKeyColumn,
 }
 
 /// <summary>
@@ -198,14 +259,40 @@ public enum IndexDesignFindingKind
 /// itself for why (new catalog plumbing with zero real rows in the local test database to validate
 /// against).
 ///
+/// <b>A third §A wave</b> (four more kinds, same reasoning as the second wave for staying on this
+/// one type): <see cref="IndexDesignFindingKind.FilterColumnNotInIndex"/> (needs <see
+/// cref="Catalog.CatalogIndex.FilterDefinition"/>, reparsed the same throwaway-wrapper-statement
+/// way <see cref="SchemaDependencyScanner"/> already reparses a CHECK constraint's own definition
+/// text), <see cref="IndexDesignFindingKind.DeprecatedLobColumnType"/>/<see
+/// cref="IndexDesignFindingKind.TimestampColumnNaming"/> (a plain column-type walk, the checklist's
+/// "deprecated LOB column types" item, split into a genuine functional deprecation and a
+/// naming-only recommendation - see each kind's own doc comment for why they are NOT the same
+/// claim), and <see cref="IndexDesignFindingKind.FloatOrRealIndexKeyColumn"/> (the catalog-only
+/// half of the checklist's "float/real as an index key or equality-predicate target" item - the
+/// AST-level half, an actual equality predicate against a float/real column, ships as its own
+/// small type, <see cref="FloatEqualityFinding"/>, since it is a predicate-site claim, not a
+/// catalog-only structural one - see that type's own doc comment for why it was not folded into
+/// <see cref="TypedPredicateExtractor"/>'s existing type-conversion-verdict machinery instead).
+/// The checklist's identity/sequence-range item ships as its own type too, <see
+/// cref="IdentityRangeFinding"/> - its own doc comment explains why "one is a schema fact, the
+/// other needs live data state" earns it a stand-alone type rather than two more members here.
+///
 /// One finding type, one <see cref="Kind"/> discriminator - this codebase's established
 /// shared-plumbing shape (<see cref="ControlFlowRiskFinding"/>/<see cref="SecurityFinding"/>).
-/// Catalog-only, no AST walk of any kind - every one of these fourteen kinds is a structural fact
+/// Catalog-only, no AST walk of any kind except <see cref="IndexDesignFindingKind.FilterColumnNotInIndex"/>'s
+/// own throwaway reparse of a filter's stored definition TEXT (not a query-site AST - the
+/// distinction <see cref="SchemaDependencyScanner"/> already draws for CHECK constraints) - every
+/// other one of these eighteen kinds is a structural fact about
 /// about <see cref="Catalog.DatabaseCatalog.Tables"/>/<see cref="Catalog.DatabaseCatalog.ForeignKeys"/>
 /// alone, computed once by <see cref="IndexDesignScanner"/>. Live-mode only by construction: <see
-/// cref="Catalog.CatalogIndex.IsClustered"/>/<see cref="Catalog.CatalogIndex.IsHypothetical"/> are
-/// populated only by <c>LiveCatalogReader</c> (see their own doc comments for why file-mode
-/// DDL-fidelity replication is deliberately out of scope), so this stream is always empty from
+/// cref="Catalog.CatalogIndex.IsClustered"/>/<see cref="Catalog.CatalogIndex.IsHypothetical"/>/<see
+/// cref="Catalog.CatalogIndex.FilterDefinition"/> are populated only by <c>LiveCatalogReader</c>
+/// (see their own doc comments for why file-mode DDL-fidelity replication is deliberately out of
+/// scope) - the newer <see cref="IndexDesignFindingKind.DeprecatedLobColumnType"/>/<see
+/// cref="IndexDesignFindingKind.TimestampColumnNaming"/>/<see cref="IndexDesignFindingKind.FloatOrRealIndexKeyColumn"/>
+/// kinds are structurally derivable from a plain column-type walk that file mode COULD populate,
+/// but are kept on this same live-only-invoked scanner rather than fragmenting invocation across
+/// two call sites for three kinds alone - so this stream is always empty from
 /// <see cref="Reporting.ScanReportBuilder"/> and is merged in by <c>SilentScan.Live.LiveScanRunner</c>
 /// after a real live catalog read - the same pattern <c>TempTableExecShapeFindings</c>/
 /// <c>DatabaseConfigurationFindings</c> already established.
@@ -243,13 +330,19 @@ public enum IndexDesignFindingKind
 /// listed for completeness rather than as priorities" framing, kept genuinely informational rather
 /// than dropped, after real measurement against the local test database showed all three fire on
 /// a real minority of tables rather than nearly all of them (docs/detection-checklist.md carries
-/// the measured numbers).
+/// the measured numbers). <see cref="FindingConfidence.High"/> for <see
+/// cref="IndexDesignFindingKind.FilterColumnNotInIndex"/> (deterministic once the filter text
+/// parses) and <see cref="IndexDesignFindingKind.DeprecatedLobColumnType"/>/<see
+/// cref="IndexDesignFindingKind.FloatOrRealIndexKeyColumn"/> (plain declared-type facts). <see
+/// cref="FindingConfidence.Low"/> for <see cref="IndexDesignFindingKind.TimestampColumnNaming"/> -
+/// a naming-only recommendation, not a defect.
 ///
-/// Engine-version sensitivity: none of these fourteen kinds depends on compat level or CE mode -
+/// Engine-version sensitivity: none of these eighteen kinds depends on compat level or CE mode -
 /// clustered index mechanics (the hidden uniquifier, RID-based nonclustered lookups on a heap,
-/// GUID-vs-sequential insert locality), duplicate/subsumed/disabled/hypothetical index catalog
-/// state, foreign-key/index catalog shape, and table column-shape statistics are all long-standing
-/// physical storage-engine/catalog facts, not query-optimizer behavior.
+/// GUID-vs-sequential insert locality), duplicate/subsumed/disabled/hypothetical/filtered index
+/// catalog state, foreign-key/index catalog shape, table column-shape statistics, and declared
+/// column types are all long-standing physical storage-engine/catalog facts, not query-optimizer
+/// behavior.
 /// </summary>
 public sealed record IndexDesignFinding(
     IndexDesignFindingKind Kind,

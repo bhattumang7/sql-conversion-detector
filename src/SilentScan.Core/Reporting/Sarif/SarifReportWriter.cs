@@ -96,6 +96,8 @@ public static class SarifReportWriter
         results.AddRange(report.ControlFlowRiskFindings.Select(ToResult));
         results.AddRange(report.SecurityFindings.Select(ToResult));
         results.AddRange(report.IndexDesignFindings.Select(ToResult));
+        results.AddRange(report.IdentityRangeFindings.Select(ToResult));
+        results.AddRange(report.FloatEqualityFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -1002,10 +1004,43 @@ public static class SarifReportWriter
         // already floors severity by confidence elsewhere (FloorLevelForConfidence handles the
         // Medium-confidence downgrade for it on top of this).
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexDesignRuleId(finding.Kind), finding.Confidence);
-        var baseLevel = finding.Kind == IndexDesignFindingKind.WideClusteredKey ? LevelWarning : LevelError;
+        // TimestampColumnNaming is a naming-only recommendation (Low confidence, informational) -
+        // Note rather than Error/Warning, the same tier NonPersistedComputedColumnFinding uses for
+        // an equally informational structural fact.
+        var baseLevel = finding.Kind switch
+        {
+            IndexDesignFindingKind.WideClusteredKey => LevelWarning,
+            IndexDesignFindingKind.TimestampColumnNaming => LevelNote,
+            _ => LevelError,
+        };
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
 
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(IdentityRangeFinding finding)
+    {
+        // IdentitySeedOrIncrementAnomaly is Low-confidence/informational by construction (see its
+        // own doc comment) - Note. IdentityRangeNearExhaustion is a real, structurally-provable
+        // approaching-failure condition (the next INSERT past the type's own range raises a hard
+        // error) - Error, floored by confidence like every other stream.
+        var baseLevel = finding.Kind == IdentityRangeFindingKind.IdentityRangeNearExhaustion ? LevelError : LevelNote;
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IdentityRangeRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(FloatEqualityFinding finding)
+    {
+        // A correctness claim (can silently return the wrong rows), not a performance one - Error,
+        // the same tier NotInNullableSubqueryFinding/TempTableExecShapeFinding's column-count
+        // mismatch use for "provably wrong outcome" findings.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FloatEqualityRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is compared with = in this predicate - IEEE-754 floating-point representation error means two values a person would call the same number can compare unequal, silently returning the wrong rows.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(TempTableExecShapeFinding finding)

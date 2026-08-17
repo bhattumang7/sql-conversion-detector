@@ -1,4 +1,6 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
 
@@ -100,6 +102,9 @@ public static class IndexDesignScanner
             ScanDisabledAndHypotheticalIndexes(table, findings);
             ScanOverIndexing(table, findings);
             ScanTableShape(table, findings);
+            ScanFilteredIndexColumnCoverage(table, findings);
+            ScanColumnTypeSignals(table, findings);
+            ScanFloatOrRealIndexKeyColumns(table, findings);
         }
 
         ScanUnindexedForeignKeys(catalog, findings);
@@ -531,6 +536,161 @@ public static class IndexDesignScanner
             HashCode.Combine(
                 obj.ConstraintName.ToUpperInvariant(),
                 obj.ParentTableQualifiedName.ToUpperInvariant());
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A "Filtered index whose filter columns are absent from its own
+    /// key + include list". Only evaluated for an index with <see cref="CatalogIndex.IsFiltered"/>
+    /// true and a non-null <see cref="CatalogIndex.FilterDefinition"/> (live-only - see that
+    /// field's own doc comment). The filter text is reparsed as a WHERE search condition through
+    /// the same throwaway-wrapper-statement technique <see cref="SchemaDependencyScanner"/> already
+    /// uses for a CHECK constraint's own definition text - a filter's stored text is always a valid
+    /// boolean predicate on its own (the engine itself stored it that way), so wrapping it under
+    /// <c>WHERE</c> is always the right shape, unlike a computed-column/DEFAULT definition which
+    /// wraps as a bare SELECT-list scalar expression instead. A filter this pass cannot parse is
+    /// left unanalyzed entirely - never guessed at.
+    /// </summary>
+    private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var index in table.Indexes)
+        {
+            if (!index.IsFiltered || index.FilterDefinition is not { } filterDefinition)
+            {
+                continue;
+            }
+
+            var filterColumns = TryExtractFilterColumnNames(filterDefinition);
+            if (filterColumns is null || filterColumns.Count == 0)
+            {
+                continue;
+            }
+
+            var carriedColumns = new HashSet<string>(index.KeyColumns, StringComparer.OrdinalIgnoreCase);
+            carriedColumns.UnionWith(index.IncludedColumns);
+
+            var missing = filterColumns.Where(c => !carriedColumns.Contains(c)).ToList();
+            if (missing.Count == 0)
+            {
+                continue;
+            }
+
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.FilterColumnNotInIndex,
+                table.QualifiedName,
+                index.Name,
+                $"'{table.QualifiedName}' filtered index '{index.Name ?? "<unnamed>"}' has filter '{filterDefinition}' referencing column(s) not in its own key/INCLUDE list: {string.Join(", ", missing)} - the engine can only substitute this index for a query whose own WHERE clause restates the filter predicate, and it cannot cheaply confirm that without reading those column(s) from the base table.",
+                table.SourcePath,
+                table.SourceLine));
+        }
+    }
+
+    /// <summary>
+    /// Reparses a <c>sys.indexes.filter_definition</c> string (e.g. <c>"([IsActive]=(1))"</c>) as a
+    /// WHERE search condition and returns the distinct column names it references, or
+    /// <see langword="null"/> if the text does not parse cleanly as one - the same "never guess"
+    /// discipline every other reparse in this codebase follows.
+    /// </summary>
+    private static List<string>? TryExtractFilterColumnNames(string filterDefinition)
+    {
+        var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
+        if (result.HasErrors
+            || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { WhereClause.SearchCondition: { } searchCondition } } ] }] })
+        {
+            return null;
+        }
+
+        var collector = new ColumnNameCollector();
+        searchCondition.Accept(collector);
+        return [.. collector.Names];
+    }
+
+    private sealed class ColumnNameCollector : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void ExplicitVisit(ColumnReferenceExpression node)
+        {
+            if (node.MultiPartIdentifier?.Identifiers is { Count: > 0 } identifiers)
+            {
+                Names.Add(identifiers[^1].Value);
+            }
+
+            base.ExplicitVisit(node);
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A "Deprecated LOB column types in the schema" - a plain
+    /// column-type walk, no AST, mirroring <see cref="MaxTypedColumnScanner"/>'s own shape. Splits
+    /// the checklist's single item into two kinds because they are not the same claim: <c>text</c>/
+    /// <c>ntext</c>/<c>image</c> are a genuine functional deprecation (<see
+    /// cref="IndexDesignFindingKind.DeprecatedLobColumnType"/>), <c>timestamp</c> vs. <c>rowversion</c>
+    /// is a naming-only recommendation over the identical underlying type (<see
+    /// cref="IndexDesignFindingKind.TimestampColumnNaming"/>) - see each kind's own doc comment.
+    /// </summary>
+    private static void ScanColumnTypeSignals(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var column in table.Columns)
+        {
+            switch (column.Type?.Category)
+            {
+                case SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image:
+                    findings.Add(new IndexDesignFinding(
+                        IndexDesignFindingKind.DeprecatedLobColumnType,
+                        table.QualifiedName,
+                        IndexName: null,
+                        $"'{table.QualifiedName}.{column.Name}' is declared {column.Type}, formally deprecated by Microsoft since SQL Server 2005 in favor of the MAX-length equivalent - a future engine version may remove it entirely, and it already cannot be used in most string functions or a variable/parameter type in many contexts the MAX-length equivalent supports natively.",
+                        table.SourcePath,
+                        table.SourceLine));
+                    break;
+
+                case SqlTypeCategory.Timestamp:
+                    findings.Add(new IndexDesignFinding(
+                        IndexDesignFindingKind.TimestampColumnNaming,
+                        table.QualifiedName,
+                        IndexName: null,
+                        $"'{table.QualifiedName}.{column.Name}' is declared timestamp - since SQL Server 2005, rowversion is a synonym for the exact same underlying type (not a functional deprecation, unlike text/ntext/image); Microsoft recommends the rowversion spelling for new development purely to avoid the name colliding with the unrelated SQL-standard TIMESTAMP datetime type.",
+                        table.SourcePath,
+                        table.SourceLine,
+                        FindingConfidence.Low));
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md §A "float/real as an index key column" - the catalog-only half;
+    /// see <see cref="FloatEqualityFinding"/> for the AST-level, sharper sibling (an actual equality
+    /// predicate against such a column). Fires once per active (non-disabled) index that carries at
+    /// least one float/real key column, listing every such column - not once per column, since the
+    /// index itself is the unit a reader would act on (rebuild it on a different/additional key).
+    /// </summary>
+    private static void ScanFloatOrRealIndexKeyColumns(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var index in table.Indexes)
+        {
+            if (index.IsDisabled || index.KeyColumns.Count == 0)
+            {
+                continue;
+            }
+
+            var floatKeyColumns = index.KeyColumns
+                .Where(name => table.FindColumn(name)?.Type?.Category is SqlTypeCategory.Real or SqlTypeCategory.Float)
+                .ToList();
+
+            if (floatKeyColumns.Count == 0)
+            {
+                continue;
+            }
+
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.FloatOrRealIndexKeyColumn,
+                table.QualifiedName,
+                index.Name,
+                $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' carries approximate (float/real) key column(s) {string.Join(", ", floatKeyColumns)} - IEEE-754 binary floating-point cannot represent every decimal value exactly, so an equality seek/comparison against it can silently miss a value a person would call 'the same number'.",
+                table.SourcePath,
+                table.SourceLine));
+        }
     }
 
     /// <summary>

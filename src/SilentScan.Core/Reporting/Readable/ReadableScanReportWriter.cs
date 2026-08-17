@@ -126,6 +126,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ControlFlowRisk(report, headingLevel, pathBase));
         blocks.AddRange(Security(report, headingLevel, pathBase));
         blocks.AddRange(IndexDesign(report, headingLevel, pathBase));
+        blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
+        blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -192,6 +194,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Cursor and control-flow risks", report.ControlFlowRiskFindings.Count);
         AddCount(counts, "Security", report.SecurityFindings.Count);
         AddCount(counts, "Physical/schema index design (heap/clustered-key quality)", report.IndexDesignFindings.Count);
+        AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
+        AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1039,6 +1043,50 @@ public static class ReadableScanReportWriter
             or IndexDesignFindingKind.HighStringColumnRatio => true,
         _ => false,
     };
+
+    private static IEnumerable<ReadableBlock> IdentityRange(ScanReport report, int level, string? pathBase)
+    {
+        if (report.IdentityRangeFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Identity/sequence range signals ({report.IdentityRangeFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Live-mode only. A negative seed or a non-1 increment on an IDENTITY column - schema-decidable, informational, not a proven defect. An IDENTITY column that has consumed most of its declared type's representable range - data-state-decidable, meaningful ONLY against a production-shaped target; never read the absence of this finding as a passing signal on a low-value development database.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Column", "Detail"],
+            [.. report.IdentityRangeFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.ColumnName,
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> FloatEquality(ScanReport report, int level, string? pathBase)
+    {
+        if (report.FloatEqualityFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Float/real equality predicates ({report.FloatEqualityFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A WHERE/ON equality predicate (=) compares a float/real (IEEE-754 approximate) column - a correctness risk, not a performance one: two values a person would call the same number can carry a different bit pattern and compare unequal, silently returning the wrong rows regardless of plan shape or indexing. Direct base-table columns in the immediate statement's own FROM clause only - a predicate reached through a view/CTE/derived table is not analyzed by this v1.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Column", "Type", "Detail"],
+            [.. report.FloatEqualityFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+                $"Compared with = at line {f.Line}, column {f.Column}.",
+            })]);
+    }
 
     private static IEnumerable<ReadableBlock> NotInNullableSubquery(ScanReport report, int level, string? pathBase)
     {

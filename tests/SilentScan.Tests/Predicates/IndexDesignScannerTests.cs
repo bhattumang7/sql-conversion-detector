@@ -698,4 +698,163 @@ public sealed class IndexDesignScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.HighStringColumnRatio);
     }
+
+    [Fact]
+    public void FilteredIndex_FilterColumnMissingFromKeyAndInclude_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        // Filters on IsActive, but only carries CustomerId as its key - IsActive is neither a key
+        // column nor an INCLUDE column, so the engine can't confirm the filter still holds without
+        // re-reading the base table.
+        var filtered = new CatalogIndex(
+            "IX_Orders_Active", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [],
+            IsFiltered: true, FilterDefinition: "([IsActive]=(1))");
+        catalog.AddOrReplace(Table(
+            "dbo", "Orders",
+            [Column("CustomerId", IntType), Column("IsActive", new SqlType(SqlTypeCategory.Bit))],
+            [filtered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.FilterColumnNotInIndex);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("IsActive", finding.DetailText);
+    }
+
+    [Fact]
+    public void FilteredIndex_FilterColumnIsKeyColumn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var filtered = new CatalogIndex(
+            "IX_Orders_Active", CatalogIndexKind.Index, IsUnique: false, ["IsActive"], [],
+            IsFiltered: true, FilterDefinition: "([IsActive]=(1))");
+        catalog.AddOrReplace(Table(
+            "dbo", "Orders", [Column("IsActive", new SqlType(SqlTypeCategory.Bit))], [filtered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.FilterColumnNotInIndex);
+    }
+
+    [Fact]
+    public void FilteredIndex_FilterColumnIsIncludeColumn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var filtered = new CatalogIndex(
+            "IX_Orders_Active", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["IsActive"],
+            IsFiltered: true, FilterDefinition: "([IsActive]=(1))");
+        catalog.AddOrReplace(Table(
+            "dbo", "Orders",
+            [Column("CustomerId", IntType), Column("IsActive", new SqlType(SqlTypeCategory.Bit))],
+            [filtered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.FilterColumnNotInIndex);
+    }
+
+    [Fact]
+    public void FilteredIndex_UnparseableFilterText_NeverGuesses()
+    {
+        var catalog = new DatabaseCatalog();
+        var filtered = new CatalogIndex(
+            "IX_Orders_Weird", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [],
+            IsFiltered: true, FilterDefinition: "not valid t-sql at all (((");
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("CustomerId", IntType)], [filtered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.FilterColumnNotInIndex);
+    }
+
+    [Theory]
+    [InlineData(SqlTypeCategory.Text)]
+    [InlineData(SqlTypeCategory.NText)]
+    [InlineData(SqlTypeCategory.Image)]
+    public void DeprecatedLobColumnType_Fires(SqlTypeCategory category)
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Legacy", [Column("Blob", new SqlType(category))], []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.DeprecatedLobColumnType);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void TimestampColumn_FiresNamingKindOnly_LowConfidence()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Audited", [Column("RowVer", new SqlType(SqlTypeCategory.Timestamp))], []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.TimestampColumnNaming);
+        Assert.Equal(FindingConfidence.Low, finding.Confidence);
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.DeprecatedLobColumnType);
+    }
+
+    [Fact]
+    public void VarcharColumn_NeverFiresColumnTypeSignals()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Ordinary", [Column("Name", new SqlType(SqlTypeCategory.VarChar, Length: 50))], []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is IndexDesignFindingKind.DeprecatedLobColumnType or IndexDesignFindingKind.TimestampColumnNaming);
+    }
+
+    [Fact]
+    public void FloatKeyColumn_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("IX_Prices_Amount", CatalogIndexKind.Index, IsUnique: false, ["Amount"], []);
+        catalog.AddOrReplace(Table("dbo", "Prices", [Column("Amount", new SqlType(SqlTypeCategory.Float))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.FloatOrRealIndexKeyColumn);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void RealKeyColumn_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("IX_Prices_Amount", CatalogIndexKind.Index, IsUnique: false, ["Amount"], []);
+        catalog.AddOrReplace(Table("dbo", "Prices", [Column("Amount", new SqlType(SqlTypeCategory.Real))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.FloatOrRealIndexKeyColumn);
+    }
+
+    [Fact]
+    public void FloatColumn_NotAKeyColumn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("IX_Prices_CustomerId", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Amount"]);
+        catalog.AddOrReplace(Table(
+            "dbo", "Prices",
+            [Column("CustomerId", IntType), Column("Amount", new SqlType(SqlTypeCategory.Float))],
+            [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.FloatOrRealIndexKeyColumn);
+    }
+
+    [Fact]
+    public void FloatKeyColumn_OnDisabledIndex_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("IX_Prices_Amount", CatalogIndexKind.Index, IsUnique: false, ["Amount"], [], IsDisabled: true);
+        catalog.AddOrReplace(Table("dbo", "Prices", [Column("Amount", new SqlType(SqlTypeCategory.Float))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.FloatOrRealIndexKeyColumn);
+    }
 }

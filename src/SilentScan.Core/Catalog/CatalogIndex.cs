@@ -45,6 +45,23 @@ namespace SilentScan.Core.Catalog;
 /// falls through to a plain disabled-index finding when it is false - never double-reporting the
 /// same row under both kinds. Read live-only, same as <see cref="IsClustered"/>; defaults to
 /// <see langword="false"/> so file mode (which never sets it) never misreads an ordinary index.
+///
+/// <paramref name="FilterDefinition"/> (docs/detection-checklist.md "DBA-script family sweep" §A
+/// "Filtered index whose filter columns are absent from its own key + include list") is
+/// <c>sys.indexes.filter_definition</c> - the filtered index's own predicate as a raw T-SQL
+/// expression string (e.g. <c>"([IsActive]=(1))"</c>), read live-only, <see langword="null"/> for
+/// a non-filtered index (<see cref="IsFiltered"/> false) or in file mode. Before this field
+/// existed, the duplicate/subsumed-index checks (<c>IndexDesignScanner</c>) could only see
+/// <see cref="IsFiltered"/> as a bare flag and had to exclude every filtered index from
+/// comparison rather than risk assuming two unread filter texts matched - this field is the first
+/// consumer that reads the filter's own text rather than just its presence, letting
+/// <c>IndexDesignScanner.ScanFilteredIndexColumnCoverage</c> reparse it (the same throwaway-
+/// wrapper-statement technique <c>SchemaDependencyScanner</c> uses for a CHECK constraint's own
+/// boolean definition text) and check whether every column the filter predicate touches also
+/// appears in this index's own <see cref="KeyColumns"/>/<see cref="IncludedColumns"/> - the engine
+/// can only use a filtered index for a query whose own WHERE clause restates (or logically
+/// implies) the filter predicate, and it can only prove that inexpensively when every column the
+/// filter predicate needs is already sitting in the index itself.
 /// </summary>
 public sealed record CatalogIndex(
     string? Name,
@@ -56,4 +73,5 @@ public sealed record CatalogIndex(
     bool IsColumnstore = false,
     bool IsDisabled = false,
     bool IsClustered = false,
-    bool IsHypothetical = false);
+    bool IsHypothetical = false,
+    string? FilterDefinition = null);

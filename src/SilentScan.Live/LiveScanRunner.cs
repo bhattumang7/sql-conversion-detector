@@ -221,6 +221,17 @@ public static class LiveScanRunner
             indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
         }
 
+        // docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A "Identity/sequence
+        // range exhaustion" - catalog-only (no extra live round trip: CatalogColumn's identity
+        // seed/increment/current-value fields were already populated by the catalog read above),
+        // merged in the same live-only shape as IndexDesignFindings just above.
+        using (var identityRangeStage = progress.Begin("checking identity/sequence range"))
+        {
+            var identityRangeFindings = IdentityRangeScanner.Scan(catalog);
+            report = report with { IdentityRangeFindings = identityRangeFindings };
+            identityRangeStage.Complete($"{identityRangeFindings.Count:N0} findings");
+        }
+
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];
         IReadOnlyList<WorkloadFinding> workloadFindings = [];

@@ -118,6 +118,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -205,6 +207,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -231,6 +235,8 @@ public sealed class SarifReportWriterTests
                 5,
                 [new TransformationSite("vw_outer.sql", 3, "CAST/CONVERT to Int"), new TransformationSite("vw_inner.sql", 2, "CAST/CONVERT to VarChar(20)")],
                 [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)])],
+            [],
+            [],
             [],
             [],
             [],
@@ -373,6 +379,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -392,6 +400,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)],
+            [],
+            [],
             [],
             [],
             [],
@@ -526,6 +536,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -547,6 +559,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.InnerParseFailed, "Incorrect syntax near '$$$'.")],
+            [],
+            [],
             [],
             [],
             [],
@@ -689,6 +703,8 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -728,5 +744,31 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.VerdictRuleId(verdict);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+    }
+
+    [Fact]
+    public void Write_RuleCatalog_CoversEveryIndexDesignFindingKind()
+    {
+        foreach (var kind in Enum.GetValues<IndexDesignFindingKind>())
+        {
+            var ruleId = SarifRuleCatalog.IndexDesignRuleId(kind);
+            Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
+        }
+    }
+
+    [Fact]
+    public void Write_RuleCatalog_CoversEveryIdentityRangeFindingKind()
+    {
+        foreach (var kind in Enum.GetValues<IdentityRangeFindingKind>())
+        {
+            var ruleId = SarifRuleCatalog.IdentityRangeRuleId(kind);
+            Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
+        }
+    }
+
+    [Fact]
+    public void Write_RuleCatalog_CoversFloatEqualityRuleId()
+    {
+        Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == SarifRuleCatalog.FloatEqualityRuleId);
     }
 }

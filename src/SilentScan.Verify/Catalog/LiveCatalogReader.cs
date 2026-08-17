@@ -704,15 +704,27 @@ public sealed class LiveCatalogReader
     private static async Task<Dictionary<int, List<CatalogColumn>>> ReadColumnsAsync(
         SqlConnection connection, SkipLedger skipLedger, CancellationToken cancellationToken)
     {
+        // LEFT JOINs sys.identity_columns for CatalogColumn's own IdentitySeed/IdentityIncrement/
+        // IdentityCurrentValue (docs/detection-checklist.md "DBA-script family sweep" §A
+        // "Identity/sequence range exhaustion") - a single extra join on the same query every
+        // other column fact already comes from, not a separate live round trip. seed_value/
+        // increment_value/last_value are sql_variant at the engine level; CONVERTed to
+        // decimal(38,0) here so every identity type (tinyint through decimal(p,0)) reports through
+        // the same CatalogColumn shape rather than needing a per-type reader downstream. last_value
+        // is NULL until the first row is ever inserted - reported as null (never a guessed 0),
+        // matching CatalogColumn's own "never guess" default for every other unresolved fact.
         const string sql = """
             SELECT c.object_id, s.name AS schema_name, t.name AS table_name, c.name AS column_name,
                    ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name,
-                   c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted, c.is_ansi_padded
+                   c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted, c.is_ansi_padded,
+                   CONVERT(decimal(38,0), idc.seed_value), CONVERT(decimal(38,0), idc.increment_value),
+                   CONVERT(decimal(38,0), idc.last_value)
             FROM sys.columns c
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
             JOIN sys.tables t ON t.object_id = c.object_id
             JOIN sys.schemas s ON s.schema_id = t.schema_id
             LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
+            LEFT JOIN sys.identity_columns idc ON idc.object_id = c.object_id AND idc.column_id = c.column_id
             WHERE t.is_ms_shipped = 0
             ORDER BY c.object_id, c.column_id;
             """;
@@ -737,6 +749,9 @@ public sealed class LiveCatalogReader
             var isComputed = reader.GetBoolean(11);
             var isPersisted = !await reader.IsDBNullAsync(12, cancellationToken) && reader.GetBoolean(12);
             var isAnsiPadded = reader.GetBoolean(13);
+            var identitySeed = await reader.IsDBNullAsync(14, cancellationToken) ? (decimal?)null : reader.GetDecimal(14);
+            var identityIncrement = await reader.IsDBNullAsync(15, cancellationToken) ? (decimal?)null : reader.GetDecimal(15);
+            var identityCurrentValue = await reader.IsDBNullAsync(16, cancellationToken) ? (decimal?)null : reader.GetDecimal(16);
 
             var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName);
             if (type is null)
@@ -756,7 +771,9 @@ public sealed class LiveCatalogReader
                 columnsByTable[objectId] = columns;
             }
 
-            columns.Add(new CatalogColumn(columnName, type, isNullable, isIdentity, isComputed, isPersisted, isAnsiPadded));
+            columns.Add(new CatalogColumn(
+                columnName, type, isNullable, isIdentity, isComputed, isPersisted, isAnsiPadded,
+                identitySeed, identityIncrement, identityCurrentValue));
         }
 
         return columnsByTable;
@@ -777,7 +794,7 @@ public sealed class LiveCatalogReader
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
-                   i.is_hypothetical,
+                   i.is_hypothetical, i.filter_definition,
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
@@ -800,6 +817,7 @@ public sealed class LiveCatalogReader
             if (!rowsByIndex.TryGetValue(key, out var row))
             {
                 var indexName = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
+                var filterDefinition = await reader.IsDBNullAsync(10, cancellationToken) ? null : reader.GetString(10);
                 row = new IndexRow(
                     Name: indexName,
                     TypeDesc: reader.GetString(3),
@@ -810,26 +828,27 @@ public sealed class LiveCatalogReader
                     IsDisabled: reader.GetBoolean(8),
                     IsHypothetical: reader.GetBoolean(9),
                     KeyColumns: [],
-                    IncludedColumns: []);
+                    IncludedColumns: [],
+                    FilterDefinition: filterDefinition);
                 rowsByIndex[key] = row;
             }
 
-            if (await reader.IsDBNullAsync(13, cancellationToken))
+            if (await reader.IsDBNullAsync(14, cancellationToken))
             {
                 // No sys.index_columns row at all (clustered columnstore) - the index row above
                 // was already recorded with empty key/included lists; nothing more to add.
                 continue;
             }
 
-            var isIncluded = reader.GetBoolean(11);
-            var columnName = reader.GetString(13);
+            var isIncluded = reader.GetBoolean(12);
+            var columnName = reader.GetString(14);
             if (isIncluded)
             {
                 row.IncludedColumns.Add(columnName);
             }
             else
             {
-                row.KeyColumns.Add((reader.GetByte(10), columnName));
+                row.KeyColumns.Add((reader.GetByte(11), columnName));
             }
         }
 
@@ -850,7 +869,8 @@ public sealed class LiveCatalogReader
                 IsColumnstore: row.TypeDesc.Contains("COLUMNSTORE", StringComparison.OrdinalIgnoreCase),
                 IsDisabled: row.IsDisabled,
                 IsClustered: row.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase),
-                IsHypothetical: row.IsHypothetical);
+                IsHypothetical: row.IsHypothetical,
+                FilterDefinition: row.FilterDefinition);
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -888,7 +908,10 @@ public sealed class LiveCatalogReader
         // this same row shape but never sets it (an indexed view's own index is never a DTA/
         // missing-index-wizard hypothetical row), so it defaults to false rather than every other
         // caller needing to pass it explicitly.
-        bool IsHypothetical = false);
+        bool IsHypothetical = false,
+        // Same reasoning as IsHypothetical above - only ReadIndexesAsync's own query reads
+        // filter_definition; ReadIndexedViewsAsync never sets it.
+        string? FilterDefinition = null);
 
     /// <summary>
     /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead

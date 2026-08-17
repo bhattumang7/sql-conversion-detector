@@ -64,6 +64,8 @@ public sealed record ScanReport(
     IReadOnlyList<ControlFlowRiskFinding> ControlFlowRiskFindings,
     IReadOnlyList<SecurityFinding> SecurityFindings,
     IReadOnlyList<IndexDesignFinding> IndexDesignFindings,
+    IReadOnlyList<IdentityRangeFinding> IdentityRangeFindings,
+    IReadOnlyList<FloatEqualityFinding> FloatEqualityFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -236,5 +238,18 @@ public sealed record ScanReport(
     /// (auto-create/auto-update statistics off, compatibility level behind the connected engine
     /// instance's own current default). Both streams stay live-mode only, same reasoning as the
     /// bump to 47.
-    public const int CurrentSchemaVersion = 48;
+    /// Bumped to 49 for the remaining four docs/detection-checklist.md "DBA-script family sweep
+    /// (2026-08-17)" §A items: four more <see cref="IndexDesignFindings"/> kinds (a filtered
+    /// index's own filter columns absent from its key/INCLUDE list, deprecated LOB column types -
+    /// text/ntext/image - and the naming-only timestamp/rowversion recommendation, and float/real
+    /// used as an index key column), plus two new streams of their own - <see
+    /// cref="IdentityRangeFindings"/> (identity seed/increment anomaly - schema-decidable - and
+    /// identity range near-exhaustion - data-state-decidable, meaningful only against a
+    /// production-shaped target) and <see cref="FloatEqualityFindings"/> (an AST-level equality
+    /// predicate against a float/real column - a correctness claim, not a sargability one).
+    /// <see cref="IndexDesignFindings"/>/<see cref="IdentityRangeFindings"/> stay live-mode only,
+    /// same reasoning as the bump to 47/48; <see cref="FloatEqualityFindings"/> is a genuine
+    /// AST+catalog pass that runs in both file and live mode, same as every ordinary per-module
+    /// stream.
+    public const int CurrentSchemaVersion = 49;
 }

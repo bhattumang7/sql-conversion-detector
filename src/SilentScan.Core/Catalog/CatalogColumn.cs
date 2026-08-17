@@ -14,6 +14,24 @@ namespace SilentScan.Core.Catalog;
 /// "non-padded" the moment this field was added; file mode (`CatalogBuilder`, which never parses
 /// session-state history) is the one caller for whom this default is the ONLY answer it can ever
 /// give, live mode always overrides it with the engine's own authoritative flag.
+///
+/// <paramref name="IdentitySeed"/>/<paramref name="IdentityIncrement"/>/<paramref name="IdentityCurrentValue"/>
+/// (docs/detection-checklist.md "DBA-script family sweep" §A "Identity/sequence range exhaustion")
+/// are <c>sys.identity_columns.seed_value</c>/<c>increment_value</c>/<c>last_value</c> - read
+/// LIVE-ONLY, straight from the same <c>sys.columns</c>-keyed query that reads every other column
+/// fact (a single extra LEFT JOIN, no separate round trip), and only ever non-null for a column
+/// with <see cref="IsIdentity"/> true. All three are <c>sql_variant</c> at the engine level (the
+/// same underlying numeric type the identity column itself declares - int, bigint, decimal(p,0),
+/// etc.) and are converted to <see langword="decimal"/> here for uniform arithmetic regardless of
+/// which exact identity type produced them.
+/// <paramref name="IdentityCurrentValue"/> is a DATA-STATE fact, not a schema fact (docs/
+/// detection-checklist.md's own three-way design-time-decidability split): it changes every time a
+/// row is inserted, is <see langword="null"/> when the column has never had a row inserted since
+/// the table (or the whole database) was created, and is only meaningful for range-exhaustion
+/// reasoning against a production-shaped target - never treated as a passing/clean signal on a
+/// low-value development database (<c>IdentityRangeScanner</c>'s own doc comment enforces this).
+/// <paramref name="IdentitySeed"/>/<paramref name="IdentityIncrement"/> are ordinary schema facts,
+/// decidable identically on a dev or production copy of the same schema.
 /// </summary>
 public sealed record CatalogColumn(
     string Name,
@@ -22,4 +40,7 @@ public sealed record CatalogColumn(
     bool IsIdentity,
     bool IsComputed,
     bool IsPersisted,
-    bool IsAnsiPadded = true);
+    bool IsAnsiPadded = true,
+    decimal? IdentitySeed = null,
+    decimal? IdentityIncrement = null,
+    decimal? IdentityCurrentValue = null);

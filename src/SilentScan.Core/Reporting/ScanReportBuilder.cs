@@ -871,6 +871,33 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<FloatEqualityFinding> floatEqualityFindings;
+        using (var floatEqualityStage = progress.Begin("scanning float/real equality predicates", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    IReadOnlyList<FloatEqualityFinding> findings;
+                    try
+                    {
+                        findings = FloatEqualityPredicateScanner.Scan(r, catalog);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"DIAG float-equality crash in {r.SourcePath}: {ex}");
+                        throw;
+                    }
+                    floatEqualityStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            floatEqualityFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<ForcedSerialFinding> forcedSerialFindings;
         using (var forcedSerialStage = progress.Begin("scanning forced-serial constructs", usableCount))
         {
@@ -1151,6 +1178,11 @@ public static class ScanReportBuilder
             // in afterward, same pattern TempTableExecShapeFindings/DatabaseConfigurationFindings
             // already established.
             [],
+            // IdentityRangeFindings needs CatalogColumn's identity seed/increment/current-value
+            // fields, populated only by a live catalog read - always empty here; LiveScanRunner
+            // merges the real result in afterward, same pattern as IndexDesignFindings above.
+            [],
+            floatEqualityFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

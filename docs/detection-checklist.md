@@ -3710,30 +3710,183 @@ makes them the cleanest findings in this entire file.
       `RandomClusteredKeyGuidDefault` already set. Both kinds have real
       fire/near-miss fixtures in
       `tests/SilentScan.Tests/Predicates/IndexDesignScannerTests.cs`.
-- [ ] **Filtered index whose filter columns are absent from its own key +
+- [x] **Filtered index whose filter columns are absent from its own key +
       include list** — the engine cannot use the index for a query that does
-      not itself repeat the filter predicate. Needs the filter definition text
-      (not currently read) plus a parse of it.
-- [ ] **Identity/sequence range exhaustion** — current identity value against
+      not itself repeat the filter predicate. Needed the filter definition
+      TEXT, not previously read by this catalog: `CatalogIndex.FilterDefinition`
+      (new, additive, live-only, `sys.indexes.filter_definition`), reparsed
+      through the same throwaway-wrapper-statement technique
+      `SchemaDependencyScanner` already uses for a CHECK constraint's own
+      definition text (`SELECT 1 WHERE {filter};` — a filter's stored text is
+      always a valid boolean predicate on its own, since the engine stored it
+      that way). Column references are collected from the parsed tree and
+      compared against the index's own key + INCLUDE columns; any filter
+      column in neither set fires. A filter this pass cannot parse is left
+      unanalyzed entirely — never guessed at. Shipped as
+      `IndexDesignFindingKind.FilterColumnNotInIndex` on the existing
+      `IndexDesignFinding` type (`src/SilentScan.Core/Predicates/IndexDesignFinding.cs`,
+      `IndexDesignScanner.ScanFilteredIndexColumnCoverage`). Confidence High —
+      deterministic once the filter text parses.
+      <br><br>
+      Real coverage measured against the local test database (`scan-db`):
+      **9 of 17 real filtered indexes** have at least one filter column absent
+      from their own key/INCLUDE list — cross-checked by hand against every
+      one of the 17 `sys.indexes WHERE has_filter = 1` rows independently of
+      this tool's own code before trusting the count (the other 8 either
+      filter on their own leading key column, e.g. a
+      `WHERE [IsActive]=(1)` filter on an index keyed on `IsActive`, or carry
+      the filter column via INCLUDE).
+- [x] **Identity/sequence range exhaustion** — current identity value against
       the column type's own maximum, and a negative seed or an increment other
-      than 1. The failure mode is a hard outage (insert failure) rather than a
-      slowdown. **Split this in two, and do not ship the halves as one rule:**
-      the seed/increment half is a schema fact and decidable anywhere; the
-      "how close to the ceiling" half reads a current *data* value, so against
-      a development database it is meaningless (a dev copy's identity sits near
-      zero regardless of what production looks like) and reporting it there
-      would be a confidently-wrong verdict. The consumption half is a
-      `scan-db`-against-a-production-shaped-target finding only, and must say
-      so in the finding text; the seed/increment half ships unconditionally.
-      This is the sharpest example of the design-time decidability axis below —
-      use it as the reference case when classifying future candidates.
-- [ ] **Deprecated LOB column types in the schema** — `text`/`ntext`/`image`
-      columns (and `timestamp` in favour of `rowversion`). The shipped
-      deprecated-syntax stream is statement-level and does not look at column
-      types at all.
-- [ ] **`float`/`real` as an index key column or an equality-predicate target**
+      than 1. **Split in two per the checklist's own instruction, shipped as
+      its own type rather than two more `IndexDesignFindingKind` members** —
+      `IdentityRangeFinding`/`IdentityRangeScanner`
+      (`src/SilentScan.Core/Predicates/IdentityRangeFinding.cs`,
+      `IdentityRangeScanner.cs`): the two halves genuinely differ in what they
+      claim (schema fact vs. data-state fact), and a stand-alone type makes
+      that split visible in the finding schema itself rather than burying it
+      inside one more `IndexDesignFindingKind` switch arm.
+      <br><br>
+      **(a) `IdentitySeedOrIncrementAnomaly`** — schema-decidable, identical on
+      a dev and a production copy of the same schema. A negative seed or a
+      non-1 increment is reported at `FindingConfidence.Low`, worded
+      informationally rather than as a defect: verified this is the right
+      call before shipping — a reversed-numbering scheme (negative increment),
+      an interleaved-writer scheme (increment ≠ 1), or a deliberately
+      high-then-descending seed are all real, legitimate reasons this could be
+      intentional, so this is a data-modeling signal worth a second look, not
+      a provable mistake.
+      <br><br>
+      **(b) `IdentityRangeNearExhaustion`** — data-state-decidable, reads
+      `sys.identity_columns.last_value` (the live current value), which the
+      checklist's own text warns is meaningless against a development
+      database. Fires only when the current value has consumed ≥90% of the
+      column's own type's representable range in the direction it is
+      incrementing (`IdentityRangeScanner.NearExhaustionRemainingFraction`) —
+      a deliberately round, uncalibrated threshold rather than one tuned
+      against this project's own dev database, since calibrating against dev
+      data would be calibrating against the wrong population for a
+      data-state-decidable check. Bounds computed for tinyint/smallint/int/
+      bigint/decimal(p,0) (the only types a SQL Server IDENTITY column can
+      legally declare); a type this pass cannot bound confidently is left
+      unanalyzed. **There is no corresponding "identity range OK" finding —
+      by design.** The finding's own `DetailText` states the
+      production-shaped-target precondition explicitly every time it fires,
+      and the scanner never reports a clean/passing state for this half at
+      all, honoring the checklist's own "never report a clean/passing state
+      as evidence" instruction the strict way: not by suppressing a false
+      positive, but by having no code path that could ever emit a passing
+      verdict in the first place.
+      <br><br>
+      Both fields (seed/increment and current value) are populated in the SAME
+      live catalog column read every other `CatalogColumn` fact already comes
+      from (`LiveCatalogReader.ReadColumnsAsync`, a single added
+      `LEFT JOIN sys.identity_columns`) — no separate live round trip needed,
+      unlike a first design draft that considered a dedicated reader the way
+      `DatabaseConfigurationReader` works.
+      <br><br>
+      Real coverage measured against the local test database (`scan-db`):
+      **0 findings for both kinds** — cross-checked by hand: 568 real identity
+      columns exist, all with seed 0 or 1 and increment 1 (0 anomalies,
+      confirmed via a direct `sys.identity_columns` query), and the
+      near-exhaustion half's 0 is the *expected*, checklist-predicted outcome
+      for a development-shaped database (every tinyint/smallint identity
+      column with any rows at all sits nowhere near its own ceiling) — not a
+      coverage gap, an honest report of what a dev-shaped target genuinely
+      looks like for a data-state-decidable check. Fixtures
+      (`tests/SilentScan.Tests/Predicates/IdentityRangeScannerTests.cs`)
+      cover both fire paths directly, including a hand-built near-ceiling
+      tinyint case and the checklist's own "a dev copy with an identity at
+      400 is not evidence" example as an explicit never-fires case.
+- [x] **Deprecated LOB column types in the schema** — `text`/`ntext`/`image`
+      columns (and `timestamp` in favour of `rowversion`). Confirmed the
+      shipped `DeprecatedSyntaxFinding` stream is statement-level (AST) and
+      never looks at column types before building this as a second, catalog-
+      only pass — no AST walk, mirrors `MaxTypedColumnScanner`'s exact shape
+      (one structural fact per column). **Split into two kinds, not one**,
+      after verifying a real distinction the checklist's own phrasing glossed
+      over: `text`/`ntext`/`image` are a genuine functional deprecation
+      (cannot be used in most string functions, cannot appear in WHERE/GROUP
+      BY/ORDER BY without casting, cannot be a variable/parameter type in many
+      contexts) — `IndexDesignFindingKind.DeprecatedLobColumnType`, Confidence
+      High. `timestamp` vs. `rowversion` is NOT the same claim — verified
+      directly against the engine that `rowversion` is literally a synonym for
+      the identical underlying type (`sys.columns`/`sys.types` report a
+      `rowversion`-declared column identically to a `timestamp`-declared one;
+      there is no separate "rowversion" row in `sys.types` at all) — a
+      naming-only recommendation, shipped as
+      `IndexDesignFindingKind.TimestampColumnNaming`, Confidence Low,
+      informational. Both on the existing `IndexDesignFinding` type
+      (`IndexDesignScanner.ScanColumnTypeSignals`).
+      <br><br>
+      Real coverage measured against the local test database (`scan-db`):
+      **20 `DeprecatedLobColumnType` findings** (14 `image` + 6 `ntext`, 0
+      `text`) and **0 `TimestampColumnNaming` findings** (no `timestamp`/
+      `rowversion` column exists anywhere in this database) — both
+      cross-checked directly against a hand-rolled `sys.columns`/`sys.types`
+      query independent of this tool's own code before trusting the counts.
+      The zero `TimestampColumnNaming` result is fixture-only against the
+      real corpus, the same "fixture-only today, real corpus honestly reports
+      zero" precedent `RandomClusteredKeyGuidDefault` already set.
+- [x] **`float`/`real` as an index key column or an equality-predicate target**
       — approximate types do not compare exactly; an equality seek on one is a
-      correctness trap before it is a performance one.
+      correctness trap before it is a performance one. Shipped as two distinct
+      sub-checks at two different granularities, per the checklist's own
+      instruction:
+      <br><br>
+      **(a) Catalog-only** — a `float`/`real` column used as an index key
+      column at all, structurally risky regardless of any specific query.
+      Shipped as `IndexDesignFindingKind.FloatOrRealIndexKeyColumn` on the
+      existing `IndexDesignFinding` type
+      (`IndexDesignScanner.ScanFloatOrRealIndexKeyColumns`), Confidence High
+      — a plain declared-type fact, no estimation.
+      <br><br>
+      **(b) AST-level** — an actual equality predicate (`WHERE floatCol = @x`
+      or `= literal`) against a `float`/`real` column, the sharper, more
+      directly actionable claim. Shipped as its own small new type,
+      `FloatEqualityFinding`/`FloatEqualityPredicateScanner`
+      (`src/SilentScan.Core/Predicates/FloatEqualityFinding.cs`,
+      `FloatEqualityPredicateScanner.cs`), **deliberately NOT** folded into
+      `TypedPredicateExtractor`/`Rules.VerdictClassifier`'s existing
+      type-conversion-verdict machinery — that machinery answers "can the
+      engine seek this predicate", and `Verdict`'s
+      `SeekPreserved`/`RangeSeek`/`ScanForced` vocabulary has no member for
+      "this comparison can return a wrong answer regardless of plan shape",
+      which is what IEEE-754 representation error actually threatens here (a
+      correctness risk, not a performance one). Folding it in would either
+      misuse an existing verdict to mean something it doesn't, or bolt on a
+      verdict member orthogonal to every other one beside it — a standalone
+      type keeps the two concerns visibly separate in the finding schema.
+      Deliberately narrow v1 scope, matching this codebase's established
+      restraint for a standalone scanner (`NonUniqueUpdateSourceScanner`'s own
+      precedent): resolves a column reference only through a DIRECT base-table
+      alias in the immediate statement's own FROM clause (or, when
+      unambiguous, a single unqualified table in scope) — never through a
+      view, CTE, derived table, or lineage-resolved column provenance; only a
+      top-level `=` is examined, not `<>`/range operators. A real, known gap,
+      not a silent one. Confidence High.
+      <br><br>
+      Real coverage measured against the local test database (`scan-db`):
+      **1 `FloatOrRealIndexKeyColumn` finding** (cross-checked directly
+      against a hand-rolled `sys.indexes`/`sys.index_columns`/`sys.types`
+      query — 166 real `float` columns and 2 `real` columns exist in the
+      schema, only 1 index carries one as a key column) and **18
+      `FloatEqualityFinding` findings** across the real corpus. Spot-checked
+      one directly against its real source: `dbo.spAssetActivityInsertByOnboardDeviceInput2`
+      line 187, `WHERE ... AND Latitude = @GpsLatitude AND Longitude =
+      @GpsLongitude` — a real GPS-coordinate duplicate-row check against two
+      `float` columns, exactly the representation-error correctness trap this
+      finding targets (a duplicate GPS ping recomputed through a different
+      code path could carry a bit-for-bit different `float` value and slip
+      past this dedup check entirely). Fixtures
+      (`tests/SilentScan.Tests/Predicates/FloatEqualityPredicateScannerTests.cs`)
+      cover WHERE/JOIN-ON/UPDATE/DELETE positions, alias-qualified and
+      unqualified references, the view-boundary v1 scope limit, subquery
+      re-scoping, and a real crash this pass hit scanning the local test
+      database and fixed before shipping: a positioned `WHERE CURRENT OF
+      @cursor` carries a `WhereClause` with a null `SearchCondition` (not a
+      boolean expression at all), which the first version of this scanner
+      dereferenced unconditionally.
 - [ ] **Statistics-object flags**: `NO_RECOMPUTE`, and a partitioned table with
       no incremental statistics. Catalog flags, not DMV state — in scope, unlike
       "statistics are stale", which is not.

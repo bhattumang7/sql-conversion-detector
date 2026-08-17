@@ -30,6 +30,7 @@ public static class SarifRuleCatalog
     public const string ProcCallArgumentMismatchRuleId = "silentscan/call-graph/argument-type-mismatch";
     public const string TemporalBoundaryPrecisionRuleId = "silentscan/correctness/between-end-of-period-boundary";
     public const string MaxTypedColumnRuleId = "silentscan/catalog/max-typed-column";
+    public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string OversizedParameterRuleId = "silentscan/predicates/oversized-parameter";
     public const string UnderLengthParameterRuleId = "silentscan/predicates/under-length-parameter";
     public const string AnsiPaddingMismatchRuleId = "silentscan/predicates/ansi-padding-mismatch";
@@ -232,6 +233,17 @@ public static class SarifRuleCatalog
         IndexDesignFindingKind.WideTable => "silentscan/index-design/wide-table",
         IndexDesignFindingKind.HighNullableColumnRatio => "silentscan/index-design/high-nullable-column-ratio",
         IndexDesignFindingKind.HighStringColumnRatio => "silentscan/index-design/high-string-column-ratio",
+        IndexDesignFindingKind.FilterColumnNotInIndex => "silentscan/index-design/filter-column-not-in-index",
+        IndexDesignFindingKind.DeprecatedLobColumnType => "silentscan/index-design/deprecated-lob-column-type",
+        IndexDesignFindingKind.TimestampColumnNaming => "silentscan/index-design/timestamp-column-naming",
+        IndexDesignFindingKind.FloatOrRealIndexKeyColumn => "silentscan/index-design/float-or-real-index-key-column",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    public static string IdentityRangeRuleId(IdentityRangeFindingKind kind) => kind switch
+    {
+        IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly => "silentscan/identity/seed-or-increment-anomaly",
+        IdentityRangeFindingKind.IdentityRangeNearExhaustion => "silentscan/identity/range-near-exhaustion",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -517,6 +529,7 @@ public static class SarifRuleCatalog
             Rule(ProcCallArgumentMismatchRuleId, "A real EXEC call site passes a caller-side variable whose declared type risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate, classified the same way an INSERT/UPDATE assignment's silent data loss is."),
             Rule(TemporalBoundaryPrecisionRuleId, "A BETWEEN predicate's upper bound literal has fewer fractional-second digits than the TIME/DATETIME2/DATETIMEOFFSET column's own declared precision - a correctness bug, not a sargability one: rows in the precision gap are silently excluded, oracle-confirmed. Rewrite as >= start AND < (start of the next period) instead."),
             Rule(MaxTypedColumnRuleId, "A string/binary column is declared MAX-typed - it can never be an index key column at all, so any predicate/join on it can never seek regardless of how it's used. Catalog-only structural fact."),
+            Rule(FloatEqualityRuleId, "A WHERE/ON equality predicate (=) compares a float/real (approximate, IEEE-754) column - two values a person would call the same number can carry a different bit pattern and compare unequal, so the predicate can silently return the wrong rows regardless of plan shape or indexing."),
             Rule(OversizedParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate."),
             Rule(UnderLengthParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding's identical class of concern."),
             Rule(AnsiPaddingMismatchRuleId, "A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace - the column can never store a value ending in whitespace at all (stripped at INSERT time under ANSI_PADDING OFF), so the pattern can never match anything the column could ever contain. Data-semantics finding, not a plan-shape one."),
@@ -667,6 +680,12 @@ public static class SarifRuleCatalog
             Rule(IndexDesignRuleId(IndexDesignFindingKind.WideTable), "A table has an unusually large column count or estimated non-LOB row width - a data-modeling signal, not a specific proven defect."),
             Rule(IndexDesignRuleId(IndexDesignFindingKind.HighNullableColumnRatio), "A table's columns are mostly nullable - often a sign of several optional sub-entities crammed into one table."),
             Rule(IndexDesignRuleId(IndexDesignFindingKind.HighStringColumnRatio), "A table's columns are mostly string-typed - often correlates with under-typed data."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.FilterColumnNotInIndex), "A filtered index's own filter predicate references a column not in its own key/INCLUDE list - the engine cannot cheaply confirm the filter still holds for a query that doesn't already carry that column, defeating the covering benefit a filtered index exists for."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.DeprecatedLobColumnType), "A column is declared text/ntext/image - formally deprecated by Microsoft since SQL Server 2005 in favor of the MAX-length equivalent, and a future engine version may remove it entirely."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.TimestampColumnNaming), "A column is declared timestamp - since SQL Server 2005, rowversion is a synonym for the identical underlying type; a naming-only recommendation, not a functional deprecation."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.FloatOrRealIndexKeyColumn), "An index's key carries a float/real (approximate) column - IEEE-754 representation error means an equality seek/comparison against it can silently miss a value a person would call the same number."),
+            Rule(IdentityRangeRuleId(IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly), "An IDENTITY column carries a negative seed or a non-1 increment - an unusual, informational data-modeling signal, not a proven defect (schema-decidable: identical on a dev and a production copy of the same schema)."),
+            Rule(IdentityRangeRuleId(IdentityRangeFindingKind.IdentityRangeNearExhaustion), "An IDENTITY column has consumed most of its declared type's representable range - once exhausted, every subsequent INSERT raises a hard arithmetic-overflow error. Data-state-decidable: meaningful only against a production-shaped target, never a dev database."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the
