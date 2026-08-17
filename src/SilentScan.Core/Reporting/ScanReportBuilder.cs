@@ -418,6 +418,60 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<WindowFrameFinding> windowFrameFindings;
+        using (var windowFrameStage = progress.Begin("scanning RANGE window-function frames", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = WindowFrameScanner.Scan(r);
+                    windowFrameStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            windowFrameFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<WaitForFinding> waitForFindings;
+        using (var waitForStage = progress.Begin("scanning WAITFOR DELAY/TIME", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = WaitForScanner.Scan(r);
+                    waitForStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            waitForFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<ViewOrderingFinding> viewOrderingFindings;
+        using (var viewOrderingStage = progress.Begin("scanning TOP(100) PERCENT/ORDER BY in views and inline TVFs", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = ViewOrderingScanner.Scan(r);
+                    viewOrderingStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            viewOrderingFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<CatchAllPredicateFinding> catchAllPredicateFindings;
         using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
         {
@@ -725,6 +779,7 @@ public static class ScanReportBuilder
             selfReferencingDmlFindings,
             temporalTableHistoryIndexGapFindings,
             moduleCompileFlagFindings,
+            windowFrameFindings, waitForFindings, viewOrderingFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

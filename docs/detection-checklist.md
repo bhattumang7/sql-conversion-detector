@@ -2255,28 +2255,191 @@ get an oracle fixture for the serial-plan consequence).
       doesn't, schema-bound function doesn't despite the flag being true).
       **Real coverage against the local RM_ test database: 27 findings**, all
       multi-statement table-valued functions.
-- [ ] `RANGE` instead of `ROWS` in window-function frames — on-disk spool per
-      partition; purely syntactic, near-zero FP risk.
+- [x] **`RANGE` instead of `ROWS` in window-function frames — shipped, scope
+      corrected from the checklist's own "on-disk spool per partition" premise
+      once oracle-investigated.** Probed directly (Docker instance, a
+      5,000-row seeded table, `SET STATISTICS XML ON` against real
+      executions, repeated with and without duplicate `ORDER BY` values to
+      isolate peer-group ties from plain row cost): an equivalent `ROWS`
+      frame and a `RANGE` frame produce the IDENTICAL `PhysicalOp="Window
+      Spool"` operator — there is no on-disk-vs-not distinction between the
+      two at the physical-operator level, so the checklist's original framing
+      does not survive contact with the oracle. The real, reproduced
+      differentiator: the `Window Spool` operator's own `ActualCPUms` was
+      measured at roughly 4x higher for `RANGE` than the equivalent `ROWS`
+      frame across repeated runs against identical data (peer-group
+      value-comparison cost `ROWS`'s pure physical-offset counting doesn't
+      pay) — real and reproducible, just not the mechanism originally
+      claimed. **Second oracle finding, load-bearing for scope:** a window
+      function's `OVER` clause with an `ORDER BY` and NO explicit frame
+      clause at all silently defaults to `RANGE BETWEEN UNBOUNDED PRECEDING
+      AND CURRENT ROW` (T-SQL's own documented default) — confirmed to carry
+      the identical measured cost as writing `RANGE` explicitly, so this
+      finding fires on both the explicit and the invisible-in-source-text
+      implicit case (`WindowFrameFindingKind.ExplicitRangeFrame`/
+      `ImplicitDefaultRangeFrame`), not just the explicit keyword. Fully
+      syntax-only (`WindowFrameFinding`/`WindowFrameScanner`,
+      `src/SilentScan.Core/Predicates/WindowFrameScanner.cs`) — no catalog
+      dependency, both kinds visible directly from the AST
+      (`OverClause.WindowFrameClause`). `FindingConfidence.High`, SARIF
+      Warning, the same "structural risk, not provably-wrong-result" tier
+      `ForcedSerialFinding`/`CatchAllPredicateFinding` use. Wired end-to-end
+      (`ScanReport` schema version 29 → 30, SARIF rules
+      `silentscan/window-frame/{explicit-range,implicit-default-range}`,
+      readable-report section). Unit-tested (`WindowFrameScannerTests`, 6
+      cases: explicit ROWS never fires, explicit RANGE fires, ORDER BY with
+      no frame clause fires as implicit-default, no ORDER BY at all never
+      fires — a frame clause is syntactically illegal without one so this can
+      never occur in valid SQL, `ROW_NUMBER()`-style ranking functions with
+      no frame support still fire on the shape since it's about the `OVER`
+      clause's own AST, not per-function semantics, and multiple window
+      functions in one query are each reported independently). **Real
+      coverage against the local RM_ test database: 225 findings, all
+      `ImplicitDefaultRangeFrame`** — every real window function in this
+      corpus that specifies `ORDER BY` leaves the frame clause unwritten
+      entirely (the invisible-in-source-text default), rather than spelling
+      out `RANGE` explicitly; 0 explicit `RANGE` frames, confirming the
+      implicit-default half of this rule is the one carrying the real
+      finding volume here, not a rarely-hit edge case.
 - [ ] Trigger content scan — run trigger bodies through the existing pipeline
       so cursors/UDFs/MSTVFs inside triggers surface as hidden per-DML cost
       (the modules are already in `sys.sql_modules`; this is mostly wiring).
-- [ ] `COMPUTE`/`COMPUTE BY` deprecated aggregate constructs — bypasses
-      normal set-based aggregate optimization; syntax-only, rare but trivial.
-- [ ] `WAITFOR DELAY`/`WAITFOR TIME` inside a routine or batch — holds a
-      worker thread idle, contributing to worker exhaustion under load;
-      syntax-only.
+- [x] **`COMPUTE`/`COMPUTE BY` deprecated aggregate constructs — closed, not
+      reachable through this tool's own parser dialect, confirmed empirically
+      rather than assumed.** Probed directly against `TSql160Parser` (the
+      exact parser class `SqlScriptParser` uses) with `SELECT OrderId, Amount
+      FROM Orders ORDER BY OrderId COMPUTE SUM(Amount) BY OrderId;` — a hard
+      parse error ("Incorrect syntax near 'OrderId'"), not a distinct AST node
+      shape to pattern-match. This syntax was removed from the engine's own
+      grammar entirely (deprecated since SQL Server 2012, and ScriptDOM's
+      modern-compat parser follows the same grammar), the identical situation
+      this checklist already found and closed for the `*=`/`=*` outer-join
+      operators under "Schema-scan UDF and computed-column findings" above. A
+      real corpus file using this syntax would already fail to parse as a
+      whole, surfaced via the existing `ParseHealthReport`/dialect-sniffing
+      machinery as a parse error — a stronger, more honest signal than a
+      targeted rule that can never fire. Closed exactly as stated, no code
+      written.
+- [x] **`WAITFOR DELAY`/`WAITFOR TIME` inside a routine or batch — shipped**:
+      new `WaitForFinding`/`WaitForScanner`
+      (`src/SilentScan.Core/Predicates/WaitForScanner.cs`) — fully
+      syntax-only, a direct AST match on `WaitForStatement.WaitForOption`
+      (`Delay`/`Time`). `WAITFOR (RECEIVE ...)` (Service Broker's own
+      `WaitForOption.Statement`) is deliberately never matched — a distinct,
+      legitimate blocking-wait idiom with its own `TIMEOUT` option, not a
+      timer sleep with nothing to justify the wait. No oracle needed: a
+      blocked worker thread is a documented, unconditional SQL Server
+      mechanism, not a plan-shape claim. Both DELAY (relative) and TIME
+      (absolute) report identically — the risk story doesn't differ — but the
+      finding also tracks whether the `WAITFOR` is reachable inside an open
+      `BEGIN TRANSACTION`/no-matching-`COMMIT`-or-`ROLLBACK`-yet span in the
+      same batch's own straight-line reading order (a structural signal, not
+      real control-flow analysis — a `WAITFOR` reachable only through a
+      branch where the transaction was already closed on that path is not
+      disambiguated, the same class of documented imprecision
+      `SelfReferencingDmlScanner` already accepts for its own alias-reuse
+      case), since a WAITFOR inside an open transaction holds that
+      transaction's locks for the same duration, a sharper claim than the
+      bare worker-idle one. `FindingConfidence.High`, SARIF Warning. Wired
+      end-to-end (`ScanReport` schema version 30, SARIF rule
+      `silentscan/control-flow/waitfor`, readable-report section).
+      Unit-tested (`WaitForScannerTests`, 7 cases: DELAY fires, TIME fires,
+      inside an open transaction flags `IsInsideTransaction`, after a
+      COMMIT/ROLLBACK does not, plain SELECT never fires, `WAITFOR (RECEIVE
+      ...)` never fires). **Real coverage against the local RM_ test
+      database: 0 findings** — a real, honest zero (this codebase's own
+      T-SQL apparently doesn't use `WAITFOR DELAY`/`WAITFOR TIME` anywhere
+      across 4,987 modules), not a detection gap; the scanner correctly
+      fires on every hand-authored fixture in the unit-test suite.
 - [ ] Transaction hygiene pair: lengthy work (loops, RBAR, external calls)
       between an error and its `ROLLBACK` extends lock hold duration;
       `BEGIN TRANSACTION` with no reachable `ROLLBACK`/`COMMIT` on some path
       leaves locks held indefinitely. Both are control-flow/dataflow checks
       over the AST, no catalog needed.
-- [ ] **`TOP(100) PERCENT` ignored by the optimizer** and **`ORDER BY` in a
-      view / inline TVF** (folded in from the incumbent-catalog read) — same
-      family, both commonly written to "force" ordering that is not
-      guaranteed. Syntactic, near-zero FP.
-- [ ] **`IF` statements containing queries inside a procedure** (folded in
-      from the incumbent-catalog read) — estimation and recompile
-      consequences; nobody frames it as a performance finding.
+- [x] **`TOP(100) PERCENT` ignored by the optimizer** and **`ORDER BY` in a
+      view / inline TVF — shipped together as one finding type, because T-SQL
+      structurally cannot separate them.** Oracle-checked first (Docker
+      instance, real seeded data): a bare `ORDER BY` with no
+      `TOP`/`OFFSET`/`FOR XML` in a view/inline TVF is a hard compile error
+      (Msg 1033, "The ORDER BY clause is invalid in views, inline functions,
+      derived tables, subqueries, and common table expressions, unless TOP,
+      OFFSET or FOR XML is also specified") — so "ORDER BY in a view" only
+      ever occurs already paired with a `TOP`/`OFFSET`, meaning the
+      checklist's two items describe the same shape from two angles, not two
+      independent ones. **Oracle-confirmed the core claim directly**: a real
+      view with `TOP (100) PERCENT ... ORDER BY Amt DESC`, queried via
+      `SELECT TOP 5 * FROM theView` with no outer `ORDER BY`, returned rows in
+      the base table's own storage order, not `Amt DESC` — the view's
+      internal ordering was silently discarded entirely, since `TOP (100)
+      PERCENT` never excludes a single row and so cannot even be defended as
+      "the ORDER BY decided which rows survived." A second probe (a view with
+      a genuine row-limiting `TOP (10) ... ORDER BY`) found the weaker,
+      related case: the ORDER BY DOES decide which rows survive there, but
+      the FINAL output order of the surviving rows sometimes still *appeared*
+      ordered to the consumer, purely as a side effect of the chosen plan
+      shape (SQL Server often reuses the same sort it needed internally to
+      compute the TOP) — a real, undocumented, plan-dependent coincidence,
+      never a guarantee, which is why this shipped as the deliberately
+      *weaker*, lower-confidence half of the same finding rather than a
+      second instance of provable meaninglessness. New
+      `ViewOrderingFinding`/`ViewOrderingScanner`
+      (`src/SilentScan.Core/Predicates/ViewOrderingScanner.cs`,
+      `ViewOrderingFindingKind.{TopPercentOrderByNeverLimits,
+      OrderByNotGuaranteedToConsumer}`) — fully syntax-only, only a
+      view's/inline TVF's own OUTERMOST query is inspected (a top-level
+      `UNION`/`EXCEPT`/`INTERSECT` declines rather than guessing which
+      branch's `TOP`/`ORDER BY` matters, the same discipline
+      `SelectStarViewScanner.FindOutermostStarLine` already established for
+      the identical class of view-body-shape rule). `TopPercentOrderByNeverLimits`:
+      `FindingConfidence.High`, SARIF Warning (the meaninglessness is
+      provable). `OrderByNotGuaranteedToConsumer`: `FindingConfidence.Low`,
+      SARIF Note (purely informational — this pass cannot see whether any
+      real consumer relies on the unguaranteed order, the same no-magnitude-
+      claim tier `CascadingForeignKeyFinding`/`LocalVariablePredicateFinding`
+      use for their own reason). **Known v1 scope limit, deliberate:**
+      matches the checklist's own explicit "view / inline TVF" scope — a
+      derived table/subquery/CTE using the identical trick (the same Msg 1033
+      grammar rule applies to those too) is a real, structurally identical
+      relative left unanalyzed rather than silently widened past what was
+      asked for; a multi-statement TVF's own `RETURNS @t TABLE(...)` body has
+      no single outermost query to inspect the same way, so it is never a
+      candidate. Wired end-to-end (`ScanReport` schema version 30, SARIF
+      rules `silentscan/view/{top-percent-order-by-no-op,
+      order-by-not-guaranteed}`, readable-report section). Unit-tested
+      (`ViewOrderingScannerTests`, 12 cases: `TOP (100) PERCENT` fires as
+      never-limits, `TOP (10)`/`TOP (50) PERCENT`/`OFFSET...FETCH` all fire as
+      not-guaranteed, no `ORDER BY` never fires, CREATE/ALTER/CREATE OR ALTER
+      VIEW all fire, an inline TVF fires, a multi-statement TVF never fires, a
+      scalar function never fires, a plain top-level `SELECT` (not in a view/
+      function) never fires, a top-level `UNION` declines). **Real coverage
+      against the local RM_ test database: 3 findings, all
+      `TopPercentOrderByNeverLimits`** — the provably-meaningless case; 0
+      instances of the weaker `OrderByNotGuaranteedToConsumer` shape, a real,
+      honest result given how rare a genuinely row-limiting `TOP` combined
+      with `ORDER BY` inside a view/inline TVF is in this corpus.
+- [x] **`IF` statements containing queries inside a procedure — investigated
+      and closed, not built.** Proposed premise (`detection-reference.md`
+      §7.2 `SRD0063`, "estimation and recompile consequences"): a query inside
+      an `IF`/`ELSE` branch not taken at runtime still costs something at
+      compile time, because the whole procedure is compiled/cached as one
+      unit. Probed directly against the Docker oracle (a real 2-branch
+      procedure, one branch a `COUNT(*)`, the other a `GROUP BY` aggregate) —
+      **the premise is false.** A real executed plan (`SET STATISTICS XML
+      ON`) for a call that takes branch A contains ONLY that branch's own
+      operators — no trace of the untaken branch B's query at all. Confirmed
+      further via `sys.dm_exec_cached_plans`: SQL Server compiles/caches each
+      individual statement inside a procedure lazily, the first time that
+      statement is actually reached at runtime (documented "deferred
+      compilation" behavior) — an untaken `IF` branch's query is never
+      compiled at all until (if ever) that branch actually executes, so there
+      is no compile-time cost specific to "having multiple `IF` branches with
+      queries" distinct from ordinary per-statement compilation. Nothing
+      survives that is both true and a performance finding distinct from
+      normal query compilation, so this is **not** being built — the same
+      "proposed and killed the same session" discipline the "Non-foldable
+      nondeterministic intrinsic in a predicate" item above already models.
+      Recorded here rather than silently dropped because the value is the
+      falsification, not a verdict.
 - [x] **Non-foldable nondeterministic intrinsic in a predicate** — *proposed
       and killed the same session, before any code was written.* Worth keeping
       as a worked example of the admission rule doing its job. Proposed premise:

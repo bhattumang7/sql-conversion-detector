@@ -40,6 +40,9 @@ public sealed record ScanReport(
     IReadOnlyList<SelfReferencingDmlFinding> SelfReferencingDmlFindings,
     IReadOnlyList<TemporalTableHistoryIndexGapFinding> TemporalTableHistoryIndexGapFindings,
     IReadOnlyList<ModuleCompileFlagFinding> ModuleCompileFlagFindings,
+    IReadOnlyList<WindowFrameFinding> WindowFrameFindings,
+    IReadOnlyList<WaitForFinding> WaitForFindings,
+    IReadOnlyList<ViewOrderingFinding> ViewOrderingFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -115,6 +118,10 @@ public sealed record ScanReport(
     /// FK-linked half. Bumped to 29 for the new <see cref="ModuleCompileFlagFindings"/> stream
     /// (docs/detection-checklist.md "Small precise adds": WITH RECOMPILE, and a table-valued
     /// function's own un-COLLATE'd return-table string column). Live-mode only, same reasoning.
+    /// Bumped to 30 for three new syntax-only streams (docs/detection-checklist.md "Small precise
+    /// adds"): <see cref="WindowFrameFindings"/> (RANGE instead of ROWS in window-function
+    /// frames), <see cref="WaitForFindings"/> (WAITFOR DELAY/TIME), and
+    /// <see cref="ViewOrderingFindings"/> (TOP(100) PERCENT / ORDER BY in a view or inline TVF).
     /// </summary>
-    public const int CurrentSchemaVersion = 29;
+    public const int CurrentSchemaVersion = 30;
 }

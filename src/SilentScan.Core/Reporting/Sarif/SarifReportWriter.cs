@@ -72,6 +72,9 @@ public static class SarifReportWriter
         results.AddRange(report.SetOptionFindings.Select(ToResult));
         results.AddRange(report.TemporalTableHistoryIndexGapFindings.Select(ToResult));
         results.AddRange(report.ModuleCompileFlagFindings.Select(ToResult));
+        results.AddRange(report.WindowFrameFindings.Select(ToResult));
+        results.AddRange(report.WaitForFindings.Select(ToResult));
+        results.AddRange(report.ViewOrderingFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -480,6 +483,60 @@ public static class SarifReportWriter
                 $"'{finding.ModuleQualifiedName}' declares a RETURNS TABLE character column with no explicit COLLATE - its collation was baked in against the database's default collation at CREATE/ALTER time and will silently disagree with the database's collation after any future ALTER DATABASE ... COLLATE.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(WindowFrameFinding finding)
+    {
+        // Warning, not error: a real, oracle-measured performance cost, not a proven-wrong-result
+        // claim - the same "structural risk" tier ForcedSerialFinding/CatchAllPredicateFinding use.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WindowFrameRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            WindowFrameFindingKind.ExplicitRangeFrame =>
+                "This window function uses an explicit RANGE frame - oracle-measured to cost materially more CPU at the Window Spool operator than the equivalent ROWS frame for the same logical boundary.",
+            WindowFrameFindingKind.ImplicitDefaultRangeFrame =>
+                "This window function has an ORDER BY but no explicit frame clause - T-SQL silently defaults this to a RANGE frame, oracle-confirmed to carry the same measured cost as writing RANGE explicitly.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(WaitForFinding finding)
+    {
+        // Warning, not error: a documented structural cost/risk, not a proven-wrong-result claim -
+        // the same "structural risk" tier ForcedSerialFinding/CatchAllPredicateFinding use.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WaitForRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.IsInsideTransaction
+            ? "WAITFOR DELAY/TIME holds this worker thread idle inside an open transaction - locks held by that transaction stay held for the full delay/until-time too."
+            : "WAITFOR DELAY/TIME holds this worker thread idle for the full delay/until-time, contributing to worker-pool exhaustion under load.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(ViewOrderingFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ViewOrderingRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind switch
+        {
+            // Warning/High: oracle-confirmed the ordering is provably never guaranteed to a
+            // consumer - the same "structural risk, high confidence" tier as e.g.
+            // AnsiPaddingMismatchFinding's own LIKE case.
+            ViewOrderingFindingKind.TopPercentOrderByNeverLimits =>
+                $"'{finding.ObjectQualifiedName}' uses TOP (100) PERCENT ... ORDER BY - 100 PERCENT never excludes a row, so this ORDER BY exists only to satisfy T-SQL's view-ordering grammar rule and is not guaranteed to any consumer that doesn't apply its own ORDER BY.",
+            // Note/Low: purely informational - this pass cannot see whether any real consumer
+            // relies on the unguaranteed order, the same no-magnitude-claim tier
+            // CascadingForeignKeyFinding uses for its own reason.
+            ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer =>
+                $"'{finding.ObjectQualifiedName}' uses a row-limiting TOP/OFFSET ... ORDER BY - the ORDER BY does decide which rows survive, but the final output order is not guaranteed to a consumer that doesn't apply its own ORDER BY.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+        var baseLevel = finding.Kind == ViewOrderingFindingKind.TopPercentOrderByNeverLimits ? LevelWarning : LevelNote;
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }

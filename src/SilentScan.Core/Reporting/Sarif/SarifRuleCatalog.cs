@@ -63,6 +63,22 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
+    public static string WindowFrameRuleId(WindowFrameFindingKind kind) => kind switch
+    {
+        WindowFrameFindingKind.ExplicitRangeFrame => "silentscan/window-frame/explicit-range",
+        WindowFrameFindingKind.ImplicitDefaultRangeFrame => "silentscan/window-frame/implicit-default-range",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    public const string WaitForRuleId = "silentscan/control-flow/waitfor";
+
+    public static string ViewOrderingRuleId(ViewOrderingFindingKind kind) => kind switch
+    {
+        ViewOrderingFindingKind.TopPercentOrderByNeverLimits => "silentscan/view/top-percent-order-by-no-op",
+        ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer => "silentscan/view/order-by-not-guaranteed",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
     {
         SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature => "silentscan/set-option/quoted-identifier-off",
@@ -260,6 +276,11 @@ public static class SarifRuleCatalog
             Rule(TemporalTableHistoryIndexGapRuleId, "A system-versioned temporal table's CURRENT side carries a nonclustered index with no structurally matching index (same key columns, same order) on its HISTORY side - oracle-confirmed that FOR SYSTEM_TIME AS OF/BETWEEN rewrites to a UNION ALL of the two tables, so a predicate that seeks the current-table branch via this index degrades to a full scan of the history-table branch. PRIMARY KEY/UNIQUE-constraint indexes are never compared - the engine itself forbids either constraint on a temporal history table."),
             Rule(ModuleCompileFlagRuleId(ModuleCompileFlagFindingKind.RecompilesEveryCall), "The module was authored WITH RECOMPILE (sys.sql_modules.is_recompiled) - every execution compiles a fresh plan and discards it immediately rather than caching it, so the module's own cost never accumulates in the plan cache at all, invisible to any monitoring that reads sys.dm_exec_cached_plans/sys.dm_exec_query_stats."),
             Rule(ModuleCompileFlagRuleId(ModuleCompileFlagFindingKind.TableValuedFunctionReturnUsesDatabaseCollation), "A non-schema-bound table-valued function's own RETURNS @t TABLE(...) declares a character-typed column with no explicit COLLATE clause, so its collation was implicitly resolved against the CURRENT database's default collation at CREATE/ALTER time and baked in (sys.sql_modules.uses_database_collation) - a later ALTER DATABASE ... COLLATE silently leaves the function's already-compiled return shape disagreeing with the database's new default. Schema-bound modules are excluded from this finding: oracle-confirmed that schema-binding sets this flag unconditionally regardless of whether the module touches string data at all, so it carries no differentiating signal there."),
+            Rule(WindowFrameRuleId(WindowFrameFindingKind.ExplicitRangeFrame), "A window function's OVER clause uses an explicit RANGE frame - oracle-confirmed to cost materially more CPU at the Window Spool operator than the equivalent ROWS frame (peer-group value comparison vs. plain physical-offset counting), though both compile to the same Window Spool physical operator, not an on-disk-vs-not distinction."),
+            Rule(WindowFrameRuleId(WindowFrameFindingKind.ImplicitDefaultRangeFrame), "A window function's OVER clause has an ORDER BY but no explicit frame clause at all - T-SQL silently defaults this to RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, oracle-confirmed to carry the identical measured cost as an explicit RANGE frame, invisible in the source text."),
+            Rule(WaitForRuleId, "WAITFOR DELAY/WAITFOR TIME holds the calling worker thread idle for the full delay/until-time - a documented, unconditional cost contributing to worker-pool exhaustion under load, and (inside an open transaction) extended lock hold duration."),
+            Rule(ViewOrderingRuleId(ViewOrderingFindingKind.TopPercentOrderByNeverLimits), "A view/inline TVF's own outermost query uses TOP (100) PERCENT ... ORDER BY - oracle-confirmed provably meaningless: 100 PERCENT never excludes a row, so the ORDER BY exists purely to satisfy T-SQL's own view-ordering grammar rule (Msg 1033) and is not guaranteed to any consumer that doesn't apply its own ORDER BY."),
+            Rule(ViewOrderingRuleId(ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer), "A view/inline TVF's own outermost query uses a genuinely row-limiting TOP (N) or OFFSET ... FETCH together with ORDER BY - the ORDER BY does decide which rows survive, but the FINAL output order is still not guaranteed to a consumer that doesn't apply its own ORDER BY, oracle-observed to sometimes still appear ordered purely as a plan-shape coincidence."),
             Rule(TempTableExecShapeColumnCountMismatchRuleId, "INSERT INTO #temp EXEC proc, where the executed proc's real, engine-described result-set column count differs from #temp's own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(TempTableExecShapeColumnTypeMismatchRuleId, "INSERT INTO #temp EXEC proc, where column counts match but at least one position's type risks silent data loss between the executed proc's real, engine-described column type and #temp's own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),

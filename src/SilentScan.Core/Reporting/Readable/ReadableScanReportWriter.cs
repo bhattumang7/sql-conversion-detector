@@ -102,6 +102,9 @@ public static class ReadableScanReportWriter
         blocks.AddRange(SelfReferencingDml(report, headingLevel, pathBase));
         blocks.AddRange(TemporalTableHistoryIndexGap(report, headingLevel, pathBase));
         blocks.AddRange(ModuleCompileFlag(report, headingLevel, pathBase));
+        blocks.AddRange(WindowFrame(report, headingLevel, pathBase));
+        blocks.AddRange(WaitFor(report, headingLevel, pathBase));
+        blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -173,6 +176,9 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Self-referencing DML (Halloween Protection risk)", report.SelfReferencingDmlFindings.Count);
         AddCount(counts, "Temporal table history-side index gaps", report.TemporalTableHistoryIndexGapFindings.Count);
         AddCount(counts, "Module compile flags (WITH RECOMPILE / TVF database-collation return)", report.ModuleCompileFlagFindings.Count);
+        AddCount(counts, "RANGE window-function frames", report.WindowFrameFindings.Count);
+        AddCount(counts, "WAITFOR DELAY/TIME", report.WaitForFindings.Count);
+        AddCount(counts, "View/inline TVF ordering not guaranteed", report.ViewOrderingFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1067,6 +1073,67 @@ public static class ReadableScanReportWriter
                 f.Kind == ModuleCompileFlagFindingKind.RecompilesEveryCall
                     ? "WITH RECOMPILE"
                     : "RETURNS TABLE column uses database collation",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> WindowFrame(ScanReport report, int level, string? pathBase)
+    {
+        if (report.WindowFrameFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"RANGE window-function frames ({report.WindowFrameFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A window function's OVER clause uses (explicitly, or by T-SQL's own silent default when ORDER BY is present with no frame clause at all) a RANGE frame rather than ROWS - oracle-measured to cost materially more CPU at the Window Spool operator than the equivalent ROWS frame, though both compile to the identical Window Spool physical operator, not an on-disk-vs-not distinction.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Frame"],
+            [.. report.WindowFrameFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind == WindowFrameFindingKind.ExplicitRangeFrame ? "Explicit RANGE" : "Implicit default (RANGE)",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> WaitFor(ScanReport report, int level, string? pathBase)
+    {
+        if (report.WaitForFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"WAITFOR DELAY/TIME ({report.WaitForFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "WAITFOR DELAY/WAITFOR TIME holds the calling worker thread idle for the full delay/until-time - a documented, unconditional cost, worse still when reached inside an open transaction, where any locks that transaction holds stay held for the same duration.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Inside open transaction?"],
+            [.. report.WaitForFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.IsInsideTransaction ? "Yes" : "No",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ViewOrdering(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ViewOrderingFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"View/inline TVF ordering not guaranteed ({report.ViewOrderingFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A view/inline TVF's own outermost query uses TOP/OFFSET ... ORDER BY - T-SQL requires TOP/OFFSET/FOR XML for ORDER BY to appear in a view at all, but the resulting order is never guaranteed to a consumer that doesn't apply its own ORDER BY. TOP (100) PERCENT is the provably meaningless case (100 PERCENT never excludes a row, oracle-confirmed the order is silently discarded); a genuinely row-limiting TOP(N)/OFFSET is a legitimate use whose final output order is still unguaranteed, oracle-observed to sometimes appear ordered only by plan-shape coincidence.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Object", "Shape"],
+            [.. report.ViewOrderingFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ObjectQualifiedName,
+                f.Kind == ViewOrderingFindingKind.TopPercentOrderByNeverLimits ? "TOP (100) PERCENT (no-op)" : "TOP(N)/OFFSET (order not guaranteed)",
             })]);
     }
 
