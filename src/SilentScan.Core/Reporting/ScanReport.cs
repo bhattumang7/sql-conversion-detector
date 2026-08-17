@@ -58,6 +58,7 @@ public sealed record ScanReport(
     IReadOnlyList<FormattingFinding> FormattingFindings,
     IReadOnlyList<NamingFinding> NamingFindings,
     IReadOnlyList<DeadCodeFinding> DeadCodeFindings,
+    IReadOnlyList<DuplicationFinding> DuplicationFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -180,6 +181,11 @@ public sealed record ScanReport(
     /// Tier 4 "Dead and duplicated code" - the five members needing real control-flow/dataflow
     /// analysis: unreachable code, an unused label, an unused local variable, an unused
     /// non-OUTPUT parameter, and a GOTO whose target is the very next statement).
+    /// Bumped to 41 for the new <see cref="DuplicationFindings"/> stream (docs/detection-checklist.md
+    /// Tier 4 "Dead and duplicated code" - the pattern-matching half: commented-out code, a
+    /// duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical
+    /// operands either side of a comparison/logical/self-referential-arithmetic operator, a
+    /// repeated unary operator, and a negated comparison written as the negation of its opposite).
     /// </summary>
-    public const int CurrentSchemaVersion = 40;
+    public const int CurrentSchemaVersion = 41;
 }

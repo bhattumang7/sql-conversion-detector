@@ -3858,14 +3858,138 @@ exactly as originally scoped until its own turn comes up.
     - fixed, and two tests now assert the real per-kind confidence value
     directly as a regression guard.
     <br><br>
-    **Still open, not this pass:** the pattern-matching half of this same
-    checklist bullet — commented-out code, duplicated string literals, a
-    loop that can only run once, self-assignment, identical operands either
-    side of an operator, duplicated conditions, identical branch bodies, a
-    conditional whose branches are all the same, redundant conditions,
-    mutually exclusive conditions, collapsible nested conditionals, nested
-    conditional-expression functions, a repeated unary operator, a negated
-    comparison written as the negation of its opposite. The always-true/
+    **Pattern-matching half — 7 of the remaining members shipped
+    (2026-08-17), cross-checked against the real decompiled source directly
+    (not just this checklist's own paraphrase):** commented-out code, a
+    duplicated string literal, a WHILE loop that can only run once, a
+    self-assignment, identical operands either side of a comparison/
+    logical/self-referential-arithmetic operator, a repeated unary operator,
+    and a negated comparison written as the negation of its opposite. One
+    new finding type (`DuplicationFinding`/`DuplicationFindingKind`,
+    `src/SilentScan.Core/Predicates/DuplicationScanner.cs`), no catalog
+    needed for any member, no plan-XML oracle either — every member is a
+    directly observable structural/textual AST fact, except the negated-
+    comparison rewrite's own equivalence claim, which is a pure three-
+    valued-logic proof (`NOT (x > y)` and `x <= y` both evaluate to UNKNOWN
+    identically whenever either operand is NULL, so the rewrite needs no
+    nullability guard at all — worked through explicitly rather than
+    assumed, the same rigor every plan-shape claim elsewhere in this file
+    gets, even though no live probe applies here).
+    <br><br>
+    **Commented-out code**: a comment whose stripped content reparses
+    cleanly as a real T-SQL statement/batch. **Real false-positive bug
+    found and fixed before shipping, discovered only against the real local
+    corpus, not by the unit suite alone:** T-SQL's grammar accepts the
+    `EXEC` keyword being omitted the moment a bare identifier appears where
+    a statement is expected — `word1 word2` alone reparses with zero errors
+    as an implicit `EXECUTE word1 word2`, confirmed directly (`Deistance
+    Factor` — a real annotation comment `/* Deistance Factor */` in the
+    local database's own `dbo.ApproxLinearDistance` — parsed clean and
+    regenerated as `EXECUTE Deistance Factor`). An initial version fired on
+    literally any two-word prose comment as a result — 14,662 findings
+    before the fix, the overwhelming majority false positives. Fixed by
+    requiring the comment's own first word to be a real T-SQL
+    statement-starting keyword (`SELECT`/`INSERT`/`DECLARE`/`EXEC`/`IF`/
+    etc.) before trusting the reparse at all — genuine commented-out T-SQL
+    essentially always starts with one, so this closes the hole without
+    narrowing real coverage; a regression test locks in the exact
+    `Deistance Factor` shape. `FindingConfidence.Low` — real, but the
+    heaviest-heuristic, highest-subjectivity member of this whole stream.
+    <br><br>
+    **Duplicated string literal**: the same non-trivial (3+ character)
+    string literal recurring 3+ times within one module — a magic value
+    that should be a constant. `N'...'` and `'...'` literals with identical
+    text are tracked as distinct values (a real, different literal type,
+    not the same duplicate). `FindingConfidence.Low`.
+    <br><br>
+    **Single-iteration loop**: a `WHILE` body that unconditionally reaches
+    a `BREAK`/`RETURN`/`THROW` on every path through the first iteration —
+    the same terminality-walk shape `DeadCodeFinding`'s own
+    `ReachabilityWalker` already established, with `BREAK` additionally
+    counted as terminal and a **nested loop's own `BREAK` never counting
+    toward the outer loop's own terminality** (it exits only the inner
+    loop — covered by its own regression test). Any `GOTO`/label anywhere
+    in the body declines the whole check, matching `DeadCodeFinding`'s
+    identical discipline. `FindingConfidence.Medium` — a real reachability
+    fact, but a `WHILE` genuinely used as a structured one-shot construct
+    with an early exit is a rare, legitimate pattern.
+    <br><br>
+    **Self-assignment**: `SET @x = @x` / `SELECT @x = @x`, or an UPDATE's
+    own `SET Col = Col` — compared by full rendered text (via
+    `FragmentTextRenderer`, ScriptDOM's own script generator), so a
+    multi-table `UPDATE t SET t.Col = s.Col FROM t JOIN s ON ...` correctly
+    never fires even when both columns share a bare name, since `t.Col` and
+    `s.Col` render as textually distinct. A compound assignment
+    (`SET @x += expr`) is never a self-assignment shape and is excluded.
+    `FindingConfidence.High`.
+    <br><br>
+    **Identical binary operands**: the identical expression on both sides
+    of `=`/`<>`/`<`/`>`/`<=`/`>=`, `AND`/`OR`, or the self-referentially-
+    degenerate arithmetic operators `Subtract`/`Divide`/`Modulo`.
+    **Deliberately excludes `Add`/`Multiply`** — `x + x` doubling and
+    `x * x` squaring are both legitimate, commonly-intended patterns, not
+    authoring mistakes. **Never fires when both operands are literals** —
+    the extremely common `WHERE 1 = 1`/`0 = 0` dynamic-SQL-base-predicate
+    placeholder idiom is a deliberate defensive pattern, not a copy-paste
+    bug, and flagging it would be a well-known false-positive risk. **Known
+    v1 scope limit:** only a direct sibling pair either side of one
+    operator is checked — a duplicate reachable only by walking a longer
+    `AND`/`OR` chain (`A AND B AND A`) is left unanalyzed rather than
+    guessed at, a deliberate narrowing for precision. `FindingConfidence.High`
+    for comparison/logical operators, `Medium` for the arithmetic trio (a
+    real fact, but self-referential arithmetic is a narrower, less
+    unambiguous signal than a tautological comparison).
+    <br><br>
+    **Repeated unary operator**: `NOT NOT x` / `- - x` / `~ ~ x` — always
+    simplifiable. **Real parsing bug caught and fixed before shipping:**
+    `NOT (x)` parses its parenthesized operand as a `BooleanParenthesisExpression`
+    wrapping the real inner expression, not the inner expression directly —
+    an initial version matched only the unwrapped shape and silently never
+    fired on the overwhelmingly common parenthesized form (`NOT (NOT (...))`),
+    caught by a failing unit test before shipping, not discovered against
+    the real corpus. `FindingConfidence.High`.
+    <br><br>
+    **Negated comparison as opposite**: `NOT (x > y)` written instead of
+    the simpler, provably equivalent `x <= y` (and the four analogous
+    rewrites, plus `NOT (x IS NULL)` instead of `x IS NOT NULL` — a
+    genuinely different AST shape ScriptDOM itself distinguishes from
+    `BooleanIsNullExpression.IsNot = true`). A pure readability suggestion,
+    correctness-neutral by construction — no nullability guard needed (see
+    above). `FindingConfidence.Medium`.
+    <br><br>
+    Wired end-to-end (`ScanReport` schema version 40 → 41, SARIF rule
+    catalog + writer, readable report section — also fixed a real,
+    previously-latent gap in `SarifRuleCatalog.BuildAllRules`: only the
+    Medium confidence-suffixed rule-ID variant was ever pre-registered,
+    never Low, even though several already-shipped streams from earlier
+    this session produce `Low`-confidence findings; both variants are now
+    generated for every rule unconditionally). Unit-tested
+    (`DuplicationScannerTests`, 36 cases: every kind's fire/near-miss pair,
+    the `Deistance Factor`/two-word-prose-comment regression guard, the
+    nested-WHILE-BREAK-never-counts-toward-outer-loop guard, the
+    multi-table-UPDATE-different-alias near-miss, the `Add`/`Multiply`
+    exclusion, the literal-vs-literal exclusion, the compound-assignment
+    exclusion, and the parenthesized-double-NOT regression guard).
+    <br><br>
+    **Real coverage against the local RM_ test database: 7,354 findings**
+    (3,637 commented-out code, 3,612 duplicated string literals, 49
+    self-assignments, 46 identical binary operands, 9 negated comparisons,
+    1 single-iteration loop). Spot-checked across every kind against real
+    module text: a `CommentedOutCode` cluster in `dbo.GetFleetOrderCapacities`
+    confirmed as real, deliberately-disabled legacy logic (`--DECLARE
+    @WorkOrderStopTaskID int;` and siblings); a `SelfAssignment` in
+    `dbo.spAddressSearch` confirmed genuine — `SET @SQL_SearchParm =
+    @SQL_SearchParm` sits directly under the author's own comment "--
+    Nothing to do...", a deliberate no-op placeholder coded as a
+    self-assignment rather than an empty block, exactly the shape this rule
+    targets even though this particular instance is intentional rather than
+    a bug.
+    <br><br>
+    **Still genuinely open, not this pass:** the conditional-structure
+    remainder of this same checklist bullet — duplicated conditions,
+    identical branch bodies, a conditional whose branches are all the same,
+    redundant conditions, mutually exclusive conditions, collapsible nested
+    conditionals, nested conditional-expression functions. The always-true/
     always-false predicate family here overlaps the enum-style
     `CHECK`-constraint candidate below — same rule, build once.
   * *Task-comment tracking* — `TODO`, `FIXME`.

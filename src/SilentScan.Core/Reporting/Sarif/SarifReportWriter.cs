@@ -90,6 +90,7 @@ public static class SarifReportWriter
         results.AddRange(report.FormattingFindings.Select(ToResult));
         results.AddRange(report.NamingFindings.Select(ToResult));
         results.AddRange(report.DeadCodeFindings.Select(ToResult));
+        results.AddRange(report.DuplicationFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -473,6 +474,35 @@ public static class SarifReportWriter
             DeadCodeFindingKind.RedundantJump =>
                 $"GOTO {finding.DetailText} jumps to the very next statement - control flow would already go there.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled DeadCodeFindingKind."),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(DuplicationFinding finding)
+    {
+        // Warning, not error - a structural/maintainability risk, not itself a proof of a wrong
+        // result, matching DeadCodeFinding's own tier: the flagged code's current behavior is
+        // unaffected either way, even for the structurally-unambiguous High-confidence kinds.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DuplicationRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            DuplicationFindingKind.CommentedOutCode =>
+                "This comment's own content reparses as plausible T-SQL - remove the commented-out code or restore it.",
+            DuplicationFindingKind.DuplicatedStringLiteral =>
+                $"String literal {finding.DetailText} - define a constant or variable instead of repeating it.",
+            DuplicationFindingKind.SingleIterationLoop =>
+                "This WHILE loop's own body unconditionally exits on every path through the first iteration - it can never loop a second time.",
+            DuplicationFindingKind.SelfAssignment =>
+                $"\"{finding.DetailText}\" is assigned to itself - remove this no-op assignment or correct one side.",
+            DuplicationFindingKind.IdenticalBinaryOperands =>
+                $"The identical expression appears on both sides of \"{finding.DetailText}\" - correct one side or remove the redundant comparison.",
+            DuplicationFindingKind.RepeatedUnaryOperator =>
+                $"The \"{finding.DetailText}\" operator is applied twice in a row - simplify to a single application.",
+            DuplicationFindingKind.NegatedComparisonAsOpposite =>
+                $"Use the opposite operator (\"{finding.DetailText}\") instead of negating its complement.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled DuplicationFindingKind."),
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);

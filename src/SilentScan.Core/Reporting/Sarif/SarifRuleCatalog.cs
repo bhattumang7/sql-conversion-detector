@@ -62,6 +62,13 @@ public static class SarifRuleCatalog
     public const string DeadCodeUnusedLocalVariableRuleId = "silentscan/dead-code/unused-local-variable";
     public const string DeadCodeUnusedParameterRuleId = "silentscan/dead-code/unused-parameter";
     public const string DeadCodeRedundantJumpRuleId = "silentscan/dead-code/redundant-jump";
+    public const string DuplicationCommentedOutCodeRuleId = "silentscan/duplication/commented-out-code";
+    public const string DuplicationDuplicatedStringLiteralRuleId = "silentscan/duplication/duplicated-string-literal";
+    public const string DuplicationSingleIterationLoopRuleId = "silentscan/duplication/single-iteration-loop";
+    public const string DuplicationSelfAssignmentRuleId = "silentscan/duplication/self-assignment";
+    public const string DuplicationIdenticalBinaryOperandsRuleId = "silentscan/duplication/identical-binary-operands";
+    public const string DuplicationRepeatedUnaryOperatorRuleId = "silentscan/duplication/repeated-unary-operator";
+    public const string DuplicationNegatedComparisonAsOppositeRuleId = "silentscan/duplication/negated-comparison-as-opposite";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -235,6 +242,18 @@ public static class SarifRuleCatalog
         DeadCodeFindingKind.UnusedParameter => DeadCodeUnusedParameterRuleId,
         DeadCodeFindingKind.RedundantJump => DeadCodeRedundantJumpRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DeadCodeFindingKind."),
+    };
+
+    public static string DuplicationRuleId(DuplicationFindingKind kind) => kind switch
+    {
+        DuplicationFindingKind.CommentedOutCode => DuplicationCommentedOutCodeRuleId,
+        DuplicationFindingKind.DuplicatedStringLiteral => DuplicationDuplicatedStringLiteralRuleId,
+        DuplicationFindingKind.SingleIterationLoop => DuplicationSingleIterationLoopRuleId,
+        DuplicationFindingKind.SelfAssignment => DuplicationSelfAssignmentRuleId,
+        DuplicationFindingKind.IdenticalBinaryOperands => DuplicationIdenticalBinaryOperandsRuleId,
+        DuplicationFindingKind.RepeatedUnaryOperator => DuplicationRepeatedUnaryOperatorRuleId,
+        DuplicationFindingKind.NegatedComparisonAsOpposite => DuplicationNegatedComparisonAsOppositeRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DuplicationFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -462,17 +481,29 @@ public static class SarifRuleCatalog
             Rule(DeadCodeUnusedLocalVariableRuleId, "A DECLARE'd local variable is never read anywhere after being declared - only ever assigned, or never referenced at all."),
             Rule(DeadCodeUnusedParameterRuleId, "A non-OUTPUT formal parameter is never referenced anywhere in the routine body."),
             Rule(DeadCodeRedundantJumpRuleId, "A GOTO whose target label is the very next statement in the same straight-line sequence - jumping to exactly where control flow would already go."),
+            Rule(DuplicationCommentedOutCodeRuleId, "A comment's own stripped content reparses cleanly as a plausible T-SQL statement or batch - not prose that merely mentions SQL keywords."),
+            Rule(DuplicationDuplicatedStringLiteralRuleId, "The same non-trivial string literal appears three or more times within one module - a magic value that should be a variable or constant instead."),
+            Rule(DuplicationSingleIterationLoopRuleId, "A WHILE loop's own body unconditionally reaches a BREAK/RETURN/THROW on every path through the first iteration - it can never loop a second time."),
+            Rule(DuplicationSelfAssignmentRuleId, "A pure no-op assignment: a variable or UPDATE column assigned to itself."),
+            Rule(DuplicationIdenticalBinaryOperandsRuleId, "The identical expression appears on both sides of a comparison, AND/OR, or a self-referential arithmetic operator - always the same value, a tautology, or a fixed degenerate result."),
+            Rule(DuplicationRepeatedUnaryOperatorRuleId, "The same unary operator (NOT, unary minus, bitwise NOT) is applied twice in a row - always simplifiable to a single application or none."),
+            Rule(DuplicationNegatedComparisonAsOppositeRuleId, "A negated comparison is written instead of its provably equivalent opposite operator - a readability suggestion, not a correctness claim."),
         ];
 
-        // Only the Medium variant is generated: nothing in this tool produces a Low-confidence
-        // finding yet, and a rule entry with no possible producer would itself be the kind of
-        // silent-until-someone-checks noise CLAUDE.md's "never silently counted as clean" warns
-        // against - add the Low variant here the day a Low producer actually exists.
+        // Both confidence-suffixed variants are generated for every base rule (except the
+        // DynamicSqlOutcome family, which never carries a Confidence field at all) - a rule entry
+        // with no possible producer would itself be the kind of silent-until-someone-checks noise
+        // CLAUDE.md's "never silently counted as clean" warns against, but the reverse (a real
+        // producer whose rule ID is missing from this catalog) is the same class of gap, so both
+        // variants are pre-registered unconditionally rather than added reactively per producer.
         var mediumVariants = baseRules
             .Where(rule => !DynamicSqlOutcomeRuleIds.Contains(rule.Id))
             .Select(rule => Rule(RuleId(rule.Id, FindingConfidence.Medium), $"(Medium confidence) {rule.ShortDescription.Text}"));
+        var lowVariants = baseRules
+            .Where(rule => !DynamicSqlOutcomeRuleIds.Contains(rule.Id))
+            .Select(rule => Rule(RuleId(rule.Id, FindingConfidence.Low), $"(Low confidence) {rule.ShortDescription.Text}"));
 
-        return [.. baseRules, .. mediumVariants];
+        return [.. baseRules, .. mediumVariants, .. lowVariants];
     }
 
     private static SarifRule Rule(string id, string description) => new(id, new SarifMessage(description));

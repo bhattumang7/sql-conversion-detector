@@ -744,6 +744,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<DuplicationFinding> duplicationFindings;
+        using (var duplicationStage = progress.Begin("scanning duplicated/redundant code shapes", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = DuplicationScanner.Scan(r);
+                    duplicationStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            duplicationFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1047,6 +1065,7 @@ public static class ScanReportBuilder
             formattingFindings,
             namingFindings,
             deadCodeFindings,
+            duplicationFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

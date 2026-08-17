@@ -120,6 +120,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(Formatting(report, headingLevel, pathBase));
         blocks.AddRange(Naming(report, headingLevel, pathBase));
         blocks.AddRange(DeadCode(report, headingLevel, pathBase));
+        blocks.AddRange(Duplication(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -180,6 +181,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Formatting and layout risks", report.FormattingFindings.Count);
         AddCount(counts, "Naming and identifier risks", report.NamingFindings.Count);
         AddCount(counts, "Dead code and control-flow risks", report.DeadCodeFindings.Count);
+        AddCount(counts, "Duplicated/redundant code shapes", report.DuplicationFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -878,6 +880,27 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],
             [.. report.DeadCodeFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText ?? f.ModuleQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> Duplication(ScanReport report, int level, string? pathBase)
+    {
+        if (report.DuplicationFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Duplicated/redundant code shapes ({report.DuplicationFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Commented-out code, a duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical operands either side of an operator, a repeated unary operator, or a negated comparison written as the negation of its opposite. Purely a maintainability/readability signal for every kind - the flagged code's own current behavior is unaffected.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.DuplicationFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),
