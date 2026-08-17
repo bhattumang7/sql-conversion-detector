@@ -4698,9 +4698,34 @@ exactly as originally scoped until its own turn comes up.
     built up dynamically, not provably constant). Also updates the "Open
     scope questions" section below — security is no longer merely "not built
     yet."
-  * *Missing/ambiguous `ELSE`* — `IF`/`CASE` with no `ELSE` where a sibling
-    has one, and the closely related dangling-`IF`-on-a-shared-line ambiguity.
-  * `GOTO` usage.
+  * *Missing/ambiguous `ELSE`* — **shipped, re-scoped once oracle-checked.**
+    The "dangling `IF`-on-a-shared-line" half is already fully shipped as
+    `FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd`/
+    `SingleLineConditionalBody` (see "Formatting and layout" above) — not
+    rebuilt, cross-referenced only. The "`IF`/`CASE` with no `ELSE` where a
+    sibling has one" half was investigated and NOT shipped as originally
+    framed: some `IF`s in a routine carrying an `ELSE` and others not is an
+    extremely common, unopinionated shape in ordinary T-SQL, too noisy a
+    signal to state as a real defect on its own. **Shipped instead, as the
+    sharper, real, oracle-confirmed claim the vague framing was gesturing
+    at:** a *simple* CASE expression (`CASE <input> WHEN v1 THEN ... END`,
+    not the searched form) with no `ELSE` — confirmed directly on the Docker
+    oracle (a real executed `SELECT CASE 5 WHEN 1 THEN 'one' WHEN 2 THEN
+    'two' END`) that an unmatched value silently evaluates to `NULL`, no
+    error, no warning. Deliberately excludes the searched-CASE form
+    (`CASE WHEN cond THEN ...`), whose boolean conditions are typically a
+    deliberately partial set by design, unlike a simple CASE's fixed,
+    enumerable value list, where "forgot a value" is the sharper, more
+    common real mistake. New `ControlFlowRiskFindingKind.CaseExpressionMissingElse`.
+  * `GOTO` usage — **shipped.** New `ControlFlowRiskFindingKind.GotoUsage`,
+    a direct AST match on `GoToStatement`, fires unconditionally.
+    Load-bearing, not just a "structured programming" style opinion: this
+    codebase's own already-shipped `DeadCodeScanner` already **declines its
+    entire reachability analysis** (unreachable code, unused labels/
+    variables/parameters, redundant jumps) for any routine containing a
+    `GOTO` at all — this new finding is the first thing in the codebase to
+    actually *surface* that fact, where before it only ever silently
+    starved another stream's coverage with no visible reason why.
   * A redundant database/schema qualifier on a reference already in scope
     (the opposite complaint from the qualification-*requiring* rule above) —
     **shipped as `NamingFindingKind.RedundantTypeQualifier` above**, scope
@@ -4708,19 +4733,94 @@ exactly as originally scoped until its own turn comes up.
     against the real source (see the "Naming and identifiers" write-up above
     for the full reasoning and scope limit).
   * A non-deterministic function (`RAND`/`NEWID`/`CRYPT_GEN_RANDOM`) used as a
-    `CASE` **input expression** — re-evaluated per `WHEN` comparison, so the
-    branch taken can silently disagree with itself. Distinct from the
-    per-row-predicate premise probed and killed elsewhere in this file (that
-    one was about seek behavior; this is about `CASE` evaluating its own
-    input more than once) — never itself probed, but syntax-only either way.
-  * Two with unresolved exact semantics — read from decompiled source, not
-    confirmed: a rule pairing one `SET` option being `OFF` against a sibling
-    that should be `ON` (unclear whether this overlaps the already-falsified
-    `ARITHABORT` finding elsewhere in this file), and a rule about a statement
-    "forcing serialization" without `SNAPSHOT ISOLATION` whose firing
-    condition wasn't reconstructable from the bytecode alone. Pin down the
-    actual trigger condition (vendor docs or a fresh oracle probe) before
-    building either.
+    `CASE` **input expression** — **shipped, oracle-confirmed exactly as
+    proposed, a rare case in this file where the "commonly assumed" premise
+    survived direct testing rather than being found backwards.** Captured
+    real compiled plan XML for `SELECT CASE NEWID() WHEN v1 THEN r1 WHEN v2
+    THEN r2 ELSE r3 END FROM ...`: the optimizer rewrites the simple CASE
+    into a nested searched form, `CASE WHEN newid()=v1 THEN r1 ELSE CASE
+    WHEN newid()=v2 THEN r2 ELSE r3 END END` — three **separate**
+    `Intrinsic FunctionName="newid"` call sites in the real scalar-operator
+    tree, not one evaluation reused across the comparisons. Independently
+    confirmed this is genuine per-call re-evaluation, not merely a repeated
+    textual reference to one shared/cached value: three bare `RAND()`
+    references in a single real executed `SELECT` list returned three
+    *different* values. (This does not contradict this file's own separate,
+    already-shipped finding that bare `RAND()` folds to one constant *across
+    multiple rows* of one query — that is row-invariance across a result
+    set, a different claim from multiple distinct textual call sites within
+    one row's own expression tree, and both are independently real.)
+    Practical consequence, stated in the finding's own wording: for a
+    large-domain function (`NEWID()`/`CRYPT_GEN_RANDOM()`) every `WHEN`
+    branch becomes, in effect, permanently unreachable dead code — the
+    astronomically improbable event of one fresh random call matching a
+    fixed literal — so the whole CASE structure silently always evaluates
+    to `ELSE` (or `NULL`, compounding with the sibling
+    `CaseExpressionMissingElse` finding above when both apply to the same
+    expression). Genuinely distinct from the already-probed-and-killed
+    "non-foldable nondeterministic intrinsic in a predicate" item elsewhere
+    in this file — that one was about WHERE-predicate seek/scan behavior and
+    was correctly found not to hold; this is a structurally different claim
+    about a CASE expression re-evaluating its own input, and holds. New
+    `ControlFlowRiskFindingKind.NonDeterministicCaseInput`. `GETDATE()`/
+    `SYSDATETIME()` are deliberately NOT included — the checklist's own
+    proposed list names only `RAND`/`NEWID`/`CRYPT_GEN_RANDOM`, and this
+    entry wasn't independently re-probed for date/time intrinsics.
+    <br><br>
+    Unit-tested (9 new cases across the three shipped kinds in this bullet
+    group: `GotoUsage` fires/never-fires, `CaseExpressionMissingElse` fires
+    on a simple CASE with no ELSE / never fires with an ELSE / never fires
+    on the searched-CASE form, `NonDeterministicCaseInput` fires for
+    `NEWID`/`RAND`/`CRYPT_GEN_RANDOM` and never fires for an ordinary column
+    or `GETDATE()`). Wired into the existing `ControlFlowRiskFinding`/
+    `ControlFlowRiskScanner` type from the "Cursor and control-flow
+    correctness" bullet above (`ScanReport` schema unchanged — no new list,
+    just three new `Kind` members on the existing one). **Real coverage
+    against the local RM_ test database: 232 `GotoUsage` findings, 79
+    `CaseExpressionMissingElse` findings, 0 `NonDeterministicCaseInput`
+    findings** (a real, honest zero — this corpus's own simple-CASE
+    expressions never use a non-deterministic input, not a detection gap).
+    Both non-zero kinds spot-checked directly against real module text and
+    confirmed genuine true positives: `dbo.FRRuns`'s own `CASE
+    COALESCE(re.OptimizeRun, rt.OptimizeRun) WHEN 1 THEN 0 WHEN 0 THEN 1
+    END` (any value other than exactly 0 or 1 silently returns NULL);
+    `dbo.FRStopTypeResolve`'s own `GOTO ReturnResult;` early-exit idiom.
+  * Two with unresolved exact semantics — **investigated in depth against the
+    real decompiled source; both closed, not built, with real evidence
+    rather than a guess.** A rule pairing one `SET` option being `OFF`
+    against a sibling that should be `ON`: the real rule class was located
+    and its structural shape confirmed (a `SET` statement's own option list
+    carrying one option turned `OFF` while a specific pair of companion
+    "should stay `ON`" options is *also* present in that same list, gated by
+    some containing-context check) — genuinely distinct from the
+    already-falsified `ARITHABORT` finding and from the already-shipped
+    `SetOptionScanner` territory (`QUOTED_IDENTIFIER`/`NUMERIC_ROUNDABORT`/
+    `ANSI_NULLS`/`ANSI_WARNINGS`/`CONCAT_NULL_YIELDS_NULL`). But the
+    companion option pair's own identity is referenced in the decompiled
+    source only via obfuscated symbol names with no recoverable mapping
+    back to a real T-SQL keyword (no original `.class` files survive in the
+    locally-held decompiled tree to cross-reference via bytecode constant
+    pool inspection, only CFR-decompiled `.java` source, and the obfuscation
+    specifically stripped the readable name at exactly this call site while
+    leaving it intact for hundreds of other, unrelated enum members
+    elsewhere in the same tree) — genuinely not reconstructable with real
+    confidence, not merely inconvenient to look up. Closed rather than
+    guessed, the same "never guess" discipline this file applies everywhere.
+    A rule about a statement "forcing serialization" without `SNAPSHOT
+    ISOLATION`: real investigation of the decompiled source recovered a
+    plausible general shape (comparing structurally-identical subqueries
+    appearing in different branches of the same conditional structure,
+    cross-referenced against whether `SNAPSHOT` isolation is active) but not
+    with enough confidence in the exact scope (which statement/branch types
+    are actually in play) to independently design and ship a sound
+    replacement at this codebase's own precision bar without further
+    validation there wasn't time to do carefully in this pass. Closed
+    alongside the SET-option item rather than shipped half-confident — two
+    honest closures here are not a failure; this file already has multiple
+    precedents (`ARITHABORT`, "IF statements containing queries",
+    "non-foldable nondeterministic intrinsic") for investigating and
+    correctly declining to build something once real scrutiny doesn't leave
+    enough confidence to ship it.
   The read's other conclusion still stands regardless of this reopening: the
   richest paid T-SQL rule set found still contains no implicit-conversion
   rule, no collation-aware rule, no lineage-aware rule, and no plan oracle —

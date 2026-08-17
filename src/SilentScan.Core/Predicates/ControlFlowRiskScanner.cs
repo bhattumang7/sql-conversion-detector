@@ -231,6 +231,78 @@ public static class ControlFlowRiskScanner
             base.ExplicitVisit(node);
         }
 
+        private static readonly HashSet<string> NonDeterministicFunctionNames =
+            new(StringComparer.OrdinalIgnoreCase) { "NEWID", "RAND", "CRYPT_GEN_RANDOM" };
+
+        public override void ExplicitVisit(GoToStatement node)
+        {
+            Findings.Add(new ControlFlowRiskFinding(
+                ControlFlowRiskFindingKind.GotoUsage,
+                _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                "GOTO makes control flow harder to follow, and this codebase's own dead-code analysis " +
+                "already declines its entire reachability check for any routine that contains one.",
+                FindingConfidence.High));
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(SimpleCaseExpression node)
+        {
+            if (node.ElseExpression is null)
+            {
+                Findings.Add(new ControlFlowRiskFinding(
+                    ControlFlowRiskFindingKind.CaseExpressionMissingElse,
+                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    "This simple CASE has no ELSE - an input value matching none of the WHEN values " +
+                    "silently evaluates to NULL, no error raised.",
+                    FindingConfidence.High));
+            }
+
+            if (ContainsNonDeterministicCall(node.InputExpression) is { } functionName)
+            {
+                Findings.Add(new ControlFlowRiskFinding(
+                    ControlFlowRiskFindingKind.NonDeterministicCaseInput,
+                    _moduleName, sourcePath, node.StartLine, node.StartColumn,
+                    $"{functionName}() as a CASE input is re-evaluated separately for each WHEN " +
+                    "comparison, not once - every WHEN branch is effectively unreachable and this " +
+                    "always falls through to ELSE (or NULL, with no ELSE).",
+                    FindingConfidence.High));
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>The first non-deterministic function name (<see
+        /// cref="NonDeterministicFunctionNames"/>) found anywhere in the given expression subtree, or
+        /// null. A standalone, single-purpose walk over just the CASE input expression - deliberately
+        /// not reusing a broader "does this subtree contain a column"-style walk from elsewhere in
+        /// this codebase, since none of those are shaped for "does this subtree contain one of these
+        /// three specific function names" and bolting that onto an unrelated helper would be a worse
+        /// fit than this small, purpose-built visitor.</summary>
+        private static string? ContainsNonDeterministicCall(ScalarExpression expression)
+        {
+            var finder = new NonDeterministicCallFinder();
+            expression.Accept(finder);
+            return finder.FoundFunctionName;
+        }
+
+        private sealed class NonDeterministicCallFinder : TSqlFragmentVisitor
+        {
+            public string? FoundFunctionName { get; private set; }
+
+            public override void ExplicitVisit(FunctionCall node)
+            {
+                if (FoundFunctionName is null
+                    && node.FunctionName?.Value is { } name
+                    && NonDeterministicFunctionNames.Contains(name))
+                {
+                    FoundFunctionName = name.ToUpperInvariant();
+                }
+
+                base.ExplicitVisit(node);
+            }
+        }
+
         public override void ExplicitVisit(ExecutableProcedureReference node)
         {
             ReportDuplicatedArguments(node.Parameters?.Select(p => p.ParameterValue) ?? []);

@@ -967,7 +967,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Cursor and control-flow risks ({report.ControlFlowRiskFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "A cursor FETCH whose INTO list doesn't match its own cursor's defining SELECT column count (always fails at runtime, Msg 16924), an empty CATCH block (silently swallows every error), output emitted from a trigger (a SELECT or PRINT sent back to whatever connection fired the DML, not the calling application), a NOLOCK/READUNCOMMITTED dirty-read hint, the same expression passed twice to one call, or a reference to @@IDENTITY (session-wide scope, prefer SCOPE_IDENTITY()).");
+            "A cursor FETCH whose INTO list doesn't match its own cursor's defining SELECT column count (always fails at runtime, Msg 16924), an empty CATCH block (silently swallows every error), output emitted from a trigger (a SELECT or PRINT sent back to whatever connection fired the DML, not the calling application), a NOLOCK/READUNCOMMITTED dirty-read hint, the same expression passed twice to one call, a reference to @@IDENTITY (session-wide scope, prefer SCOPE_IDENTITY()), a GOTO statement, a simple CASE with no ELSE (silently evaluates to NULL when nothing matches), or a non-deterministic function (NEWID/RAND/CRYPT_GEN_RANDOM) used as a CASE input (oracle-confirmed to be re-evaluated separately per WHEN comparison, making every branch effectively unreachable).");
 
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],

@@ -102,6 +102,9 @@ public static class SarifRuleCatalog
     public const string ControlFlowRiskDirtyReadIsolationHintRuleId = "silentscan/control-flow/dirty-read-isolation-hint";
     public const string ControlFlowRiskDuplicatedCallArgumentRuleId = "silentscan/control-flow/duplicated-call-argument";
     public const string ControlFlowRiskLegacyIdentityIntrinsicRuleId = "silentscan/control-flow/legacy-identity-intrinsic";
+    public const string ControlFlowRiskGotoUsageRuleId = "silentscan/control-flow/goto-usage";
+    public const string ControlFlowRiskCaseExpressionMissingElseRuleId = "silentscan/control-flow/case-expression-missing-else";
+    public const string ControlFlowRiskNonDeterministicCaseInputRuleId = "silentscan/control-flow/non-deterministic-case-input";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -344,6 +347,9 @@ public static class SarifRuleCatalog
         ControlFlowRiskFindingKind.DirtyReadIsolationHint => ControlFlowRiskDirtyReadIsolationHintRuleId,
         ControlFlowRiskFindingKind.DuplicatedCallArgument => ControlFlowRiskDuplicatedCallArgumentRuleId,
         ControlFlowRiskFindingKind.LegacyIdentityIntrinsic => ControlFlowRiskLegacyIdentityIntrinsicRuleId,
+        ControlFlowRiskFindingKind.GotoUsage => ControlFlowRiskGotoUsageRuleId,
+        ControlFlowRiskFindingKind.CaseExpressionMissingElse => ControlFlowRiskCaseExpressionMissingElseRuleId,
+        ControlFlowRiskFindingKind.NonDeterministicCaseInput => ControlFlowRiskNonDeterministicCaseInputRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ControlFlowRiskFindingKind."),
     };
 
@@ -612,6 +618,9 @@ public static class SarifRuleCatalog
             Rule(ControlFlowRiskDirtyReadIsolationHintRuleId, "NOLOCK/READUNCOMMITTED allows dirty reads and can miss or double-count rows during a concurrent page split."),
             Rule(ControlFlowRiskDuplicatedCallArgumentRuleId, "The same non-literal expression is passed as two different arguments to the same call."),
             Rule(ControlFlowRiskLegacyIdentityIntrinsicRuleId, "@@IDENTITY returns the last identity value inserted in this session across any table/scope - prefer SCOPE_IDENTITY()."),
+            Rule(ControlFlowRiskGotoUsageRuleId, "A GOTO statement - unrestricted jumps make control flow harder to follow, and this tool's own dead-code analysis declines entirely for a routine that contains one."),
+            Rule(ControlFlowRiskCaseExpressionMissingElseRuleId, "A simple CASE expression has no ELSE - an input value matching none of the WHEN values silently evaluates to NULL, no error raised."),
+            Rule(ControlFlowRiskNonDeterministicCaseInputRuleId, "A non-deterministic function (NEWID/RAND/CRYPT_GEN_RANDOM) is used as a simple CASE expression's input - oracle-confirmed to be re-evaluated separately per WHEN comparison, not once, making every WHEN branch effectively unreachable."),
             Rule(SecurityRuleId(SecurityFindingKind.HardCodedCredential), "A credential-suggestive-named variable/parameter is assigned a literal string value directly in source text - keep credentials in a secrets store or external configuration."),
             Rule(SecurityRuleId(SecurityFindingKind.HardCodedIpAddress), "A string literal contains a hardcoded, non-benign IPv4 address - an environment-specific detail embedded in code."),
             Rule(SecurityRuleId(SecurityFindingKind.WeakHashAlgorithm), "A HASHBYTES call names a cryptographically broken/deprecated algorithm (MD2/MD4/MD5/SHA/SHA1) - prefer SHA2_256/SHA2_512."),

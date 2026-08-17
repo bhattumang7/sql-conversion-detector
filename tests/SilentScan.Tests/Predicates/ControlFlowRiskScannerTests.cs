@@ -369,4 +369,157 @@ public sealed class ControlFlowRiskScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.LegacyIdentityIntrinsic);
     }
+
+    // --- GotoUsage ---
+
+    [Fact]
+    public void Goto_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                GOTO Done;
+                SELECT 1;
+                Done:
+                SELECT 2;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == ControlFlowRiskFindingKind.GotoUsage);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void NoGoto_NeverFires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                SELECT 1;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.GotoUsage);
+    }
+
+    // --- CaseExpressionMissingElse ---
+
+    [Fact]
+    public void SimpleCaseWithNoElse_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                DECLARE @x INT = 1;
+                SELECT CASE @x WHEN 1 THEN 'a' WHEN 2 THEN 'b' END;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == ControlFlowRiskFindingKind.CaseExpressionMissingElse);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void SimpleCaseWithElse_NeverFires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                DECLARE @x INT = 1;
+                SELECT CASE @x WHEN 1 THEN 'a' WHEN 2 THEN 'b' ELSE 'c' END;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.CaseExpressionMissingElse);
+    }
+
+    [Fact]
+    public void SearchedCaseWithNoElse_NeverFiresMissingElse()
+    {
+        // Deliberately excluded - a searched CASE's boolean conditions are typically a
+        // deliberately partial set, unlike a simple CASE's fixed, enumerable value list.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                DECLARE @x INT = 1;
+                SELECT CASE WHEN @x = 1 THEN 'a' WHEN @x = 2 THEN 'b' END;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.CaseExpressionMissingElse);
+    }
+
+    // --- NonDeterministicCaseInput ---
+
+    [Fact]
+    public void NewIdAsSimpleCaseInput_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                SELECT CASE NEWID()
+                    WHEN '00000000-0000-0000-0000-000000000000' THEN 'a'
+                    ELSE 'b'
+                END;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == ControlFlowRiskFindingKind.NonDeterministicCaseInput);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("NEWID", finding.DetailText);
+    }
+
+    [Fact]
+    public void RandAsSimpleCaseInput_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                SELECT CASE RAND() WHEN 0.5 THEN 'a' ELSE 'b' END;
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == ControlFlowRiskFindingKind.NonDeterministicCaseInput);
+    }
+
+    [Fact]
+    public void CryptGenRandomAsSimpleCaseInput_Fires()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                SELECT CASE CRYPT_GEN_RANDOM(1) WHEN 0x00 THEN 'a' ELSE 'b' END;
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == ControlFlowRiskFindingKind.NonDeterministicCaseInput);
+    }
+
+    [Fact]
+    public void OrdinaryColumnAsSimpleCaseInput_NeverFiresNonDeterministic()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                SELECT CASE Status WHEN 1 THEN 'a' ELSE 'b' END FROM dbo.T;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.NonDeterministicCaseInput);
+    }
+
+    [Fact]
+    public void GetDateAsSimpleCaseInput_NeverFiresNonDeterministic()
+    {
+        // GETDATE() is deliberately out of scope for this kind - the checklist's own proposed
+        // list is NEWID()/RAND()/CRYPT_GEN_RANDOM() only.
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS
+            BEGIN
+                SELECT CASE GETDATE() WHEN '2026-01-01' THEN 'a' ELSE 'b' END;
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == ControlFlowRiskFindingKind.NonDeterministicCaseInput);
+    }
 }

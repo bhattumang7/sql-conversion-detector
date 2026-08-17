@@ -557,13 +557,18 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(ControlFlowRiskFinding finding)
     {
-        // Error for the two structurally-unambiguous, hard-fact kinds (a cursor FETCH that always
-        // fails at runtime; a CATCH block that swallows every error with zero statements) - the
-        // same "provably-wrong-outcome" tier NotInNullableSubqueryFinding/TempTableExecShapeFinding
-        // use. Warning for everything else - a real, well-documented risk, never itself proof of a
-        // wrong result in isolation.
+        // Error for the structurally-unambiguous, hard-fact kinds (a cursor FETCH that always fails
+        // at runtime; a CATCH block that swallows every error with zero statements; a simple CASE
+        // with no ELSE, which silently returns NULL; a non-deterministic CASE input, oracle-confirmed
+        // to make every WHEN branch effectively unreachable) - the same "provably-wrong-outcome" tier
+        // NotInNullableSubqueryFinding/TempTableExecShapeFinding use. Warning for everything else,
+        // including GotoUsage (a maintainability risk, not itself a provably wrong outcome) - a real,
+        // well-documented risk, never itself proof of a wrong result in isolation.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ControlFlowRiskRuleId(finding.Kind), finding.Confidence);
-        var baseLevel = finding.Kind is ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch or ControlFlowRiskFindingKind.EmptyCatchBlock
+        var baseLevel = finding.Kind is ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch
+            or ControlFlowRiskFindingKind.EmptyCatchBlock
+            or ControlFlowRiskFindingKind.CaseExpressionMissingElse
+            or ControlFlowRiskFindingKind.NonDeterministicCaseInput
             ? LevelError
             : LevelWarning;
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
