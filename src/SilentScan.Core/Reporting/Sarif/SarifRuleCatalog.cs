@@ -83,6 +83,36 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
+    public static string SessionDateSettingRuleId(SessionDateSettingKind kind) => kind switch
+    {
+        SessionDateSettingKind.DateFormat => "silentscan/session-date/set-dateformat",
+        SessionDateSettingKind.DateFirst => "silentscan/session-date/set-datefirst",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    public static string CartesianJoinRuleId(CartesianJoinKind kind) => kind switch
+    {
+        CartesianJoinKind.CommaJoin => "silentscan/join/cartesian-comma-join",
+        CartesianJoinKind.ExplicitCrossJoin => "silentscan/join/cartesian-cross-join",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    public static string UndersizedDeclarationRuleId(UndersizedDeclarationSite site) => site switch
+    {
+        UndersizedDeclarationSite.TableColumn => "silentscan/declaration/undersized-column",
+        UndersizedDeclarationSite.Declaration => "silentscan/declaration/undersized-variable-or-parameter",
+        _ => throw new ArgumentOutOfRangeException(nameof(site), site, null),
+    };
+
+    public const string TruncateSwallowedRuleId = "silentscan/control-flow/truncate-swallowed-by-catch";
+
+    public static string UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind kind) => kind switch
+    {
+        UnindexedTempTableUsageKind.JoinOperand => "silentscan/temp-table/unindexed-join-operand",
+        UnindexedTempTableUsageKind.FilteredInWhere => "silentscan/temp-table/unindexed-where-filter",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
     public static string ViewOrderingRuleId(ViewOrderingFindingKind kind) => kind switch
     {
         ViewOrderingFindingKind.TopPercentOrderByNeverLimits => "silentscan/view/top-percent-order-by-no-op",
@@ -296,6 +326,15 @@ public static class SarifRuleCatalog
             Rule(CompositeIndexLeadingColumnRuleId, "A real composite index's leading key column is never bound anywhere in the statement while the query genuinely constrains one of its NON-leading key columns - a composite index is a single B-tree keyed first by its leading column, so with no bound on that column this specific index cannot be seek-used for this predicate at all. Only fires when no OTHER usable index on the table leads with the same violating column either, so a table with a real alternative seek path is never flagged."),
             Rule(IndexHintRuleId(IndexHintFindingKind.IndexDoesNotExist), "An INDEX(...) table hint names an index that does not exist in the catalog for this table - oracle-confirmed a hard compile error (Msg 308) every time this statement runs, not a silently-ignored hint."),
             Rule(IndexHintRuleId(IndexHintFindingKind.HintedIndexNotSeekable), "An INDEX(...) table hint names a real index whose own leading key column is never bound anywhere in the statement - the hint forces the engine to use this specific index (not merely suggest it), and with no bound on the leading key the engine cannot descend its B-tree to a useful starting point, oracle-confirmed to degrade the forced access path to a full index scan."),
+            Rule(SessionDateSettingRuleId(SessionDateSettingKind.DateFormat), "SET DATEFORMAT appears in this module's own body - oracle-confirmed the identical ambiguous string date literal ('03/04/2026') resolves to a different real date (March 4 vs. April 3) depending purely on which DATEFORMAT value was set first in the session, independent of the caller's own settings."),
+            Rule(SessionDateSettingRuleId(SessionDateSettingKind.DateFirst), "SET DATEFIRST appears in this module's own body - oracle-confirmed DATEPART(weekday, ...) for a fixed real date returns a different ordinal depending purely on which DATEFIRST value was set first in the session."),
+            Rule(CartesianJoinRuleId(CartesianJoinKind.CommaJoin), "A legacy comma-join (FROM A, B) with no predicate anywhere in the statement - no ON clause, no WHERE clause - connecting the two tables at all: a true cartesian product, the classic 'forgot the join condition' defect."),
+            Rule(CartesianJoinRuleId(CartesianJoinKind.ExplicitCrossJoin), "An explicit CROSS JOIN with no predicate anywhere in the statement connecting the two tables - the author wrote CROSS JOIN, self-documenting a deliberate cartesian product, but this is still worth surfacing since an accidentally-left CROSS JOIN is a real, if less common, mistake."),
+            Rule(UndersizedDeclarationRuleId(UndersizedDeclarationSite.TableColumn), "A real table column is declared with a string/binary length of 1 or 2 - almost always a truncated-from-a-larger-source mistake or a leftover single-character-flag placeholder that later grew real string content. Advisory only, no compared column needed - distinct from the under-length-vs-compared-column stream."),
+            Rule(UndersizedDeclarationRuleId(UndersizedDeclarationSite.Declaration), "A DECLARE'd local variable or a procedure/function formal parameter is declared with a string/binary length of 1 or 2 - the same advisory-only, no-compared-column-needed claim as the table-column sibling."),
+            Rule(TruncateSwallowedRuleId, "TRUNCATE TABLE sits inside a TRY block whose CATCH block never THROWs/RAISERRORs anywhere in its own statement tree - oracle-confirmed a real TRUNCATE failure (e.g. an enforced FK reference, Msg 4712) is silently swallowed here, with execution continuing as if the TRUNCATE had succeeded and no error reaching the caller. TRY with no matching CATCH at all is a hard parse error (Msg 102) and can never occur in valid T-SQL, correcting this item's own original framing."),
+            Rule(UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind.JoinOperand), "A SELECT...INTO #temp table is later used as a JOIN operand in the same batch/procedure scope, but no index was ever created on it - oracle-confirmed this forces a full scan/Hash Match of the entire temp table, with no seek alternative possible at all without an index."),
+            Rule(UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind.FilteredInWhere), "A SELECT...INTO #temp table is later filtered by a WHERE predicate in the same batch/procedure scope, but no index was ever created on it - the same no-seek-possible cost as the JOIN-operand sibling."),
             Rule(TempTableExecShapeColumnCountMismatchRuleId, "INSERT INTO #temp EXEC proc, where the executed proc's real, engine-described result-set column count differs from #temp's own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(TempTableExecShapeColumnTypeMismatchRuleId, "INSERT INTO #temp EXEC proc, where column counts match but at least one position's type risks silent data loss between the executed proc's real, engine-described column type and #temp's own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),

@@ -46,6 +46,11 @@ public sealed record ScanReport(
     IReadOnlyList<TransactionHygieneFinding> TransactionHygieneFindings,
     IReadOnlyList<CompositeIndexLeadingColumnFinding> CompositeIndexLeadingColumnFindings,
     IReadOnlyList<IndexHintFinding> IndexHintFindings,
+    IReadOnlyList<SessionDateSettingFinding> SessionDateSettingFindings,
+    IReadOnlyList<CartesianJoinFinding> CartesianJoinFindings,
+    IReadOnlyList<UndersizedDeclarationFinding> UndersizedDeclarationFindings,
+    IReadOnlyList<TruncateSwallowedFinding> TruncateSwallowedFindings,
+    IReadOnlyList<UnindexedTempTableUsageFinding> UnindexedTempTableUsageFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -129,7 +134,14 @@ public sealed record ScanReport(
     /// checklist.md "Small precise adds": the first half of the "Transaction hygiene pair" item -
     /// BEGIN TRANSACTION with no reachable COMMIT/ROLLBACK on some path). Bumped to 32 for the
     /// new <see cref="CompositeIndexLeadingColumnFindings"/> and <see cref="IndexHintFindings"/>
-    /// streams (docs/detection-checklist.md "Hint and index-shape catalog checks").
+    /// streams (docs/detection-checklist.md "Hint and index-shape catalog checks"). Bumped to 33
+    /// for five new streams from docs/detection-checklist.md "Second OSS/commercial sweep": <see
+    /// cref="SessionDateSettingFindings"/> (SET DATEFORMAT/DATEFIRST mid-module), <see
+    /// cref="CartesianJoinFindings"/> (true cartesian join), <see
+    /// cref="UndersizedDeclarationFindings"/> (declared type of size 1 or 2), <see
+    /// cref="TruncateSwallowedFindings"/> (TRUNCATE inside a TRY whose CATCH swallows the error),
+    /// and <see cref="UnindexedTempTableUsageFindings"/> (SELECT INTO temp table later joined/
+    /// filtered with no index).
     /// </summary>
-    public const int CurrentSchemaVersion = 32;
+    public const int CurrentSchemaVersion = 33;
 }

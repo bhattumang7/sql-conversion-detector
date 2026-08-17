@@ -108,6 +108,11 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
         blocks.AddRange(CompositeIndexLeadingColumn(report, headingLevel, pathBase));
         blocks.AddRange(IndexHint(report, headingLevel, pathBase));
+        blocks.AddRange(SessionDateSetting(report, headingLevel, pathBase));
+        blocks.AddRange(CartesianJoin(report, headingLevel, pathBase));
+        blocks.AddRange(UndersizedDeclaration(report, headingLevel, pathBase));
+        blocks.AddRange(TruncateSwallowed(report, headingLevel, pathBase));
+        blocks.AddRange(UnindexedTempTableUsage(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -185,6 +190,11 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Unresolved BEGIN TRANSACTION", report.TransactionHygieneFindings.Count);
         AddCount(counts, "Composite index leading-column violations", report.CompositeIndexLeadingColumnFindings.Count);
         AddCount(counts, "INDEX hints naming a nonexistent or non-seekable index", report.IndexHintFindings.Count);
+        AddCount(counts, "SET DATEFORMAT/DATEFIRST mid-module", report.SessionDateSettingFindings.Count);
+        AddCount(counts, "True cartesian joins", report.CartesianJoinFindings.Count);
+        AddCount(counts, "Undersized (length 1/2) declarations", report.UndersizedDeclarationFindings.Count);
+        AddCount(counts, "TRUNCATE swallowed by an empty/non-rethrowing CATCH", report.TruncateSwallowedFindings.Count);
+        AddCount(counts, "Unindexed SELECT INTO temp table usage", report.UnindexedTempTableUsageFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1206,6 +1216,110 @@ public static class ReadableScanReportWriter
                 f.TableQualifiedName,
                 f.HintedIndexName,
                 f.Kind == IndexHintFindingKind.IndexDoesNotExist ? "Index does not exist" : $"Leading column {f.LeadingColumnName} never bound",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SessionDateSetting(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SessionDateSettingFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"SET DATEFORMAT/DATEFIRST mid-module ({report.SessionDateSettingFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "SET DATEFORMAT/SET DATEFIRST inside a module body changes how a string date literal or DATEPART(weekday, ...) is interpreted for the rest of the session, independent of the caller's own settings - oracle-confirmed the identical literal/date silently means something different depending on which value was set first.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Setting"],
+            [.. report.SessionDateSettingFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind == SessionDateSettingKind.DateFormat ? "DATEFORMAT" : "DATEFIRST",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CartesianJoin(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CartesianJoinFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"True cartesian joins ({report.CartesianJoinFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A comma-join or explicit CROSS JOIN with no predicate anywhere in the statement - no ON clause, no WHERE clause - connecting the two tables at all: a true cartesian product, distinct from the shipped partial-composite-FK-join rule (which fires when a join predicate exists but is incomplete).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "First table", "Second table", "Shape"],
+            [.. report.CartesianJoinFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.FirstTableQualifiedName,
+                f.SecondTableQualifiedName,
+                f.Kind == CartesianJoinKind.ExplicitCrossJoin ? "Explicit CROSS JOIN" : "Legacy comma-join",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> UndersizedDeclaration(ScanReport report, int level, string? pathBase)
+    {
+        if (report.UndersizedDeclarationFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Undersized (length 1/2) declarations ({report.UndersizedDeclarationFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A table column, DECLARE'd local variable, or procedure/function parameter is declared with a string/binary length of 1 or 2, with no compared column involved at all - advisory: almost always a truncated-from-a-larger-source mistake or a leftover single-character-flag placeholder.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Name", "Type", "Site"],
+            [.. report.UndersizedDeclarationFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.QualifiedOrVariableName,
+                f.TypeDescription,
+                f.Site == UndersizedDeclarationSite.TableColumn ? "Table column" : "Variable/parameter",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TruncateSwallowed(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TruncateSwallowedFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"TRUNCATE swallowed by an empty/non-rethrowing CATCH ({report.TruncateSwallowedFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "TRUNCATE TABLE sits inside a TRY block whose CATCH never THROWs/RAISERRORs - oracle-confirmed a real TRUNCATE failure (e.g. an enforced FK reference, Msg 4712) is silently swallowed here, with execution continuing as if it had succeeded and no error reaching the caller.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader],
+            [.. report.TruncateSwallowedFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> UnindexedTempTableUsage(ScanReport report, int level, string? pathBase)
+    {
+        if (report.UnindexedTempTableUsageFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unindexed SELECT INTO temp table usage ({report.UnindexedTempTableUsageFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A SELECT...INTO #temp table is later joined or filtered by a WHERE predicate in the same batch/procedure scope, but no index was ever created on it - oracle-confirmed this forces a full scan of the temp table, with no seek alternative possible at all.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Temp table", "Usage"],
+            [.. report.UnindexedTempTableUsageFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.UsageLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TempTableQualifiedName,
+                f.Kind == UnindexedTempTableUsageKind.JoinOperand ? "JOIN operand" : "Filtered in WHERE",
             })]);
     }
 

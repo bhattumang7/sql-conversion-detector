@@ -78,6 +78,11 @@ public static class SarifReportWriter
         results.AddRange(report.TransactionHygieneFindings.Select(ToResult));
         results.AddRange(report.CompositeIndexLeadingColumnFindings.Select(ToResult));
         results.AddRange(report.IndexHintFindings.Select(ToResult));
+        results.AddRange(report.SessionDateSettingFindings.Select(ToResult));
+        results.AddRange(report.CartesianJoinFindings.Select(ToResult));
+        results.AddRange(report.UndersizedDeclarationFindings.Select(ToResult));
+        results.AddRange(report.TruncateSwallowedFindings.Select(ToResult));
+        results.AddRange(report.UnindexedTempTableUsageFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -565,6 +570,50 @@ public static class SarifReportWriter
             : FloorLevelForConfidence(LevelWarning, finding.Confidence);
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(SessionDateSettingFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SessionDateSettingRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind switch
+        {
+            SessionDateSettingKind.DateFormat =>
+                "SET DATEFORMAT changes how a string date literal is interpreted for the rest of this session - oracle-confirmed the identical ambiguous literal resolves to a different date depending on which value was set first.",
+            SessionDateSettingKind.DateFirst =>
+                "SET DATEFIRST changes what DATEPART(weekday, ...) returns for the rest of this session - oracle-confirmed the identical date returns a different weekday ordinal depending on which value was set first.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+        return BuildResult(ruleId, FloorLevelForConfidence(LevelNote, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(CartesianJoinFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CartesianJoinRuleId(finding.Kind), finding.Confidence);
+        var kindText = finding.Kind == CartesianJoinKind.ExplicitCrossJoin ? "CROSS JOIN" : "comma-join";
+        var message = $"{finding.FirstTableQualifiedName} and {finding.SecondTableQualifiedName} are combined via a {kindText} with no predicate anywhere in the statement connecting the two - a true cartesian product.";
+        return BuildResult(ruleId, FloorLevelForConfidence(LevelWarning, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(UndersizedDeclarationFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UndersizedDeclarationRuleId(finding.Site), finding.Confidence);
+        var message = $"{finding.QualifiedOrVariableName} is declared {finding.TypeDescription} - a length of {finding.Length} is almost always a truncated-from-a-larger-source mistake or a leftover placeholder.";
+        return BuildResult(ruleId, FloorLevelForConfidence(LevelNote, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(TruncateSwallowedFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TruncateSwallowedRuleId, finding.Confidence);
+        var message = "TRUNCATE TABLE inside a TRY block whose CATCH never THROWs/RAISERRORs - oracle-confirmed a TRUNCATE failure (e.g. an enforced FK reference, Msg 4712) is silently swallowed here with no error reaching the caller.";
+        return BuildResult(ruleId, FloorLevelForConfidence(LevelWarning, finding.Confidence), message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(UnindexedTempTableUsageFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnindexedTempTableUsageRuleId(finding.Kind), finding.Confidence);
+        var usageText = finding.Kind == UnindexedTempTableUsageKind.JoinOperand ? "joined" : "filtered by a WHERE predicate";
+        var message = $"{finding.TempTableQualifiedName} is SELECT...INTO'd and later {usageText}, but no index was ever created on it - oracle-confirmed this forces a full scan of the temp table with no seek alternative possible.";
+        return BuildResult(ruleId, FloorLevelForConfidence(LevelWarning, finding.Confidence), message, finding.SourcePath, finding.UsageLine, finding.UsageColumn);
     }
 
     private static SarifResult ToResult(ViewOrderingFinding finding)

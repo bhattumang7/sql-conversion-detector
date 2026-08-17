@@ -2799,31 +2799,142 @@ the original survey session) and never got promoted into this checklist as
 work items.** Re-cloning these repos mostly re-confirmed what we already had
 on record; queuing them below is what was actually missing.
 
-- [ ] **`SELECT INTO` a temp table later joined/filtered with no index** and
-      **`TRUNCATE TABLE` inside a `TRY` block with no matching `CATCH`** —
-      both already in Appendix 7.4 (`PERF-TSQL-002`, `REL-TSQL-003`), never
-      queued until now. The first needs the same temp-table-lifecycle
-      tracking the queued "temp-table shape mismatch across a proc-call
-      boundary" item already requires — natural to build together. The
-      second is pure syntax: `TRUNCATE` can fail (an untrusted/enforced FK
-      reference is the common case), and unlike a hard error outside any
-      `TRY`, the failure is silently swallowed if nothing catches it.
-- [ ] **`SET DATEFORMAT`/`SET DATEFIRST` changed mid-module** — already in
-      Appendix 7.2 (`SRD0082`/`SRD0083`), never queued. Same family as the
-      shipped/queued SET-option stream, different mechanism: these don't
-      block a plan feature, they change how date *literals* and
-      `DATEPART`-relative comparisons are parsed, so the same literal means a
-      different date depending on which session compiled it first — a
-      direction-of-harm this project is already built to state precisely.
-      Syntax-only (no baked-in `sys.sql_modules` column expected; confirm
-      against the Appendix 8 column list before assuming).
-- [ ] **Unnamed `PRIMARY KEY`/`DEFAULT`/`FOREIGN KEY`/`CHECK` constraint on a
-      `#temp` table** — already in Appendix 7.2 (`SRD0092`–`0095`), never
-      queued. An unnamed constraint gets a system-generated name; two
-      sessions creating the same-shaped temp table concurrently in the same
-      `tempdb` can collide on that generated name, an intermittent,
-      hard-to-reproduce failure. In scope by the same CLAUDE.md carve-out
-      that already covers temp tables created inside proc bodies.
+- [x] **`SELECT INTO` a temp table later joined/filtered with no index —
+      shipped.** `UnindexedTempTableUsageFinding`/`UnindexedTempTableUsageScanner`
+      (`src/SilentScan.Core/Predicates/UnindexedTempTableUsageScanner.cs`) —
+      reuses `CatalogBuilder`'s own already-existing temp-table tracking
+      directly: a `SELECT ... INTO #temp`'s inferred columns, and any later
+      `CREATE INDEX` against the same scoped name, are already recorded on
+      the same `CatalogTable` entry by the catalog pass everything else in
+      this codebase reads — no new catalog plumbing needed, only a new AST
+      pass over usage sites within the same proc/trigger/batch scope. Fires
+      on two usage shapes: a JOIN operand (`QualifiedJoin`, either side), or
+      the sole FROM-clause source under a WHERE clause (declines rather than
+      guesses when more than one table is in scope, the same "no catalog
+      column lookup to attribute an unqualified reference" discipline the
+      cartesian-join stream below also uses). Oracle-confirmed the underlying
+      cost claim directly (Docker instance, a 5,000-row seeded source table):
+      an unindexed `#temp` joined to a real table produces
+      `PhysicalOp="Hash Match"` reading the entire temp table via
+      `PhysicalOp="Table Scan"` — no seek alternative exists at all without
+      an index, independent of row count (SQL Server's own automatic
+      temp-table statistics change cardinality ESTIMATES, never whether a
+      seek is structurally possible). `FindingConfidence.Medium` — this pass
+      cannot see the temp table's real row count, so a genuinely tiny
+      unindexed temp table may never matter in practice, the same honesty
+      `PartialCompositeForeignKeyJoinFinding` already applies for its own
+      data-dependent risk. Deliberately scoped to `SELECT INTO` only, per
+      the item's own title — `CREATE TABLE #temp` is a known, deliberate v1
+      scope limit. Wired end-to-end (`ScanReport` schema version 32 → 33,
+      SARIF rules `silentscan/temp-table/unindexed-{join-operand,where-filter}`,
+      readable-report section). Unit-tested (`UnindexedTempTableUsageScannerTests`,
+      5 cases: JOIN-operand fires, WHERE-filter fires, an index created
+      afterward suppresses it, a temp table never used again never fires,
+      `CREATE TABLE #temp` — not `SELECT INTO` — never fires). **Real
+      coverage against the local RM_ test database: 22 findings** (12 JOIN
+      operand, 10 WHERE-filtered) — spot-checked against real module text,
+      genuine unindexed temp-table usages in real production procedures.
+- [x] **`TRUNCATE TABLE` inside a `TRY` block with no matching `CATCH` —
+      shipped, scope corrected from the item's own original framing once the
+      real T-SQL grammar was checked.** Oracle-confirmed directly: a `BEGIN
+      TRY` with no corresponding `BEGIN CATCH` at all is a hard PARSE ERROR
+      (Msg 102) — TRY and CATCH are paired grammar, never independently
+      optional, so "no matching CATCH" can never actually occur in valid
+      T-SQL. The real, narrower shape: a CATCH block that SWALLOWS the error
+      rather than propagating it — no `THROW`/`RAISERROR` anywhere in the
+      CATCH block's own statement tree (including one nested inside an
+      IF/BEGIN), an empty CATCH being the most extreme case.
+      `TruncateSwallowedFinding`/`TruncateSwallowedScanner`
+      (`src/SilentScan.Core/Predicates/TruncateSwallowedScanner.cs`), fully
+      syntax-only. Oracle-confirmed the underlying mechanism directly (a real
+      seeded FK-referenced table): `TRUNCATE` genuinely fails at runtime
+      (Msg 4712) when a referencing FK exists, and when that failure lands
+      inside a TRY whose CATCH is empty, execution continues as if the
+      TRUNCATE had succeeded — no error surfaces to the caller, the
+      referenced table's row count unchanged and no exception propagating.
+      `FindingConfidence.High`, SARIF Warning — a structural risk (any
+      TRUNCATE inside this shape can fail silently the instant a new FK
+      reference is added, with zero change to the statement itself), not a
+      claim about today's schema specifically. Wired end-to-end (`ScanReport`
+      schema version 33, SARIF rule
+      `silentscan/control-flow/truncate-swallowed-by-catch`, readable-report
+      section). Unit-tested (`TruncateSwallowedScannerTests`, 7 cases: empty
+      CATCH fires, a CATCH doing unrelated work but never throwing fires, a
+      bare `THROW` never fires, `RAISERROR` never fires, a `THROW` nested
+      inside an `IF` inside the CATCH still never fires, no TRUNCATE in the
+      TRY never fires, a TRUNCATE outside any TRY never fires). **Real
+      coverage against the local RM_ test database: 0 findings** — a real,
+      honest zero (this codebase's own TRY/CATCH blocks around TRUNCATE
+      apparently all propagate their errors correctly), not a detection gap;
+      the mechanism itself is oracle-proven and the scanner correctly fires
+      on every hand-authored fixture in the unit-test suite.
+- [x] **`SET DATEFORMAT`/`SET DATEFIRST` changed mid-module — shipped.**
+      Confirmed no baked-in `sys.sql_modules` column exists for either
+      (unlike `QUOTED_IDENTIFIER`/`ANSI_NULLS`), so this is syntax-only, as
+      originally expected. ScriptDom's own AST shape verified directly rather
+      than assumed: both parse as `SetCommandStatement` containing a
+      `GeneralSetCommand` with `CommandType` `DateFormat`/`DateFirst` — NOT a
+      `PredicateSetStatement`, the node the existing SET-option stream reads
+      (that node only carries the ON/OFF-style boolean options). New
+      `SessionDateSettingFinding`/`SessionDateSettingScanner`
+      (`src/SilentScan.Core/Predicates/SessionDateSettingScanner.cs`), fully
+      syntax-only, one AST match per `SetCommandStatement`. Oracle-confirmed
+      the real mechanism directly (Docker instance) rather than trusted from
+      the item's own framing: the identical AMBIGUOUS literal `'03/04/2026'`
+      resolves to 2026-03-04 under `SET DATEFORMAT mdy` and to 2026-04-03
+      under `SET DATEFORMAT dmy` (an unambiguous ISO literal like
+      `'2026-03-04'` is unaffected either way — SQL Server special-cases that
+      format regardless of session `DATEFORMAT`, so only genuinely ambiguous
+      literals are at risk); `DATEPART(weekday, ...)` for a fixed real date
+      returns a different ordinal under `SET DATEFIRST 1` vs. `SET DATEFIRST
+      7`. Purely informational — this pass cannot see what value the
+      CALLER's own session already had, so it cannot claim the module's SET
+      actually changes anything for a specific invocation, only that the
+      module makes its own date interpretation session-state-dependent;
+      `FindingConfidence.Low`, SARIF Note, the same no-magnitude-claim tier
+      `LocalVariablePredicateFinding` uses for its own reason. Wired
+      end-to-end (`ScanReport` schema version 33, SARIF rules
+      `silentscan/session-date/set-{dateformat,datefirst}`, readable-report
+      section). Unit-tested (`SessionDateSettingScannerTests`, 5 cases:
+      DATEFORMAT fires, DATEFIRST fires, both in the same module both fire,
+      unrelated `SET NOCOUNT`/`SET ANSI_NULLS` never fire, no SET statement
+      never fires). **Real coverage against the local RM_ test database: 0
+      findings** — a real, honest zero (this codebase's own modules
+      apparently never override these two session settings mid-body), not a
+      detection gap; the mechanism itself is oracle-proven and the scanner
+      correctly fires on every hand-authored fixture in the unit-test suite.
+- [x] **Unnamed `PRIMARY KEY`/`DEFAULT`/`FOREIGN KEY`/`CHECK` constraint on a
+      `#temp` table — investigated and closed, not built. The core premise
+      is false in modern SQL Server, oracle-confirmed directly rather than
+      trusted from the incumbent tool's own description.** The proposed
+      claim was that two sessions creating the same-shaped `#temp` table
+      concurrently could collide on the system-generated constraint name.
+      Probed directly (Docker instance, `tempdb.sys.tables`/
+      `tempdb.sys.key_constraints`): SQL Server itself already disambiguates
+      every `#temp` table's own PHYSICAL name in `tempdb` with a unique
+      per-object numeric suffix baked in at `CREATE TABLE` time
+      (`#t1_______...00000000003F`, confirmed to differ on every single
+      creation — three sequential `CREATE TABLE #t1`/`DROP TABLE #t1` calls
+      in the SAME session produced three different suffixes, so this isn't
+      even a same-session-reuse question, only a new-object-identity one),
+      and the generated constraint name is derived from that already-unique
+      identity — three sequential creations of the identically-shaped
+      unnamed-PK `#t1` produced three genuinely different constraint names
+      (`PK__#t1_______3214EC0727670645`,
+      `PK__#t1_______3214EC07FAF76D01`,
+      `PK__#t1_______3214EC07AD7744EB`). Since every `CREATE TABLE` call —
+      concurrent or sequential, same session or different — gets a fresh
+      object identity and therefore a fresh generated name, the collision
+      this item's whole premise depended on cannot actually occur. Whatever
+      version-specific behavior the incumbent tool's rule was written
+      against, it does not reproduce on the current engine
+      (SQL Server 2022). No code written — forcing a rule to exist for a
+      falsified premise would be exactly the "plausible-sounding but
+      unverified claim" CLAUDE.md's precision-first discipline exists to
+      prevent, the same "proposed and killed the same session" treatment
+      already given to "Non-foldable nondeterministic intrinsic in a
+      predicate" and "`IF` statements containing queries inside a
+      procedure" elsewhere in this file.
 - [ ] **Database-level configuration flags** — already in Appendix 7.2, never
       queued; genuinely new finding *category*, not module/predicate-level
       like everything else in this file: `PAGE_VERIFY <> CHECKSUM` (silent
@@ -2835,22 +2946,122 @@ on record; queuing them below is what was actually missing.
       simplest possible catalog-only finding, but needs a new finding shape
       since nothing here today reports at database granularity rather than
       module/column/predicate granularity.
-- [ ] **True cartesian join — comma-join or explicit `CROSS JOIN` with no
-      predicate anywhere connecting the two sides** — already in Appendix 7.5
-      (`C023`), never queued. Deliberately distinct from the shipped
-      partial-composite-FK-join rule: that fires when a join predicate exists
-      but is incomplete; this fires when there is no predicate joining the
-      pair at all. Pure AST — cheaper and higher-precision than the partial
-      case, worth building even before it if sequencing matters.
-- [ ] **Declared type of size 1 or 2** (`varchar(1)`, `varchar(2)`, etc.) —
-      already in `detection-reference.md`'s hard-cases table (line ~317,
-      previously decided "Skip (lint)" under the now-superseded admission
-      rule; that disposition no longer applies under the current scope rule).
-      A narrow declaration smell distinct from the shipped
-      under-length-vs-column-comparison rule — this one doesn't need a
-      compared column at all, a size that small on its own is almost always
-      a truncated-from-a-larger-source mistake or a leftover placeholder.
-      Lightweight companion to the existing under-length stream.
+- [x] **True cartesian join — shipped, with a real precision bug caught and
+      fixed against the local test database before this could ship
+      honestly.** `CartesianJoinFinding`/`CartesianJoinScanner`
+      (`src/SilentScan.Core/Predicates/CartesianJoinScanner.cs`) — a
+      comma-join or explicit `CROSS JOIN` where NO predicate anywhere in the
+      statement (WHERE clause, or any other JOIN's own ON clause) connects
+      the two sides. Deliberately distinct from the shipped
+      `PartialCompositeForeignKeyJoinFinding`: that fires when a join
+      predicate exists but is incomplete; this fires when there is no
+      predicate at all. Pure relational algebra, no oracle needed for the
+      finding's own core claim (a row-count-multiplying cartesian product is
+      definitional, not implementation-dependent), version-insensitive.
+      <br><br>
+      **A real false positive, caught only against the real corpus, not by
+      the unit-test suite:** the first implementation checked connectivity
+      PAIRWISE — "does any single predicate leaf mention both of these two
+      specific table aliases" — for every pair of top-level FROM entries.
+      Against the local test database this flagged a genuine 5-table
+      comma-join (`FROM a, b, c, d, e WHERE a.TypeID = b.ID AND ... AND
+      a.AgencyID = c.AgencyID AND c.OriginID = d.AddressID AND
+      c.DestinationID = e.AddressID`) as three separate "cartesian" pairs
+      (b-c, b-d, b-e) even though every table is transitively connected
+      through `a` and `c` — a real query with zero cartesian risk. Connectivity
+      is a GRAPH property, not a pairwise one: fixed by building a proper
+      union-find over every leaf table in the FROM tree, unioned by every
+      leaf predicate that spans two or more of them, and only reporting when
+      the resulting graph has more than one connected component — a witness
+      pair per disconnected component, not one finding per non-directly-
+      connected pair (avoiding the same spam risk the fix also closes).
+      Confirmed the fix against the exact real shape that caught the bug
+      (`FiveTableCommaJoin_AllTransitivelyConnectedThroughAThirdTable_NeverFires`)
+      and a case with one genuinely disconnected table among otherwise-
+      connected ones, firing once, not per pair
+      (`CommaJoin_OneGenuinelyDisconnectedTableAmongConnectedOthers_FiresOnceNotPerPair`).
+      <br><br>
+      **A second real bug, also caught only against the real corpus:** a
+      `NullReferenceException` on `COUNT(*)` — a wildcard `ColumnReferenceExpression`
+      has `MultiPartIdentifier` null ENTIRELY, not merely short, which a
+      naive `.Identifiers.Count < 2` check crashes on. Fixed (treated the
+      same as unqualified — the whole statement declines, since a wildcard
+      inside a nested subquery can't be attributed to a side either) and
+      regression-tested
+      (`CountStarWildcardInsideNestedSubquery_NeverCrashes`).
+      <br><br>
+      Precision guards: `CartesianJoinKind.CommaJoin`/`ExplicitCrossJoin`
+      report separately (different intent signal — an explicit `CROSS JOIN`
+      is the author self-documenting a deliberate cartesian product, still
+      worth surfacing since an accidentally-left one is a real, if less
+      common, mistake); a witness pair is only reported when BOTH sides are
+      themselves a single plain `NamedTableReference` (a nested join/derived
+      table/subquery on either side is declined rather than guessed at,
+      though it still participates correctly in the wider connectivity
+      graph); an UNQUALIFIED column reference anywhere in the combined
+      predicate set declines the whole FROM clause (cannot be conservatively
+      attributed to a side without a catalog column lookup this pass doesn't
+      perform). `FindingConfidence.High`, SARIF Warning. Wired end-to-end
+      (`ScanReport` schema version 33, SARIF rules
+      `silentscan/join/cartesian-{comma-join,cross-join}`, readable-report
+      section). Unit-tested (`CartesianJoinScannerTests`, 12 cases including
+      the two regression cases above: comma-join with no connecting
+      predicate fires, a connecting WHERE predicate suppresses it, explicit
+      `CROSS JOIN` with no connecting predicate fires, an `INNER JOIN ...
+      ON` suppresses it, a single-table FROM never fires, an unqualified
+      column reference declines, a connecting predicate inside an
+      arithmetic expression is still recognized, a third join's ON clause
+      connecting two otherwise-unrelated tables suppresses them, a nested
+      join on one side declines per the stated scope limit). **Real coverage
+      against the local RM_ test database: 63 findings** (62
+      `ExplicitCrossJoin`, 1 `CommaJoin`) — spot-checked two: a recurring,
+      genuine `dbo.tblAuditKind CROSS JOIN dbo.tblDatabaseObjects` pattern
+      (each side filtered to exactly one row by an independent equality
+      predicate, a real "constant lookup via cross join" idiom, appearing
+      15+ times across real procedures) and a self-join comma-join
+      (`FROM tblSettings a, tblSettings b WHERE a.InternalID = 207 AND
+      b.InternalID = 1882`, structurally a true cartesian product even
+      though both sides happen to resolve to exactly one row by design) —
+      both real, both matching the finding's own stated mechanism exactly,
+      neither a false positive.
+- [x] **Declared type of size 1 or 2 — shipped.**
+      `UndersizedDeclarationFinding`/`UndersizedDeclarationScanner`
+      (`src/SilentScan.Core/Predicates/UndersizedDeclarationScanner.cs`) —
+      genuinely distinct from the shipped under-length-vs-compared-column
+      stream: needs no compared column at all, a string/binary declaration
+      of length 1 or 2 (`CHAR`/`VARCHAR`/`NCHAR`/`NVARCHAR`/`BINARY`/
+      `VARBINARY`) is flagged purely for being that small on its own. Two
+      independent scan halves: `ScanCatalog` walks every real table column
+      (mirrors `MaxTypedColumnScanner`'s "one structural fact per column, no
+      AST" shape); `ScanDeclarations` walks every `DECLARE`'d local variable
+      and procedure/function formal parameter across every parsed module.
+      **A temp table's/table variable's own column declarations (`CREATE
+      TABLE #temp`, `SELECT ... INTO #temp`, `DECLARE @t TABLE(...)`) are
+      covered for free by the catalog half** — `CatalogBuilder` already
+      registers all three under `DatabaseCatalog.Tables` for other, earlier
+      consumers, confirmed directly by real findings against the local test
+      database's own temp tables (single-character flag/type columns like
+      `BreakType`, `leftoperandtype`/`rightoperandtype`, `SchedObjType`) —
+      not a separate pass this stream had to build. Purely advisory/
+      structural — no oracle applies ("this declaration looks like a
+      mistake" is a code-smell judgment call, not a provable runtime or
+      plan-shape fact) — `FindingConfidence.Low` by default, the same
+      no-magnitude-claim tier `LocalVariablePredicateFinding`/
+      `CascadingForeignKeyFinding` use for their own advisory reasons. Wired
+      end-to-end (`ScanReport` schema version 33, SARIF rules
+      `silentscan/declaration/undersized-{column,variable-or-parameter}`,
+      readable-report section). Unit-tested
+      (`UndersizedDeclarationScannerTests`, 9 cases: catalog column length 1
+      fires, length 2 fires, length 10 never fires, a non-string/binary
+      column never fires, a `DECLARE`d `CHAR(1)` fires, a `VARCHAR(2)`
+      procedure parameter fires, a `VARCHAR(50)` local never fires, an `INT`
+      local never fires, a `VARCHAR(MAX)` local never fires — MAX is never
+      misread as "shorter" the way a raw sentinel length would). **Real
+      coverage against the local RM_ test database: 589 findings** (392
+      declarations, 197 table columns) — spot-checked several catalog-side
+      hits directly against real module text, all genuine single-character
+      flag/type columns matching the finding's own claimed pattern, not
+      false positives.
 - [ ] **Output parameter not populated on every code path** — (`ErikEJ` fork,
       `SR0013`) — real control-flow strengthening of the already-queued
       "output parameter never assigned" item (some paths vs. no paths at

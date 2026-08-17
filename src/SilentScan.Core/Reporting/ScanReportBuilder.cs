@@ -526,6 +526,97 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<SessionDateSettingFinding> sessionDateSettingFindings;
+        using (var sessionDateStage = progress.Begin("scanning SET DATEFORMAT/DATEFIRST", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = SessionDateSettingScanner.Scan(r);
+                    sessionDateStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            sessionDateSettingFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<CartesianJoinFinding> cartesianJoinFindings;
+        using (var cartesianJoinStage = progress.Begin("scanning true cartesian joins", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = CartesianJoinScanner.Scan(r);
+                    cartesianJoinStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            cartesianJoinFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<UndersizedDeclarationFinding> undersizedDeclarationFindings;
+        using (var undersizedDeclarationStage = progress.Begin("scanning undersized (length 1/2) declarations", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = UndersizedDeclarationScanner.ScanDeclarations(r, catalog);
+                    undersizedDeclarationStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            unordered.AddRange(UndersizedDeclarationScanner.ScanCatalog(catalog));
+            undersizedDeclarationFindings = unordered
+                .OrderBy(f => f.QualifiedOrVariableName, StringComparer.Ordinal).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<TruncateSwallowedFinding> truncateSwallowedFindings;
+        using (var truncateSwallowedStage = progress.Begin("scanning TRUNCATE inside a swallowing TRY/CATCH", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = TruncateSwallowedScanner.Scan(r);
+                    truncateSwallowedStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            truncateSwallowedFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<UnindexedTempTableUsageFinding> unindexedTempTableUsageFindings;
+        using (var unindexedTempTableStage = progress.Begin("scanning unindexed SELECT INTO temp tables", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = UnindexedTempTableUsageScanner.Scan(r, catalog);
+                    unindexedTempTableStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            unindexedTempTableUsageFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.DeclarationLine)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<CatchAllPredicateFinding> catchAllPredicateFindings;
         using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
         {
@@ -835,6 +926,7 @@ public static class ScanReportBuilder
             moduleCompileFlagFindings,
             windowFrameFindings, waitForFindings, viewOrderingFindings, transactionHygieneFindings,
             compositeIndexLeadingColumnFindings, indexHintFindings,
+            sessionDateSettingFindings, cartesianJoinFindings, undersizedDeclarationFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
