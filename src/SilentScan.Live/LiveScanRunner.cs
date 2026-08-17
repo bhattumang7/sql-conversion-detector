@@ -198,6 +198,17 @@ public static class LiveScanRunner
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        // docs/detection-checklist.md "Second OSS/commercial sweep": "Database-level
+        // configuration flags" - a single, cheap read of the target database's own row in
+        // sys.databases (plus sys.database_query_store_options), reported once per scan run, not
+        // per module - the same live-only-merge pattern the temp-table-shape stage above uses.
+        using (var databaseConfigStage = progress.Begin("reading database-level configuration flags"))
+        {
+            var databaseConfigFindings = await new DatabaseConfigurationReader(connectionString).ReadAsync(cancellationToken);
+            report = report with { DatabaseConfigurationFindings = databaseConfigFindings };
+            databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
+        }
+
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];
         IReadOnlyList<WorkloadFinding> workloadFindings = [];

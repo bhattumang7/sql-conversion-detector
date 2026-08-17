@@ -83,6 +83,8 @@ public static class SarifReportWriter
         results.AddRange(report.UndersizedDeclarationFindings.Select(ToResult));
         results.AddRange(report.TruncateSwallowedFindings.Select(ToResult));
         results.AddRange(report.UnindexedTempTableUsageFindings.Select(ToResult));
+        results.AddRange(report.OutputParameterFindings.Select(ToResult));
+        results.AddRange(report.DatabaseConfigurationFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -538,6 +540,51 @@ public static class SarifReportWriter
             $"BEGIN TRANSACTION at line {finding.BeginTransactionLine} reaches this point with no intervening COMMIT/ROLLBACK - @@TRANCOUNT is left elevated by one on this path, holding its locks until the session or connection pool eventually clears it.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.UnresolvedExitLine, finding.UnresolvedExitColumn);
+    }
+
+    private static SarifResult ToResult(OutputParameterFinding finding)
+    {
+        // Warning, not error: same "structural risk, not a plan-shape claim" tier
+        // TransactionHygieneFinding/ForcedSerialFinding already use - the actual harm depends on
+        // whether a real caller reads the parameter's post-call value at all, which this pass
+        // cannot observe.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OutputParameterRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message =
+            $"OUTPUT parameter '{finding.ParameterName}' is not assigned on this path - the caller's own variable is left completely unchanged (not reset to NULL), so a reused caller variable can silently read stale data from a previous call.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.UnresolvedExitLine, finding.UnresolvedExitColumn);
+    }
+
+    private static SarifResult ToResult(DatabaseConfigurationFinding finding)
+    {
+        // No file/line applies - this is a database-granularity fact, not a module/predicate one.
+        // The database's own name stands in for a "location" so the SARIF result still carries an
+        // artifactLocation, matching this writer's existing shape for every other finding.
+        var (ruleId, level, message) = finding.Kind switch
+        {
+            DatabaseConfigurationFindingKind.PageVerifyNotChecksum => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "PAGE_VERIFY is not CHECKSUM - silent storage-level page corruption can go undetected until a much later, harder-to-diagnose failure."),
+            DatabaseConfigurationFindingKind.AutoShrinkOn => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "AUTO_SHRINK is ON - a well-known, severe anti-pattern: the engine repeatedly shrinks the file and the workload immediately re-grows it, causing constant fragmentation churn for no durable space saving."),
+            DatabaseConfigurationFindingKind.AutoCloseOn => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "AUTO_CLOSE is ON - the database's connection/buffer-pool state is torn down after the last connection closes and rebuilt from scratch on the next one, adding real latency to whichever connection happens to be first."),
+            DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                "TARGET_RECOVERY_TIME is 0 (disabled) - indirect checkpoint is off, falling back to the legacy automatic-checkpoint mechanism instead of a bounded, predictable crash-recovery time; the engine's own modern default is 60 seconds."),
+            DatabaseConfigurationFindingKind.QueryStoreNotReadWrite => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelNote,
+                "Query Store is not actively running (actual state is not READ_WRITE) - the engine's own built-in plan-regression/history diagnostic is unavailable for this database. Informational: whether Query Store should be on is a real operational choice, not a universal anti-pattern."),
+            DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelNote,
+                "Query Store is running with a capture mode other than AUTO - informational only: ALL is a real, deliberate choice some teams prefer for active troubleshooting, not a mistake."),
+            _ => throw new ArgumentOutOfRangeException(nameof(finding)),
+        };
+
+        return BuildResult(ruleId, FloorLevelForConfidence(level, finding.Confidence), message, finding.DatabaseName, 1, null);
     }
 
     private static SarifResult ToResult(CompositeIndexLeadingColumnFinding finding)

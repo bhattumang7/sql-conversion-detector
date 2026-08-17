@@ -73,6 +73,7 @@ public static class SarifRuleCatalog
     public const string WaitForRuleId = "silentscan/control-flow/waitfor";
 
     public const string TransactionHygieneRuleId = "silentscan/control-flow/unresolved-transaction";
+    public const string OutputParameterRuleId = "silentscan/control-flow/unassigned-output-parameter";
 
     public const string CompositeIndexLeadingColumnRuleId = "silentscan/index-shape/composite-leading-column-unconstrained";
 
@@ -105,6 +106,17 @@ public static class SarifRuleCatalog
     };
 
     public const string TruncateSwallowedRuleId = "silentscan/control-flow/truncate-swallowed-by-catch";
+
+    public static string DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind kind) => kind switch
+    {
+        DatabaseConfigurationFindingKind.PageVerifyNotChecksum => "silentscan/database/page-verify-not-checksum",
+        DatabaseConfigurationFindingKind.AutoShrinkOn => "silentscan/database/auto-shrink-on",
+        DatabaseConfigurationFindingKind.AutoCloseOn => "silentscan/database/auto-close-on",
+        DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset => "silentscan/database/target-recovery-time-unset",
+        DatabaseConfigurationFindingKind.QueryStoreNotReadWrite => "silentscan/database/query-store-not-read-write",
+        DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto => "silentscan/database/query-store-capture-mode-not-auto",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
 
     public static string UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind kind) => kind switch
     {
@@ -335,6 +347,13 @@ public static class SarifRuleCatalog
             Rule(TruncateSwallowedRuleId, "TRUNCATE TABLE sits inside a TRY block whose CATCH block never THROWs/RAISERRORs anywhere in its own statement tree - oracle-confirmed a real TRUNCATE failure (e.g. an enforced FK reference, Msg 4712) is silently swallowed here, with execution continuing as if the TRUNCATE had succeeded and no error reaching the caller. TRY with no matching CATCH at all is a hard parse error (Msg 102) and can never occur in valid T-SQL, correcting this item's own original framing."),
             Rule(UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind.JoinOperand), "A SELECT...INTO #temp table is later used as a JOIN operand in the same batch/procedure scope, but no index was ever created on it - oracle-confirmed this forces a full scan/Hash Match of the entire temp table, with no seek alternative possible at all without an index."),
             Rule(UnindexedTempTableUsageRuleId(UnindexedTempTableUsageKind.FilteredInWhere), "A SELECT...INTO #temp table is later filtered by a WHERE predicate in the same batch/procedure scope, but no index was ever created on it - the same no-seek-possible cost as the JOIN-operand sibling."),
+            Rule(OutputParameterRuleId, "A procedure's own OUTPUT parameter is not assigned on some statically reachable path (a RETURN, or the natural end of the body) - oracle-confirmed a caller's own variable is left completely unchanged by the call on that path (not reset to NULL), so a reused caller variable can silently carry stale data from a previous, unrelated call."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.PageVerifyNotChecksum), "PAGE_VERIFY is not CHECKSUM - silent storage-level page corruption can go undetected until a much later, harder-to-diagnose failure."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.AutoShrinkOn), "AUTO_SHRINK is ON - a well-known, severe anti-pattern: constant fragmentation churn as the engine shrinks the file and the workload immediately re-grows it."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.AutoCloseOn), "AUTO_CLOSE is ON - the database's connection/buffer-pool state is torn down after the last connection closes and rebuilt from scratch on the next one."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset), "TARGET_RECOVERY_TIME is 0 (disabled) - indirect checkpoint is off; confirmed directly against a freshly created database on the same engine that the modern default is 60 seconds, not 0."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.QueryStoreNotReadWrite), "Query Store is not actively running (actual state is not READ_WRITE) - informational: a real operational choice, not a universal anti-pattern."),
+            Rule(DatabaseConfigurationRuleId(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto), "Query Store is running with a capture mode other than AUTO - informational: ALL is a deliberate, real choice some teams prefer for active troubleshooting."),
             Rule(TempTableExecShapeColumnCountMismatchRuleId, "INSERT INTO #temp EXEC proc, where the executed proc's real, engine-described result-set column count differs from #temp's own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(TempTableExecShapeColumnTypeMismatchRuleId, "INSERT INTO #temp EXEC proc, where column counts match but at least one position's type risks silent data loss between the executed proc's real, engine-described column type and #temp's own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only)."),
             Rule(PartialCompositeForeignKeyJoinRuleId, "A JOIN equates some but not all of a real composite foreign key's column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek."),

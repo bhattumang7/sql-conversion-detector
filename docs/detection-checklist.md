@@ -2935,17 +2935,78 @@ on record; queuing them below is what was actually missing.
       already given to "Non-foldable nondeterministic intrinsic in a
       predicate" and "`IF` statements containing queries inside a
       procedure" elsewhere in this file.
-- [ ] **Database-level configuration flags** — already in Appendix 7.2, never
-      queued; genuinely new finding *category*, not module/predicate-level
-      like everything else in this file: `PAGE_VERIFY <> CHECKSUM` (silent
-      corruption goes undetected), `AUTO_SHRINK = ON` (a well-known, severe
-      anti-pattern — constant fragmentation churn), `AUTO_CLOSE <> OFF`,
-      `TARGET_RECOVERY_TIME` unset, `QUERY_STORE <> READ_WRITE`,
-      `QUERY_STORE_CAPTURE_MODE <> AUTO`. All read directly from
-      `sys.databases` in live mode — no query text involved at all, the
-      simplest possible catalog-only finding, but needs a new finding shape
-      since nothing here today reports at database granularity rather than
-      module/column/predicate granularity.
+- [x] **Database-level configuration flags — shipped, a genuinely new finding
+      *category*.** `DatabaseConfigurationFinding`/`DatabaseConfigurationReader`
+      (`src/SilentScan.Core/Predicates/DatabaseConfigurationFinding.cs`,
+      `src/SilentScan.Live/Catalog/DatabaseConfigurationReader.cs`) — the
+      first stream in this codebase reported once per SCAN RUN against the
+      target database itself, not once per module/column/predicate. Live-mode
+      only by construction (there is no file-mode equivalent of "the
+      database's own current configuration"); always empty from
+      `ScanReportBuilder`, merged into the report by `LiveScanRunner` after a
+      real connection, the identical live-only-merge pattern
+      `TempTableExecShapeFindings` already established. Six flags read from
+      `sys.databases` (`PAGE_VERIFY`, `AUTO_SHRINK`, `AUTO_CLOSE`,
+      `TARGET_RECOVERY_TIME`) and `sys.database_query_store_options` (actual
+      state, capture mode) — no query text involved at all.
+      <br><br>
+      **Severity deliberately NOT uniform across the six flags, decided after
+      checking current engine defaults rather than assuming every flag is an
+      equally-confident "always should be X" claim:** `PAGE_VERIFY`/
+      `AUTO_SHRINK`/`AUTO_CLOSE` are long-established, essentially
+      uncontroversial DBA anti-patterns — SARIF Warning. `TARGET_RECOVERY_TIME`
+      is also Warning, but only after confirming directly (not assumed) that
+      the engine's OWN modern default is `60`, not `0` — checked against a
+      freshly created database on the same instance (`model`, the system
+      database every new database clones from), which shows
+      `target_recovery_time_in_seconds = 60` — a database sitting at `0` has
+      genuinely deviated from that default, disabling indirect checkpoint
+      entirely (Microsoft's own "Database Checkpoints" guidance since SQL
+      Server 2016 recommends enabling it). The two Query Store flags are
+      SARIF Note only, not Warning — unlike the others, whether Query Store
+      should be on, and which capture mode, are real, deliberate operational
+      choices (`ALL` capture mode is a genuine, common choice for active
+      troubleshooting; some teams disable Query Store on very high-churn
+      ad-hoc workloads), not a universal anti-pattern.
+      `QueryStoreCaptureModeNotAuto` is only even evaluated when Query
+      Store's own actual state IS `READ_WRITE` — reporting a capture-mode
+      complaint about a Query Store that isn't running would be a confusing,
+      redundant second finding for the same underlying fact.
+      <br><br>
+      **Oracle discovery, load-bearing for how this stream's own tests are
+      written:** a bare `CREATE DATABASE` on this engine instance genuinely
+      starts with Query Store ON and immediately `READ_WRITE` (confirmed
+      directly — no warm-up lag) — but every disposable test database this
+      test suite's own `DatabaseProvisioner` creates deliberately turns Query
+      Store back OFF right after creation (real, measured Docker error-log
+      spam from Query Store's own background worker racing this suite's
+      CREATE/DROP churn, documented in `DatabaseProvisioner`'s own doc
+      comment). This is a genuine property of the test infrastructure, not a
+      reader bug — the oracle test suite's own "all defaults" baseline
+      explicitly re-enables Query Store first before asserting zero findings,
+      rather than asserting a premise the provisioner itself had already
+      falsified. The same fact also meant `EngineAuthoritativeScan`-based
+      fixture tests elsewhere in this suite (which genuinely run the full
+      live pipeline against a real disposable database, not a file-mode
+      stub) now legitimately carry one real `QueryStoreNotReadWrite` finding
+      each — a real, honest consequence of shipping a live-mode-only stream
+      into a test harness that already runs the live pipeline, not a false
+      positive.
+      <br><br>
+      No plan-XML oracle applies — every value is a directly-read, exact
+      catalog fact, not a plan-shape claim. Wired end-to-end (`ScanReport`
+      schema version 34 → 35, SARIF rule catalog + writer, readable-report
+      section). Unit/oracle-tested (`DatabaseConfigurationReaderDefaultsOracleTests`,
+      `DatabaseConfigurationReaderUnhealthyFlagsOracleTests`,
+      `DatabaseConfigurationReaderQueryStoreCaptureModeOracleTests`,
+      `DatabaseConfigurationReaderAutoCloseOracleTests` — 4 real oracle test
+      classes against real deployed databases, each flag mutated via a real
+      `ALTER DATABASE` and read back, plus the capture-mode-only-when-
+      Query-Store-is-on suppression guard). **Real coverage against the local
+      RM_ test database: 2 findings** (`TargetRecoveryTimeUnset`,
+      `QueryStoreNotReadWrite`) — `PAGE_VERIFY`/`AUTO_SHRINK`/`AUTO_CLOSE`
+      are all already at their healthy defaults there, a real, honest partial
+      result rather than either extreme.
 - [x] **True cartesian join — shipped, with a real precision bug caught and
       fixed against the local test database before this could ship
       honestly.** `CartesianJoinFinding`/`CartesianJoinScanner`
@@ -3062,18 +3123,133 @@ on record; queuing them below is what was actually missing.
       hits directly against real module text, all genuine single-character
       flag/type columns matching the finding's own claimed pattern, not
       false positives.
-- [ ] **Output parameter not populated on every code path** — (`ErikEJ` fork,
-      `SR0013`) — real control-flow strengthening of the already-queued
-      "output parameter never assigned" item (some paths vs. no paths at
-      all); fold into that item rather than building twice.
-- **Two read but not yet understood well enough to scope** — (`ErikEJ` fork):
-  `SR0006` "move a column reference to one side of a comparison operator" —
-  possibly already subsumed by the shipped column-arithmetic non-sargability
-  rule, needs a source-level read of the actual rule (not just its name)
-  before deciding; `SR0015` "extract deterministic function calls from WHERE
-  predicates" — exact trigger condition unclear from the survey alone. Both
-  need a closer read before either gets queued or dropped, same discipline as
-  the two unresolved Tier 4 items from the earlier vendor-plugin sweep.
+- [x] **Output parameter not populated on every code path — shipped, standalone
+      (not folded into the Tier 4 "output parameter never assigned" entry, since
+      Tier 4 itself stayed out of scope for this whole pass of work).** A real,
+      sound path-sensitive reachability walk — `OutputParameterFinding`/
+      `OutputParameterScanner` (`src/SilentScan.Core/Predicates/
+      OutputParameterScanner.cs`) — directly reuses the reachability-walk shape
+      `TransactionHygieneScanner` already established for "does every path
+      resolve a state", adapted from tracking one open transaction site to
+      tracking a SET of not-yet-guaranteed-assigned OUTPUT parameter names
+      through IF/ELSE, TRY/CATCH, WHILE, BEGIN/END, RETURN. A correct
+      path-sensitive analysis naturally subsumes the simpler "never assigned at
+      all" case as one end of the same spectrum, so nothing from the original
+      framing is lost by shipping it here instead.
+      <br><br>
+      **Oracle-confirmed the real caller-visible risk directly, load-bearing
+      for the finding's own wording:** a genuinely never-assigned OUTPUT
+      parameter leaves the CALLING session's own variable completely
+      UNCHANGED — not reset to NULL, not defaulted, literally untouched
+      (`OutputParameterOracleTests`: a caller variable seeded `999` stays
+      `999`; one seeded `NULL` stays `NULL`). This is a sharper, more
+      dangerous claim than "the caller gets NULL": a caller reusing the same
+      local variable across several calls (a common accumulator/status-code
+      pattern) can silently read STALE data from a previous, unrelated call
+      and never notice.
+      <br><br>
+      An assignment is recognized in exactly three forms: `SET @p = ...`
+      (any compound form, e.g. `+=`), `SELECT @p = ...` in a top-level query
+      specification's own select list, and passing `@p` onward as the
+      `OUTPUT` argument to a nested `EXEC` call (a real, common "delegate the
+      whole output" idiom — a genuinely broken callee is the callee's own
+      finding, not a reason to double-flag the caller here).
+      <br><br>
+      **`THROW` is deliberately never a finding site** — unlike a `RETURN` or
+      the natural end of the body, `THROW` raises a real, loud engine error
+      the instant it executes, so the caller does not silently receive a
+      stale value with no signal at all, matching this codebase's whole scope
+      discipline for excluding cases the engine already surfaces loudly
+      (`Rules.WriteLossClassifier`'s identical reasoning). `THROW` is still
+      terminal for the walk (nothing after it executes on that path), just
+      never itself a finding. **`RAISERROR` is NOT treated as terminal at
+      all** — by default it does not stop batch execution the way `THROW`
+      does, so statements after it are genuinely still reachable and are
+      analyzed normally.
+      <br><br>
+      **Known v1 scope limits, stated honestly:** a `GOTO` anywhere in the
+      procedure body declines the whole procedure's analysis, identical
+      reasoning to `TransactionHygieneScanner`'s own documented choice; a
+      `CATCH` block is analyzed as entering with whatever assignment state
+      existed at the START of its own `TRY`/`CATCH` construct (sound, not
+      merely conservative, for the identical reason already documented for
+      the transaction-hygiene stream); a `WHILE` loop body is analyzed as
+      running exactly one representative iteration, OR-merged with the "ran
+      zero times" possibility; no cross-procedure tracking beyond the direct
+      "passed onward as OUTPUT" recognition above.
+      <br><br>
+      A correctness finding, not a plan-shape one — no plan-XML oracle
+      applies. `FindingConfidence.High`, SARIF Warning — the same "structural
+      risk, not a plan-shape claim" tier `TransactionHygieneFinding`/
+      `ForcedSerialFinding` already use, not Error: unlike e.g.
+      `NotInNullableSubqueryFinding`, this pass cannot see whether a real
+      caller ever reads the parameter's post-call value at all, so the
+      magnitude of harm is genuinely conditional on caller behavior this
+      tool cannot observe. Version-insensitive: OUTPUT parameter marshalling
+      is ANSI/T-SQL calling-convention semantics, unaffected by compat level
+      or CE mode. Wired end-to-end (`ScanReport` schema version 33 → 34,
+      SARIF rule `silentscan/control-flow/unassigned-output-parameter`,
+      readable-report section). Unit-tested (`OutputParameterScannerTests`,
+      18 cases: falls-off-end fires, unconditional top-of-body assignment
+      never fires, `SELECT @p = ...` assignment never fires, IF-branch-only
+      assignment with implicit unresolved ELSE fires, both-branches-assign
+      never fires, RETURN-before/after-assignment, forwarded-as-OUTPUT-
+      argument never fires, plain-input-argument (not forwarded) still
+      fires, unconditional THROW never fires despite never assigning,
+      RAISERROR does not terminate the walk, GOTO declines the whole scope,
+      TRY-only-assignment-CATCH-doesn't fires, both-TRY-and-CATCH-assign
+      never fires, WHILE-zero-iterations fires, multiple OUTPUT parameters
+      report only the genuinely unassigned one, no OUTPUT parameters at all
+      never fires, compound assignment still counts) + 3 real execution-based
+      oracle tests (`OutputParameterOracleTests`, the caller-variable-
+      unchanged mechanism above). **Real coverage against the local RM_ test
+      database: 512 findings.** Spot-checked one true positive directly
+      against real deployed module text (`dbo.GetEstimatedDistanceAndTime`):
+      both `@distance` and `@timeinminutes` are assigned only inside a `TRY`
+      block's own final `SELECT @a = x, @b = y` statement, while the matching
+      `CATCH` block only `RAISERROR`s without reassigning either parameter —
+      exactly the pattern this rule targets: any real error earlier in the
+      TRY block leaves both parameters silently unresolved for the caller.
+- [x] **`SR0006`/`SR0015` scoped and closed — both already fully covered, no new
+      code needed.** (`ErikEJ` fork rule names only were available to reason
+      from — this environment has no network/repo access to read the fork's
+      actual rule source, so both were resolved by direct reasoning about the
+      named shape plus real verification against this codebase's own shipped
+      code and the Docker oracle, not by reading the vendor's implementation.)
+  - **`SR0006` "move a column reference to one side of a comparison
+    operator" — already fully subsumed by the shipped column-arithmetic
+    non-sargability rule, confirmed with a new regression test, not just a
+    source read.** `NonSargablePredicateScanner.Visit(BooleanComparisonExpression)`
+    calls `InspectSide` on BOTH `FirstExpression` and `SecondExpression`
+    symmetrically — a reversed operand order (`3.975 > UnitPrice + 1`
+    instead of `UnitPrice + 1 < 3.975`, literal written first) fires
+    `SargabilityFindingKind.ColumnArithmetic` identically either way,
+    since which side the column sits on was never load-bearing to begin
+    with. Locked in by
+    `NonSargablePredicateScannerTests.ColumnArithmetic_ReversedOperandOrder_StillFires`.
+    No fix needed; nothing was missing.
+  - **`SR0015` "extract deterministic function calls from WHERE predicates"
+    — investigated and closed, the premise is false.** Oracle-probed
+    directly (Docker instance, real seeded 2,000-row indexed table, a
+    genuinely expensive schema-bound scalar UDF — a 1,000-iteration `WHILE`
+    loop — called two ways): `WHERE indexed_col = dbo.Expensive(indexed_col)`
+    (the UDF genuinely depends on each row) measured ~4 seconds of real CPU
+    time across 2,000 rows, exactly the per-row-re-evaluation cost the
+    shipped scalar-UDF stream already targets; `WHERE indexed_col =
+    dbo.Expensive(1)` (the UDF's argument is a literal, independent of any
+    column) measured 2ms — indistinguishable from the no-UDF baseline — with
+    the captured plan showing a `Compute Scalar` operator feeding a genuine
+    `Index Seek`, confirming the optimizer already folds/hoists a
+    column-independent deterministic scalar UDF call to evaluate it ONCE,
+    the same way it already folds a bare `GETDATE()`/`RAND()` call (see the
+    "Non-foldable nondeterministic intrinsic in a predicate" item elsewhere
+    in this file, which found and closed a structurally identical false
+    premise). There is no repeated-per-row cost for this rule to catch that
+    the engine hasn't already eliminated on its own — nothing survives that
+    is both true and a performance finding distinct from the already-shipped
+    column-dependent scalar-UDF stream, so this is **not** being built, the
+    same "proposed and killed the same session" discipline that item already
+    models.
 
 ---
 

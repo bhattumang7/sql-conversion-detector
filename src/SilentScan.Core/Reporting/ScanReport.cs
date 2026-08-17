@@ -51,6 +51,8 @@ public sealed record ScanReport(
     IReadOnlyList<UndersizedDeclarationFinding> UndersizedDeclarationFindings,
     IReadOnlyList<TruncateSwallowedFinding> TruncateSwallowedFindings,
     IReadOnlyList<UnindexedTempTableUsageFinding> UnindexedTempTableUsageFindings,
+    IReadOnlyList<OutputParameterFinding> OutputParameterFindings,
+    IReadOnlyList<DatabaseConfigurationFinding> DatabaseConfigurationFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -141,7 +143,16 @@ public sealed record ScanReport(
     /// cref="UndersizedDeclarationFindings"/> (declared type of size 1 or 2), <see
     /// cref="TruncateSwallowedFindings"/> (TRUNCATE inside a TRY whose CATCH swallows the error),
     /// and <see cref="UnindexedTempTableUsageFindings"/> (SELECT INTO temp table later joined/
-    /// filtered with no index).
+    /// filtered with no index). Bumped to 34 for the new <see cref="OutputParameterFindings"/>
+    /// stream (docs/detection-checklist.md "Second OSS/commercial sweep": "Output parameter not
+    /// populated on every code path" - a path-sensitive reachability rule, shipped standalone
+    /// rather than folded into the Tier 4 "output parameter never assigned" entry, since Tier 4
+    /// itself stayed out of scope for this pass). Bumped to 35 for the new
+    /// <see cref="DatabaseConfigurationFindings"/> stream (docs/detection-checklist.md "Second
+    /// OSS/commercial sweep": "Database-level configuration flags" - PAGE_VERIFY, AUTO_SHRINK,
+    /// AUTO_CLOSE, TARGET_RECOVERY_TIME, and Query Store state/capture mode). Live-mode only -
+    /// always empty in a file-mode scan (there is no file-mode equivalent of "the database's own
+    /// current configuration"), same reasoning as <see cref="TempTableExecShapeFindings"/>.
     /// </summary>
-    public const int CurrentSchemaVersion = 33;
+    public const int CurrentSchemaVersion = 35;
 }

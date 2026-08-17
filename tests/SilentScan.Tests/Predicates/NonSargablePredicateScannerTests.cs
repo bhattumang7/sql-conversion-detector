@@ -300,6 +300,35 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Empty(findings);
     }
 
+    /// <summary>
+    /// docs/detection-checklist.md "Second OSS/commercial sweep": scoping `SR0006` ("move a
+    /// column reference to one side of a comparison operator") against the shipped stream -
+    /// this locks in that a REVERSED operand order (the literal written FIRST, `3.975 &gt;
+    /// UnitPrice + 1` instead of `UnitPrice + 1 &lt; 3.975`) still fires identically, since
+    /// <c>Visit(BooleanComparisonExpression)</c> inspects both
+    /// <c>FirstExpression</c>/<c>SecondExpression</c> symmetrically - confirming SR0006's own
+    /// claim is already fully subsumed here, not merely assumed from reading the visitor code.
+    /// </summary>
+    [Fact]
+    public void ColumnArithmetic_ReversedOperandOrder_StillFires()
+    {
+        var sql = """
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice DECIMAL(10,2) NOT NULL);
+            GO
+            CREATE INDEX IX_Products_UnitPrice ON dbo.Products(UnitPrice);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE 3.975 > UnitPrice + 1;
+            """;
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var findings = NonSargablePredicateScanner.Scan(result);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
     [Fact]
     public void LikePattern_Parameter_FiresAsNotLiteral()
     {

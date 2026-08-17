@@ -113,6 +113,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(UndersizedDeclaration(report, headingLevel, pathBase));
         blocks.AddRange(TruncateSwallowed(report, headingLevel, pathBase));
         blocks.AddRange(UnindexedTempTableUsage(report, headingLevel, pathBase));
+        blocks.AddRange(OutputParameter(report, headingLevel, pathBase));
+        blocks.AddRange(DatabaseConfiguration(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -195,6 +197,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Undersized (length 1/2) declarations", report.UndersizedDeclarationFindings.Count);
         AddCount(counts, "TRUNCATE swallowed by an empty/non-rethrowing CATCH", report.TruncateSwallowedFindings.Count);
         AddCount(counts, "Unindexed SELECT INTO temp table usage", report.UnindexedTempTableUsageFindings.Count);
+        AddCount(counts, "Unassigned OUTPUT parameters", report.OutputParameterFindings.Count);
+        AddCount(counts, "Database-level configuration flags", report.DatabaseConfigurationFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1322,6 +1326,58 @@ public static class ReadableScanReportWriter
                 f.Kind == UnindexedTempTableUsageKind.JoinOperand ? "JOIN operand" : "Filtered in WHERE",
             })]);
     }
+
+    private static IEnumerable<ReadableBlock> OutputParameter(ScanReport report, int level, string? pathBase)
+    {
+        if (report.OutputParameterFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unassigned OUTPUT parameters ({report.OutputParameterFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An OUTPUT parameter is not assigned on some statically reachable path - oracle-confirmed a caller's own variable is left completely unchanged by the call on that path (not reset to NULL), so a reused caller variable can silently carry stale data from a previous, unrelated call.");
+
+        yield return new ReadableBlock.Table(
+            ["Procedure at", "Parameter", "Unresolved at"],
+            [.. report.OutputParameterFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.ProcedureLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ParameterName,
+                $"{f.SourcePath}:{f.UnresolvedExitLine}",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> DatabaseConfiguration(ScanReport report, int level, string? pathBase)
+    {
+        if (report.DatabaseConfigurationFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Database-level configuration flags ({report.DatabaseConfigurationFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Read once per scan run directly from sys.databases/sys.database_query_store_options - a database-granularity fact, not a per-module one. PAGE_VERIFY/AUTO_SHRINK/AUTO_CLOSE/TARGET_RECOVERY_TIME are well-established anti-patterns; the two Query Store flags are informational since whether Query Store should be on is a real operational choice.");
+
+        yield return new ReadableBlock.Table(
+            ["Database", "Flag"],
+            [.. report.DatabaseConfigurationFindings.Select(f => new List<string>
+            {
+                f.DatabaseName,
+                DatabaseConfigurationFlagLabel(f.Kind),
+            })]);
+    }
+
+    private static string DatabaseConfigurationFlagLabel(DatabaseConfigurationFindingKind kind) => kind switch
+    {
+        DatabaseConfigurationFindingKind.PageVerifyNotChecksum => "PAGE_VERIFY <> CHECKSUM",
+        DatabaseConfigurationFindingKind.AutoShrinkOn => "AUTO_SHRINK = ON",
+        DatabaseConfigurationFindingKind.AutoCloseOn => "AUTO_CLOSE = ON",
+        DatabaseConfigurationFindingKind.TargetRecoveryTimeUnset => "TARGET_RECOVERY_TIME unset (0)",
+        DatabaseConfigurationFindingKind.QueryStoreNotReadWrite => "Query Store not READ_WRITE",
+        DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto => "Query Store capture mode <> AUTO",
+        _ => kind.ToString(),
+    };
 
     private static IEnumerable<ReadableBlock> PartialCompositeForeignKeyJoin(ScanReport report, int level, string? pathBase)
     {

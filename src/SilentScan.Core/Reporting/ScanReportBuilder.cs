@@ -617,6 +617,25 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<OutputParameterFinding> outputParameterFindings;
+        using (var outputParameterStage = progress.Begin("scanning unassigned OUTPUT parameters", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = OutputParameterScanner.Scan(r);
+                    outputParameterStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            outputParameterFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.ProcedureLine)
+                .ThenBy(f => f.ParameterName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<CatchAllPredicateFinding> catchAllPredicateFindings;
         using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
         {
@@ -927,6 +946,12 @@ public static class ScanReportBuilder
             windowFrameFindings, waitForFindings, viewOrderingFindings, transactionHygieneFindings,
             compositeIndexLeadingColumnFindings, indexHintFindings,
             sessionDateSettingFindings, cartesianJoinFindings, undersizedDeclarationFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
+            outputParameterFindings,
+            // DatabaseConfigurationFindings needs a live database round trip (sys.databases,
+            // sys.database_query_store_options) this builder never issues - always empty here;
+            // LiveScanRunner merges the real result in afterward, same pattern
+            // TempTableExecShapeFindings already established.
+            [],
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
