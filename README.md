@@ -87,6 +87,223 @@ detail, scope decisions, and precision guards for every stream are in
 `docs/detection-checklist.md` (working backlog) and `CLAUDE.md` (project
 contract).
 
+## What SilentScan detects
+
+The themed summary above groups 49 finding streams into 7 families. This is
+the same list broken down issue by issue — what's actually wrong, in plain
+terms, for every distinct thing the tool looks for.
+
+**Type/collation-aware conversion and write-loss**
+* A predicate compares a lower-precedence-typed column against a
+  higher-precedence value/param (e.g. `varchar` column vs `nvarchar` value)
+  — T-SQL converts the *column*, not the value, silently losing the index
+  seek. Direction-aware: the same mismatch the other way round is harmless.
+* Collation family changes the verdict for the same mismatch: `SQL_*`
+  collations force a full scan, Windows collations degrade to a cheaper
+  (but not free) range seek.
+* `sql_variant` compared against a normal type — same precedence logic
+  applies, oracle-confirmed in both directions.
+* A bounded-length column compared against a `MAX`-typed value/param, or
+  against an oversized/under-length/undersized (declared length 1–2)
+  parameter or variable — each a distinct silent cost or truncation risk,
+  scored differently (seek-preserving-but-costlier vs. actually-truncating).
+* Cross-table same-name column type/collation drift, and a value passed
+  into a procedure's own parameter at a call site with a different declared
+  type than the parameter itself.
+* `ISNULL`/`COALESCE` against a nullable-vs-not-null column, wrapped in a
+  way that silently changes whether the optimizer can simplify it away.
+* `ANSI_PADDING OFF` silently strips trailing blanks on insert, so a `LIKE`
+  pattern with significant trailing whitespace can never match a
+  non-padded column no matter what's actually stored.
+* A non-schema-bound table-valued function's `RETURNS TABLE` string column
+  with no explicit `COLLATE` — its correctness silently depends on
+  whatever the database's own default collation happens to be.
+* Silent DML data loss the engine raises **no error** for: Unicode
+  characters replaced with `?` when written into a non-Unicode column,
+  a `REAL`/`FLOAT` value's fractional part dropped into an exact integer
+  column, `DECIMAL`/`NUMERIC` digits rounded away by a smaller target
+  scale, and a `DATETIME`-family value's time-of-day silently dropped when
+  written into a `DATE` column.
+* Two string columns compared directly whose resolved collations are
+  genuinely incompatible — a hard compile error (Msg 468), not a
+  seek/scan question, but one this pass can point at the exact cause of.
+* A column's own collation has drifted from the database's default
+  collation (multi-tenant/migrated-database smell).
+* An unsized `CAST`/`CONVERT` to a string type resolved to T-SQL's real
+  30-character default instead of being silently mis-typed by this tool
+  itself — a correctness fix to how every other rule above reasons about
+  CAST/CONVERT expressions, not a finding of its own.
+
+**Sargability and index shape**
+* A column wrapped in a function, `CAST`/`CONVERT`, arithmetic, a
+  leading-wildcard `LIKE`, or a non-literal `LIKE` pattern — the classic
+  ways a predicate stops being seekable, each suppressed when a matching
+  indexed computed column already absorbs the wrap.
+* A date-part function (`YEAR`/`MONTH`/`DAY`/`DATEPART`/`DATEDIFF`/
+  `DATEADD`/`DATENAME`) applied to a column instead of rewriting the
+  literal side — forces a scan unconditionally.
+* `UPPER`/`LOWER` wrapping a column — forces a scan regardless of
+  collation case-sensitivity, contrary to the common assumption that a
+  case-insensitive collation makes the wrap harmless to remove.
+* `CHARINDEX(x, col) = 1` / `LEFT(col, n) = 'x'` written instead of the
+  exactly-equivalent, genuinely sargable `col LIKE 'x%'`.
+* An end-of-period `BETWEEN` boundary literal with fewer fractional-second
+  digits than the column's own declared precision — silently **excludes**
+  real rows in the precision gap (a correctness bug, not just a plan one).
+* A composite index's non-leading key column is constrained by a predicate
+  while its own leading column is left completely unconstrained anywhere
+  in the same statement — the b-tree structurally can't be searched by a
+  suffix, and no other usable index covers the gap.
+* An `INDEX(...)` hint naming an index that no longer exists, or pinning
+  a real index the query's own predicates can't actually seek through —
+  forcing the wrong, hint-pinned access path instead of letting the
+  optimizer route around it.
+* `TOP(100) PERCENT ... ORDER BY` inside a view or inline TVF — provably
+  never limits anything and never guarantees the output order a consumer
+  sees; even a genuinely row-limiting `TOP (n) ... ORDER BY` there only
+  ever gets a lucky, plan-dependent illusion of order, never a guarantee.
+* A window function's `OVER` clause using (explicitly, or by the silent
+  default when unwritten) a `RANGE` frame instead of `ROWS` — measurably
+  more expensive for identical peer-group semantics.
+
+**Lineage-metric findings** (the numbers no other static tool can compute,
+because they require resolving views/TVFs through the lineage pass first)
+* A view/inline TVF nested 2+ layers deep over other views/TVFs — each
+  layer is a place a `SELECT *`/column-mismatch/type-widening can hide.
+* The *expanded* base-table join width after resolving every view/TVF in
+  the FROM/JOIN list, vs. the written width — a query that reads like a
+  3-table join but expands to 20 real tables is the finding nobody else
+  can produce, ranked by the size of that gap.
+* A CTE referenced 2+ times downstream of its own `WITH` clause — SQL
+  Server re-runs the CTE's defining query independently per reference,
+  never materializes and reuses it once.
+* `SELECT *` inside a view/inline TVF whose column list is frozen at
+  create time and demonstrably disagrees with the base table after a
+  later `ALTER` — narrowed to only fire when a real consumer elsewhere in
+  the corpus already selects a strict, named subset of the columns.
+
+**Catalog and constraint findings**
+* An untrusted (`WITH NOCHECK`) or disabled FK/CHECK constraint — the
+  optimizer forfeits join elimination and other plan simplifications a
+  trusted constraint would otherwise enable.
+* A cascading `ON DELETE`/`ON UPDATE` FK action — hidden multi-table write
+  work triggered by a single DML statement against the parent.
+* A JOIN that equates only part of a composite foreign key, leaving the
+  remaining column(s) uncovered anywhere else in the statement — silent
+  row multiplication, not just a missed index.
+* A non-persisted computed column — recomputed on every read, unlike its
+  `PERSISTED` sibling.
+* A `MAX`-typed column used as a predicate/join target — can never be an
+  index key at all, by the engine's own `CREATE INDEX` rules.
+* `SET QUOTED_IDENTIFIER OFF` / `NUMERIC_ROUNDABORT ON` / `ANSI_NULLS OFF`
+  / `ANSI_WARNINGS OFF` / `CONCAT_NULL_YIELDS_NULL ON` on a module that
+  actually touches a filtered index or indexed view — each one silently
+  blocks the optimizer from using that plan feature at all, degrading a
+  seek/match to a full scan.
+* A system-versioned temporal table whose history table lacks an index
+  the current table has — `FOR SYSTEM_TIME` queries rewrite to a UNION ALL
+  between the two tables, so a sargable predicate does nothing for the
+  history half.
+* A procedure authored `WITH RECOMPILE` — compiles fresh on every single
+  call, invisible to plan-cache-based monitoring.
+* Database-level configuration smells read straight from `sys.databases`
+  (the one finding category at database granularity, not module/column/
+  predicate): `PAGE_VERIFY` not `CHECKSUM`, `AUTO_SHRINK` on, `AUTO_CLOSE`
+  not off, `TARGET_RECOVERY_TIME` unset, and Query Store mode/capture
+  settings out of the recommended range.
+* A comma-join or explicit `CROSS JOIN` with no predicate anywhere in the
+  statement connecting the two sides — a true, unqualified cartesian
+  product.
+* A `varchar`/`nvarchar`/`char`/`nchar`/`binary`/`varbinary` column or
+  declaration of length 1 or 2 — almost always a truncated-from-a-larger-
+  source mistake or a leftover placeholder, reported as advisory.
+
+**Plan-shape and correctness findings**
+* A multi-statement table-valued function referenced directly, via a
+  correlated `CROSS`/`OUTER APPLY`, inherited through a view/iTVF layer, or
+  as an `INSERT ... EXEC` target — each forces the optimizer to treat it as
+  an opaque, uncosted black box (a "fence") no statistics can see through.
+* A scalar UDF invoked in predicate position (WHERE/JOIN ON/HAVING/MERGE
+  ON), in projection position, or referenced from a computed column/
+  DEFAULT/CHECK constraint — each forces per-row evaluation and/or blocks
+  parallelism, cross-checked against the engine's own 2019+ inlining
+  verdict rather than a hand-maintained blocker list alone.
+* Forced-serial constructs: a table variable as a DML target (that one
+  statement's plan loses parallelism entirely), a `FAST_FORWARD` cursor
+  (the option itself, not its absence, is what forces the cursor's own
+  query serial — the opposite of the commonly repeated advice), and a
+  short, finite list of oracle-confirmed non-parallelizable intrinsic
+  functions referenced inside a query with a real FROM clause.
+* `(col = @p OR @p IS NULL)` and its swapped/chained variants — the
+  classic "optional filter" idiom that defeats cardinality sniffing,
+  fully suppressed under `OPTION(RECOMPILE)`.
+* A predicate against a `DECLARE`'d local variable, or against a formal
+  parameter reassigned before its own predicate use — in both cases the
+  optimizer's cached-plan cardinality estimate is provably blind to the
+  value actually compared at runtime.
+* `NOT IN (SELECT ...)` against a subquery column the catalog proves can
+  be `NULL` — a genuine correctness bug (ANSI three-valued logic turns the
+  whole predicate UNKNOWN the instant one `NULL` row exists), not a
+  plan-shape one.
+* `UPDATE ... FROM`/`DELETE ... FROM` joined to a source with no PK/unique
+  constraint backing its own join columns — SQL Server picks an
+  unspecified, plan-dependent row among the matches, silently.
+* A DML statement (`INSERT`/`UPDATE`/`DELETE`/`MERGE`) whose own source
+  query reads the same table it's writing to, directly or through a view
+  — Halloween Protection, an extra defensive spool or sort the plan pays
+  for on every execution.
+* A `#temp` table populated by `SELECT INTO` and later used as a JOIN
+  source or filtered with no index ever created against it.
+
+**Control-flow and transaction correctness**
+* `BEGIN TRANSACTION` with at least one code path (through IF/ELSE,
+  TRY/CATCH, WHILE, early RETURN/THROW) that reaches the end of the batch
+  without a matching `COMMIT`/`ROLLBACK` — locks held indefinitely on that
+  path, confirmed against the real engine error (Msg 266) and elevated
+  `@@TRANCOUNT`.
+* `WAITFOR DELAY`/`WAITFOR TIME` inside a routine or batch — a blocked
+  worker thread every time, flagged more sharply when it's reachable
+  inside an already-open transaction (holding that transaction's locks for
+  the same duration).
+* `TRUNCATE TABLE` inside a `TRY` block whose `CATCH` swallows the error
+  silently — `TRUNCATE` can fail (an enforced FK reference is the common
+  case), and unlike an uncaught failure, nothing surfaces it.
+* An `OUTPUT` parameter not guaranteed to be assigned on every return path
+  through the procedure — the caller can read a stale or default value
+  with no error raised.
+* `SET DATEFORMAT`/`SET DATEFIRST` changed mid-module — changes how a date
+  literal or `DATEPART`-relative comparison is parsed for the rest of that
+  module's own execution, independent of the caller's own session
+  settings.
+
+**Dynamic SQL**
+* `EXEC`/`sp_executesql` text that can be proven constant (literal
+  concatenation, `sp_executesql`'s own typed `@params`, or straight-line
+  reaching-definitions tracing of `DECLARE`/`SET`/`SELECT` chains) is
+  re-run through the entire pipeline above, with every finding remapped
+  back to its true source line and the call site kept as provenance.
+* A value (as opposed to an identifier) spliced into otherwise-constant
+  dynamic SQL text via string concatenation instead of a real
+  `sp_executesql` parameter — measured to pollute the plan cache with one
+  distinct cached plan per distinct value, where a real parameter compiles
+  exactly one.
+* `EXEC(string)` used where `sp_executesql` with real parameters was
+  available and simply wasn't used.
+* `INSERT INTO #temp EXEC OtherProc` where the executed procedure's real,
+  engine-described result set (`sys.dm_exec_describe_first_result_set`,
+  compile-only) doesn't match `#temp`'s own declared columns by position —
+  either a hard runtime error (column count) or a silent conversion/
+  truncation (column type), both invisible to file-only analysis.
+
+Every claim above is oracle-verified against a real SQL Server instance
+where it's a plan-shape or runtime behavior claim, never assumed from
+documentation or folklore — several items above are stated the way they
+are specifically *because* the commonly repeated version turned out wrong
+under direct testing (the `FAST_FORWARD` cursor and `UPPER`/`LOWER`
+case-folding items are two examples). Full mechanism, precision guards,
+scope limits, and real measured coverage for every stream are in
+`docs/detection-checklist.md`.
+
 ## Requirements
 
 * .NET 10 SDK
