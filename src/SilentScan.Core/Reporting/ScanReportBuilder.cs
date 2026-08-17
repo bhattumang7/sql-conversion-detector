@@ -726,6 +726,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<DeadCodeFinding> deadCodeFindings;
+        using (var deadCodeStage = progress.Begin("scanning dead code and control-flow risks", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = DeadCodeScanner.Scan(r);
+                    deadCodeStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            deadCodeFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1028,6 +1046,7 @@ public static class ScanReportBuilder
             codeMetricFindings,
             formattingFindings,
             namingFindings,
+            deadCodeFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

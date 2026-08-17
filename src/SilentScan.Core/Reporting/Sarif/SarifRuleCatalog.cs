@@ -57,6 +57,11 @@ public static class SarifRuleCatalog
     public const string NamingSpPrefixOnUserRoutineRuleId = "silentscan/naming/sp-prefix-on-user-routine";
     public const string NamingUnqualifiedCreateRuleId = "silentscan/naming/unqualified-create";
     public const string NamingRedundantTypeQualifierRuleId = "silentscan/naming/redundant-type-qualifier";
+    public const string DeadCodeUnreachableCodeRuleId = "silentscan/dead-code/unreachable-code";
+    public const string DeadCodeUnusedLabelRuleId = "silentscan/dead-code/unused-label";
+    public const string DeadCodeUnusedLocalVariableRuleId = "silentscan/dead-code/unused-local-variable";
+    public const string DeadCodeUnusedParameterRuleId = "silentscan/dead-code/unused-parameter";
+    public const string DeadCodeRedundantJumpRuleId = "silentscan/dead-code/redundant-jump";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -220,6 +225,16 @@ public static class SarifRuleCatalog
         NamingFindingKind.UnqualifiedCreate => NamingUnqualifiedCreateRuleId,
         NamingFindingKind.RedundantTypeQualifier => NamingRedundantTypeQualifierRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled NamingFindingKind."),
+    };
+
+    public static string DeadCodeRuleId(DeadCodeFindingKind kind) => kind switch
+    {
+        DeadCodeFindingKind.UnreachableCode => DeadCodeUnreachableCodeRuleId,
+        DeadCodeFindingKind.UnusedLabel => DeadCodeUnusedLabelRuleId,
+        DeadCodeFindingKind.UnusedLocalVariable => DeadCodeUnusedLocalVariableRuleId,
+        DeadCodeFindingKind.UnusedParameter => DeadCodeUnusedParameterRuleId,
+        DeadCodeFindingKind.RedundantJump => DeadCodeRedundantJumpRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DeadCodeFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -442,6 +457,11 @@ public static class SarifRuleCatalog
             Rule(NamingSpPrefixOnUserRoutineRuleId, "A user-defined procedure or function is named with the \"sp_\" prefix, reserved by convention for system-shipped procedures - SQL Server searches the master database first for any unqualified call, adding lookup overhead and risking a silent collision with a real system procedure of the same name."),
             Rule(NamingUnqualifiedCreateRuleId, "A CREATE/ALTER for a schema-scoped procedure/function/view names it with no explicit schema qualifier - the object's real owning schema then depends on the connecting principal's own default schema at deployment time."),
             Rule(NamingRedundantTypeQualifierRuleId, "A data type reference carries a redundant \"dbo.\" schema qualifier that adds nothing and couples the declaration to a schema it does not need to name."),
+            Rule(DeadCodeUnreachableCodeRuleId, "A statement structurally can never execute - it follows a statement that always ends the enclosing routine on every path (RETURN/THROW, or an IF/TRY-CATCH whose every branch itself always ends it)."),
+            Rule(DeadCodeUnusedLabelRuleId, "A label target that no GOTO anywhere in the same routine ever jumps to."),
+            Rule(DeadCodeUnusedLocalVariableRuleId, "A DECLARE'd local variable is never read anywhere after being declared - only ever assigned, or never referenced at all."),
+            Rule(DeadCodeUnusedParameterRuleId, "A non-OUTPUT formal parameter is never referenced anywhere in the routine body."),
+            Rule(DeadCodeRedundantJumpRuleId, "A GOTO whose target label is the very next statement in the same straight-line sequence - jumping to exactly where control flow would already go."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

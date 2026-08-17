@@ -57,6 +57,7 @@ public sealed record ScanReport(
     IReadOnlyList<CodeMetricFinding> CodeMetricFindings,
     IReadOnlyList<FormattingFinding> FormattingFindings,
     IReadOnlyList<NamingFinding> NamingFindings,
+    IReadOnlyList<DeadCodeFinding> DeadCodeFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -175,6 +176,10 @@ public sealed record ScanReport(
     /// bullet: a reserved keyword used as a table/column/index/routine identifier, a user-defined
     /// procedure or function named with the "sp_" prefix, a CREATE with no explicit schema
     /// qualifier, and a redundant "dbo." qualifier on a user-defined type reference).
+    /// Bumped to 40 for the new <see cref="DeadCodeFindings"/> stream (docs/detection-checklist.md
+    /// Tier 4 "Dead and duplicated code" - the five members needing real control-flow/dataflow
+    /// analysis: unreachable code, an unused label, an unused local variable, an unused
+    /// non-OUTPUT parameter, and a GOTO whose target is the very next statement).
     /// </summary>
-    public const int CurrentSchemaVersion = 39;
+    public const int CurrentSchemaVersion = 40;
 }

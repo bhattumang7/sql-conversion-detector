@@ -3754,16 +3754,120 @@ exactly as originally scoped until its own turn comes up.
     hand-authored application code — the finding is still factually accurate
     (they do use the prefix and do incur the lookup cost) but a reader should
     know the likely explanation before treating it as a code-review item.
-  * *Dead and duplicated code* — unreachable code, unused labels, unused local
-    variables, unused parameters, redundant jumps, commented-out code,
-    duplicated string literals, a loop that can only run once, self-assignment,
-    identical operands either side of an operator, duplicated conditions,
-    identical branch bodies, a conditional whose branches are all the same,
-    redundant conditions, mutually exclusive conditions, collapsible nested
-    conditionals, nested conditional-expression functions, a repeated unary
-    operator, a negated comparison written as the negation of its opposite.
-    The always-true/always-false predicate family here overlaps the
-    enum-style `CHECK`-constraint candidate below — same rule, build once.
+  * *Dead and duplicated code — the dataflow/control-flow half shipped
+    (2026-08-17), the pattern-matching half still open.* Five members needing
+    real reachability/dataflow analysis, not pure AST pattern-matching — cross-
+    checked against the real decompiled source (not just this checklist's own
+    paraphrase) — are shipped: **unreachable code**, **unused labels**,
+    **unused local variables**, **unused parameters**, **redundant jumps**.
+    One finding type (`DeadCodeFinding`/`DeadCodeFindingKind`,
+    `src/SilentScan.Core/Predicates/DeadCodeScanner.cs`), no catalog, no
+    oracle — every member is a directly observable structural fact about the
+    parsed AST, never a plan-shape or runtime-behavior claim.
+    <br><br>
+    **Known v1 scope limit, stated honestly:** only `CREATE/ALTER PROCEDURE`
+    and `CREATE/ALTER TRIGGER` bodies are analyzed (matching
+    `TransactionHygieneScanner`'s own established scope for this class of
+    reachability analysis) — functions are declined, not silently swept in.
+    <br><br>
+    **Unreachable code**: a sound (never-guess) terminality walk over
+    IF/ELSE, WHILE, TRY/CATCH, BEGIN/END — the same CFG-walking discipline
+    `TransactionHygieneScanner` already established, adapted from tracking
+    "is a transaction open" to "does this path always end the routine". An
+    IF is terminal only when BOTH branches are (no ELSE ⇒ never terminal,
+    the implicit else always falls through); a WHILE is never terminal
+    (conservative — it may run zero times, matching
+    `TransactionHygieneScanner`'s identical WHILE reasoning); TRY/CATCH is
+    terminal only when both the try-path and the catch-path are. **A routine
+    containing ANY `GOTO`/label anywhere declines this analysis entirely** —
+    an arbitrary jump target can make code that looks structurally
+    unreachable actually reachable, the same discipline
+    `TransactionHygieneScanner` already applies for its own reachability
+    walk. One finding per contiguous dead region, not one per statement in
+    it.
+    <br><br>
+    **Unused local variables / unused parameters**: a `DECLARE`'d variable or
+    non-`OUTPUT` formal parameter never *read* anywhere — only a simple
+    `SET @x = expr` and a `SELECT @x = expr` are excluded from counting as a
+    real "use" (both are unambiguous pure writes); a compound assignment
+    (`SET @x += expr`) reads the prior value too, so it counts, and every
+    other reference shape (a cursor `FETCH ... INTO @x`, a table variable
+    used as a JOIN/INSERT target, an `OUTPUT` argument) counts as a use even
+    though some of those are themselves write-only in a strict sense — a
+    deliberate under-report, never a false-positive risk, matching this
+    codebase's "prefer declining an ambiguous case" discipline. An unused
+    `OUTPUT` parameter is deliberately excluded from the unused-parameter
+    check — it's already a sharper, separately-shipped claim
+    (`OutputParameterFinding`'s "never assigned on some path"), so this
+    avoids two findings restating the same fact differently.
+    <br><br>
+    **Unused labels / redundant jumps**: a label no `GOTO` in the same
+    routine ever targets; a `GOTO` whose target label is the very next
+    statement in the same straight-line sequence (checked both for nested
+    statement lists AND the routine's own outermost, never-itself-visited
+    statement sequence — a real gap caught and fixed before shipping: the
+    routine body is unwrapped past a single `BEGIN...END` before analysis,
+    so the outermost list is never itself walked by the visitor's own
+    `ExplicitVisit(StatementList)` override, and a redundant jump sitting
+    directly at routine top level would otherwise be silently missed —
+    covered by its own regression test).
+    <br><br>
+    `FindingConfidence.High` for the structurally-provable kinds
+    (unreachable code, unused label, redundant jump — hard facts once the
+    CFG/label-topology is right, matching `TransactionHygieneFinding`'s own
+    tier). `FindingConfidence.Medium` for unused-variable/unused-parameter —
+    real, measured, but the narrow "pure write" exclusion list means a
+    genuinely-used variable referenced only through an unmodeled shape is a
+    real, if rare, false-positive risk this tier is honest about. SARIF
+    Warning throughout (structural/maintainability risk, not itself a proof
+    of a wrong result). Wired end-to-end (`ScanReport` schema version 39 →
+    40, SARIF rule catalog + writer, readable report section). Unit-tested
+    (`DeadCodeScannerTests`, 29 cases: every kind's fire/near-miss pair, the
+    WHILE/TRY-CATCH/IF terminality edge cases, the GOTO-declines-the-whole-
+    routine guard, the compound-assignment-counts-as-a-use and
+    cursor-FETCH-counts-as-a-use precision guards, the OUTPUT-parameter
+    exclusion, the top-level redundant-jump regression case, and the
+    function-body-never-analyzed scope guard).
+    <br><br>
+    **Real coverage against the local RM_ test database: 4,879 findings**
+    (2,943 unused local variables, 1,924 unused parameters, 10 unreachable-
+    code regions, 2 unused labels, 0 redundant jumps — a real, honest zero,
+    not a detection gap) — 12 High-confidence findings (unreachable code +
+    unused labels), 4,867 Medium (unused variables/parameters). Spot-checked
+    two of the rarer, structurally-provable High-confidence kinds directly
+    against real module text and confirmed both genuine true positives: an
+    unreachable-code finding in `dbo.spAuditOnboardDeviceActivity` sits
+    immediately after an unconditional `RAISERROR (...) RETURN` guard
+    whose own message reads "This sp is not in use. Call
+    spAuditOnboardDeviceActivity2 instead" - the entire rest of the
+    procedure's body genuinely never executes; an unused-label finding in
+    `dbo.spSuspensionAssignSuspension` for `LBL_CLEANUP:` is real - the
+    module's only `GOTO` anywhere targets a *different* label
+    (`LBL_SKIP_ASSIGNING_SUSPENSION`), confirmed by grepping the real
+    deployed module text.
+    <br><br>
+    **Real bug caught and fixed before shipping, not left latent:** the
+    first version of this scanner correctly documented `High` confidence
+    for the three structurally-provable kinds (unreachable code, unused
+    label, redundant jump) in `DeadCodeFinding`'s own doc comment, but the
+    scanner's actual `new DeadCodeFinding(...)` constructor calls never
+    passed it - every finding silently defaulted to `Medium` regardless of
+    kind. Caught by comparing the doc comment against a real `scan-db` run's
+    own measured confidence breakdown before shipping (which showed 100%
+    Medium, contradicting the documented split), not by the unit suite alone
+    - fixed, and two tests now assert the real per-kind confidence value
+    directly as a regression guard.
+    <br><br>
+    **Still open, not this pass:** the pattern-matching half of this same
+    checklist bullet — commented-out code, duplicated string literals, a
+    loop that can only run once, self-assignment, identical operands either
+    side of an operator, duplicated conditions, identical branch bodies, a
+    conditional whose branches are all the same, redundant conditions,
+    mutually exclusive conditions, collapsible nested conditionals, nested
+    conditional-expression functions, a repeated unary operator, a negated
+    comparison written as the negation of its opposite. The always-true/
+    always-false predicate family here overlaps the enum-style
+    `CHECK`-constraint candidate below — same rule, build once.
   * *Task-comment tracking* — `TODO`, `FIXME`.
   * *Non-ANSI and deprecated spellings* — `!=`/`!<`/`!>`, `= NULL` in place of
     `IS NULL`, a `LIKE` pattern containing no wildcard, legacy system

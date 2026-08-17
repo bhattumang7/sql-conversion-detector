@@ -89,6 +89,7 @@ public static class SarifReportWriter
         results.AddRange(report.CodeMetricFindings.Select(ToResult));
         results.AddRange(report.FormattingFindings.Select(ToResult));
         results.AddRange(report.NamingFindings.Select(ToResult));
+        results.AddRange(report.DeadCodeFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -449,6 +450,32 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NamingRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(DeadCodeFinding finding)
+    {
+        // Warning, not error - a structural/maintainability risk, not itself a proof of a wrong
+        // result (the same tier ForcedSerialFinding/FormattingFinding use), even for the
+        // structurally-provable High-confidence kinds (unreachable code, unused label, redundant
+        // jump): the flagged code's own current behavior is unaffected either way.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DeadCodeRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            DeadCodeFindingKind.UnreachableCode =>
+                "This statement can never execute - control flow always ends the routine before reaching it on every path.",
+            DeadCodeFindingKind.UnusedLabel =>
+                $"Label \"{finding.DetailText}\" is never the target of a GOTO anywhere in this routine.",
+            DeadCodeFindingKind.UnusedLocalVariable =>
+                $"Local variable \"{finding.DetailText}\" is declared but never read - only ever assigned, or never referenced at all.",
+            DeadCodeFindingKind.UnusedParameter =>
+                $"Parameter \"{finding.DetailText}\" is never referenced anywhere in the routine body.",
+            DeadCodeFindingKind.RedundantJump =>
+                $"GOTO {finding.DetailText} jumps to the very next statement - control flow would already go there.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled DeadCodeFindingKind."),
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(NotInNullableSubqueryFinding finding)
