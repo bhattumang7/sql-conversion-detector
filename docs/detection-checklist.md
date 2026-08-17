@@ -3887,9 +3887,38 @@ makes them the cleanest findings in this entire file.
       @cursor` carries a `WhereClause` with a null `SearchCondition` (not a
       boolean expression at all), which the first version of this scanner
       dereferenced unconditionally.
-- [ ] **Statistics-object flags**: `NO_RECOMPUTE`, and a partitioned table with
-      no incremental statistics. Catalog flags, not DMV state — in scope, unlike
-      "statistics are stale", which is not.
+- [x] **Statistics-object flags — `NO_RECOMPUTE` half shipped; partitioned-
+      incremental-statistics half deliberately deferred, same reasoning as the
+      "Non-aligned index on a partitioned table" item below.** New
+      `Catalog.CatalogStatisticsInfo` (`Name`/`NoRecompute`/`IsAutoCreated`),
+      read live-only from `sys.stats` (a distinct catalog view from
+      `sys.indexes` — every index owns a matching stats object implicitly, but
+      the engine also auto-creates single-column stats with no backing index
+      at all, and `sys.stats` is the only place either kind's own
+      `no_recompute` flag lives), exposed as `CatalogTable.Statistics`
+      (`EffectiveStatistics` normalizes the record's own non-constant-default
+      `null` to a real empty list). New `IndexDesignFindingKind
+      .NoRecomputeStatistics` on the existing `IndexDesignFinding` type —
+      catalog-only, no AST, no oracle needed (a stats object explicitly
+      created/altered `WITH NORECOMPUTE` is a directly-read catalog fact, not
+      a plan-shape claim); `FindingConfidence.Medium`, matching this section's
+      own "silent, unchosen gap vs. deliberate pin" tier (a deliberate
+      NORECOMPUTE to pin a known-good plan is a legitimate, if rare, choice —
+      what this reports is that the flag is set at all, not that it's wrong).
+      The partitioned-incremental-statistics half needs partition-metadata
+      catalog plumbing this project reads nowhere at all
+      (`sys.partition_schemes`/`sys.partition_functions`), and the local test
+      database has zero partitioned tables to validate new plumbing against
+      (confirmed directly) — deferred with the identical reasoning already
+      recorded for "Non-aligned index on a partitioned table" just below,
+      rather than shipping unexercised code. Real coverage measured against
+      the local test database, cross-checked directly against a hand-rolled
+      `sys.stats` query before trusting the scanner: **0 of 2,987 real
+      statistics objects are marked NORECOMPUTE** — a genuine, honest zero,
+      not a detection gap. Unit-tested (`IndexDesignScannerTests`: fires on a
+      NORECOMPUTE stats object, never fires when the flag is off, never fires
+      when a table carries no statistics info at all). Wired end-to-end
+      (`ScanReport` schema version 49 → 50, SARIF, readable report).
 - [x] **Database-option gaps in the shipped `DatabaseConfigurationFindingKind`
       stream** (6 kinds today): auto-create statistics off, auto-update
       statistics off, and compatibility level behind the engine's own current

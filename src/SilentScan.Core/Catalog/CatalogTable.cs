@@ -29,7 +29,8 @@ public sealed record CatalogTable(
     IReadOnlyList<CatalogIndex> Indexes,
     string SourcePath,
     int SourceLine,
-    bool IsMemoryOptimized = false)
+    bool IsMemoryOptimized = false,
+    IReadOnlyList<CatalogStatisticsInfo>? Statistics = null)
 {
     // IsMemoryOptimized (sys.tables.is_memory_optimized, live-only) guards
     // Predicates.IndexDesignScanner's heap findings: a memory-optimized table has no on-disk
@@ -41,6 +42,12 @@ public sealed record CatalogTable(
 
     /// <summary>schema.name, or just name for temp tables/table variables which have no schema.</summary>
     public string QualifiedName => SchemaName is null ? Name : $"{SchemaName}.{Name}";
+
+    /// <summary><see cref="Statistics"/> normalized to a real empty list - the record's own default
+    /// is <see langword="null"/> (a collection expression is not a valid C# default-parameter
+    /// constant), never file mode's/an older call site's own value, so every reader treats "no
+    /// statistics info" identically regardless of which constructor path built this table.</summary>
+    public IReadOnlyList<CatalogStatisticsInfo> EffectiveStatistics => Statistics ?? [];
 
     public CatalogColumn? FindColumn(string columnName) =>
         Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));

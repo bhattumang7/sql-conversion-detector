@@ -105,6 +105,7 @@ public static class IndexDesignScanner
             ScanFilteredIndexColumnCoverage(table, findings);
             ScanColumnTypeSignals(table, findings);
             ScanFloatOrRealIndexKeyColumns(table, findings);
+            ScanNoRecomputeStatistics(table, findings);
         }
 
         ScanUnindexedForeignKeys(catalog, findings);
@@ -690,6 +691,26 @@ public static class IndexDesignScanner
                 $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' carries approximate (float/real) key column(s) {string.Join(", ", floatKeyColumns)} - IEEE-754 binary floating-point cannot represent every decimal value exactly, so an equality seek/comparison against it can silently miss a value a person would call 'the same number'.",
                 table.SourcePath,
                 table.SourceLine));
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md "DBA-script family sweep" §A "Statistics-object flags",
+    /// <c>NO_RECOMPUTE</c> half - see <see cref="IndexDesignFindingKind.NoRecomputeStatistics"/>'s
+    /// own doc comment for why the partitioned-incremental-statistics half is not shipped here.
+    /// </summary>
+    private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var stat in table.EffectiveStatistics.Where(s => s.NoRecompute))
+        {
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.NoRecomputeStatistics,
+                table.QualifiedName,
+                stat.Name,
+                $"'{table.QualifiedName}' statistics object '{stat.Name}' is marked NORECOMPUTE - the engine's automatic statistics maintenance never refreshes it, so its cardinality estimate silently drifts stale as the table's data changes.",
+                table.SourcePath,
+                table.SourceLine,
+                Confidence: FindingConfidence.Medium));
         }
     }
 

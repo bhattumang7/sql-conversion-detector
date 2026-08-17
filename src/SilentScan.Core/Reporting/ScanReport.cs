@@ -251,5 +251,5 @@ public sealed record ScanReport(
     /// same reasoning as the bump to 47/48; <see cref="FloatEqualityFindings"/> is a genuine
     /// AST+catalog pass that runs in both file and live mode, same as every ordinary per-module
     /// stream.
-    public const int CurrentSchemaVersion = 49;
+    public const int CurrentSchemaVersion = 50;
 }

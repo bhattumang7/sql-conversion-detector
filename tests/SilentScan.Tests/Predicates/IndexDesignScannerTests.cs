@@ -15,9 +15,9 @@ public sealed class IndexDesignScannerTests
 {
     private static CatalogTable Table(
         string schema, string name, IReadOnlyList<CatalogColumn> columns, IReadOnlyList<CatalogIndex> indexes,
-        bool isMemoryOptimized = false) =>
+        bool isMemoryOptimized = false, IReadOnlyList<CatalogStatisticsInfo>? statistics = null) =>
         new(schema, name, CatalogTableKind.Table, columns, indexes,
-            SourcePath: $"{schema}.{name}", SourceLine: 1, IsMemoryOptimized: isMemoryOptimized);
+            SourcePath: $"{schema}.{name}", SourceLine: 1, IsMemoryOptimized: isMemoryOptimized, Statistics: statistics);
 
     private static CatalogColumn Column(string name, SqlType? type, bool isNullable = false) =>
         new(name, type, isNullable, IsIdentity: false, IsComputed: false, IsPersisted: false);
@@ -856,5 +856,43 @@ public sealed class IndexDesignScannerTests
         var findings = IndexDesignScanner.Scan(catalog);
 
         Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.FloatOrRealIndexKeyColumn);
+    }
+
+    [Fact]
+    public void StatisticsMarkedNoRecompute_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var stats = new CatalogStatisticsInfo("_WA_Sys_CustomerId", NoRecompute: true, IsAutoCreated: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("CustomerId", IntType)], [], statistics: [stats]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndexDesignFindingKind.NoRecomputeStatistics, finding.Kind);
+        Assert.Equal("_WA_Sys_CustomerId", finding.IndexName);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void StatisticsWithAutomaticRecompute_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var stats = new CatalogStatisticsInfo("_WA_Sys_CustomerId", NoRecompute: false, IsAutoCreated: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("CustomerId", IntType)], [], statistics: [stats]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.NoRecomputeStatistics);
+    }
+
+    [Fact]
+    public void TableWithNoStatisticsInfo_NeverFiresNoRecompute()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("CustomerId", IntType)], []));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.NoRecomputeStatistics);
     }
 }

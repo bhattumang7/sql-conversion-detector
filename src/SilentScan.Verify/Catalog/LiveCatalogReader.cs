@@ -50,6 +50,7 @@ public sealed class LiveCatalogReader
         var tables = await ReadTablesAsync(connection, cancellationToken);
         var columnsByTable = await ReadColumnsAsync(connection, catalog.Skipped, cancellationToken);
         var indexesByTable = await ReadIndexesAsync(connection, cancellationToken);
+        var statisticsByTable = await ReadStatisticsAsync(connection, cancellationToken);
 
         foreach (var (objectId, schemaName, tableName, isMemoryOptimized) in tables)
         {
@@ -62,7 +63,8 @@ public sealed class LiveCatalogReader
                 Indexes: indexesByTable.GetValueOrDefault(objectId, []),
                 SourcePath: qualifiedName,
                 SourceLine: 0,
-                IsMemoryOptimized: isMemoryOptimized));
+                IsMemoryOptimized: isMemoryOptimized,
+                Statistics: statisticsByTable.GetValueOrDefault(objectId, [])));
         }
 
         foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
@@ -882,6 +884,49 @@ public sealed class LiveCatalogReader
         }
 
         return indexesByTable;
+    }
+
+    /// <summary>
+    /// <c>sys.stats</c> - a distinct catalog view from <c>sys.indexes</c>: every index owns a
+    /// matching stats object implicitly, but the engine also auto-creates single-column stats
+    /// with no backing index at all, and <c>sys.stats</c> is the only place either kind's own
+    /// <c>no_recompute</c> flag lives. <c>docs/detection-checklist.md</c> "DBA-script family
+    /// sweep" §A "Statistics-object flags" - a stats object explicitly marked
+    /// <c>NORECOMPUTE</c> never gets its cardinality estimate refreshed by the engine's own
+    /// automatic maintenance, silently drifting stale as the table's data changes.
+    /// </summary>
+    private static async Task<Dictionary<int, List<CatalogStatisticsInfo>>> ReadStatisticsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.object_id, s.name, s.no_recompute, s.auto_created
+            FROM sys.stats s
+            JOIN sys.tables t ON t.object_id = s.object_id
+            WHERE t.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var statisticsByTable = new Dictionary<int, List<CatalogStatisticsInfo>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var objectId = reader.GetInt32(0);
+            var info = new CatalogStatisticsInfo(
+                Name: reader.GetString(1),
+                NoRecompute: reader.GetBoolean(2),
+                IsAutoCreated: reader.GetBoolean(3));
+
+            if (!statisticsByTable.TryGetValue(objectId, out var list))
+            {
+                list = [];
+                statisticsByTable[objectId] = list;
+            }
+
+            list.Add(info);
+        }
+
+        return statisticsByTable;
     }
 
     private static CatalogIndexKind ClassifyIndexKind(IndexRow row)

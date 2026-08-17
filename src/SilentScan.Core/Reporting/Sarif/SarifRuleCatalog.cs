@@ -237,6 +237,7 @@ public static class SarifRuleCatalog
         IndexDesignFindingKind.DeprecatedLobColumnType => "silentscan/index-design/deprecated-lob-column-type",
         IndexDesignFindingKind.TimestampColumnNaming => "silentscan/index-design/timestamp-column-naming",
         IndexDesignFindingKind.FloatOrRealIndexKeyColumn => "silentscan/index-design/float-or-real-index-key-column",
+        IndexDesignFindingKind.NoRecomputeStatistics => "silentscan/index-design/no-recompute-statistics",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -684,6 +685,7 @@ public static class SarifRuleCatalog
             Rule(IndexDesignRuleId(IndexDesignFindingKind.DeprecatedLobColumnType), "A column is declared text/ntext/image - formally deprecated by Microsoft since SQL Server 2005 in favor of the MAX-length equivalent, and a future engine version may remove it entirely."),
             Rule(IndexDesignRuleId(IndexDesignFindingKind.TimestampColumnNaming), "A column is declared timestamp - since SQL Server 2005, rowversion is a synonym for the identical underlying type; a naming-only recommendation, not a functional deprecation."),
             Rule(IndexDesignRuleId(IndexDesignFindingKind.FloatOrRealIndexKeyColumn), "An index's key carries a float/real (approximate) column - IEEE-754 representation error means an equality seek/comparison against it can silently miss a value a person would call the same number."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.NoRecomputeStatistics), "A statistics object is marked NORECOMPUTE - the engine's automatic statistics maintenance never refreshes it, so its cardinality estimate silently drifts stale as the table's data changes."),
             Rule(IdentityRangeRuleId(IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly), "An IDENTITY column carries a negative seed or a non-1 increment - an unusual, informational data-modeling signal, not a proven defect (schema-decidable: identical on a dev and a production copy of the same schema)."),
             Rule(IdentityRangeRuleId(IdentityRangeFindingKind.IdentityRangeNearExhaustion), "An IDENTITY column has consumed most of its declared type's representable range - once exhausted, every subsequent INSERT raises a hard arithmetic-overflow error. Data-state-decidable: meaningful only against a production-shaped target, never a dev database."),
         ];

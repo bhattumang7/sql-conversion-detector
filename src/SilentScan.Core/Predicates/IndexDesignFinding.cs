@@ -230,6 +230,23 @@ public enum IndexDesignFindingKind
     /// independent of whether any scanned query happens to compare on it.
     /// </summary>
     FloatOrRealIndexKeyColumn,
+
+    /// <summary>
+    /// A statistics object (<see cref="Catalog.CatalogStatisticsInfo"/>) explicitly created/altered
+    /// <c>WITH NORECOMPUTE</c> - docs/detection-checklist.md "DBA-script family sweep" §A
+    /// "Statistics-object flags", the <c>NO_RECOMPUTE</c> half; the sibling half of that same
+    /// checklist item ("a partitioned table with no incremental statistics") is deliberately NOT
+    /// shipped alongside this one - this codebase's catalog surface reads no partition metadata at
+    /// all (the same gap, and the same reasoning, already recorded against the separate
+    /// "Non-aligned index on a partitioned table" item elsewhere in this file: zero partitioned
+    /// tables exist in the local test database to validate new plumbing against, confirmed directly
+    /// via <c>sys.partition_schemes</c> before deciding). A stats object marked <c>NORECOMPUTE</c>
+    /// never gets refreshed by the engine's own automatic statistics-update maintenance - it drifts
+    /// silently stale as the table's data changes, which is the actual mechanism (not "statistics
+    /// ARE stale right now", a live data-state fact this pass structurally cannot see) this catalog
+    /// flag can honestly claim.
+    /// </summary>
+    NoRecomputeStatistics,
 }
 
 /// <summary>
