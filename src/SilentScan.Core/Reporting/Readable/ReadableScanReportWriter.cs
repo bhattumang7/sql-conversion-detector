@@ -115,6 +115,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(UnindexedTempTableUsage(report, headingLevel, pathBase));
         blocks.AddRange(OutputParameter(report, headingLevel, pathBase));
         blocks.AddRange(DatabaseConfiguration(report, headingLevel, pathBase));
+        blocks.AddRange(ParameterReassignmentPredicate(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -170,6 +171,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "LIKE predicates that can never match a non-ANSI-padded column", report.AnsiPaddingMismatchFindings.Count);
         AddCount(counts, "Catch-all / kitchen-sink optional-filter predicates", report.CatchAllPredicateFindings.Count);
         AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
+        AddCount(counts, "Predicates against a reassigned formal parameter (sniffing defeated)", report.ParameterReassignmentPredicateFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -762,6 +764,30 @@ public static class ReadableScanReportWriter
                 f.VariableName,
                 f.Operator,
                 f.Indexed ? "yes" : "no",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ParameterReassignmentPredicate(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ParameterReassignmentPredicateFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Predicates against a reassigned formal parameter ({report.ParameterReassignmentPredicateFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value is a formal parameter that is reassigned (SET/SELECT) on every statically reachable path before this predicate runs - the optimizer's compile-time sniffed value (the caller's original argument) is provably stale by the time this comparison executes. Distinct from a predicate against a plain DECLARE'd local variable (never sniffable to begin with) - here a value that WAS sniffable had its sniffed value invalidated by the procedure's own code. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Parameter", "Operator", IndexedHeader, "Reassigned at"],
+            [.. report.ParameterReassignmentPredicateFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.ParameterName,
+                f.Operator,
+                f.Indexed ? "yes" : "no",
+                $"line {f.ReassignmentLine}",
             })]);
     }
 

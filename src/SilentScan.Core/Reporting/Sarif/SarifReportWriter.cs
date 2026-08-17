@@ -85,6 +85,7 @@ public static class SarifReportWriter
         results.AddRange(report.UnindexedTempTableUsageFindings.Select(ToResult));
         results.AddRange(report.OutputParameterFindings.Select(ToResult));
         results.AddRange(report.DatabaseConfigurationFindings.Select(ToResult));
+        results.AddRange(report.ParameterReassignmentPredicateFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -360,6 +361,18 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LocalVariablePredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - a DECLARE'd local, not a formal parameter, so its value is invisible to the cardinality estimator (falls back to average-density statistics). The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ParameterReassignmentPredicateFinding finding)
+    {
+        // Note, not warning/error: purely informational per the finding's own doc comment - the
+        // predicate is still fully sargable, only the row-count ESTIMATE (built from the now-stale
+        // sniffed value) is at risk, the identical certainty tier LocalVariablePredicateFinding uses.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ParameterReassignmentPredicateRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} @{finding.ParameterName} - {finding.ParameterName} is a formal parameter reassigned at line {finding.ReassignmentLine} before this predicate runs, so the optimizer's compile-time sniffed value (the caller's original argument) is stale by the time this comparison executes. The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

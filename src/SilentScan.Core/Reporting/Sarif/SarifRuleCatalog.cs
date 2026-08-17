@@ -35,6 +35,7 @@ public static class SarifRuleCatalog
     public const string AnsiPaddingMismatchRuleId = "silentscan/predicates/ansi-padding-mismatch";
     public const string CatchAllPredicateRuleId = "silentscan/predicates/catch-all-parameter";
     public const string LocalVariablePredicateRuleId = "silentscan/predicates/local-variable-predicate";
+    public const string ParameterReassignmentPredicateRuleId = "silentscan/predicates/reassigned-parameter";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -362,6 +363,7 @@ public static class SarifRuleCatalog
             Rule(SetOptionRuleId(SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature), "The module was compiled under ANSI_NULLS OFF (sys.sql_modules.uses_ansi_nulls) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature), "An explicit SET ANSI_WARNINGS OFF in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
             Rule(SetOptionRuleId(SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature), "An explicit SET CONCAT_NULL_YIELDS_NULL OFF in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan."),
+            Rule(ParameterReassignmentPredicateRuleId, "A formal parameter is reassigned (SET/SELECT) on every statically reachable path before a later predicate use of the same name - the optimizer's compile-time SNIFFED value (from the caller's original argument) is provably stale by the time this predicate executes, unlike a plain DECLARE'd local (which was never sniffable at all). The predicate is still fully sargable; only the row-count ESTIMATE built from the sniffed value is at risk. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence

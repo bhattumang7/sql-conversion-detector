@@ -53,6 +53,7 @@ public sealed record ScanReport(
     IReadOnlyList<UnindexedTempTableUsageFinding> UnindexedTempTableUsageFindings,
     IReadOnlyList<OutputParameterFinding> OutputParameterFindings,
     IReadOnlyList<DatabaseConfigurationFinding> DatabaseConfigurationFindings,
+    IReadOnlyList<ParameterReassignmentPredicateFinding> ParameterReassignmentPredicateFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -153,6 +154,10 @@ public sealed record ScanReport(
     /// AUTO_CLOSE, TARGET_RECOVERY_TIME, and Query Store state/capture mode). Live-mode only -
     /// always empty in a file-mode scan (there is no file-mode equivalent of "the database's own
     /// current configuration"), same reasoning as <see cref="TempTableExecShapeFindings"/>.
+    /// Bumped to 36 for the new <see cref="ParameterReassignmentPredicateFindings"/> stream
+    /// (docs/detection-checklist.md "Catch-all / kitchen-sink predicates" sibling: "parameter
+    /// overwritten before use in a predicate" - a formal parameter reassigned on every path
+    /// reaching a later predicate use of the same name, defeating the compile-time sniffed value).
     /// </summary>
-    public const int CurrentSchemaVersion = 35;
+    public const int CurrentSchemaVersion = 36;
 }

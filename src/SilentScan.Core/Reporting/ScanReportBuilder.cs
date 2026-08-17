@@ -654,6 +654,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<ParameterReassignmentPredicateFinding> parameterReassignmentPredicateFindings;
+        using (var reassignmentStage = progress.Begin("scanning reassigned-parameter predicates", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = ParameterReassignmentPredicateScanner.Scan(r, catalog);
+                    reassignmentStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            parameterReassignmentPredicateFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -952,6 +970,7 @@ public static class ScanReportBuilder
             // LiveScanRunner merges the real result in afterward, same pattern
             // TempTableExecShapeFindings already established.
             [],
+            parameterReassignmentPredicateFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

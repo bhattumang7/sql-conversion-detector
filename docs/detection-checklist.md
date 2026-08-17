@@ -968,11 +968,105 @@ exactly the same way ARITHABORT's own assumption just failed one.
       gap (RECOMPILE-guard tracking still applies to it; the catch-all match
       itself does not) — its scope resolution and raw shape differ enough
       from every other statement kind to need its own dedicated work.
-- [ ] Sibling: parameter overwritten before use in a predicate
-      (sniffing-defeat — straight-line dataflow we already have from
-      dynamic-SQL tracing). Deliberately deferred, not attempted this pass —
-      a distinct dataflow question from "does this shape exist," which is
-      what this item's own scanner answers.
+- [x] **Sibling: parameter overwritten before use in a predicate
+      (sniffing-defeat) — shipped.** A formal parameter's compile-time
+      SNIFFED value (the caller's real argument) is what the cached plan is
+      built against — if the procedure's own body reassigns that same
+      parameter (`SET @p = ...`/`SELECT @p = ...`) on every path reaching a
+      later predicate use of it, the plan was compiled against the ORIGINAL
+      value while the predicate actually runs against the NEW one. Distinct
+      from the already-shipped "Local-variable predicates" finding: that one
+      fires on a `DECLARE`d local, which was never a sniffable, caller-
+      supplied value in the first place — this fires on a genuine formal
+      parameter whose sniffed value was invalidated by the procedure's own
+      code before the predicate that would have benefited from it ever ran.
+      New `ParameterReassignmentPredicateFinding`/
+      `ParameterReassignmentPredicateScanner`
+      (`src/SilentScan.Core/Predicates/ParameterReassignmentPredicateScanner.cs`)
+      — a real, sound, path-sensitive reachability walk over the procedure's
+      own statement list (`IF`/`ELSE`, `WHILE`, `TRY`/`CATCH`, `BEGIN`/`END`,
+      `RETURN`/`THROW`, `GOTO`), the exact same shape
+      `OutputParameterScanner`/`TransactionHygieneScanner` already
+      established for "does a fact hold on every path" — but tracking the
+      DUAL property: those two track "is there some path where a fact does
+      NOT yet hold" (state shrinks toward empty, merges via UNION at a
+      branch); this tracks "does a fact hold on EVERY path reaching here"
+      (state only grows, merges via INTERSECT at a branch — a reassignment on
+      only one side of an `IF` is never carried past the merge point, sound
+      rather than merely conservative, since a predicate after the merge
+      cannot be guaranteed to see the reassigned value unless BOTH branches
+      produced it). Deliberately base-table-only and `WHERE`-clause-only,
+      matching `CatchAllPredicateScanner`'s own scope: JOIN `ON`/`HAVING`
+      predicates and MERGE's own `ON` clause are a known, explicitly
+      out-of-v1-scope gap (MERGE's scope resolution differs enough to need
+      its own dedicated work, the identical reasoning
+      `CatchAllPredicateScanner` already documents). Only
+      `BooleanComparisonExpression` operators are matched (`=`/`<`/`<=`/`>`/
+      `>=`/`<>`) — `LIKE` uses a distinct `LikePredicate` AST shape, a known
+      v1 scope limit. Same `OPTION(RECOMPILE)`/`WITH RECOMPILE` suppression
+      as the "Catch-all"/"Local-variable predicates" siblings — fully
+      suppressed, not downgraded, since a per-execution recompile sees the
+      parameter's real, post-reassignment value. Purely informational,
+      `FindingConfidence.Low`, never verdict-bearing, matching
+      `LocalVariablePredicateFinding`'s own honesty: no estimate magnitude
+      claim, only that the sniffed value is provably stale by the time the
+      predicate runs.
+
+      **Real, genuine bug caught only against the real corpus, not by the
+      unit-test suite alone (fixed before shipping):** the first working
+      version tracked ANY reassigned variable name, not just formal
+      parameters — a real module in the local test database `DECLARE`s a
+      local, reassigns it via a running-accumulator `SELECT @v = CASE ...`,
+      and compares it in a predicate; the first version mis-fired on this as
+      if it were a reassigned formal parameter, when it is exactly the
+      already-shipped `LocalVariablePredicateFinding`'s own concern instead
+      (a `DECLARE`d local was never sniffable to begin with — there is no
+      staleness to report). Fixed by seeding a per-procedure
+      `_formalParameterNames` set (mirroring
+      `CatchAllPredicateScanner`'s/`TypedPredicateExtractor`'s own identical
+      tracking) and filtering every reassignment through it before it is
+      ever added to the reachability state — a `DECLARE`d local's own
+      reassignment is now silently ignored by this scanner, exactly as
+      intended. Regression-tested
+      (`DeclaredLocalVariable_ReassignedThenUsedInPredicate_NeverFires`).
+
+      **Oracle-confirmed the general mechanism** (a genuine compile-time
+      phenomenon, like `LocalVariablePredicateFinding`, not like the
+      catch-all stream's own RECOMPILE finding which needed real execution —
+      parameter sniffing for a stored-procedure `EXEC` is fully visible to
+      the existing compile-only `SET SHOWPLAN_XML ON` probe):
+      `ParameterReassignmentPredicateOracleTests` calls a real seeded
+      procedure with a common, high-frequency argument value, whose body then
+      reassigns the parameter to a value with ZERO real rows before the
+      predicate runs — the plan's `EstimateRows` still reflects the ORIGINAL
+      sniffed argument's real skew (~1900 of 2000 rows), never the
+      reassigned value's own near-zero density, proving the compiled plan is
+      structurally blind to the reassignment. Unit-tested
+      (`ParameterReassignmentPredicateScannerTests`, 18 cases: `SET`/`SELECT
+      @v =` reassignment before a predicate fires, predicate BEFORE the
+      reassignment never fires, no reassignment never fires, the
+      `DECLARE`d-local regression above, reassignment in only one `IF`
+      branch never fires, reassignment in both branches fires, reassignment
+      inside the same branch as the predicate fires, a `WHILE` loop body's
+      own reassignment never propagates past the loop, `CATCH` never
+      inherits what `TRY` did, both RECOMPILE guards, unindexed columns
+      still fire, `UPDATE` statements, range operators, `GOTO` declines the
+      whole procedure). Wired end-to-end (`ScanReport` schema version 35 →
+      36, SARIF rule `silentscan/predicates/reassigned-parameter`,
+      readable-report section). **Real coverage against the local RM_ test
+      database: 34 findings across 18 modules** after the `DECLARE`d-local
+      fix — down from an unfixed-build measurement of 582, confirming the
+      fix's real precision impact on this exact corpus, not just a
+      theoretical one (the overwhelming majority of the original 582 were
+      false positives against reassigned `DECLARE`d locals, not formal
+      parameters). Spot-checked a real true positive against actual module
+      text (`dbo.spContractList`): a formal `@StartDate DATETIME` parameter
+      reassigned via `SET @StartDate = COALESCE(@StartDate, '1900/01/01
+      00:00:00')` — a completely ordinary NULL-default idiom — then compared
+      directly in the WHERE clause; a caller passing a real date gets that
+      date sniffed, but a caller passing `NULL` sniffs a value the predicate
+      never actually runs against once the COALESCE default takes over,
+      exactly the staleness this rule targets.
 
       **Oracle correction worth recording (load-bearing, not a footnote):**
       the compile-only `SET SHOWPLAN_XML ON` oracle every other Tier-1
@@ -1312,14 +1406,58 @@ latest) compat level.
       `COL_NAME()`, `DATABASEPROPERTYEX()`) are plausible members of the
       same family but were not probed — deliberately left out rather than
       guessed in, a known v1 gap, not a claim they're safe.
-- [ ] Serial-zone constructs as informational: TOP row goals, recursive
-      CTEs, global scalar aggregates — deliberately deferred. MSTVF refs are
-      already covered by the shipped MSTVF-as-fence stream. A recursive CTE
-      was sanity-checked directly and shows no `NonParallelPlanReason`
-      attribute at all (the optimizer never appears to consider a parallel
-      plan for the recursive union in the first place) — a structurally
-      weaker, harder-to-attribute signal than the three shipped kinds above,
-      not pursued further this pass.
+- [x] **Serial-zone constructs as informational: TOP row goals, recursive
+      CTEs, global scalar aggregates — investigated and closed, not built.**
+      MSTVF refs are already covered by the shipped MSTVF-as-fence stream. A
+      recursive CTE was sanity-checked directly and shows no
+      `NonParallelPlanReason` attribute at all (the optimizer never appears
+      to consider a parallel plan for the recursive union in the first
+      place) — already closed in an earlier pass, not re-investigated here.
+      The two genuinely remaining candidates were each investigated directly
+      on the oracle and neither survives as a real, precise, non-redundant
+      finding:
+      * **TOP + ORDER BY "row goal"** — the mechanism itself IS real and
+        genuinely attributable: a `SET SHOWPLAN_XML ON` probe against
+        `SELECT TOP (10) ... ORDER BY IndexedCol DESC` over a 50,000-row
+        indexed table shows the scanned `RelOp` carrying both
+        `EstimateRows="10"` (the row-goal-biased estimate that drove the
+        operator choice) and a separate `EstimateRowsWithoutRowGoal="50000"`
+        attribute — a precise, unambiguous marker distinguishing a row-goal
+        plan from an ordinary one, oracle-confirmed directly rather than
+        assumed. **But the row goal itself is normal, usually BENEFICIAL
+        optimizer behavior** (it is exactly what makes `TOP N ... ORDER BY`
+        on an indexed column fast — an index-ordered scan that stops early,
+        instead of sorting the whole table) — reporting every occurrence of
+        this extremely common, ordinarily-fine pattern would be pure noise,
+        not a risk signal. The REAL, well-known risk (a row-goal estimate
+        that turns out badly wrong because of a co-occurring highly
+        selective filter, causing the optimizer's nested-loop-style plan to
+        scan far more rows than the row goal assumed) needs a data-
+        distribution magnitude fact this static tool cannot see — the same
+        honesty `LocalVariablePredicateFinding`/`OversizedParameterFinding`
+        already apply to their own no-magnitude-claim risk. Nothing survives
+        that is both true and a distinct, non-noisy finding.
+      * **Global scalar aggregate with no GROUP BY** — oracle-falsified
+        directly, not merely judged too vague: seeded a table at 550,000
+        rows (`SELECT COUNT(*) FROM dbo.T`, no WHERE, no GROUP BY) and found
+        `Parallel="0"` with the real `StatementSubTreeCost` (1.79) below the
+        server's own `cost threshold for parallelism` (5) — the query is
+        forced serial for the same reason ANY cheap-enough query is,
+        ordinary cost-based non-parallelism, not a structural restriction
+        specific to global aggregates. Confirmed the absence of any real
+        block by re-seeding to 2,000,000 rows and re-running the identical
+        query: it went fully parallel (`Parallel="1"` on every operator, no
+        `NonParallelPlanReason` anywhere), the opposite of what a genuine
+        "forces serial" construct (like the three already-shipped kinds)
+        would show. There is no structural mechanism here at all — this
+        candidate is fully dropped, not merely descoped.
+      Nothing shipped for this item — both candidates were oracle-
+      investigated and found not to survive as real, precise, non-redundant
+      findings, the same "proposed and killed the same session" discipline
+      the "Non-foldable nondeterministic intrinsic in a predicate" and "`IF`
+      statements containing queries" items elsewhere in this file already
+      model. Recorded here because the value is the falsification/scoping
+      work, not a shipped verdict.
 
       Real internet-sourced references (verified against the oracle, never
       trusted blind): Adam Machanic's original documentation of the
