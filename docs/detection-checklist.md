@@ -4017,36 +4017,159 @@ nine red flags, six already fire here (TVF joins, multi-referenced CTE,
 kitchen-sink `OR`, unindexed temp tables, `CROSS JOIN`, `BEGIN TRAN` without
 error handling). These are the ones that do not.
 
-- [ ] **`NOLOCK` / `READ UNCOMMITTED`** (table hint and `SET TRANSACTION
-      ISOLATION LEVEL` form) — the single most-cited item in this whole
-      literature, and pure syntax with nothing to infer. Frame it honestly as
-      a correctness finding (dirty reads, rows read twice or skipped during
-      page splits), not a performance one.
-- [ ] **Table variable used as a query source** — the shipped forced-serial
-      rule covers the DML *target* side only. A table variable in a `FROM`/
-      `JOIN` carries no statistics and a fixed 1-row estimate. Engine-version
-      sensitive, and the rule must say so: 2019+ deferred compilation fixes
-      the estimate for a table variable populated before first use, and does
-      not fix it inside a multi-statement loop or when the variable is a proc
-      parameter. 821 modules locally use table variables.
-- [ ] **`SELECT ... INTO #temp`** — no declared column types (they are inherited
-      from expressions, so a downstream join can silently mismatch), and the
-      column shape is invisible to any reader of the proc.
-- [ ] **Row-by-row processing beyond the shipped cursor rule** — a `WHILE` loop
-      whose body issues single-row DML against a table, and a cursor declared
-      without `LOCAL` (global-scope leak). The shipped rule covers cursor
-      declaration options and their forced-serial consequence, not RBAR shape.
-- [ ] **`COUNT(*)` used as an existence test** (`IF (SELECT COUNT(*) …) > 0`,
-      `WHERE (SELECT COUNT(*) …) = 0`) — counts the whole set where `EXISTS`
-      short-circuits at the first row.
-- [ ] **Non-aggregate predicate in `HAVING`** that belongs in `WHERE` — filters
-      after aggregation instead of before it.
-- [ ] **`UNION` where `UNION ALL` is sufficient**, and **`DISTINCT` masking a
-      join fan-out**. Both need a real precision story before shipping: the
-      first is only provable when the branches are provably disjoint, the
-      second only when the fan-out is provable from key metadata. Do not ship
-      either as a bare shape match — that is the incumbent failure mode this
-      project exists to avoid.
+**Design-time decidability of the seven items shipped 2026-08-18** (the
+three-way axis this sweep's own intro defines above): every one is
+**schema-decidable** or code-only (a strictly stronger, "true regardless of
+any database at all" case of the same axis) - none is data-state-decidable
+or workload-decidable. `TableVariableLowCompatEstimate` needs the connected
+database's own compatibility level, a database property identical on a dev
+copy and a production one, not a data value - schema-decidable, not
+data-state-decidable, so it is exactly as trustworthy against the local test
+database as against a production target. Every other kind here is pure
+AST, or AST plus ordinary catalog metadata (index uniqueness, table
+existence) - none of the eight ever needs a data value, so unlike the
+identity-range item elsewhere in this sweep, none carries a "meaningless on
+a dev database" caveat.
+
+**Real coverage, measured 2026-08-18 via `scan-db` against the local test
+database** (4,987 modules; the database's own connected compatibility level
+is 140, confirmed via `sys.databases.compatibility_level` - below 150, so
+directly, currently exercising `TableVariableLowCompatEstimate`, not a
+hypothetical): 2,996 `QueryAntiPatternFinding`s total -
+`TableVariableLowCompatEstimate` 2,399, `DistinctMaskingJoinFanout` 402,
+`GlobalCursorDeclaration` 111, `RbarSingleRowLoopDml` 76,
+`CountStarVariableExistenceCheck` 8. `TableVariableStaleEstimateInLoop`,
+`NonAggregateHavingPredicate`, and `UnionOfProvablyDisjointBranches` found
+zero real occurrences in this corpus - a real, honestly-reported absence
+(the shapes are genuinely rare here), not a scanner defect; each kind's own
+unit-test fire/near-miss pair (`QueryAntiPatternScannerTests.cs`) confirms
+the detection logic itself works on a hand-authored fixture. Spot-checked
+one `DistinctMaskingJoinFanout` finding directly against
+`sys.indexes`/`sys.index_columns` (never against the finding's own catalog
+read) - confirmed the joined-to table's only unique index is its own primary
+key on a different column, and the join's own equated column has no unique
+index covering it at all, exactly as claimed.
+
+- [x] **`NOLOCK` / `READ UNCOMMITTED`** — closed 2026-08-18, already shipped, no
+      new work needed. Both forms this item names — the `WITH (NOLOCK)`/
+      `READUNCOMMITTED` table hint and `SET TRANSACTION ISOLATION LEVEL READ
+      UNCOMMITTED` — already fire as `ControlFlowRiskFindingKind.
+      DirtyReadIsolationHint` (`ControlFlowRiskScanner.cs`), framed exactly as
+      this item asked: a correctness finding (dirty reads, rows read twice or
+      skipped during a concurrent page split), `FindingConfidence.Low`/SARIF
+      Warning since it's sometimes a deliberate, reasonable tradeoff, not a
+      default-bad choice. Confirmed by direct source read, not assumed - see
+      `ControlFlowRiskFinding.cs`/`ControlFlowRiskScanner.cs`.
+- [x] **Table variable used as a query source** — shipped 2026-08-18 as two
+      `QueryAntiPatternFinding` kinds (`QueryAntiPatternFinding.cs`/
+      `QueryAntiPatternScanner.cs`). Oracle-checked directly (Docker instance,
+      SQL Server 2022) rather than assuming the commonly-cited claim, and the
+      real story is sharper and different from what this item originally
+      guessed: **`TableVariableLowCompatEstimate`** (live-mode only, needs the
+      new `DatabaseCatalog.CompatibilityLevel`, populated by
+      `LiveCatalogReader`) fires when a table variable is used as a
+      `FROM`/`JOIN` source under a connected compatibility level below 150 -
+      confirmed the cardinality estimate is fixed at exactly 1 row regardless
+      of how many rows were actually loaded, for every shape tested. Level
+      150+ (2019's deferred compilation) genuinely fixes the "populate once,
+      read once" shape - confirmed accurate estimates for a table variable
+      populated before first use in the same batch, populated across a
+      `WHILE` loop then read once afterward, AND (correcting this item's own
+      "does not fix it ... when the variable is a proc parameter" guess) a
+      table-valued parameter populated by the caller before `EXEC`. The one
+      shape level 150+ genuinely does NOT fix - confirmed separately -
+      is **`TableVariableStaleEstimateInLoop`**: a table variable read as a
+      query source inside a `WHILE` loop that ALSO writes to it - the
+      estimate freezes at the row count from the first iteration that
+      executed the read (2,000 in a 5-iteration test that grew the table
+      variable by 2,000 rows/iteration) and never re-adjusts as the loop
+      keeps growing it. This kind is pure AST (no catalog needed) and stays
+      silent under compat &lt;150 to avoid double-reporting the same site the
+      stronger low-compat kind already covers. Declared-via-`DECLARE` table
+      variables only in both kinds - a table-valued parameter's own low-compat
+      story was never oracle-tested and is a deliberate, documented v1 scope
+      limit, not a silent gap. The local test database itself runs at
+      compatibility level 140 (below 150), confirmed directly - this item is
+      directly, currently relevant to it, not a hypothetical.
+- [x] **`SELECT ... INTO #temp`** — closed 2026-08-18, no new work needed. The
+      sharper, more actionable form this item's own text proposed choosing
+      between - "only ones whose resulting temp table is later
+      joined/compared against" - already shipped as
+      `UnindexedTempTableUsageFinding` (`UnindexedTempTableUsageScanner.cs`,
+      "Second OSS/commercial sweep"), which tracks a `SELECT ... INTO #temp`
+      declaration site and fires when the resulting temp table is later a
+      JOIN operand or WHERE-filtered with no index ever created on it. The
+      blanket "flag every `SELECT ... INTO #temp`" informational alternative
+      this item raised was considered and declined: it would be pure noise on
+      top of the sharper claim already shipped, with no reader action the
+      sharper form doesn't already cover more precisely.
+- [x] **Row-by-row processing beyond the shipped cursor rule** — shipped
+      2026-08-18 as two more `QueryAntiPatternFinding` kinds.
+      **`RbarSingleRowLoopDml`**: a `WHILE` loop body issuing an UPDATE/DELETE
+      whose `WHERE` clause is a single top-level equality between a column and
+      a local variable that the SAME loop body itself assigns (a `SET`/
+      `SELECT` assignment, or a cursor `FETCH ... INTO`) - the classic RBAR
+      shape, a loop advancing one tracked value per iteration and writing
+      exactly that value each time. AND-flattened only (never through OR);
+      does not descend into a nested loop's own body when collecting a given
+      loop's writes/reads, so a nested loop's own RBAR is attributed to that
+      inner loop, not double-counted against the outer one.
+      **`GlobalCursorDeclaration`**: a cursor declared without `LOCAL` -
+      `DECLARE cur CURSOR FOR ...` or an explicit `DECLARE cur CURSOR GLOBAL
+      FOR ...` - defaults to connection-wide `GLOBAL` scope per engine
+      documentation, a resource-leak/naming-collision risk, distinct from the
+      already-shipped `ForcedSerialFindingKind.FastForwardCursor` (a different
+      mechanism entirely - forced-serial plans, never inspects LOCAL/GLOBAL).
+- [x] **`COUNT(*)` used as an existence test** — shipped 2026-08-18 as
+      `QueryAntiPatternFindingKind.CountStarVariableExistenceCheck`, but the
+      real, oracle-confirmed scope is narrower AND different from what this
+      item assumed. Direct Docker oracle check (200,000-row seeded table, SQL
+      Server 2022, compat 160, real plan XML) found the commonly-cited claim
+      is **false for the shape most people write and most examples show**:
+      `IF (SELECT COUNT(*) FROM T WHERE ...) > 0` with the aggregate written
+      INLINE as a scalar subquery directly in the boolean comparison - the
+      optimizer automatically rewrites this into a `Left Semi Join`/`Left
+      Anti Semi Join` plan that short-circuits exactly like `EXISTS`
+      (`EstimateRows="1"`, not 200,000) - confirmed for `> 0`, `>= 1`, and
+      `WHERE (SELECT COUNT(*) ...) = 0` in an outer query. This project does
+      NOT flag that inline form at all - doing so would be a false claim this
+      oracle run directly disproved. The SAME oracle run found a genuinely
+      different, real risk shape the rewrite does NOT apply to: `SELECT @v =
+      COUNT(*) FROM T [WHERE ...]` assigning the count to a variable, with
+      the existence comparison against that variable in a SEPARATE, later
+      statement - confirmed a real, full `Stream Aggregate` over an `Index
+      Seek` estimated at all 200,000 matching rows. Only this variable-
+      assignment shape is flagged, and only when the very next statement in
+      the same block compares that same variable to zero with no other use in
+      between - `FindingConfidence.High` (mechanically confirmed).
+- [x] **Non-aggregate predicate in `HAVING`** that belongs in `WHERE` —
+      shipped 2026-08-18 as `QueryAntiPatternFindingKind.
+      NonAggregateHavingPredicate`. Fires per AND-flattened HAVING branch
+      (never through OR) whose own referenced columns are all GROUP BY key
+      columns or literals and which does not reference an aggregate function
+      result - correctness-preserving by construction, `FindingConfidence.
+      High`. A conjunctive `HAVING Col = 'x' AND COUNT(*) > 1` still fires for
+      the `Col = 'x'` branch alone (splitting at the AND boundary and moving
+      only the non-aggregate half to WHERE is itself a correct, independent
+      rewrite).
+- [x] **`UNION` where `UNION ALL` is sufficient**, and **`DISTINCT` masking a
+      join fan-out** — both survived precision scrutiny and shipped
+      2026-08-18, neither as a bare shape match. **`UnionOfProvablyDisjointBranches`**:
+      a `UNION` (not `UNION ALL`) combining two or more branches that are each
+      a plain, single-base-table `SELECT` whose own WHERE clause is nothing
+      but a single top-level equality of the SAME column (same table) against
+      a literal, where every branch's literal is pairwise distinct - since a
+      row can't equal two different literal values on the same column at
+      once, the branches are provably mutually exclusive and `UNION ALL`
+      would be equivalent. A branch with a join, an OR, a non-equality
+      comparison, or a non-literal comparand declines rather than guesses.
+      **`DistinctMaskingJoinFanout`**: a `SELECT DISTINCT` query with a JOIN
+      whose second (joined-to) table's own join-equated columns are not
+      backed by a unique, non-filtered, non-disabled catalog index - reuses
+      `NonUniqueUpdateSourceScanner`'s own composite-uniqueness catalog check
+      verbatim. Both `FindingConfidence.Medium` (the structural claim is
+      exact; whether it costs anything measurable, or whether DISTINCT is a
+      genuine deliberate requirement, is data/intent this pass can't see).
 - [ ] **Unqualified object references** in module bodies (`FROM Orders`, not
       `FROM dbo.Orders`) — a real cost, not a style rule: name resolution is
       per-user, so the plan cache holds one entry per schema-resolution context

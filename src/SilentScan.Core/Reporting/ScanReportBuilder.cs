@@ -889,6 +889,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<QueryAntiPatternFinding> queryAntiPatternFindings;
+        using (var queryAntiPatternStage = progress.Begin("scanning query anti-patterns", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = QueryAntiPatternScanner.Scan(r, catalog);
+                    queryAntiPatternStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            queryAntiPatternFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<ForcedSerialFinding> forcedSerialFindings;
         using (var forcedSerialStage = progress.Begin("scanning forced-serial constructs", usableCount))
         {
@@ -1174,6 +1192,7 @@ public static class ScanReportBuilder
             // merges the real result in afterward, same pattern as IndexDesignFindings above.
             [],
             floatEqualityFindings,
+            queryAntiPatternFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

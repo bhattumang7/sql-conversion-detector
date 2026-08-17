@@ -128,6 +128,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(IndexDesign(report, headingLevel, pathBase));
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
+        blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -196,6 +197,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Physical/schema index design (heap/clustered-key quality)", report.IndexDesignFindings.Count);
         AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
+        AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1085,6 +1087,27 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
                 $"Compared with = at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> QueryAntiPattern(ScanReport report, int level, string? pathBase)
+    {
+        if (report.QueryAntiPatternFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Query anti-patterns ({report.QueryAntiPatternFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Eight structurally-provable query shapes: a table variable used as a query source under a low compatibility level or a growing WHILE loop (stale/fixed cardinality estimate), a WHILE loop doing single-row DML keyed to its own tracked variable (RBAR), a cursor declared without LOCAL, COUNT(*) assigned to a variable then compared only to zero (a real full-set scan, unlike the inline scalar-subquery form the optimizer already rewrites), a non-aggregate HAVING predicate that belongs in WHERE, a UNION of provably disjoint branches, and a SELECT DISTINCT join not backed by a unique index.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.QueryAntiPatternFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
             })]);
     }
 

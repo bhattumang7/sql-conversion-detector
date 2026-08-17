@@ -66,6 +66,7 @@ public sealed record ScanReport(
     IReadOnlyList<IndexDesignFinding> IndexDesignFindings,
     IReadOnlyList<IdentityRangeFinding> IdentityRangeFindings,
     IReadOnlyList<FloatEqualityFinding> FloatEqualityFindings,
+    IReadOnlyList<QueryAntiPatternFinding> QueryAntiPatternFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -251,5 +252,20 @@ public sealed record ScanReport(
     /// same reasoning as the bump to 47/48; <see cref="FloatEqualityFindings"/> is a genuine
     /// AST+catalog pass that runs in both file and live mode, same as every ordinary per-module
     /// stream.
-    public const int CurrentSchemaVersion = 50;
+    /// Bumped to 51 for the new <see cref="QueryAntiPatternFindings"/> stream (docs/detection-
+    /// checklist.md "DBA-script family sweep (2026-08-17)" §B "Query anti-patterns still
+    /// unbuilt"): a table variable used as a query source under a connected compatibility level
+    /// below 150 (oracle-confirmed fixed 1-row estimate) or inside a WHILE loop that also writes
+    /// it (oracle-confirmed stale estimate frozen at the first iteration's size); a WHILE loop
+    /// issuing single-row UPDATE/DELETE keyed to its own per-iteration tracked variable (RBAR); a
+    /// cursor declared without LOCAL; a local variable assigned COUNT(*) then compared only to
+    /// zero in the very next statement (oracle-confirmed to force a real full-set aggregation,
+    /// unlike the inline scalar-subquery form, which the optimizer already rewrites into an
+    /// EXISTS-equivalent semi-join and this stream deliberately never flags); a HAVING condition
+    /// referencing only GROUP BY key columns/literals; a UNION of branches provably disjoint by a
+    /// same-column distinct-literal equality; and a SELECT DISTINCT joining a table whose own
+    /// join columns aren't backed by a unique index. The first kind is live-mode only (needs the
+    /// new <see cref="Catalog.DatabaseCatalog.CompatibilityLevel"/>, itself live-mode only); every
+    /// other kind runs in both file and live mode.
+    public const int CurrentSchemaVersion = 51;
 }

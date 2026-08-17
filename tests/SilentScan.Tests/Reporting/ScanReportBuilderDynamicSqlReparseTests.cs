@@ -134,14 +134,15 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // predicate target" - the AST-level half; the catalog-only half,
         // IndexDesignFindingKind.FloatOrRealIndexKeyColumn, costs nothing here, same reasoning as
         // every other catalog-only kind on that stream).
-        // Reverting to re-enumerating per round pushes this fixture's 3 rounds well past that. 44
-        // sits strictly between the two (measured 44 with every fix/stream landed to date), so this
+        // Reverting to re-enumerating per round pushes this fixture's 3 rounds well past that. 45
+        // sits strictly between the two (measured 45 with every fix/stream landed to date,
+        // including the new QueryAntiPatternScanner stage), so this
         // fails the moment the loop stops reusing its one materialization and starts scaling with
         // round count again, while still tolerating a future +/-1 shift from unrelated changes
         // elsewhere in the method (e.g. the next new full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 44,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 44 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 45,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 45 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

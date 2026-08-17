@@ -31,6 +31,15 @@ public static class SarifRuleCatalog
     public const string TemporalBoundaryPrecisionRuleId = "silentscan/correctness/between-end-of-period-boundary";
     public const string MaxTypedColumnRuleId = "silentscan/catalog/max-typed-column";
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
+
+    public const string QueryAntiPatternTableVariableLowCompatEstimateRuleId = "silentscan/query/table-variable-low-compat-estimate";
+    public const string QueryAntiPatternTableVariableStaleEstimateInLoopRuleId = "silentscan/query/table-variable-stale-estimate-in-loop";
+    public const string QueryAntiPatternRbarSingleRowLoopDmlRuleId = "silentscan/query/rbar-single-row-loop-dml";
+    public const string QueryAntiPatternGlobalCursorDeclarationRuleId = "silentscan/query/global-cursor-declaration";
+    public const string QueryAntiPatternCountStarVariableExistenceCheckRuleId = "silentscan/query/count-star-variable-existence-check";
+    public const string QueryAntiPatternNonAggregateHavingPredicateRuleId = "silentscan/query/non-aggregate-having-predicate";
+    public const string QueryAntiPatternUnionOfProvablyDisjointBranchesRuleId = "silentscan/query/union-of-provably-disjoint-branches";
+    public const string QueryAntiPatternDistinctMaskingJoinFanoutRuleId = "silentscan/query/distinct-masking-join-fanout";
     public const string OversizedParameterRuleId = "silentscan/predicates/oversized-parameter";
     public const string UnderLengthParameterRuleId = "silentscan/predicates/under-length-parameter";
     public const string AnsiPaddingMismatchRuleId = "silentscan/predicates/ansi-padding-mismatch";
@@ -389,6 +398,19 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ControlFlowRiskFindingKind."),
     };
 
+    public static string QueryAntiPatternRuleId(QueryAntiPatternFindingKind kind) => kind switch
+    {
+        QueryAntiPatternFindingKind.TableVariableLowCompatEstimate => QueryAntiPatternTableVariableLowCompatEstimateRuleId,
+        QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop => QueryAntiPatternTableVariableStaleEstimateInLoopRuleId,
+        QueryAntiPatternFindingKind.RbarSingleRowLoopDml => QueryAntiPatternRbarSingleRowLoopDmlRuleId,
+        QueryAntiPatternFindingKind.GlobalCursorDeclaration => QueryAntiPatternGlobalCursorDeclarationRuleId,
+        QueryAntiPatternFindingKind.CountStarVariableExistenceCheck => QueryAntiPatternCountStarVariableExistenceCheckRuleId,
+        QueryAntiPatternFindingKind.NonAggregateHavingPredicate => QueryAntiPatternNonAggregateHavingPredicateRuleId,
+        QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches => QueryAntiPatternUnionOfProvablyDisjointBranchesRuleId,
+        QueryAntiPatternFindingKind.DistinctMaskingJoinFanout => QueryAntiPatternDistinctMaskingJoinFanoutRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
+    };
+
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
     {
         UntrustedConstraintFindingKind.ForeignKey => UntrustedForeignKeyRuleId,
@@ -531,6 +553,14 @@ public static class SarifRuleCatalog
             Rule(TemporalBoundaryPrecisionRuleId, "A BETWEEN predicate's upper bound literal has fewer fractional-second digits than the TIME/DATETIME2/DATETIMEOFFSET column's own declared precision - a correctness bug, not a sargability one: rows in the precision gap are silently excluded, oracle-confirmed. Rewrite as >= start AND < (start of the next period) instead."),
             Rule(MaxTypedColumnRuleId, "A string/binary column is declared MAX-typed - it can never be an index key column at all, so any predicate/join on it can never seek regardless of how it's used. Catalog-only structural fact."),
             Rule(FloatEqualityRuleId, "A WHERE/ON equality predicate (=) compares a float/real (approximate, IEEE-754) column - two values a person would call the same number can carry a different bit pattern and compare unequal, so the predicate can silently return the wrong rows regardless of plan shape or indexing."),
+            Rule(QueryAntiPatternTableVariableLowCompatEstimateRuleId, "A table variable is used as a query source while the connected database's compatibility level is below 150 - oracle-confirmed the optimizer's cardinality estimate is fixed at exactly 1 row regardless of how many rows were actually loaded, below that level."),
+            Rule(QueryAntiPatternTableVariableStaleEstimateInLoopRuleId, "A table variable is read as a query source inside a WHILE loop that also writes to it - oracle-confirmed the cardinality estimate freezes at the row count from the first iteration that executed the read and never re-adjusts as the loop keeps growing the table variable."),
+            Rule(QueryAntiPatternRbarSingleRowLoopDmlRuleId, "A WHILE loop issues a single-row UPDATE/DELETE keyed to a variable the same loop advances per iteration (row-by-row processing) - a set-based statement over the whole matching set would do the same work without the per-iteration overhead."),
+            Rule(QueryAntiPatternGlobalCursorDeclarationRuleId, "A cursor is declared without LOCAL, defaulting to GLOBAL - it stays alive and visible for the whole connection/batch, not just the declaring scope, a resource-leak and naming-collision risk."),
+            Rule(QueryAntiPatternCountStarVariableExistenceCheckRuleId, "COUNT(*) is assigned to a variable and the very next statement compares that variable only to zero - oracle-confirmed this shape forces a real full-set aggregation, unlike the inline scalar-subquery form (IF (SELECT COUNT(*) ...) > 0), which the optimizer already rewrites into an EXISTS-equivalent short-circuiting plan."),
+            Rule(QueryAntiPatternNonAggregateHavingPredicateRuleId, "A HAVING condition references only GROUP BY key columns/literals and no aggregate result - moving it to WHERE produces an identical result while filtering before, not after, aggregation."),
+            Rule(QueryAntiPatternUnionOfProvablyDisjointBranchesRuleId, "A UNION combines branches that each filter the same table/column to a distinct literal - the branches are provably mutually exclusive, so UNION's duplicate-elimination pass can never remove a row and UNION ALL is equivalent."),
+            Rule(QueryAntiPatternDistinctMaskingJoinFanoutRuleId, "A SELECT DISTINCT joins a table whose own join columns are not backed by a unique index - DISTINCT may be silently papering over row duplication the join itself introduces."),
             Rule(OversizedParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate."),
             Rule(UnderLengthParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding's identical class of concern."),
             Rule(AnsiPaddingMismatchRuleId, "A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace - the column can never store a value ending in whitespace at all (stripped at INSERT time under ANSI_PADDING OFF), so the pattern can never match anything the column could ever contain. Data-semantics finding, not a plan-shape one."),

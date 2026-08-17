@@ -98,6 +98,7 @@ public static class SarifReportWriter
         results.AddRange(report.IndexDesignFindings.Select(ToResult));
         results.AddRange(report.IdentityRangeFindings.Select(ToResult));
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
+        results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -1041,6 +1042,26 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is compared with = in this predicate - IEEE-754 floating-point representation error means two values a person would call the same number can compare unequal, silently returning the wrong rows.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(QueryAntiPatternFinding finding)
+    {
+        // TableVariableLowCompatEstimate and CountStarVariableExistenceCheck/
+        // NonAggregateHavingPredicate are mechanically-confirmed hard facts about the connected
+        // engine/optimizer, not magnitude estimates - Error. Every other kind is a real but
+        // context-dependent risk (a deliberate GLOBAL cursor, a genuinely tiny RBAR loop, a stale
+        // estimate that may never matter, a fan-out that may be intentional) - Warning.
+        var baseLevel = finding.Kind switch
+        {
+            QueryAntiPatternFindingKind.TableVariableLowCompatEstimate => LevelError,
+            QueryAntiPatternFindingKind.CountStarVariableExistenceCheck => LevelError,
+            QueryAntiPatternFindingKind.NonAggregateHavingPredicate => LevelWarning,
+            _ => LevelWarning,
+        };
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.QueryAntiPatternRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(TempTableExecShapeFinding finding)

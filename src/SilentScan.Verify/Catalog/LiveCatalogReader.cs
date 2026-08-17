@@ -36,6 +36,7 @@ public sealed class LiveCatalogReader
 
         catalog.CurrentDatabaseName = connection.Database;
         catalog.DefaultCollation = await ReadDatabaseDefaultCollationAsync(connection, cancellationToken);
+        catalog.CompatibilityLevel = await ReadCompatibilityLevelAsync(connection, cancellationToken);
 
         foreach (var (qualifiedName, underlyingType) in await ReadTypeAliasesAsync(connection, cancellationToken))
         {
@@ -594,6 +595,13 @@ public sealed class LiveCatalogReader
         await using var command = connection.CreateReadOnlyCommand("SELECT collation_name FROM sys.databases WHERE database_id = DB_ID();");
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is string name ? new Collation(name, CollationSource.DatabaseDefaultFromDdl) : null;
+    }
+
+    private static async Task<int?> ReadCompatibilityLevelAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateReadOnlyCommand("SELECT compatibility_level FROM sys.databases WHERE database_id = DB_ID();");
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is byte level ? level : null;
     }
 
     private static async Task<List<(string QualifiedName, SqlType UnderlyingType)>> ReadTypeAliasesAsync(

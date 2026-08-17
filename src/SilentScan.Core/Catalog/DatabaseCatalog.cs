@@ -385,6 +385,22 @@ public sealed class DatabaseCatalog
     /// <summary>The collation a temp table/table variable's columns should default to - <see cref="TempdbCollation"/> when known, else <see cref="DefaultCollation"/> (today's behavior, preserved when tempdb's own collation was never supplied).</summary>
     public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
 
+    /// <summary>
+    /// The connected database's own <c>sys.databases.compatibility_level</c> - live-mode only
+    /// (<c>LiveCatalogReader</c> populates it from a real metadata read; a file-mode scan has no
+    /// live database to ask, so this stays null, the same "live-only, never guessed" shape as
+    /// <see cref="TempdbCollation"/>). Needed by <see cref="Predicates.QueryAntiPatternScanner"/>'s
+    /// own <see cref="Predicates.QueryAntiPatternFindingKind.TableVariableLowCompatEstimate"/> kind
+    /// - oracle-confirmed (docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §B)
+    /// that a table variable's cardinality estimate is fixed at exactly 1 row below compatibility
+    /// level 150 (SQL Server 2019's deferred-compilation fix), regardless of how the variable was
+    /// populated, and is NOT fixed at 1 - deferred compilation genuinely resolves it to the real
+    /// row count - at level 150+ for the shapes this project directly verified (populated once
+    /// before first use in the same batch; populated as a table-valued parameter by the caller
+    /// before EXEC).
+    /// </summary>
+    public int? CompatibilityLevel { get; set; }
+
     /// <summary>Everything Pass 1 saw but could not resolve into catalog data - never silently dropped.</summary>
     public SkipLedger Skipped { get; } = new();
 
