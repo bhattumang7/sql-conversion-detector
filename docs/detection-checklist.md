@@ -3557,11 +3557,111 @@ exactly as originally scoped until its own turn comes up.
     41 too-many-conditional-operators) — every threshold genuinely
     selective against this real corpus, none firing on a majority of the
     codebase.
-  * *Formatting and layout* — tab characters, one statement per line, one
-    declaration per line, misleading indentation, a branch keyword sharing a
-    line with the end of the previous block, missing `BEGIN…END` around a
-    conditional body, useless parentheses, empty statements, file header
-    comments.
+  * *Formatting and layout — shipped (2026-08-17).* One finding type
+    (`FormattingFinding`/`FormattingFindingKind`), no catalog, no oracle —
+    every member is a directly observable parse/token-stream fact, never a
+    plan-shape or runtime-behavior claim. `FindingConfidence.Low` throughout,
+    including the two visual-ambiguity kinds (a dangling statement or an IF
+    misreadable as an ELSE IF): the flagged statement's OWN behavior is
+    always unaffected either way, only a *future* edit relying on the
+    misleading visual shape is at risk.
+    <br><br>
+    **Cross-checked against the real source, not just this checklist's own
+    paraphrase — this bullet's original 8-item list undercounted.** The real
+    plugin folder holds nine distinct rule classes for this theme, not eight,
+    and two of the checklist's own phrases ("misleading indentation" and "a
+    branch keyword sharing a line with the end of the previous block") each
+    turned out to name a DIFFERENT real, separate rule than the "missing
+    BEGIN...END" item, not a restatement of it — all three ship as distinct
+    kinds below. A tenth candidate ("empty statements") does **not** ship —
+    see below.
+    <br><br>
+    Nine kinds shipped:
+    * **Tab characters** in the source text — one finding per physical line
+      containing one, not per character.
+    * **Multiple statements on one physical source line** — a real AST
+      statement-list walk cross-referenced against line numbers, not a
+      semicolon count (a `;` can sit inside a string literal or nested
+      subquery).
+    * **Multiple `DECLARE` variables on one physical source line** — fires
+      only when two declared variables' own targets literally share a line;
+      the common, idiomatic multi-line comma-list `DECLARE @a INT,\n@b INT`
+      form never fires, confirmed directly against the real rule logic
+      before shipping so this couldn't regress onto ordinary T-SQL style.
+    * **Missing `BEGIN...END`** around an IF/WHILE/ELSE body that is a single
+      unbraced statement on a *different* line than its own keyword — the
+      general "always brace your conditionals" risk. Never fires on an ELSE
+      IF continuation (a nested IF as the body is exempt, matching the real
+      rule's own exemption).
+    * **Single-line conditional body** — the narrower, sharper sibling: the
+      unbraced body shares the *exact same line* as its own keyword
+      (`IF x = 1 SELECT 1;`), which the checklist's original "misleading
+      indentation" phrase was naming. Mutually exclusive with the kind
+      above for the same site (never double-reported).
+    * **Dangling statement after an unbraced body** — a statement
+      immediately follows an unbraced IF/WHILE's single-statement body,
+      starting on the very next line at the same or deeper indentation than
+      that body, visually appearing to still be "inside" the conditional/loop
+      when it structurally is not. **Real precision bug caught and fixed
+      against the actual corpus, not left in**: the first version fired on
+      ANY following statement, including a following `IF`/`WHILE` — but a
+      real scan showed the overwhelming majority of raw matches (18 of the
+      original 70) were a completely benign, unambiguous, common T-SQL idiom
+      (`IF @a = 1\n  X\nIF @b = 1\n  Y\n...`, a chain of independent
+      conditionals, each unmistakably its own new statement the moment its
+      own `IF`/`WHILE` keyword is read) — narrowed to exclude a following
+      IF/WHILE entirely, since only a *non-conditional* dangling statement is
+      genuinely confusable with belonging to the block above it.
+    * **IF immediately following a prior block's own `END`, on the same
+      line** — the checklist's "a branch keyword sharing a line with the end
+      of the previous block" phrase. Fires only when the prior IF has no
+      ELSE and its own body is braced; never fires on a genuine `ELSE IF`
+      chain (which shares no such line-adjacency shape at all).
+    * **Redundant parentheses** — a parenthesized expression whose inner
+      expression is itself a bare column reference, variable, literal, or
+      another parenthesized expression (including the double-wrapped boolean
+      case, `((x = 1))`) - narrowly scoped so a parenthesized *multi-operator*
+      subexpression, which genuinely disambiguates precedence, never fires.
+    * **Missing file header comment** — whether a module's own definition
+      begins with a comment before its first real statement. Shipped at
+      `FindingConfidence.Low` and stated as purely advisory in its own SARIF
+      description: unlike an application source file's own license-header
+      convention, T-SQL modules carry no comparably universal authoring
+      norm, so this is reported as an observation, never implied to be a
+      real risk the way the other eight kinds are.
+    <br><br>
+    **One candidate investigated and NOT shipped, confirmed unreachable
+    rather than assumed**: "empty statements." Probed directly against
+    `TSql160Parser` (the exact parser class this tool uses) — `BEGIN END`
+    (an empty block) is a hard parse error ("Incorrect syntax near 'END'.")
+    in *every* context tried (bare, inside IF, inside WHILE, inside a
+    procedure body), and a bare `;` produces no statement AST node at all to
+    attach a finding to. This tool's own parser dialect structurally cannot
+    produce the AST shape this rule would need to match — the identical
+    disposition already recorded for `COMPUTE`/`COMPUTE BY` and the `*=`/`=*`
+    operators elsewhere in this file: closed, not built, no dead code
+    shipped for a shape that can never fire.
+    <br><br>
+    Unit-tested (`FormattingScannerTests`, 25 cases covering every shipped
+    kind's fire/near-miss pair, including the chained-unbraced-IF
+    false-positive guard above and the ELSE-IF-chain exemptions for both
+    conditional-body kinds). Wired end-to-end (`ScanReport` schema version
+    37 → 38, SARIF rule catalog + writer, readable report section). **Real
+    coverage against the local RM_ test database: 755,268 findings**
+    (727,149 tab-character lines — this corpus's own real authoring
+    convention is heavily tab-indented, a real fact about the corpus, not a
+    detection artifact; 14,146 missing-BEGIN-END; 8,003 same-line
+    declarations; 3,429 missing file headers; 1,981 single-line conditional
+    bodies; 462 redundant-parentheses; 52 dangling statements; 45
+    same-line statements; 1 IF-following-prior-END). Both of the structurally
+    riskier kinds spot-checked directly against real module text and
+    confirmed genuine: the sole `IfImmediatelyFollowingPriorBlockEnd` hit is
+    a real, human-authored `END IF ... = 0` on one line with no `ELSE` at
+    all (`dbo.spTripCoordinationAccept`), and a sampled
+    `DanglingStatementAfterUnbracedBody` hit
+    (`dbo.spADHocReportSelectAllTrips`) shows an unconditional `CREATE TABLE`
+    visually indented as if it only ran when a preceding unbraced `IF`'s
+    `DROP TABLE` ran - exactly the misleading shape this kind targets.
   * *Naming and identifiers* — routine name patterns, variable name patterns,
     a reserved keyword used as an identifier, database/schema qualification on
     a `CREATE`.

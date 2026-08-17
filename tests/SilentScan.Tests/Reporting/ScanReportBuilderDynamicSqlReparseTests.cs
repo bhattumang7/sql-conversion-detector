@@ -107,18 +107,18 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // read with no per-file enumeration at all; +1 for the new
         // ParameterReassignmentPredicateScanner full-corpus pass (docs/detection-checklist.md
         // "Catch-all / kitchen-sink predicates" sibling: parameter overwritten before use in a
-        // predicate); +1 for the new CodeMetricScanner full-corpus pass (docs/detection-
-        // checklist.md Tier 4 "Size and complexity metrics" - eight configurable-threshold
-        // structural metrics: line/module/routine length, parameter count, nesting depth,
-        // conditional-operator count, CASE branch count/length). Reverting to re-enumerating per
-        // round pushes this fixture's 3 rounds well past that. 35 sits strictly between the two
-        // (measured 35 with every fix/stream landed to date), so this fails the moment the loop
-        // stops reusing its one materialization and starts scaling with round count again, while
-        // still tolerating a future +/-1 shift from unrelated changes elsewhere in the method
-        // (e.g. the next new full-corpus stream).
+        // predicate); +1 for the CodeMetricScanner full-corpus pass; +1 for the new
+        // FormattingScanner full-corpus pass (docs/detection-checklist.md Tier 4 "Formatting and
+        // layout" - tab characters, statement/declaration line-sharing, unbraced conditional
+        // bodies, dangling statements, redundant parentheses, missing file headers). Reverting to
+        // re-enumerating per round pushes this fixture's 3 rounds well past that. 36 sits
+        // strictly between the two (measured 36 with every fix/stream landed to date), so this
+        // fails the moment the loop stops reusing its one materialization and starts scaling with
+        // round count again, while still tolerating a future +/-1 shift from unrelated changes
+        // elsewhere in the method (e.g. the next new full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 35,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 35 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 36,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 36 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

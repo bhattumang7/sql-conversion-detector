@@ -55,6 +55,7 @@ public sealed record ScanReport(
     IReadOnlyList<DatabaseConfigurationFinding> DatabaseConfigurationFindings,
     IReadOnlyList<ParameterReassignmentPredicateFinding> ParameterReassignmentPredicateFindings,
     IReadOnlyList<CodeMetricFinding> CodeMetricFindings,
+    IReadOnlyList<FormattingFinding> FormattingFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -163,6 +164,11 @@ public sealed record ScanReport(
     /// checklist.md Tier 4 "Size and complexity metrics" - eight configurable-threshold
     /// structural metrics: line length, module length, routine length, parameter count, nesting
     /// depth, conditional-operator count, CASE branch count, CASE branch length).
+    /// Bumped to 38 for the new <see cref="FormattingFindings"/> stream (docs/detection-
+    /// checklist.md Tier 4 "Formatting and layout": tab characters, multiple statements/
+    /// declarations sharing a line, missing/single-line-unbraced conditional bodies, a statement
+    /// visually dangling off an unbraced conditional, an IF sharing a line with a prior block's
+    /// own END, redundant parentheses, and a module with no leading comment).
     /// </summary>
-    public const int CurrentSchemaVersion = 37;
+    public const int CurrentSchemaVersion = 38;
 }

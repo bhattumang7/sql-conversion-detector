@@ -87,6 +87,7 @@ public static class SarifReportWriter
         results.AddRange(report.DatabaseConfigurationFindings.Select(ToResult));
         results.AddRange(report.ParameterReassignmentPredicateFindings.Select(ToResult));
         results.AddRange(report.CodeMetricFindings.Select(ToResult));
+        results.AddRange(report.FormattingFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -402,6 +403,41 @@ public static class SarifReportWriter
                 $"This CASE expression has {finding.MeasuredValue} WHEN branches, which is greater than the {finding.Threshold} authorized.",
             _ =>
                 $"This CASE WHEN branch spans {finding.MeasuredValue} lines, which is greater than the {finding.Threshold} authorized.",
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(FormattingFinding finding)
+    {
+        // Note, not warning/error, for every kind except the two visual-ambiguity ones (a
+        // dangling statement or a misread ELSE IF) - a pure readability/maintainability signal,
+        // no query result or plan is ever affected. The ambiguity kinds still stay Note-tier: the
+        // STATEMENT'S OWN behavior is unaffected either way, only a future edit relying on the
+        // misleading visual shape is at risk (the same reasoning CodeMetricFinding already
+        // established for this class of Tier 4 finding).
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FormattingRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            FormattingFindingKind.TabCharacterUsed =>
+                "This line contains a tab character - replace it with spaces for consistent rendering across editors.",
+            FormattingFindingKind.MultipleStatementsOnSameLine =>
+                "This statement shares a physical source line with the previous one - put one statement per line.",
+            FormattingFindingKind.MultipleDeclarationsOnSameLine =>
+                $"'{finding.DetailText}' is declared on the same physical source line as the previous variable - declare each on its own line.",
+            FormattingFindingKind.MissingBeginEndBlock =>
+                "This conditional body is a single statement with no BEGIN...END - a later statement added here without braces silently falls outside the conditional.",
+            FormattingFindingKind.SingleLineConditionalBody =>
+                "This conditional body shares the same line as its own keyword with no BEGIN...END - easy to misread.",
+            FormattingFindingKind.DanglingStatementAfterUnbracedBody =>
+                "This statement is not actually part of the conditional/loop above it, even though its indentation makes it look like it is - the body above has no BEGIN...END.",
+            FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd =>
+                "This IF immediately follows the prior IF's own END on the same line - easy to misread as an ELSE IF continuation when it is really a separate, unconditional statement.",
+            FormattingFindingKind.RedundantParentheses =>
+                "These parentheses do not change grouping or precedence - remove them.",
+            _ =>
+                "This module's own definition does not begin with a comment before its first real statement.",
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);

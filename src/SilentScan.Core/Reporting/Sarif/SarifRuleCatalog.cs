@@ -44,6 +44,15 @@ public static class SarifRuleCatalog
     public const string CodeMetricTooManyConditionalOperatorsRuleId = "silentscan/metrics/too-many-conditional-operators";
     public const string CodeMetricTooManyCaseBranchesRuleId = "silentscan/metrics/too-many-case-branches";
     public const string CodeMetricCaseBranchTooLongRuleId = "silentscan/metrics/case-branch-too-long";
+    public const string FormattingTabCharacterUsedRuleId = "silentscan/formatting/tab-character";
+    public const string FormattingMultipleStatementsOnSameLineRuleId = "silentscan/formatting/multiple-statements-per-line";
+    public const string FormattingMultipleDeclarationsOnSameLineRuleId = "silentscan/formatting/multiple-declarations-per-line";
+    public const string FormattingMissingBeginEndBlockRuleId = "silentscan/formatting/missing-begin-end";
+    public const string FormattingSingleLineConditionalBodyRuleId = "silentscan/formatting/single-line-conditional-body";
+    public const string FormattingDanglingStatementAfterUnbracedBodyRuleId = "silentscan/formatting/dangling-statement-after-unbraced-body";
+    public const string FormattingIfImmediatelyFollowingPriorBlockEndRuleId = "silentscan/formatting/if-following-prior-block-end";
+    public const string FormattingRedundantParenthesesRuleId = "silentscan/formatting/redundant-parentheses";
+    public const string FormattingMissingFileHeaderCommentRuleId = "silentscan/formatting/missing-file-header-comment";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -184,6 +193,20 @@ public static class SarifRuleCatalog
         CodeMetricFindingKind.TooManyCaseBranches => CodeMetricTooManyCaseBranchesRuleId,
         CodeMetricFindingKind.CaseBranchTooLong => CodeMetricCaseBranchTooLongRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled CodeMetricFindingKind."),
+    };
+
+    public static string FormattingRuleId(FormattingFindingKind kind) => kind switch
+    {
+        FormattingFindingKind.TabCharacterUsed => FormattingTabCharacterUsedRuleId,
+        FormattingFindingKind.MultipleStatementsOnSameLine => FormattingMultipleStatementsOnSameLineRuleId,
+        FormattingFindingKind.MultipleDeclarationsOnSameLine => FormattingMultipleDeclarationsOnSameLineRuleId,
+        FormattingFindingKind.MissingBeginEndBlock => FormattingMissingBeginEndBlockRuleId,
+        FormattingFindingKind.SingleLineConditionalBody => FormattingSingleLineConditionalBodyRuleId,
+        FormattingFindingKind.DanglingStatementAfterUnbracedBody => FormattingDanglingStatementAfterUnbracedBodyRuleId,
+        FormattingFindingKind.IfImmediatelyFollowingPriorBlockEnd => FormattingIfImmediatelyFollowingPriorBlockEndRuleId,
+        FormattingFindingKind.RedundantParentheses => FormattingRedundantParenthesesRuleId,
+        FormattingFindingKind.MissingFileHeaderComment => FormattingMissingFileHeaderCommentRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled FormattingFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -393,6 +416,15 @@ public static class SarifRuleCatalog
             Rule(CodeMetricTooManyConditionalOperatorsRuleId, "A single IF/WHILE condition chains more AND/OR operators than the configured maximum. Purely a readability signal - no query result or plan is affected."),
             Rule(CodeMetricTooManyCaseBranchesRuleId, "A single CASE expression has more WHEN branches than the configured maximum. Purely a maintainability signal - no query result or plan is affected."),
             Rule(CodeMetricCaseBranchTooLongRuleId, "A single CASE WHEN branch's result expression spans more lines than the configured maximum. Purely a readability signal - no query result or plan is affected."),
+            Rule(FormattingTabCharacterUsedRuleId, "A literal tab character appears in the source text. Purely a readability signal - no query result or plan is affected."),
+            Rule(FormattingMultipleStatementsOnSameLineRuleId, "Two or more statements in the same block start on the same physical source line. Purely a readability signal - no query result or plan is affected."),
+            Rule(FormattingMultipleDeclarationsOnSameLineRuleId, "Two or more variables in the same DECLARE are declared on the same physical source line. Purely a readability signal - no query result or plan is affected."),
+            Rule(FormattingMissingBeginEndBlockRuleId, "An IF/WHILE/ELSE body is a single statement with no BEGIN...END - a later statement added here without braces silently falls outside the conditional. Purely a maintainability risk - no query result or plan is affected."),
+            Rule(FormattingSingleLineConditionalBodyRuleId, "An IF/WHILE/ELSE body is a single unbraced statement sharing its own keyword's line - visually easy to misread. Purely a readability signal - no query result or plan is affected."),
+            Rule(FormattingDanglingStatementAfterUnbracedBodyRuleId, "A statement immediately follows an unbraced IF/WHILE's single-statement body, visually appearing to still be inside the conditional/loop when it is not. The statement's own behavior is unaffected - only a future edit relying on the misleading visual shape is at risk."),
+            Rule(FormattingIfImmediatelyFollowingPriorBlockEndRuleId, "An IF immediately follows the closing END of a prior braced IF on the same line - easy to misread as an ELSE IF continuation when it is really a separate, unconditional statement. The statement's own behavior is unaffected - only a future edit relying on the misleading visual shape is at risk."),
+            Rule(FormattingRedundantParenthesesRuleId, "A parenthesized expression whose parentheses do not change grouping or precedence at all. Purely a readability signal - no query result or plan is affected."),
+            Rule(FormattingMissingFileHeaderCommentRuleId, "A module's own definition does not begin with a comment before its first real statement. Purely advisory - T-SQL modules carry no universal file-header convention the way application source files do."),
         ];
 
         // Only the Medium variant is generated: nothing in this tool produces a Low-confidence
