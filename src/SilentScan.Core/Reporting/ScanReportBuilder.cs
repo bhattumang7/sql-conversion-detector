@@ -1146,6 +1146,11 @@ public static class ScanReportBuilder
             statementShapeFindings,
             controlFlowRiskFindings,
             securityFindings,
+            // IndexDesignFindings needs CatalogIndex.IsClustered, populated only by a live catalog
+            // read (LiveCatalogReader) - always empty here; LiveScanRunner merges the real result
+            // in afterward, same pattern TempTableExecShapeFindings/DatabaseConfigurationFindings
+            // already established.
+            [],
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

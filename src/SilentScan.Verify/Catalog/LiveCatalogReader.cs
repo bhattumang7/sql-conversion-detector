@@ -51,7 +51,7 @@ public sealed class LiveCatalogReader
         var columnsByTable = await ReadColumnsAsync(connection, catalog.Skipped, cancellationToken);
         var indexesByTable = await ReadIndexesAsync(connection, cancellationToken);
 
-        foreach (var (objectId, schemaName, tableName) in tables)
+        foreach (var (objectId, schemaName, tableName, isMemoryOptimized) in tables)
         {
             var qualifiedName = $"{schemaName}.{tableName}";
             catalog.AddOrReplace(new CatalogTable(
@@ -61,7 +61,8 @@ public sealed class LiveCatalogReader
                 Columns: columnsByTable.GetValueOrDefault(objectId, []),
                 Indexes: indexesByTable.GetValueOrDefault(objectId, []),
                 SourcePath: qualifiedName,
-                SourceLine: 0));
+                SourceLine: 0,
+                IsMemoryOptimized: isMemoryOptimized));
         }
 
         foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
@@ -677,11 +678,11 @@ public sealed class LiveCatalogReader
         return SchemaObjectNameHelper.Qualify(namedTable.SchemaObject);
     }
 
-    private static async Task<List<(int ObjectId, string SchemaName, string TableName)>> ReadTablesAsync(
+    private static async Task<List<(int ObjectId, string SchemaName, string TableName, bool IsMemoryOptimized)>> ReadTablesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT t.object_id, s.name AS schema_name, t.name AS table_name
+            SELECT t.object_id, s.name AS schema_name, t.name AS table_name, t.is_memory_optimized
             FROM sys.tables t
             JOIN sys.schemas s ON s.schema_id = t.schema_id
             WHERE t.is_ms_shipped = 0
@@ -690,11 +691,11 @@ public sealed class LiveCatalogReader
 
         await using var command = connection.CreateReadOnlyCommand(sql);
 
-        var tables = new List<(int, string, string)>();
+        var tables = new List<(int, string, string, bool)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            tables.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+            tables.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3)));
         }
 
         return tables;
@@ -764,14 +765,23 @@ public sealed class LiveCatalogReader
     private static async Task<Dictionary<int, List<CatalogIndex>>> ReadIndexesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
+        // LEFT JOINs to sys.index_columns/sys.columns, not the INNER JOINs every other reader in
+        // this file uses - a clustered COLUMNSTORE index (type_desc = 'CLUSTERED COLUMNSTORE')
+        // owns every column implicitly and has NO sys.index_columns rows of its own, so an INNER
+        // JOIN here would silently drop the whole index row. That would have been invisible
+        // before CatalogIndex.IsClustered existed (nothing looked for a clustered index's
+        // presence at all), but IndexDesignScanner's heap findings depend on it: a table whose
+        // only clustering is a CCI must never be misread as a heap because its one clustered
+        // index vanished from this list. ic.index_column_id/c.name are null for such a row - the
+        // loop below guards both.
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
-            JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
-            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            LEFT JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            LEFT JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
             WHERE t.is_ms_shipped = 0 AND i.type_desc <> 'HEAP'
             ORDER BY i.object_id, i.index_id, ic.index_column_id;
             """;
@@ -802,6 +812,13 @@ public sealed class LiveCatalogReader
                 rowsByIndex[key] = row;
             }
 
+            if (await reader.IsDBNullAsync(12, cancellationToken))
+            {
+                // No sys.index_columns row at all (clustered columnstore) - the index row above
+                // was already recorded with empty key/included lists; nothing more to add.
+                continue;
+            }
+
             var isIncluded = reader.GetBoolean(10);
             var columnName = reader.GetString(12);
             if (isIncluded)
@@ -829,7 +846,8 @@ public sealed class LiveCatalogReader
                 IncludedColumns: row.IncludedColumns,
                 IsFiltered: row.HasFilter,
                 IsColumnstore: row.TypeDesc.Contains("COLUMNSTORE", StringComparison.OrdinalIgnoreCase),
-                IsDisabled: row.IsDisabled);
+                IsDisabled: row.IsDisabled,
+                IsClustered: row.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase));
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {

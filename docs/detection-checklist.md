@@ -3462,21 +3462,150 @@ makes them the cleanest findings in this entire file.
       leading on it. We already read both halves; this is a join over data in
       hand. Costs: RI checks on parent delete/update scan the child, and every
       join along the relationship has no seek path.
-- [ ] **Heap (no clustered index) on a table that has nonclustered indexes**,
-      and the sharper sibling, **heap with a nonclustered primary key** —
-      needs a clustered/nonclustered flag on `CatalogIndex`, which currently
-      models only `Index`/`PrimaryKey`/`UniqueConstraint` and cannot express
-      it. That field is a prerequisite for four items in this group.
+- [x] **Heap (no clustered index) on a table that has nonclustered indexes**,
+      the sharper sibling **heap with a nonclustered primary key**, and
+      **clustering-key quality** (non-unique clustered index, wide clustered
+      key, `uniqueidentifier` clustered key with a `NEWID()` default) —
+      shipped as one finding type, `IndexDesignFinding`/`IndexDesignScanner`
+      (`src/SilentScan.Core/Predicates/IndexDesignFinding.cs`,
+      `IndexDesignScanner.cs`), five `IndexDesignFindingKind` members.
+      **Count reconciliation**: this bullet's own prose called it "four items
+      in this group" needing the new clustered/nonclustered flag - the actual
+      shipped count is FIVE distinct kinds (2 heap + 3 clustering-key-quality),
+      corrected here rather than silently shipping a different count than
+      what was scoped.
+      <br><br>
+      **The prerequisite catalog field**: `CatalogIndex.IsClustered` (additive,
+      defaults `false`, same shape as every other field added this session -
+      `IsNotTrusted`/`IsDisabled` on `ForeignKeyRelationship`,
+      `IsAnsiPadded` on `CatalogColumn`), read live-only from
+      `sys.indexes.type_desc` in `LiveCatalogReader.ReadIndexesAsync`. True
+      for both `CLUSTERED` (rowstore) and `CLUSTERED COLUMNSTORE` - either
+      means the table is not a heap - false for `NONCLUSTERED`,
+      `NONCLUSTERED COLUMNSTORE`, `XML`, `SPATIAL`, and `NONCLUSTERED HASH`
+      (memory-optimized). A genuine rowstore clustering KEY (the thing the
+      quality checks reason about) is always `IsClustered && !IsColumnstore`,
+      never `IsClustered` alone - a clustered columnstore index has no
+      traditional key/uniquifier concept. File mode never sets this field
+      (file-parsed DDL-fidelity for clustering is explicitly out of scope,
+      same reasoning as every other engine-only fact), so the whole stream is
+      live-mode only: `ScanReportBuilder` always emits `[]`,
+      `SilentScan.Live.LiveScanRunner` runs `IndexDesignScanner.Scan(catalog)`
+      after a real catalog read and merges the result in, the identical
+      shape `TempTableExecShapeFindings`/`DatabaseConfigurationFindings`
+      already established.
+      <br><br>
+      **A real join-shape bug caught while adding the flag, not by intent**:
+      `ReadIndexesAsync`'s existing query INNER JOINs `sys.index_columns`,
+      which silently drops any index with zero key-column rows - true only of
+      a clustered columnstore index (it owns every column implicitly and has
+      no `sys.index_columns` rows of its own). Before `IsClustered` existed
+      this was invisible (nothing looked for a clustered index's presence at
+      all); with it, a CCI-only table's one clustered index would have
+      vanished from `CatalogTable.Indexes` entirely and been misread as a
+      heap. Fixed by switching to `LEFT JOIN` against both
+      `sys.index_columns` and `sys.columns`, guarding the null-column case in
+      the read loop - a genuine correctness fix landing alongside the new
+      field, not a pre-existing bug this task was scoped to touch.
+      <br><br>
+      **Memory-optimized guard**: `CatalogTable.IsMemoryOptimized` (new,
+      additive, live-only) skips both heap kinds - a memory-optimized table
+      has no on-disk heap/RID storage at all and the engine requires at least
+      one HASH or NONCLUSTERED (BW-tree) index, never a `type = 1` row, so
+      naive heap detection would misfire on every one. Zero memory-optimized
+      tables exist in the local test database today, so this guard is
+      precautionary, not something the measured count below depends on.
+      <br><br>
+      **Precision guard on the heap pair**: a heap with ZERO indexes at all
+      (a staging/bulk-load table, often deliberate) never fires either kind -
+      scoped narrowly to "heap WITH nonclustered indexes present," matching
+      the checklist's own original scoping note. When the nonclustered set
+      includes the table's own PRIMARY KEY, only the sharper
+      `HeapWithNonclusteredPrimaryKey` fires, never both kinds for the same
+      underlying cause.
+      <br><br>
+      **Threshold calibration against the real distribution in the local test
+      database**, done before keeping the checklist's proposed numbers
+      (CLAUDE.md's "never blindly copy a threshold" discipline): of 681 real
+      clustered indexes, only 7 (~1%) carry more than 3 key columns, and 36
+      (~5%) exceed 16 estimated key bytes (mean key width ~15.3 bytes - many
+      single-column `uniqueidentifier` keys sit exactly at 16, just under the
+      line) - both thresholds fire on a real, non-trivial minority rather
+      than either the routine case or almost nothing, so both were kept as
+      proposed (`IndexDesignScanner.WideClusteredKeyMaxColumns` = 3,
+      `WideClusteredKeyMaxBytes` = 16). Byte width is a best-effort estimate
+      from the column types/lengths this catalog already models
+      (`IndexDesignScanner.EstimateColumnKeyBytes`) - covers every fixed-width
+      numeric/temporal type plus char/varchar/nchar/nvarchar/binary/varbinary/
+      uniqueidentifier, and if ANY key column's type can't be resolved the
+      byte-based half of the check is dropped entirely rather than reporting
+      a partial lower-bound total as if it were the real key width (the
+      column-count half still evaluates independently). `Confidence.Medium`,
+      not High - a calibrated threshold is inherently softer than a
+      structurally-provable fact.
+      <br><br>
+      **The `NEWID()`/`NEWSEQUENTIALID()` precision guard, confirmed both
+      ways**: matched by exact equality on the column DEFAULT text after
+      stripping whitespace/parentheses (`"newid"`), never a substring match -
+      verified directly that `"NEWID("` is not a substring of
+      `"NEWSEQUENTIALID()"` (after `NEW` the next character differs, `S` vs
+      `I`), and a dedicated fixture/test
+      (`NewIdDefaultTextVariants_AllRecognized`,
+      `GuidClusteredKeyWithNewSequentialIdDefault_NeverFires`) exercises both
+      directions. Zero real occurrences of a `NEWID()`-defaulted clustered
+      GUID key exist in the local test database today (a genuinely rare
+      anti-pattern in a mature codebase, or simply avoided), so this kind's
+      fire path is fixture-only against the real corpus - not a gap, an
+      honest report of what the corpus actually contains.
+      <br><br>
+      **Oracle confirmation of the fragmentation claim** (decided this was
+      confidently-established, well-documented storage-engine behavior that
+      didn't strictly need a fresh probe to ship, matching
+      `MaxTypedColumnFinding`'s precedent for catalog-only structural facts -
+      but ran one anyway for extra, on-brand confidence, since the standing
+      Docker instance is free to use and CLAUDE.md never gates this on
+      permission): seeded two otherwise-identical tables (20,000 rows each,
+      `uniqueidentifier` clustered key + a 200-byte filler column) on the
+      disposable Docker instance, one defaulted to `NEWID()`, one to
+      `NEWSEQUENTIALID()`, then measured `sys.dm_db_index_physical_stats`.
+      Result: **99.3% average fragmentation, 829 pages** for the `NEWID()`
+      table vs **0.5% fragmentation, 572 pages** for the `NEWSEQUENTIALID()`
+      table - same row count, same schema, only the default differs. A
+      strong, cheap, real confirmation of the claim this finding makes.
+      <br><br>
+      **Real coverage measured against the local test database** (`scan-db`,
+      full pipeline, 4,987 modules, ~2,700 tables, no crashes, no new
+      parse/detect gaps): **151 findings** -
+      `HeapWithNonclusteredPrimaryKey` 72, `WideClusteredKey` 41,
+      `NonUniqueClusteredIndex` 22, `HeapWithNonclusteredIndexes` 16,
+      `RandomClusteredKeyGuidDefault` 0 (see the note above on why zero is
+      expected here, not a coverage gap). Cross-checked directly against
+      `sys.indexes`/`sys.key_constraints` independent of this tool's own code
+      before trusting the scanner's count: 835 real tables, 154 heaps, 88
+      heap-with-nonclustered-indexes-present (72 with a nonclustered PK + 16
+      without, matching the scanner's own kind split exactly), 22 non-unique
+      clustered indexes, 0 memory-optimized tables - every number agrees.
+      Fixtures: `tests/SilentScan.Tests/Predicates/IndexDesignScannerTests.cs`,
+      21 tests, hand-built catalog fixtures (`CatalogIndex.IsClustered` is
+      live-only, so file-mode-style parsing can't produce it - the same
+      "hand-built catalog is the only way to construct this state" precedent
+      `CrossTableTypeDriftScannerTests` already set), one fire + one
+      near-miss per kind plus the explicit `NEWSEQUENTIALID()` guard,
+      clustered-columnstore guard (never read as a heap, never treated as a
+      traditional clustering key), and memory-optimized guard.
+      <br><br>
+      Wired end-to-end: `ScanReport.CurrentSchemaVersion` bumped 46→47,
+      `SarifRuleCatalog`/`SarifReportWriter` (`Error` for the four
+      structurally-provable kinds, `Warning` for the threshold-based wide-key
+      kind, both floored by confidence the same way every other stream
+      already is), `ReadableScanReportWriter` (a new "Physical/schema index
+      design" section plus a summary-table row). Engine-version insensitive:
+      clustered-index mechanics (the hidden uniquifier, RID-based
+      nonclustered lookups on a heap, GUID-vs-sequential insert locality) are
+      long-standing physical storage-engine behavior, not query-optimizer
+      behavior, so no compat-level/CE-mode caveat applies.
 - [ ] **Table with no primary key at all** — the one design-bar check the
       abandoned DacFx sample (`SRD0001`) and the live-server family agree on.
-- [ ] **Clustering-key quality**, three findings sharing one mechanism (every
-      nonclustered index silently carries the clustering key in its leaf, so
-      the clustered key's width and stability is a per-table multiplier):
-      non-unique clustered index (the engine adds a hidden 4-byte uniquifier);
-      wide clustered key (>3 key columns or >16 bytes, computed from the
-      column types we already have); `uniqueidentifier` clustered key with a
-      `NEWID()` default (random insert distribution → page splits and
-      fragmentation; `NEWSEQUENTIALID()` is the near-miss that must not fire).
 - [ ] **Over-indexing**: many nonclustered indexes on one table, and indexes
       with ≥7 key columns. Threshold-based, so lower precision than the rest of
       this group — ship with the threshold stated in the finding text. Note the

@@ -63,6 +63,7 @@ public sealed record ScanReport(
     IReadOnlyList<StatementShapeFinding> StatementShapeFindings,
     IReadOnlyList<ControlFlowRiskFinding> ControlFlowRiskFindings,
     IReadOnlyList<SecurityFinding> SecurityFindings,
+    IReadOnlyList<IndexDesignFinding> IndexDesignFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -218,5 +219,13 @@ public sealed record ScanReport(
     /// hard-coded IP address, a HASHBYTES call naming a weak/deprecated algorithm (general use and
     /// sensitive-context use), and a dynamic SQL call site this tool cannot prove is free of
     /// runtime/external influence.
-    public const int CurrentSchemaVersion = 46;
+    /// Bumped to 47 for the new <see cref="IndexDesignFindings"/> stream (docs/detection-
+    /// checklist.md "DBA-script family sweep (2026-08-17)" §A "Physical/schema design", the
+    /// clustered/nonclustered-flag-dependent group): heap with nonclustered indexes present, heap
+    /// with a nonclustered primary key, non-unique clustered index, wide clustered key, and a
+    /// uniqueidentifier clustered key defaulted to NEWID(). Live-mode only - always empty in a
+    /// file-mode scan, same reasoning as <see cref="TempTableExecShapeFindings"/>/<see
+    /// cref="DatabaseConfigurationFindings"/> (the new <see cref="Catalog.CatalogIndex.IsClustered"/>
+    /// flag it depends on is populated only by a live catalog read).
+    public const int CurrentSchemaVersion = 47;
 }

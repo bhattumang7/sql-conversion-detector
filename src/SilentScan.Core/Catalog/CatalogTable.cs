@@ -28,8 +28,17 @@ public sealed record CatalogTable(
     IReadOnlyList<CatalogColumn> Columns,
     IReadOnlyList<CatalogIndex> Indexes,
     string SourcePath,
-    int SourceLine)
+    int SourceLine,
+    bool IsMemoryOptimized = false)
 {
+    // IsMemoryOptimized (sys.tables.is_memory_optimized, live-only) guards
+    // Predicates.IndexDesignScanner's heap findings: a memory-optimized table has no on-disk
+    // heap/RID storage at all - the engine requires at least one HASH or NONCLUSTERED (BW-tree)
+    // index and never produces a type=1 CLUSTERED row for one, so naively reading "no clustered
+    // index" as heap-ness would misfire on every memory-optimized table. Defaults to false so
+    // file mode (which never sets it) never excludes a table this scanner doesn't even run
+    // against anyway (see CatalogIndex.IsClustered's own doc comment).
+
     /// <summary>schema.name, or just name for temp tables/table variables which have no schema.</summary>
     public string QualifiedName => SchemaName is null ? Name : $"{SchemaName}.{Name}";
 

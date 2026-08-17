@@ -95,6 +95,7 @@ public static class SarifReportWriter
         results.AddRange(report.StatementShapeFindings.Select(ToResult));
         results.AddRange(report.ControlFlowRiskFindings.Select(ToResult));
         results.AddRange(report.SecurityFindings.Select(ToResult));
+        results.AddRange(report.IndexDesignFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -982,6 +983,20 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-persisted computed column ({finding.DefinitionText}) - recomputed from the base row on every read that touches it.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(IndexDesignFinding finding)
+    {
+        // Error for the structurally-provable, no-estimation kinds (both heap kinds, non-unique
+        // clustered index, and the GUID/NEWID default - an exact DEFAULT-text match, not a
+        // heuristic). Warning for the threshold-based wide-key kind, matching how this codebase
+        // already floors severity by confidence elsewhere (FloorLevelForConfidence handles the
+        // Medium-confidence downgrade for it on top of this).
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexDesignRuleId(finding.Kind), finding.Confidence);
+        var baseLevel = finding.Kind == IndexDesignFindingKind.WideClusteredKey ? LevelWarning : LevelError;
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: null);
     }
 
     private static SarifResult ToResult(TempTableExecShapeFinding finding)

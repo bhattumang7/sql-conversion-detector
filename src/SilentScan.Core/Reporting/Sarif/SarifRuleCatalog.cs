@@ -212,6 +212,16 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
+    public static string IndexDesignRuleId(IndexDesignFindingKind kind) => kind switch
+    {
+        IndexDesignFindingKind.HeapWithNonclusteredIndexes => "silentscan/index-design/heap-with-nonclustered-indexes",
+        IndexDesignFindingKind.HeapWithNonclusteredPrimaryKey => "silentscan/index-design/heap-with-nonclustered-primary-key",
+        IndexDesignFindingKind.NonUniqueClusteredIndex => "silentscan/index-design/non-unique-clustered-index",
+        IndexDesignFindingKind.WideClusteredKey => "silentscan/index-design/wide-clustered-key",
+        IndexDesignFindingKind.RandomClusteredKeyGuidDefault => "silentscan/index-design/random-clustered-key-guid-default",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
     public static string SetOptionRuleId(SetOptionFindingKind kind) => kind switch
     {
         SetOptionFindingKind.QuotedIdentifierOffBlocksIndexedFeature => "silentscan/set-option/quoted-identifier-off",
@@ -626,6 +636,11 @@ public static class SarifRuleCatalog
             Rule(SecurityRuleId(SecurityFindingKind.WeakHashAlgorithm), "A HASHBYTES call names a cryptographically broken/deprecated algorithm (MD2/MD4/MD5/SHA/SHA1) - prefer SHA2_256/SHA2_512."),
             Rule(SecurityRuleId(SecurityFindingKind.WeakHashAlgorithmInSensitiveContext), "A HASHBYTES call names a weak/deprecated algorithm in what looks like a security-sensitive context (a credential-named operand, or a direct comparison)."),
             Rule(SecurityRuleId(SecurityFindingKind.UnprovableDynamicSqlText), "A dynamic SQL call site's assembled text depends on a variable/parameter/expression this tool cannot trace - it cannot be shown, from the code alone, to be free of runtime/external influence."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.HeapWithNonclusteredIndexes), "A table has no clustered index anywhere but carries one or more nonclustered indexes - each one points back to its base row with an 8-byte RID instead of the clustering key, and that RID can change under heap maintenance (forwarded-row pointers)."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.HeapWithNonclusteredPrimaryKey), "A table has no clustered index anywhere because its own PRIMARY KEY constraint is declared NONCLUSTERED - the sharper sibling of the general heap-with-nonclustered-indexes finding."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.NonUniqueClusteredIndex), "A CLUSTERED index is not unique - the engine adds a hidden 4-byte uniquifier to every duplicate-keyed row, widening the key every nonclustered index on the table also carries in its own leaf rows."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.WideClusteredKey), "A CLUSTERED index's key is wide (more than 3 key columns, or more than 16 estimated bytes) - every nonclustered index on the table carries a full copy of this key in every leaf row."),
+            Rule(IndexDesignRuleId(IndexDesignFindingKind.RandomClusteredKeyGuidDefault), "A CLUSTERED index leads on a uniqueidentifier column defaulted to NEWID() - genuinely random insert order into a clustered B-tree causes severe page splits and fragmentation; NEWSEQUENTIALID() avoids this."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the

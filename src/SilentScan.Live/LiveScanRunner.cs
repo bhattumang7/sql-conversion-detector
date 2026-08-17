@@ -209,6 +209,18 @@ public static class LiveScanRunner
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
 
+        // docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A "Physical/schema
+        // design" - catalog-only (no live round trip of its own needed here; CatalogIndex.IsClustered
+        // was already populated by the LiveCatalogReader read above), but merged in the same
+        // live-only-only-empty-in-file-mode shape as the two stages just above, since the flag it
+        // depends on is itself live-only.
+        using (var indexDesignStage = progress.Begin("checking clustered/heap index design"))
+        {
+            var indexDesignFindings = IndexDesignScanner.Scan(catalog);
+            report = report with { IndexDesignFindings = indexDesignFindings };
+            indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
+        }
+
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];
         IReadOnlyList<WorkloadFinding> workloadFindings = [];

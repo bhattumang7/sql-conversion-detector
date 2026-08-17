@@ -125,6 +125,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(StatementShape(report, headingLevel, pathBase));
         blocks.AddRange(ControlFlowRisk(report, headingLevel, pathBase));
         blocks.AddRange(Security(report, headingLevel, pathBase));
+        blocks.AddRange(IndexDesign(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -190,6 +191,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Statement-shape risks", report.StatementShapeFindings.Count);
         AddCount(counts, "Cursor and control-flow risks", report.ControlFlowRiskFindings.Count);
         AddCount(counts, "Security", report.SecurityFindings.Count);
+        AddCount(counts, "Physical/schema index design (heap/clustered-key quality)", report.IndexDesignFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -996,6 +998,28 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> IndexDesign(ScanReport report, int level, string? pathBase)
+    {
+        if (report.IndexDesignFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Physical/schema index design ({report.IndexDesignFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), a wide clustered key (>3 key columns or >16 estimated bytes - every nonclustered index on the table carries a copy of it), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Index", "Detail"],
+            [.. report.IndexDesignFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.IndexName ?? "<unnamed>",
                 f.DetailText,
             })]);
     }
