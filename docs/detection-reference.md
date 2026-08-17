@@ -67,13 +67,15 @@ them emits is an unverified static claim.
 | Tool | Type-aware? | Status | Conversion rule |
 |---|---|---|---|
 | `SqlServer.Rules` (DacFx; dormant original 80 rules + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server — fork re-confirmed 2026-08-16 at **135 rules**, not 120; delta is 56, including exposing DacFx's own built-in SR0001–SR0016 for the first time) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric (measured, 1/3 precision) |
-| Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule, symmetric per docs; direction-awareness an unverified negative (JS-shell site) — close via trial install before publication |
+| Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule, docs describe the general mechanism ("one type will be implicitly converted to the other") with no directional language either way; **still an unverified negative, not resolved** — see 2026-08-17 pre-publication-gate note below |
 | SonarQube T-SQL plugin (ANTLR `grammars-v4`) | No | Dormant since 2024 | none |
 | Same CI platform, paid-tier T-SQL analyzer, ~83 rules (hand-written grammar; source-read 2026-08-16, §7.8) | No — AST shape matches and name lists only | Active (closed source) | none |
 | Oracle PL/SQL analyzer | No (block-scope symbol table, no catalog) | Active | none; **no T-SQL support at all** |
 | Rust multi-dialect linter, 282 rules | Parses DDL types into a field it **never reads** | Active | declared stub, never fires |
 | DacFx rule sample, 9 rules | No | Abandoned 2017 | none |
 | WinForms regex scorer, 9 regexes | No | Toy, 0 stars | none |
+| Rust/WASM-delivered T-SQL linter, ~103 T-SQL rules (source-read 2026-08-17) | **Partially** — two independent conversion rules; one is genuinely schema/catalog-aware within a single file's own DDL (declared column + variable/parameter types, no live connection), the other is a pure token-level heuristic | Active | Both **direction-aware, source-confirmed** — see §7.9 |
+| NuGet-distributed T-SQL rule set, ~130 rules registered (source-read 2026-08-17; checklist's original "169" not reproduced by a direct `RuleId` count, difference not investigated further) | **Yes** — real ScriptDom-visitor + a genuine schema-resolution layer (table/column type model built from parsed DDL, not a live connection) | Active | **Direction-aware, source-confirmed** — see §7.9 |
 
 Ruled out by the same web sweep (none does query-level type-aware analysis):
 a dormant enterprise rule-pack product (no release since 2022, vendor
@@ -962,6 +964,148 @@ these are the facts the study can cite:
 total to ~721 rules across seven tools without changing the headline negative
 at all, which is the more useful thing to be able to say: the gap is not an
 artefact of having surveyed only free tools.
+
+### 7.9 Two more tools, closed out from the checklist's own "research gates" list (source-read 2026-08-17)
+
+Both cloned and read at source level via `gh repo clone` (public repos, no
+decompilation needed, unlike §7.7/7.8). This closes the checklist's "Follow-up
+gate" item — both tools' docs showed no implicit-conversion hit on a grep, but
+that was a docs-level read; the real question was whether their actual rule
+*source* has one, and if so whether it is direction-aware. **Both do, and both
+are.** This is a genuine correction to the checklist's working assumption that
+"nothing else exists" — it does, in two independent codebases, though neither
+is oracle-backed and neither is collation-aware.
+
+**Tool A (Rust/WASM-delivered, ~103 T-SQL rules).** Has TWO separate,
+independent implicit-conversion rules, not one:
+
+* `sarg.implicit_conversion_param_type` (`crates/analyzer-core/src/rules/
+  sargability.rs`, function `implicit_conversion_param_type_mismatch`) — a
+  real, schema-aware rule. It parses `CREATE TABLE`/`ALTER TABLE ADD` column
+  lists and `DECLARE`/procedure-parameter headers *within the same file being
+  analyzed* (no live connection — a file-scoped type model, not a catalog)
+  into an ANSI-vs-Unicode string-family map, resolves table aliases in the
+  FROM clause, and only fires when a column compared against a `@variable`/
+  parameter is on the **lower-precedence (ANSI) side** while the variable is
+  Unicode — the reverse direction is explicitly and correctly treated as safe.
+  Its own doc comment states the precedence reasoning almost identically to
+  this project's own: *"Direction matters, and only one direction is
+  harmful... comparing a varchar column to an nvarchar parameter converts the
+  column, on every row, which destroys the seek. The reverse... converts the
+  parameter once and the seek survives, so it is deliberately not flagged."*
+  It even distinguishes SQL vs. Windows collation FAMILIES in its own
+  remediation text ("Under a SQL collation this forces a full scan; under a
+  Windows collation the engine can still range-seek") — but this is prose
+  advice only, not a schema field it actually reads or branches on; there is
+  no `Collation` value anywhere in its type model, so — unlike this project's
+  own `ScanForced`-vs-`RangeSeek` split — it cannot act on the distinction it
+  correctly describes. Ambiguity handling is real and conservative: a column
+  or variable redeclared with conflicting families anywhere in the file is
+  marked ambiguous and never reported, matching this project's own "Unknown
+  over guesses" discipline; a bare, unqualified column with more than one
+  candidate table in scope also declines.
+* `sarg.implicit_convert_unicode` (same file) — a separate, deliberately
+  weaker, purely token-level heuristic: any `col <op> N'...'` shape flags as
+  `Info`-severity "verify the column is nvarchar," with no type resolution at
+  all. Its own comment states plainly it cannot know the column's real type at
+  the token level and is advisory only — the tool ships both a real
+  type-checked rule and a lower-confidence fallback for files where the
+  declaration isn't visible, an honest two-tier design.
+* **What it does not have**: no cross-file/live-catalog resolution (a column
+  declared in a different file than the query using it is invisible to it,
+  by the rule's own design), no collation-driven verdict split, no view/TVF
+  lineage, no plan-XML oracle of any kind.
+
+**Tool B (NuGet-distributed rule set, ~130 rules registered via a direct
+`RuleId` count — the checklist's original "169" figure was not reproduced by
+this count and the discrepancy was not investigated further, out of scope for
+this gate).** Also has a real schema-aware rule, structurally closer to this
+project's own architecture than Tool A's file-scoped model:
+its own schema-aware implicit-conversion predicate rule (source file under
+its own rules/schema area) walks `BooleanComparisonExpression`
+nodes via a real ScriptDom visitor, resolves each operand's type through a
+genuine schema-resolution layer (an `ISchemaProvider` abstraction over its own
+table/column type model built by parsing DDL text, confirmed by reading the
+resolution layer directly: no `SqlConnection`/SMO/live-catalog code anywhere
+in it, so this is the same "parse the DDL yourself" approach CLAUDE.md's own
+hard-scope rule explicitly rejects for this project, not a live-catalog
+read), and calls a genuinely general type-compatibility function returning
+`LeftConverted`/`RightConverted`/`BothConverted`/`None` from real SQL Server
+type-precedence tables (numeric, string, datetime categories, plus
+cross-category precedence) — **the rule then only reports when the converted
+side is itself a `ColumnReferenceExpression`**, i.e. it is precedence- and
+direction-aware by construction, not by accident. A separate, unrelated rule
+covers the purely syntactic explicit-`CAST`/`CONVERT`-wraps-a-column shape
+(this project's own `CastOrConvertOnColumn` Tier-1 kind) — the two rules are
+cleanly split by mechanism, the same way this project separates its
+verdict-bearing implicit-conversion stream from its syntactic Tier-1 stream.
+A `Collation` field exists on its schema model but is never read by the
+type-compatibility function or the conversion rule — collation is modeled but
+not acted on, the same gap as Tool A.
+
+**Net correction to the checklist's own premise:** "nothing else exists" is
+false for open-source tools specifically — direction-aware implicit-
+conversion detection exists in at least two more codebases than previously
+recorded. What remains true, checked directly in both: **neither is
+collation-aware, neither has a lineage/view-expansion pass, and neither has
+any plan-XML oracle** — this project's real, still-unmatched differentiator
+is not "detects direction" (now shown to exist elsewhere) but the combination
+of direction + collation-family verdict split + lineage-depth attribution +
+oracle confirmation, none of which either tool attempts.
+
+**Item closed.** No code changes needed on either finding — both are
+research-record corrections only.
+
+### 7.10 Pre-publication gate: commercial schema-bound analyzer — attempted, not resolved (2026-08-17)
+
+The checklist's other, higher-priority research gate — measuring the
+commercial schema-bound analyzer's own conversion rule (§7's table entry
+above) for direction-awareness before the study can claim "nothing is
+direction-aware" in public. **Genuinely attempted this session, not closed
+with a real answer — recording the attempt honestly rather than guessing.**
+
+What was tried:
+* Direct fetch of the vendor's own rule documentation page for the rule
+  (found via web search, both a current URL and a legacy-format URL pattern
+  the vendor used before a site rebuild) — the entire site is now a
+  client-side-rendered SPA (confirmed by inspecting the raw HTML response
+  directly: the server returns only a `<head>`/script-bundle shell with zero
+  rule content, and JS execution is required to render anything). This
+  reproduces, with direct first-hand confirmation rather than an inherited
+  assumption, the "vendor site defeats fetching" finding this gate item
+  already recorded.
+* The same client-side-rendering wall applies even to the vendor's own
+  legacy static documentation URL scheme (pre-rebuild `/help_*/html/<guid>.htm`
+  pages, confirmed still indexed and linkable via search) — these now also
+  route through the same JS shell rather than serving static HTML, so there
+  is no older, still-static mirror of the same content to fall back to.
+* A web search engine's own indexed snippet (which does appear to reflect
+  JS-rendered content, likely captured by the search engine's own crawler
+  executing the page's JS at index time) DOES surface real rule prose: the
+  rule "checks the SQL code for operators combining two expressions of
+  different data types and cause implicit conversion... Implicit conversion
+  can lead to data truncation and to performance issues appears in query
+  filter... The rule has a Batch scope and is applied only on the SQL
+  script." This description is symmetric in its own language — it describes
+  "two expressions of different data types," never singles out which side
+  converts — but this is circumstantial, not a confirmed negative: absence of
+  directional language in a short marketing-adjacent snippet is not proof the
+  underlying rule logic is symmetric, only that if it IS direction-aware, the
+  doc snippet doesn't say so (the same category of gap this gate item was
+  opened to close).
+* No downloadable rules export/XML/PDF reference was found for this rule.
+* Trial-install was not attempted: the product is a Windows/SSMS-integrated
+  desktop add-in and this research ran in a headless Linux environment with
+  no Windows host available — genuinely infeasible here, not skipped for
+  convenience.
+
+**Disposition: left open, not falsely closed.** The study still cannot claim
+"nothing [among commercial tools] is direction-aware" until this specific gate
+is resolved by someone with a Windows/SSMS environment to trial-install into,
+or until the vendor publishes a non-JS-rendered rules reference. Recorded here
+so the next attempt does not have to rediscover that the site itself, not the
+search process, is what blocks this — and so a false "confirmed symmetric"
+claim is never made on the strength of a documentation snippet alone.
 
 ---
 

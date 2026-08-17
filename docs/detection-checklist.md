@@ -3259,24 +3259,58 @@ tasks, not rule candidates — they don't belong in a detection tier, but need
 doing before the study can make certain public claims.
 
 - [ ] **Pre-publication gate: measure the second type-binding incumbent's
-      conversion rule against our direction fixtures.** The commercial
-      schema-bound analyzer previously recorded as dead is in fact alive, and
-      its cross-type-operator rule is genuinely connection-bound. Its docs
-      read as symmetric, but that's an unverified negative (vendor site
-      defeats fetching). Trial-install it and run the same three-case demo
-      used against `SRP0016`; the study cannot claim "nothing is
-      direction-aware" in public until this is measured.
-- [ ] **Follow-up gate, same shape as the pre-publication gate above: two new
-      tools found need a closer look before being ruled out.** One
-      (Rust, WASM-delivered, ~103 T-SQL rules, actually issues `SET PARSEONLY`
-      and rollback-plan probes — the closest oracle discipline to ours found
-      anywhere; actively maintained) and one distributed via
-      NuGet (169 rules across security/correctness/performance/convention,
-      actively published). Docs for both show no implicit-conversion hit on a
-      grep, but that's from docs, not a source read — same caveat class as the
-      pre-publication gate item. Lower priority than that one since neither
-      claims schema-binding, but cheap to close: read their rule source before
-      the study cites "nothing else exists" as settled.
+      conversion rule against our direction fixtures — attempted 2026-08-17,
+      still open, not resolved.** Genuinely retried directly (fresh fetch of
+      the vendor's own rule page, the legacy static-doc URL scheme, a search
+      engine's own indexed snippet) rather than trusting the prior "vendor
+      site defeats fetching" finding secondhand — confirmed first-hand that
+      the entire site is now a client-rendered SPA with zero server-side
+      content, including the legacy static doc pages, which now redirect
+      through the same JS shell. A search engine's indexed snippet does
+      surface real rule prose, and it reads symmetrically ("two expressions
+      of different data types," no directional language) — but an absent
+      directional mention in a short snippet is not proof the underlying rule
+      logic is symmetric, so this stays an open question, not a confirmed
+      negative. Trial-install remains genuinely blocked in this environment
+      (Windows/SSMS-only product, headless Linux research environment, no
+      Windows host available) — not skipped for convenience. Full write-up,
+      including exactly what was tried and why each avenue failed, is
+      `detection-reference.md` Appendix 7 §7.10. **The study still cannot
+      claim "nothing [commercial] is direction-aware" until this resolves** —
+      needs either a Windows/SSMS environment for a real trial-install, or the
+      vendor publishing a non-JS-rendered rules reference.
+- [x] **Follow-up gate, same shape as the pre-publication gate above: two new
+      tools found need a closer look before being ruled out — closed
+      2026-08-17, both tools' real rule source read directly.** Docs showed no
+      implicit-conversion hit on a grep, but that was a docs-level read; both
+      tools' actual source has a real, direction-aware implicit-conversion
+      rule — genuinely correcting this checklist's own working "nothing else
+      exists" assumption for open-source tools specifically. The Rust/WASM
+      tool (~103 T-SQL rules) has TWO independent conversion rules: a real
+      file-scoped schema-aware one (parses the same file's own DDL/DECLARE/
+      parameter types, direction-aware by construction — its own doc comment
+      states the precedence reasoning almost identically to this project's)
+      plus a separate, deliberately weaker token-level `N'...'`-vs-column
+      heuristic. The NuGet-distributed tool (~130 rules by direct count, not
+      the originally-cited 169 — discrepancy not investigated further, out of
+      scope for this gate) has a real ScriptDom-visitor + schema-resolution-
+      layer rule with a genuinely general type-precedence table
+      (`LeftConverted`/`RightConverted`/`BothConverted`), reporting only when
+      the converted operand is a column — direction-aware by construction, not
+      by accident. **What both still lack, confirmed directly by reading their
+      source, not assumed:** neither is collation-aware (one tracks a
+      `Collation` schema field that is never actually read by the conversion
+      logic; the other only has correct COLLATION FAMILY *prose advice* in its
+      remediation text, never a branch on an actual read value), neither has a
+      lineage/view-expansion pass, neither has a live-catalog connection (both
+      resolve types from parsed DDL text in the files being analyzed, not a
+      real database — the exact "reinventing the database-project wheel"
+      approach CLAUDE.md's own hard-scope rule rejects for this project), and
+      neither has any plan-XML oracle. This project's real differentiator
+      narrows precisely to: direction + collation-family verdict split +
+      lineage-depth attribution + oracle confirmation, together — not
+      direction alone, which is now shown to exist elsewhere. Full write-up:
+      `detection-reference.md` Appendix 7 §7.9.
 
 ---
 
