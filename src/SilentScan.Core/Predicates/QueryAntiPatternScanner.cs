@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -25,7 +26,14 @@ public static class QueryAntiPatternScanner
 
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        // Pre-pass: every CTE name declared ANYWHERE in the script, before the real traversal
+        // below ever reports a bare-reference finding - a CTE declared later in the same batch
+        // than a use-site referencing the identical name is a real (if rare) shape, and this
+        // scanner must never false-fire on it just because of traversal order.
+        var cteNameCollector = new CteNameCollector();
+        parseResult.Fragment.Accept(cteNameCollector);
+
+        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNameCollector.Names);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -37,7 +45,23 @@ public static class QueryAntiPatternScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class CteNameCollector : TSqlFragmentVisitor
+    {
+        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override void ExplicitVisit(CommonTableExpression node)
+        {
+            Names.Add(node.ExpressionName.Value);
+            base.ExplicitVisit(node);
+        }
+    }
+
+    private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "master", "tempdb", "msdb", "model",
+    };
+
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, HashSet<string> cteNames) : TSqlFragmentVisitor
     {
         public List<QueryAntiPatternFinding> Findings { get; } = [];
 
@@ -71,9 +95,313 @@ public static class QueryAntiPatternScanner
                             FindingConfidence.High));
                     }
                 }
+
+                foreach (var named in CollectNamedTableReferences(tableReference))
+                {
+                    InspectUnqualifiedReference(named);
+                    InspectLinkedServerOrCrossDatabase(named);
+                }
             }
 
             base.ExplicitVisit(node);
+        }
+
+        // --- Unqualified table reference (kind 9) / linked-server & cross-database reference
+        // (kind 13) - shared table-reference-site inspection, called from every real query site:
+        // FROM/JOIN (above) plus INSERT/UPDATE/DELETE/MERGE targets and MERGE's own USING source
+        // (below). Deliberately never inspects a CREATE statement's own defining name - that is a
+        // materially different claim already shipped as NamingFindingKind.UnqualifiedCreate. -----
+
+        public override void ExplicitVisit(InsertStatement node)
+        {
+            InspectSiteIfNamedTable(node.InsertSpecification.Target);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(UpdateStatement node)
+        {
+            InspectSiteIfNamedTable(node.UpdateSpecification.Target);
+            InspectUnboundedWrite(node.UpdateSpecification.WhereClause, node.UpdateSpecification.TopRowFilter, node);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DeleteStatement node)
+        {
+            InspectSiteIfNamedTable(node.DeleteSpecification.Target);
+            InspectUnboundedWrite(node.DeleteSpecification.WhereClause, node.DeleteSpecification.TopRowFilter, node);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(MergeStatement node)
+        {
+            InspectSiteIfNamedTable(node.MergeSpecification.Target);
+            InspectSiteIfNamedTable(node.MergeSpecification.TableReference);
+            InspectMergeHazards(node.MergeSpecification);
+            base.ExplicitVisit(node);
+        }
+
+        private void InspectSiteIfNamedTable(TableReference? tableReference)
+        {
+            if (tableReference is NamedTableReference named)
+            {
+                InspectUnqualifiedReference(named);
+                InspectLinkedServerOrCrossDatabase(named);
+            }
+        }
+
+        private void InspectUnqualifiedReference(NamedTableReference named)
+        {
+            if (named.SchemaObject.SchemaIdentifier is not null
+                || named.SchemaObject.BaseIdentifier.Value.StartsWith('#')
+                || cteNames.Contains(named.SchemaObject.BaseIdentifier.Value))
+            {
+                return;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
+            var resolved = catalog.Find(qualifiedName);
+            if (resolved is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.UnqualifiedTableReference, sourcePath,
+                named.StartLine, named.StartColumn,
+                $"'{named.SchemaObject.BaseIdentifier.Value}' resolves to '{qualifiedName}' with no explicit schema qualifier at this reference.",
+                FindingConfidence.Medium));
+        }
+
+        // --- Linked-server 4-part name / cross-database reference (kind 13) --------------------
+
+        private void InspectLinkedServerOrCrossDatabase(NamedTableReference named)
+        {
+            var schemaObject = named.SchemaObject;
+            if (schemaObject.ServerIdentifier is { Value.Length: > 0 } server)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference, sourcePath,
+                    named.StartLine, named.StartColumn,
+                    $"'{server.Value}.{schemaObject.DatabaseIdentifier?.Value}.{schemaObject.SchemaIdentifier?.Value}.{schemaObject.BaseIdentifier.Value}' names a remote linked server - remote statistics are usually unavailable to the optimizer.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            if (schemaObject.DatabaseIdentifier is not { Value.Length: > 0 } database)
+            {
+                return;
+            }
+
+            if (SystemDatabaseNames.Contains(database.Value))
+            {
+                // master/tempdb/msdb/model - a genuinely different database context by name, but
+                // a reference to one of these is almost always a metadata/catalog-view read
+                // (tempdb.sys.objects, master.dbo.syslockinfo) or a tempdb-qualified temp-object
+                // reference, not a real cross-database business predicate with a meaningful
+                // remote-statistics-availability story - real-corpus-measured against the local
+                // test database (docs/detection-checklist.md), where exactly this shape accounted
+                // for 14 of an initial 43 raw hits before this exclusion. Flagging it would dilute
+                // the real signal without being false, so it's declined on purpose, not missed.
+                return;
+            }
+
+            if (catalog.CurrentDatabaseName is not { Length: > 0 } currentDatabase
+                || string.Equals(database.Value, currentDatabase, StringComparison.OrdinalIgnoreCase))
+            {
+                // File-mode (no known current database) or self-referencing 3-part name pointing
+                // back at the very database this catalog was built against - never guessed either
+                // way, matching DatabaseCatalog.Find's own "only an exact, known match" discipline.
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference, sourcePath,
+                named.StartLine, named.StartColumn,
+                $"'{database.Value}.{schemaObject.SchemaIdentifier?.Value}.{schemaObject.BaseIdentifier.Value}' references a different database than the one this scan connected to ('{currentDatabase}').",
+                FindingConfidence.Medium));
+        }
+
+        private static IEnumerable<NamedTableReference> CollectNamedTableReferences(TableReference tableReference)
+        {
+            switch (tableReference)
+            {
+                case NamedTableReference named:
+                    yield return named;
+                    break;
+
+                case QualifiedJoin join:
+                    foreach (var t in CollectNamedTableReferences(join.FirstTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    foreach (var t in CollectNamedTableReferences(join.SecondTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+
+                case JoinParenthesisTableReference parenthesis:
+                    foreach (var t in CollectNamedTableReferences(parenthesis.Join))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+            }
+        }
+
+        // --- UPDATE/DELETE with no WHERE and no TOP (kind 12) -----------------------------------
+
+        private void InspectUnboundedWrite(WhereClause? where, TopRowFilter? top, TSqlStatement node)
+        {
+            if (where is not null || top is not null)
+            {
+                return;
+            }
+
+            var verb = node is UpdateStatement ? "UPDATE" : "DELETE";
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.UnboundedTableWrite, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"{verb} with no WHERE clause and no TOP - a whole-table write with no row-limiting mechanism at all. A deliberate full-table maintenance statement is a legitimate reason this fires; verify intent before treating this as a bug.",
+                FindingConfidence.Medium));
+        }
+
+        // --- MERGE hazards (kinds 10, 11) -------------------------------------------------------
+
+        private void InspectMergeHazards(MergeSpecification spec)
+        {
+            InspectMergeMissingHoldlock(spec);
+            InspectMergeNonUniqueUsingSource(spec);
+            InspectMergeUnconditionalDelete(spec);
+        }
+
+        private void InspectMergeMissingHoldlock(MergeSpecification spec)
+        {
+            if (spec.Target is not NamedTableReference targetRef)
+            {
+                return;
+            }
+
+            var hintKinds = targetRef.TableHints.Select(h => h.HintKind).ToHashSet();
+            if (hintKinds.Contains(TableHintKind.HoldLock) || hintKinds.Contains(TableHintKind.Serializable))
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.MergeMissingHoldlock, sourcePath,
+                spec.StartLine, spec.StartColumn,
+                "MERGE target carries no WITH (HOLDLOCK)/SERIALIZABLE hint - two concurrent sessions can both take the WHEN NOT MATCHED branch under READ COMMITTED and race a primary-key violation.",
+                FindingConfidence.Medium));
+        }
+
+        private void InspectMergeNonUniqueUsingSource(MergeSpecification spec)
+        {
+            if (spec.TableReference is not NamedTableReference sourceRef)
+            {
+                return;
+            }
+
+            var sourceAlias = sourceRef.Alias?.Value ?? sourceRef.SchemaObject.BaseIdentifier.Value;
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(sourceRef.SchemaObject));
+            var sourceTable = catalog.Find(sourceQualifiedName);
+            if (sourceTable is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var joinColumns = FlattenAnd(spec.SearchCondition)
+                .OfType<BooleanComparisonExpression>()
+                .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
+                .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
+                .Select(e => ColumnNameIfQualifiedByAlias(e, sourceAlias))
+                .Where(c => c is not null)
+                .Select(c => c!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (joinColumns.Count == 0)
+            {
+                return;
+            }
+
+            var isProvablyUnique = sourceTable.Indexes.Any(ix =>
+                ix.IsUnique && !ix.IsFiltered && !ix.IsDisabled
+                && ix.KeyColumns.Count > 0
+                && ix.KeyColumns.All(kc => joinColumns.Contains(kc, StringComparer.OrdinalIgnoreCase)));
+            if (isProvablyUnique)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.MergeNonUniqueUsingSource, sourcePath,
+                spec.StartLine, spec.StartColumn,
+                $"MERGE USING source '{sourceQualifiedName}' is not backed by a unique index covering its own ON-clause join columns ({string.Join(", ", joinColumns)}) - a future duplicate join-key value hard-errors the statement.",
+                FindingConfidence.High));
+        }
+
+        private void InspectMergeUnconditionalDelete(MergeSpecification spec)
+        {
+            foreach (var clause in spec.ActionClauses)
+            {
+                if (clause.Action is not DeleteMergeAction || clause.SearchCondition is not null)
+                {
+                    continue;
+                }
+
+                var matchKindText = clause.Condition switch
+                {
+                    MergeCondition.NotMatchedBySource => "WHEN NOT MATCHED BY SOURCE THEN DELETE",
+                    MergeCondition.Matched => "WHEN MATCHED THEN DELETE",
+                    _ => "THEN DELETE",
+                };
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.MergeUnconditionalDelete, sourcePath,
+                    clause.StartLine, clause.StartColumn,
+                    $"{matchKindText} with no additional AND condition of its own - {(clause.Condition == MergeCondition.NotMatchedBySource ? "deletes every target row absent from the USING source's result set" : "deletes every row the join matched")}.",
+                    FindingConfidence.Medium));
+            }
+        }
+
+        // --- Recursive CTE with no MAXRECURSION option (kind 11) --------------------------------
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            InspectRecursiveCteMaxRecursion(node);
+            base.ExplicitVisit(node);
+        }
+
+        private void InspectRecursiveCteMaxRecursion(SelectStatement node)
+        {
+            if (node.WithCtesAndXmlNamespaces is not { CommonTableExpressions: { Count: > 0 } ctes })
+            {
+                return;
+            }
+
+            var hasMaxRecursion = node.OptimizerHints.Any(h => h.HintKind == OptimizerHintKind.MaxRecursion);
+            if (hasMaxRecursion)
+            {
+                return;
+            }
+
+            foreach (var cte in ctes)
+            {
+                if (!CteResolver.ReferencesSelf(cte.QueryExpression, cte.ExpressionName.Value))
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion, sourcePath,
+                    cte.StartLine, cte.StartColumn,
+                    $"Recursive CTE '{cte.ExpressionName.Value}' has no OPTION (MAXRECURSION n) on its containing statement - the engine's own default limit of 100 levels fails the statement outright (Msg 530) once exceeded.",
+                    FindingConfidence.High));
+            }
         }
 
         public override void ExplicitVisit(WhileStatement node)

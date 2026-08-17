@@ -4170,42 +4170,199 @@ index covering it at all, exactly as claimed.
       verbatim. Both `FindingConfidence.Medium` (the structural claim is
       exact; whether it costs anything measurable, or whether DISTINCT is a
       genuine deliberate requirement, is data/intent this pass can't see).
-- [ ] **Unqualified object references** in module bodies (`FROM Orders`, not
-      `FROM dbo.Orders`) — a real cost, not a style rule: name resolution is
-      per-user, so the plan cache holds one entry per schema-resolution context
-      and compilation takes an extra schema-stability lock. Exactly resolvable
-      against the catalog, so it fires only when the reference genuinely
-      resolves to a schema the caller may not default to.
-- [ ] **`MERGE` hazards** — missing `HOLDLOCK`/serializable on the target (the
-      documented race that produces primary-key violations under concurrency),
-      a non-unique `USING` join, and `WHEN MATCHED THEN DELETE`. Well-documented
-      engine bugs and semantics, not opinion; each needs its own fixture.
-- [ ] **Recursive CTE with no `MAXRECURSION` option** — the 100-level default
-      terminates the query with an error rather than a wrong answer, so this is
-      a "fails in prod on real depth" finding.
-- [ ] **`UPDATE`/`DELETE` with no `WHERE` and no `TOP`** — whole-table write.
-      Near-miss that must not fire: a deliberate full-table maintenance
-      statement in a migration script (see the source-context classification
-      idea in "Reporting ideas worth stealing" — this rule is the one that most
-      needs it).
-- [ ] **Missing `SET NOCOUNT ON`** in procedures and triggers — one extra
-      network round trip per statement executed, which is real in a chatty
-      proc and nothing in a single-statement one; rank accordingly.
-- [ ] **Linked-server 4-part names and cross-database predicates** — remote
-      queries are a serial zone and remote statistics are usually unavailable,
-      so the estimate is a guess. Previously skipped as "rare in corpus";
-      re-check the base rate against the local test database before building.
-- [ ] **Index-coverage shapes**, the two the field literature names most and the
-      only items in this group needing both halves of our machinery: a query
-      whose only candidate index seeks but does not cover its own output or
-      residual predicate (key-lookup-prone), and a join/filter column on the
-      inner side of a nested-loop with no supporting index at all
-      (eager-index-spool-prone). Both are statically provable from
-      catalog + AST, and both need a hard precision guard: fire only when a
-      single candidate index exists, never when the optimizer has a real
-      alternative. Plan-XML markers exist for both (`Lookup="1"` on a
-      `RelOp`, `<Spool><Index…>` on the inner side), so both are
-      oracle-confirmable rather than static-only.
+- [x] **Unqualified object references** in module bodies — shipped 2026-08-18
+      as `QueryAntiPatternFindingKind.UnqualifiedTableReference`. Fires only
+      when a schema-less `NamedTableReference` at a real query site (FROM/
+      JOIN, or an INSERT/UPDATE/DELETE/MERGE target/source) genuinely resolves
+      to a real base table via the catalog (default-schema resolution) - never
+      a CTE name (collected in a pre-pass over the whole script, so a CTE
+      declared later than a use site in the same batch still suppresses
+      correctly), never a temp table/table variable (neither is schema-object
+      shaped in the first place), and never an unresolvable name (declined,
+      not guessed). Distinct from the already-shipped
+      `NamingFindingKind.UnqualifiedCreate`, which is about the DEFINING
+      statement's own owning schema, not a reference to an existing object.
+      `FindingConfidence.Medium`: the "resolves to a real table" half is
+      mechanical, but this pass cannot see the connecting principal's actual
+      default schema, so it cannot prove a DIFFERENT caller would resolve the
+      reference differently - only that it could.
+- [x] **`MERGE` hazards** — shipped 2026-08-18 as three `QueryAntiPatternFinding`
+      kinds. **`MergeMissingHoldlock`**: the MERGE target carries no `WITH
+      (HOLDLOCK)`/`SERIALIZABLE` table hint - the documented Microsoft/
+      community guidance for the well-known MERGE race (two concurrent
+      sessions can both take the `WHEN NOT MATCHED` branch under READ
+      COMMITTED and hit a primary-key violation), `FindingConfidence.Medium`
+      since this pass cannot see an ambient session-level SERIALIZABLE
+      isolation level set by a caller it can't trace.
+      **`MergeNonUniqueUsingSource`**: reuses `NonUniqueUpdateSourceScanner`'s
+      exact composite-uniqueness catalog check against the `USING` source's
+      own `ON`-clause join columns - `MERGE`'s `USING` clause is structurally
+      the same "at most one source row per target row" question that scanner
+      already answers for `UPDATE ... FROM`. Unlike that sibling finding,
+      `MERGE` does NOT silently pick a winning row here - it hard-errors
+      ("attempted to UPDATE or DELETE the same row more than once"), already
+      oracle-confirmed directly against the Docker instance by
+      `NonUniqueUpdateSourceFinding`'s own doc comment - so this is a "fails
+      in prod on real data" finding, `FindingConfidence.High`.
+      **`MergeUnconditionalDelete`**: a `WHEN MATCHED THEN DELETE` or `WHEN
+      NOT MATCHED BY SOURCE THEN DELETE` action clause with no additional
+      `AND` condition of its own - the real, field-literature-cited MERGE
+      incident shape (`WHEN NOT MATCHED BY SOURCE THEN DELETE` deletes every
+      target row absent from the `USING` result, so an accidentally-narrow
+      `USING` query turns an intended incremental sync into a mass delete),
+      `FindingConfidence.Medium` since an unconditional delete branch is
+      sometimes the deliberate, correct semantics of a full sync.
+- [x] **Recursive CTE with no `MAXRECURSION` option** — shipped 2026-08-18 as
+      `QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion`. Reuses
+      `Lineage.CteResolver.ReferencesSelf` verbatim (made `internal` for this
+      purpose) - the exact recursion-detection primitive `CteResolver` itself
+      already relies on to resolve a recursive anchor, rather than
+      re-deriving it. Directly oracle-confirmed (Docker instance, SQL Server
+      2022): a recursive CTE with no `MAXRECURSION` option and a real
+      recursion depth of 1,000 fails outright with `Msg 530, "The statement
+      terminated. The maximum recursion 100 has been exhausted before
+      statement completion"`, while the identical query with `OPTION
+      (MAXRECURSION 0)` completes and returns all 1,000 rows - confirming
+      both the 100-level default and the "fails in prod on real depth, not a
+      wrong-answer risk" framing. Scoped to `SELECT` statements only in v1,
+      matching `MultiReferencedCteFinding`'s own established scope limit (an
+      `UPDATE`/`DELETE`/`MERGE` statement's own recursive WITH-clause CTE is
+      real but comparatively rare, left unanalyzed rather than guessed at).
+      `FindingConfidence.High`: the 100-level default and Msg 530 failure mode
+      are oracle-confirmed mechanical facts.
+- [x] **`UPDATE`/`DELETE` with no `WHERE` and no `TOP`** — shipped 2026-08-18
+      as `QueryAntiPatternFindingKind.UnboundedTableWrite`. This codebase has
+      no source-context classification mechanism (migration/deployment script
+      vs. hot-path module) yet, and building one was out of scope for this
+      single item (still an open idea under "Reporting ideas worth
+      stealing"), so this ships as a real but explicitly advisory
+      `FindingConfidence.Medium` finding whose own detail text states outright
+      that a deliberate full-table maintenance statement is a legitimate
+      reason it fired - matching how `NonUniqueUpdateSourceFinding`/
+      `DistinctMaskingJoinFanout` already frame a structurally-risky-but-
+      sometimes-deliberate shape.
+- [x] **Missing `SET NOCOUNT ON`** in procedures and triggers — closed
+      2026-08-18, no new work needed: direct source read of
+      `StatementShapeScanner.cs` confirmed `MissingSetNocountOn` already
+      visits `CreateTriggerStatement`/`AlterTriggerStatement` through the same
+      `EnterRoutine`/`ExitRoutine` pair procedures use (not procedure-only, as
+      this item's own text assumed) - the claim is already identical in scope
+      to what this item asked for. The "rank by chatty-proc vs. single-
+      statement" refinement this item also raised was considered and declined
+      as a v1 addition - the shipped finding is already a uniform
+      `FindingConfidence.Medium` per routine with no per-statement-count
+      signal to rank by, and adding one is a separate, unrequested scope
+      expansion, not a gap in this item's own ask.
+- [x] **Linked-server 4-part names and cross-database predicates** — shipped
+      2026-08-18 as `QueryAntiPatternFindingKind.
+      LinkedServerOrCrossDatabaseReference`. Two halves: a 4-part `Server.
+      Database.Schema.Object` name is an unconditional syntactic fact (naming
+      a remote server at all), `FindingConfidence.High`, fires in both file
+      and live mode; a 3-part `Database.Schema.Object` name is only flagged
+      when live-confirmed to differ from the actually-connected database
+      (`DatabaseCatalog.CurrentDatabaseName`, already existing
+      infrastructure) - file mode has no "current database" to compare
+      against and never guesses, `FindingConfidence.Medium` live-mode-only. A
+      3-part reference into `master`/`tempdb`/`msdb`/`model` is deliberately
+      excluded even when it differs from the connected database - real-
+      corpus-measured, this shape (`tempdb.sys.objects`,
+      `master.dbo.syslockinfo`) is overwhelmingly a metadata/catalog-view
+      read, not a genuine cross-database business predicate, and flagging it
+      would dilute the real signal without being technically false.
+      Re-measured the real base rate against the local test database before
+      shipping, per this item's own instruction, and the result corrected
+      this item's own initial guess: the 4-part/linked-server half is
+      genuinely zero in this 4,987-module corpus (confirming "rare in
+      corpus" for THAT half), but the 3-part cross-database half is NOT rare
+      once system databases are excluded from the noise - 29 genuine
+      references to a real second business database (`RouteMatchDirectory`,
+      hand-verified against `sys.sql_modules` text) before that exclusion
+      was even added (raw count 43, of which 14 were `master`/`tempdb`
+      catalog-view reads). See the sweep's own real-coverage paragraph below
+      for the final, post-exclusion count.
+- [x] **Index-coverage shapes** — shipped 2026-08-18, but narrower than
+      originally scoped: only the key-lookup-prone half
+      (`IndexCoverageFindingKind.KeyLookupProneIndex`, a new
+      `IndexCoverageFinding`/`IndexCoverageScanner` pair, not folded into
+      `QueryAntiPatternFinding` since this stream needs its own catalog-index
+      shape). Fires when a WHERE-equality/range predicate genuinely
+      constrains a base table's SINGLE candidate usable nonclustered index
+      (leading key column among the AND-constrained columns - the hard
+      precision guard this item itself demanded: more than one such candidate
+      means a real alternative access path exists and this pass declines
+      rather than guess which index the optimizer would pick), and that
+      index's own key + INCLUDE columns do not cover every OTHER column of
+      the same table referenced anywhere in the statement. Correctly accounts
+      for the engine's own "every nonclustered index implicitly carries the
+      clustering key as its row locator" fact (a real bug caught by this
+      item's own unit tests before shipping: a covering `INCLUDE` index was
+      false-firing on the primary key column alone until this was added) -
+      computed from the live-only `CatalogIndex.IsClustered` where known,
+      falling back to the table's own PRIMARY KEY index in file mode (SQL
+      Server's real default), a deliberate under-report-only simplification
+      documented in the finding's own doc comment.
+      Oracle-confirmed directly (Docker instance, SQL Server 2022, a real
+      20,000-row table under `SET STATISTICS XML ON`): a WHERE-equality seek
+      against a non-covering nonclustered index produced a real plan with
+      `Index Seek` → `Nested Loops` → `Clustered Index Seek` carrying
+      `Lookup="1"`; the identical query against the same index widened with a
+      covering `INCLUDE` produced a single plain `Index Seek`, no lookup, no
+      Nested Loops at all - both directions confirmed, not assumed.
+      **The eager-index-spool-prone half was investigated and deliberately
+      NOT shipped.** The "exactly one candidate index" precision guard that
+      makes the key-lookup half trustworthy has no clean analogue for a "zero
+      indexes exist at all" shape (there is no single candidate to point at
+      instead), and reliably distinguishing a genuine nested-loop-with-spool
+      plan from a hash-join plan that never spools at all requires exactly
+      the cardinality information a static pass does not have. Shipping it
+      anyway would mean either guessing at join strategy or dropping the
+      guard that keeps the sibling finding precise - CLAUDE.md's own
+      "precision beats recall everywhere" rule rules out both. Documented
+      here as a deliberately declined v1 scope limit, not a silent gap,
+      matching this codebase's many precedents for scoping down rather than
+      overclaiming (`CompositeIndexLeadingColumnFinding`, `NonUniqueUpdateSourceFinding`).
+
+**Design-time decidability of the seven items shipped 2026-08-18 (second
+batch)**: every one is schema-decidable or code-only, the same axis the
+first batch above already established - `LinkedServerOrCrossDatabaseReference`'s
+cross-database half needs the connected database's own name
+(`DatabaseCatalog.CurrentDatabaseName`), a database property, not a data
+value; `IndexCoverageFindingKind.KeyLookupProneIndex` needs catalog index
+shape (key/INCLUDE columns, clustering key) plus a plan-XML oracle
+confirmation of the mechanism, never a cardinality estimate or row count.
+None of the seven is data-state-decidable or workload-decidable.
+
+**Real coverage, measured 2026-08-18 via `scan-db` against the local test
+database** (same 4,987-module target, same connected compatibility level
+140): the seven new `QueryAntiPatternFinding` kinds added 6,186 findings on
+top of the first batch's 2,996 (19,182 `QueryAntiPatternFinding`s total
+after this batch) - `UnqualifiedTableReference` 15,581 (by far the largest
+single kind this whole sweep has produced - legacy code overwhelmingly
+does not schema-qualify), `MergeMissingHoldlock` 175, `UnboundedTableWrite`
+382, `RecursiveCteMissingMaxRecursion` 10, `LinkedServerOrCrossDatabaseReference`
+29 (post system-database exclusion), `MergeUnconditionalDelete` 9.
+`MergeNonUniqueUsingSource` found zero real occurrences in this corpus - a
+real, honestly-reported absence (every real MERGE's own `USING` source in
+this corpus turned out to be either provably unique or a table
+variable/derived-table shape this v1 scanner deliberately declines rather
+than guesses at), not a scanner defect; its own unit-test fire/near-miss
+pair confirms the detection logic works on a hand-authored fixture. The new
+`IndexCoverageFinding` stream (`KeyLookupProneIndex` only, per the scope
+decision above) found 2,528 findings.
+Spot-checked by hand, never against the finding's own catalog/AST read:
+one `MergeMissingHoldlock` finding (`dbo.spAnnouncementMessageMerge`)
+directly against the real `sys.sql_modules` text - confirmed a genuine
+`MERGE dbo.ltblAnnouncementMessage trgt USING @Messages src ON ...` with no
+`WITH (HOLDLOCK)` anywhere on the target; one `UnqualifiedTableReference`
+finding (`dbo.AddressListAllWithoutDependenciesSinceDate`) the same way -
+confirmed a genuine `select AddressID from tblAddress adr` with no schema
+prefix; one `KeyLookupProneIndex` finding (`dbo.tblRunActual` via index
+`ix_tblRunActual_EndDateTime`) directly against `sys.indexes`/
+`sys.index_columns` - confirmed the index's real key/INCLUDE column set
+matches the finding exactly, `PulloutAddress` is genuinely absent from
+both, and confirmed separately that this table has exactly one usable
+index leading with `EndDateTime` (the precision guard holds for this real
+example, not just the synthetic fixture).
 
 ### C. Trigger correctness — unclaimed by every tool surveyed, either family
 The live-server family only reports *that* triggers exist; no linter surveyed

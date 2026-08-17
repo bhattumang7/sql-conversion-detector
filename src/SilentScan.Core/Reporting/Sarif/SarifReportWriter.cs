@@ -99,6 +99,7 @@ public static class SarifReportWriter
         results.AddRange(report.IdentityRangeFindings.Select(ToResult));
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
         results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
+        results.AddRange(report.IndexCoverageFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -1056,12 +1057,28 @@ public static class SarifReportWriter
             QueryAntiPatternFindingKind.TableVariableLowCompatEstimate => LevelError,
             QueryAntiPatternFindingKind.CountStarVariableExistenceCheck => LevelError,
             QueryAntiPatternFindingKind.NonAggregateHavingPredicate => LevelWarning,
+            // MergeNonUniqueUsingSource/RecursiveCteMissingMaxRecursion are mechanically-confirmed
+            // hard engine facts too (a real error the moment the shape is exercised), same tier as
+            // the two above - every other new kind is a real but context-dependent risk.
+            QueryAntiPatternFindingKind.MergeNonUniqueUsingSource => LevelError,
+            QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion => LevelError,
             _ => LevelWarning,
         };
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.QueryAntiPatternRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
 
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(IndexCoverageFinding finding)
+    {
+        // Oracle-confirmed hard fact (real Lookup="1" plan-XML marker for the non-covering shape) -
+        // Error, floored by confidence like every other stream.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexCoverageRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}' via index '{finding.IndexName ?? "<unnamed>"}' ({string.Join(", ", finding.IndexKeyColumns)}) does not cover ({string.Join(", ", finding.UncoveredColumns)}) - a matched row needs a Key/RID Lookup back to the base table.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(TempTableExecShapeFinding finding)

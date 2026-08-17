@@ -161,6 +161,148 @@ public enum QueryAntiPatternFindingKind
     /// unique-backed side) - this pass cannot tell those two intents apart from the query text
     /// alone.</summary>
     DistinctMaskingJoinFanout,
+
+    /// <summary>A bare table reference with no schema qualifier (<c>FROM Orders</c>, not
+    /// <c>FROM dbo.Orders</c>) at a real query site - a <c>FROM</c>/<c>JOIN</c> table source, or an
+    /// <c>INSERT</c>/<c>UPDATE</c>/<c>DELETE</c>/<c>MERGE</c> target/source - that genuinely
+    /// resolves to a real base table via the catalog (default-schema resolution, the same
+    /// <see cref="Catalog.SchemaObjectNameHelper.Qualify"/> every other catalog-aware scanner in
+    /// this codebase already uses). Distinct from the already-shipped <see
+    /// cref="NamingFindingKind.UnqualifiedCreate"/>, which is about the DEFINING statement
+    /// (<c>CREATE PROCEDURE Foo</c>) picking an owning schema, not a query site referencing an
+    /// existing object - the cost here is different too: SQL Server's own plan-cache key for an
+    /// unqualified reference includes the resolving principal's default schema (a schema-resolution
+    /// "bind context"), so two callers with different default schemas referencing the identical
+    /// unqualified name each get their OWN cache entry even when both actually resolve to the same
+    /// <c>dbo</c> table, and compiling either one takes an extra schema-stability lock the qualified
+    /// form does not need (Microsoft's own documented "deferred name resolution" cost). A CTE name,
+    /// temp table (<c>#t</c>), table variable (<c>@t</c>), or derived-table alias is never a schema-
+    /// object reference in the first place and is structurally excluded by construction (this kind
+    /// only ever inspects a bare table reference, and only when its base
+    /// identifier is not itself a CTE name declared anywhere in the same batch - checked
+    /// conservatively, so a same-named real table shadowed by a CTE never false-fires). <see
+    /// cref="FindingConfidence.Medium"/>: the "resolves to a real table" half is a mechanical catalog
+    /// fact, but this pass cannot see the connecting principal's own actual default schema, so it
+    /// cannot prove the reference would resolve differently for a DIFFERENT caller - only that it
+    /// COULD, which is the real risk this finding names.</summary>
+    UnqualifiedTableReference,
+
+    /// <summary>A <c>MERGE</c> statement whose target table reference carries no <c>HOLDLOCK</c>/
+    /// <c>SERIALIZABLE</c> table hint - the documented Microsoft/community guidance for avoiding the
+    /// well-known MERGE race condition: two sessions running the identical MERGE concurrently against
+    /// the same target can both evaluate their own <c>WHEN NOT MATCHED</c> branch as true (neither
+    /// sees the other's not-yet-committed insert under the engine's default READ COMMITTED
+    /// isolation), so both attempt the INSERT and the second one fails with a primary-key/unique-
+    /// constraint violation instead of correctly taking the UPDATE branch. <c>WITH (HOLDLOCK)</c> on
+    /// the target (or an ambient <c>SERIALIZABLE</c> isolation level) closes the window by holding a
+    /// range lock across the whole statement. Purely a table-hint/isolation-level AST check - this
+    /// pass cannot see whether the caller sets session-level <c>SERIALIZABLE</c> isolation from a
+    /// different statement it can't trace (a stored procedure called under a caller-controlled
+    /// isolation level, for instance), so <see cref="FindingConfidence.Medium"/>, matching this
+    /// codebase's own <see cref="ControlFlowRiskFindingKind.DirtyReadIsolationHint"/> precedent for a
+    /// real risk that is sometimes already mitigated by session state this pass cannot observe.</summary>
+    MergeMissingHoldlock,
+
+    /// <summary>A <c>MERGE ... USING</c> source that is a real base table (resolved via the catalog,
+    /// matching the same base-table-only, direct-reference v1 scope <see
+    /// cref="NonUniqueUpdateSourceScanner"/> already established) not provably unique on its own
+    /// <c>ON</c>-clause join columns - reuses that scanner's exact composite-uniqueness catalog
+    /// check verbatim, since <c>MERGE</c>'s <c>USING</c> clause asks the structurally identical
+    /// question ("does this source have at most one row per target row"). Unlike an <c>UPDATE ...
+    /// FROM</c> without source uniqueness, the engine does NOT silently pick an arbitrary winning
+    /// row here - <c>MERGE</c> raises a genuine, documented error ("The MERGE statement attempted to
+    /// UPDATE or DELETE the same row more than once...") the moment a target row matches more than
+    /// one source row, confirmed directly against the standing Docker oracle (see <see
+    /// cref="NonUniqueUpdateSourceFinding"/>'s own doc comment, which already made and verified this
+    /// exact claim). So this is a "fails in prod on real data" finding, not a silently-wrong-answer
+    /// one - a real, catalog-provable risk that a MERGE statement working fine against today's data
+    /// will start hard-erroring the moment a future duplicate join-key value appears on the source
+    /// side, zero code change required on the statement itself. <see cref="FindingConfidence.High"/>:
+    /// the missing-uniqueness fact is mechanical and the failure mode is engine-guaranteed, not a
+    /// maybe.</summary>
+    MergeNonUniqueUsingSource,
+
+    /// <summary>A <c>MERGE</c>'s <c>WHEN MATCHED THEN DELETE</c> or <c>WHEN NOT MATCHED BY SOURCE
+    /// THEN DELETE</c> action clause carries no additional <c>AND</c>-qualifying condition beyond
+    /// its own match kind - a real, well-documented MERGE gotcha: <c>WHEN NOT MATCHED BY SOURCE THEN
+    /// DELETE</c> in particular deletes every target row that is absent from the <c>USING</c>
+    /// source's result set, so a <c>USING</c> query that is accidentally too narrow (a missing join,
+    /// an over-restrictive filter, a source query that silently returns fewer rows than intended)
+    /// turns an intended incremental sync into a mass, unrecoverable delete of "everything I didn't
+    /// happen to see this time" - the single most-cited real-world MERGE incident shape in the field
+    /// literature. An unconditional <c>WHEN MATCHED THEN DELETE</c> carries the analogous risk one
+    /// level up: it deletes every row the join matched at all, with no independent narrowing
+    /// condition of its own. A clause that DOES carry its own <c>AND</c> condition (<c>WHEN MATCHED
+    /// AND s.IsDeleted = 1 THEN DELETE</c>) is a materially different, self-documenting shape and is
+    /// never flagged. <see cref="FindingConfidence.Medium"/>: a real, well-documented risk pattern,
+    /// but an unconditional delete branch is also sometimes exactly the intended, correct semantics
+    /// of a full sync/replace operation - this pass cannot see intent, only shape.</summary>
+    MergeUnconditionalDelete,
+
+    /// <summary>A recursive CTE (a CTE whose own defining query references its own name - reuses
+    /// <see cref="Lineage.CteResolver.ReferencesSelf"/> verbatim, the exact same recursion-detection
+    /// primitive <see cref="Lineage.CteResolver"/> itself already relies on to resolve a recursive
+    /// anchor) whose containing statement carries no <c>OPTION (MAXRECURSION n)</c> clause anywhere.
+    /// T-SQL's own engine-enforced default recursion limit is 100 levels - confirmed directly
+    /// against the standing Docker oracle (SQL Server 2022): a recursive CTE with no MAXRECURSION
+    /// option and a real recursion depth of 1,000 fails outright with <c>Msg 530, "The statement
+    /// terminated. The maximum recursion 100 has been exhausted before statement completion,"</c>
+    /// while the identical query with <c>OPTION (MAXRECURSION 0)</c> (unlimited) completes and
+    /// returns all 1,000 rows. So this is a "fails in prod on real depth" finding, not a wrong-answer
+    /// risk - a recursive CTE that works fine against today's shallow data (an org chart, a bill-of-
+    /// materials tree, a threaded-comment walk) hard-errors the moment a real hierarchy exceeds 100
+    /// levels, with no code change required on the statement itself. Scoped to <c>SELECT</c>
+    /// statements only in v1, matching <see cref="MultiReferencedCteFinding"/>'s own established
+    /// scope limit for the identical reason (an <c>UPDATE</c>/<c>DELETE</c>/<c>MERGE</c> statement's
+    /// own WITH-clause recursive CTE is a real but comparatively rare shape, left unanalyzed rather
+    /// than guessed at). <see cref="FindingConfidence.High"/>: the 100-level default and its Msg 530
+    /// failure mode are mechanical engine facts, oracle-confirmed, not a magnitude estimate -
+    /// whether a GIVEN recursive CTE will ever actually reach depth 100 is the one thing this pass
+    /// cannot see, which is exactly why this is reported as a real, always-true structural risk
+    /// rather than a certainty.</summary>
+    RecursiveCteMissingMaxRecursion,
+
+    /// <summary>An <c>UPDATE</c> or <c>DELETE</c> statement with no <c>WHERE</c> clause AND no
+    /// <c>TOP</c> row-limiting clause at all - a whole-table write with zero row-limiting mechanism
+    /// of any kind. A deliberate full-table maintenance statement (a migration/deployment script
+    /// resetting a staging table, a scheduled full-refresh job) is a real, legitimate reason this
+    /// shape appears - this pass has no source-context classification mechanism (migration script
+    /// vs. hot-path module) to tell the two apart, so this is reported as a real but explicitly
+    /// advisory finding rather than a hard warning, its own detail text stating outright that a
+    /// deliberate full-table operation is a legitimate reason it fired. <see
+    /// cref="FindingConfidence.Medium"/>: the "no row-limiting clause at all" fact is exact and
+    /// mechanical, but whether it is a genuine mistake (a missing WHERE that was meant to narrow the
+    /// statement) or a deliberate whole-table operation is intent this pass cannot see from the
+    /// query text alone - the same tier this codebase already uses for other "structurally risky,
+    /// sometimes deliberate" shapes (<see cref="DistinctMaskingJoinFanout"/>).</summary>
+    UnboundedTableWrite,
+
+    /// <summary>A table reference that names a remote server explicitly (a 4-part <c>Server.
+    /// Database.Schema.Object</c> name - a linked-server reference by construction, regardless of
+    /// live/file mode), or a 3-part <c>Database.Schema.Object</c> name whose database part is
+    /// live-confirmed to differ from the CURRENTLY connected database (<see
+    /// cref="Catalog.DatabaseCatalog.CurrentDatabaseName"/> - live-mode only; a file-mode scan has
+    /// no "current database" to compare against and this kind never guesses, matching <see
+    /// cref="Catalog.DatabaseCatalog.Find(string)"/>'s own "only an exact, known match ever gets
+    /// stripped" discipline for the mirror-image case). A 3-part reference into <c>master</c>/
+    /// <c>tempdb</c>/<c>msdb</c>/<c>model</c> is deliberately excluded - real-corpus-measured
+    /// against the local test database, this shape is overwhelmingly a metadata/catalog-view read
+    /// (<c>tempdb.sys.objects</c>, <c>master.dbo.syslockinfo</c>), not a real cross-database
+    /// business predicate with a meaningful remote-statistics story, so flagging it would dilute
+    /// the real signal without being technically false - declined on purpose, not missed. A query
+    /// touching a linked server or a
+    /// genuinely different database is a serial-execution zone (the engine cannot parallelize a
+    /// remote rowset), and the optimizer usually has no real statistics for the remote object at
+    /// all - any cardinality estimate involving one is close to a guess, a real, well-documented
+    /// cost class distinct from anything schema-local. Previously scoped out of this project as
+    /// "rare in corpus" - re-measured directly against the local test database before shipping (see
+    /// docs/detection-checklist.md for the real count). <see cref="FindingConfidence.High"/> for the
+    /// 4-part/linked-server case (naming a remote server is an unconditional syntactic fact); <see
+    /// cref="FindingConfidence.Medium"/> for the live-confirmed cross-database case (real, but this
+    /// pass cannot see whether the OTHER database happens to sit on the same physical instance,
+    /// which is cheaper than a genuine linked server even though it is still a separate database
+    /// context for stats/plan-cache purposes).</summary>
+    LinkedServerOrCrossDatabaseReference,
 }
 
 public sealed record QueryAntiPatternFinding(

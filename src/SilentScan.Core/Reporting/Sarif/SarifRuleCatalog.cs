@@ -40,6 +40,14 @@ public static class SarifRuleCatalog
     public const string QueryAntiPatternNonAggregateHavingPredicateRuleId = "silentscan/query/non-aggregate-having-predicate";
     public const string QueryAntiPatternUnionOfProvablyDisjointBranchesRuleId = "silentscan/query/union-of-provably-disjoint-branches";
     public const string QueryAntiPatternDistinctMaskingJoinFanoutRuleId = "silentscan/query/distinct-masking-join-fanout";
+    public const string QueryAntiPatternUnqualifiedTableReferenceRuleId = "silentscan/query/unqualified-table-reference";
+    public const string QueryAntiPatternMergeMissingHoldlockRuleId = "silentscan/query/merge-missing-holdlock";
+    public const string QueryAntiPatternMergeNonUniqueUsingSourceRuleId = "silentscan/query/merge-non-unique-using-source";
+    public const string QueryAntiPatternMergeUnconditionalDeleteRuleId = "silentscan/query/merge-unconditional-delete";
+    public const string QueryAntiPatternRecursiveCteMissingMaxRecursionRuleId = "silentscan/query/recursive-cte-missing-maxrecursion";
+    public const string QueryAntiPatternUnboundedTableWriteRuleId = "silentscan/query/unbounded-table-write";
+    public const string QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId = "silentscan/query/linked-server-or-cross-database-reference";
+    public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
     public const string OversizedParameterRuleId = "silentscan/predicates/oversized-parameter";
     public const string UnderLengthParameterRuleId = "silentscan/predicates/under-length-parameter";
     public const string AnsiPaddingMismatchRuleId = "silentscan/predicates/ansi-padding-mismatch";
@@ -408,7 +416,20 @@ public static class SarifRuleCatalog
         QueryAntiPatternFindingKind.NonAggregateHavingPredicate => QueryAntiPatternNonAggregateHavingPredicateRuleId,
         QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches => QueryAntiPatternUnionOfProvablyDisjointBranchesRuleId,
         QueryAntiPatternFindingKind.DistinctMaskingJoinFanout => QueryAntiPatternDistinctMaskingJoinFanoutRuleId,
+        QueryAntiPatternFindingKind.UnqualifiedTableReference => QueryAntiPatternUnqualifiedTableReferenceRuleId,
+        QueryAntiPatternFindingKind.MergeMissingHoldlock => QueryAntiPatternMergeMissingHoldlockRuleId,
+        QueryAntiPatternFindingKind.MergeNonUniqueUsingSource => QueryAntiPatternMergeNonUniqueUsingSourceRuleId,
+        QueryAntiPatternFindingKind.MergeUnconditionalDelete => QueryAntiPatternMergeUnconditionalDeleteRuleId,
+        QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion => QueryAntiPatternRecursiveCteMissingMaxRecursionRuleId,
+        QueryAntiPatternFindingKind.UnboundedTableWrite => QueryAntiPatternUnboundedTableWriteRuleId,
+        QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference => QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
+    };
+
+    public static string IndexCoverageRuleId(IndexCoverageFindingKind kind) => kind switch
+    {
+        IndexCoverageFindingKind.KeyLookupProneIndex => IndexCoverageKeyLookupProneIndexRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled IndexCoverageFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -561,6 +582,14 @@ public static class SarifRuleCatalog
             Rule(QueryAntiPatternNonAggregateHavingPredicateRuleId, "A HAVING condition references only GROUP BY key columns/literals and no aggregate result - moving it to WHERE produces an identical result while filtering before, not after, aggregation."),
             Rule(QueryAntiPatternUnionOfProvablyDisjointBranchesRuleId, "A UNION combines branches that each filter the same table/column to a distinct literal - the branches are provably mutually exclusive, so UNION's duplicate-elimination pass can never remove a row and UNION ALL is equivalent."),
             Rule(QueryAntiPatternDistinctMaskingJoinFanoutRuleId, "A SELECT DISTINCT joins a table whose own join columns are not backed by a unique index - DISTINCT may be silently papering over row duplication the join itself introduces."),
+            Rule(QueryAntiPatternUnqualifiedTableReferenceRuleId, "A table reference at a real query site carries no explicit schema qualifier - the plan cache holds a separate entry per schema-resolution context and compilation takes an extra schema-stability lock."),
+            Rule(QueryAntiPatternMergeMissingHoldlockRuleId, "A MERGE target carries no WITH (HOLDLOCK)/SERIALIZABLE hint - the documented MERGE race where two concurrent sessions can both take the WHEN NOT MATCHED branch under READ COMMITTED and hit a primary-key violation."),
+            Rule(QueryAntiPatternMergeNonUniqueUsingSourceRuleId, "A MERGE USING source is not backed by a unique index covering its own ON-clause join columns - the engine raises a hard error the moment a target row matches more than one source row."),
+            Rule(QueryAntiPatternMergeUnconditionalDeleteRuleId, "A MERGE WHEN MATCHED/WHEN NOT MATCHED BY SOURCE THEN DELETE branch carries no additional AND condition of its own - a badly-scoped USING source can turn an intended incremental sync into a mass delete."),
+            Rule(QueryAntiPatternRecursiveCteMissingMaxRecursionRuleId, "A recursive CTE's containing statement has no OPTION (MAXRECURSION n) - oracle-confirmed the engine's own default 100-level limit fails the statement outright (Msg 530) once exceeded."),
+            Rule(QueryAntiPatternUnboundedTableWriteRuleId, "An UPDATE/DELETE has no WHERE clause and no TOP - a whole-table write with no row-limiting mechanism at all. Advisory: a deliberate full-table maintenance statement is a legitimate reason this fires."),
+            Rule(QueryAntiPatternLinkedServerOrCrossDatabaseReferenceRuleId, "A table reference names a remote linked server (4-part name) or a different database than the one this scan connected to (3-part name) - remote/cross-database statistics are usually unavailable to the optimizer, so any cardinality estimate involving one is close to a guess."),
+            Rule(IndexCoverageKeyLookupProneIndexRuleId, "A WHERE-equality seek against a table's own single candidate nonclustered index does not cover every other column the statement references on that table - oracle-confirmed via real plan XML that this shape produces a Key/RID Lookup (Lookup=\"1\") per matched row, and that widening the index to cover those columns removes it."),
             Rule(OversizedParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate."),
             Rule(UnderLengthParameterRuleId, "A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding's identical class of concern."),
             Rule(AnsiPaddingMismatchRuleId, "A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace - the column can never store a value ending in whitespace at all (stripped at INSERT time under ANSI_PADDING OFF), so the pattern can never match anything the column could ever contain. Data-semantics finding, not a plan-shape one."),

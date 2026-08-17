@@ -67,6 +67,7 @@ public sealed record ScanReport(
     IReadOnlyList<IdentityRangeFinding> IdentityRangeFindings,
     IReadOnlyList<FloatEqualityFinding> FloatEqualityFindings,
     IReadOnlyList<QueryAntiPatternFinding> QueryAntiPatternFindings,
+    IReadOnlyList<IndexCoverageFinding> IndexCoverageFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -267,5 +268,21 @@ public sealed record ScanReport(
     /// join columns aren't backed by a unique index. The first kind is live-mode only (needs the
     /// new <see cref="Catalog.DatabaseCatalog.CompatibilityLevel"/>, itself live-mode only); every
     /// other kind runs in both file and live mode.
-    public const int CurrentSchemaVersion = 51;
+    /// Bumped to 52 for the rest of docs/detection-checklist.md "DBA-script family sweep
+    /// (2026-08-17)" §B: seven more <see cref="QueryAntiPatternFindings"/> kinds (an unqualified
+    /// table reference at a real query site; three MERGE hazards - missing HOLDLOCK/SERIALIZABLE,
+    /// a non-unique USING source oracle-confirmed to hard-error the statement, and an unconditional
+    /// WHEN MATCHED/WHEN NOT MATCHED BY SOURCE THEN DELETE branch; a recursive CTE with no
+    /// OPTION (MAXRECURSION n), oracle-confirmed the engine's own 100-level default fails the
+    /// statement with Msg 530; a whole-table UPDATE/DELETE with no WHERE and no TOP; and a linked-
+    /// server 4-part name or live-confirmed cross-database 3-part reference), plus a new <see
+    /// cref="IndexCoverageFindings"/> stream (a WHERE-equality seek against a table's own single
+    /// candidate nonclustered index that does not cover every other column the statement references
+    /// on that table - oracle-confirmed via real plan XML that the non-covering shape produces a
+    /// <c>Lookup="1"</c> Key/RID lookup and the covering shape does not). Every kind in both new
+    /// streams runs in both file and live mode; <see cref="Predicates.QueryAntiPatternFindingKind.
+    /// LinkedServerOrCrossDatabaseReference"/>'s own cross-database (not linked-server) half is
+    /// live-mode only, needing the already-existing <see cref="Catalog.DatabaseCatalog.
+    /// CurrentDatabaseName"/>.
+    public const int CurrentSchemaVersion = 52;
 }

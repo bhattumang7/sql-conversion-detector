@@ -353,4 +353,256 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
     }
+
+    // --- UnqualifiedTableReference ----------------------------------------------------------------
+
+    [Fact]
+    public void UnqualifiedTableReferenceResolvingToRealTable_Fires()
+    {
+        var findings = Scan("SELECT Id FROM Big WHERE Id = 1;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void QualifiedTableReference_NeverFiresUnqualified()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Big WHERE Id = 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
+    }
+
+    [Fact]
+    public void UnqualifiedCteReference_NeverFiresUnqualified()
+    {
+        var findings = Scan(
+            "WITH Big AS (SELECT Id FROM dbo.A) SELECT Id FROM Big;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
+    }
+
+    [Fact]
+    public void UnqualifiedTempTableReference_NeverFires()
+    {
+        var findings = Scan("CREATE TABLE #t (Id INT); SELECT Id FROM #t;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
+    }
+
+    [Fact]
+    public void UnqualifiedReferenceToNonexistentTable_NeverFires()
+    {
+        var findings = Scan("SELECT Id FROM NoSuchTable WHERE Id = 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
+    }
+
+    // --- MERGE hazards: MergeMissingHoldlock / MergeNonUniqueUsingSource / MergeUnconditionalDelete -
+
+    [Fact]
+    public void MergeTargetWithNoHoldlockHint_Fires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeMissingHoldlock);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void MergeTargetWithHoldlockHint_NeverFires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A WITH (HOLDLOCK) AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeMissingHoldlock);
+    }
+
+    [Fact]
+    public void MergeUsingNonUniqueSource_Fires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING dbo.C AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeNonUniqueUsingSource);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void MergeUsingUniqueBackedSource_NeverFires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeNonUniqueUsingSource);
+    }
+
+    [Fact]
+    public void MergeUnconditionalWhenMatchedDelete_Fires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A WITH (HOLDLOCK) AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN DELETE;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeUnconditionalDelete);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void MergeUnconditionalWhenNotMatchedBySourceDelete_Fires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A WITH (HOLDLOCK) AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN NOT MATCHED BY SOURCE THEN DELETE;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeUnconditionalDelete);
+    }
+
+    [Fact]
+    public void MergeConditionallyQualifiedDelete_NeverFires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A WITH (HOLDLOCK) AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED AND s.AId > 0 THEN DELETE;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeUnconditionalDelete);
+    }
+
+    // --- RecursiveCteMissingMaxRecursion ------------------------------------------------------------
+
+    [Fact]
+    public void RecursiveCteWithNoMaxRecursionOption_Fires()
+    {
+        var findings = Scan(
+            "WITH r AS (SELECT Id FROM dbo.A WHERE Id = 1 UNION ALL SELECT a.Id FROM dbo.A a JOIN r ON a.Id = r.Id + 1) "
+            + "SELECT Id FROM r;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void RecursiveCteWithMaxRecursionOption_NeverFires()
+    {
+        var findings = Scan(
+            "WITH r AS (SELECT Id FROM dbo.A WHERE Id = 1 UNION ALL SELECT a.Id FROM dbo.A a JOIN r ON a.Id = r.Id + 1) "
+            + "SELECT Id FROM r OPTION (MAXRECURSION 500);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion);
+    }
+
+    [Fact]
+    public void NonRecursiveCte_NeverFiresMaxRecursion()
+    {
+        var findings = Scan(
+            "WITH r AS (SELECT Id FROM dbo.A) SELECT Id FROM r;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion);
+    }
+
+    // --- UnboundedTableWrite -------------------------------------------------------------------
+
+    [Fact]
+    public void UpdateWithNoWhereNoTop_Fires()
+    {
+        var findings = Scan("UPDATE dbo.Big SET Col = 'x';");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.UnboundedTableWrite);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void DeleteWithNoWhereNoTop_Fires()
+    {
+        var findings = Scan("DELETE FROM dbo.Big;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.UnboundedTableWrite);
+    }
+
+    [Fact]
+    public void UpdateWithWhere_NeverFires()
+    {
+        var findings = Scan("UPDATE dbo.Big SET Col = 'x' WHERE Id = 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnboundedTableWrite);
+    }
+
+    [Fact]
+    public void DeleteWithTop_NeverFires()
+    {
+        var findings = Scan("DELETE TOP (10) FROM dbo.Big;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnboundedTableWrite);
+    }
+
+    // --- LinkedServerOrCrossDatabaseReference -------------------------------------------------
+
+    [Fact]
+    public void FourPartLinkedServerReference_Fires()
+    {
+        var findings = Scan("SELECT Id FROM RemoteServer.RemoteDb.dbo.RemoteTable;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void ThreePartReference_FileMode_NeverFires()
+    {
+        // File mode has no known "current database" to compare against - never guessed.
+        var findings = Scan("SELECT Id FROM OtherDb.dbo.T;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
+    }
+
+    [Fact]
+    public void ThreePartReference_LiveMode_DifferentDatabase_Fires()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\nSELECT Id FROM OtherDb.dbo.T;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        catalog.CurrentDatabaseName = "ThisDb";
+
+        var findings = QueryAntiPatternScanner.Scan(result, catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void ThreePartReference_LiveMode_SystemDatabase_NeverFires()
+    {
+        // master/tempdb/msdb/model - overwhelmingly a metadata/catalog-view read in real corpus
+        // code, not a genuine cross-database business predicate - excluded on purpose.
+        var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\nSELECT object_id FROM tempdb.sys.objects;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        catalog.CurrentDatabaseName = "ThisDb";
+
+        var findings = QueryAntiPatternScanner.Scan(result, catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
+    }
+
+    [Fact]
+    public void ThreePartReference_LiveMode_SameDatabase_NeverFires()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\nSELECT Id FROM ThisDb.dbo.Big;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        catalog.CurrentDatabaseName = "ThisDb";
+
+        var findings = QueryAntiPatternScanner.Scan(result, catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
+    }
 }

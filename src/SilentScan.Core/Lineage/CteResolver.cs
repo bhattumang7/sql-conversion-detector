@@ -118,7 +118,11 @@ public static class CteResolver
         })];
     }
 
-    private static bool ReferencesSelf(QueryExpression queryExpression, string cteName)
+    /// <summary>Whether a CTE's own defining query references its own name - the sole, engine-
+    /// mandated recursion mechanism in T-SQL (no separate <c>RECURSIVE</c> keyword). Internal so
+    /// <c>Predicates.RecursiveCteMaxRecursionScanner</c> can reuse the exact same detection rather
+    /// than re-deriving it - see that scanner's own doc comment.</summary>
+    internal static bool ReferencesSelf(QueryExpression queryExpression, string cteName)
     {
         var collector = new SelfReferenceDetector(cteName);
         queryExpression.Accept(collector);

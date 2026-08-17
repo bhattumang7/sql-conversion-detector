@@ -907,6 +907,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<IndexCoverageFinding> indexCoverageFindings;
+        using (var indexCoverageStage = progress.Begin("scanning index-coverage shapes", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = IndexCoverageScanner.Scan(r, catalog);
+                    indexCoverageStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            indexCoverageFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<ForcedSerialFinding> forcedSerialFindings;
         using (var forcedSerialStage = progress.Begin("scanning forced-serial constructs", usableCount))
         {
@@ -1193,6 +1211,7 @@ public static class ScanReportBuilder
             [],
             floatEqualityFindings,
             queryAntiPatternFindings,
+            indexCoverageFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

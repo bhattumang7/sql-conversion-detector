@@ -129,6 +129,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
+        blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -198,6 +199,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
+        AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1099,7 +1101,7 @@ public static class ReadableScanReportWriter
 
         yield return new ReadableBlock.Heading(level, $"Query anti-patterns ({report.QueryAntiPatternFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Eight structurally-provable query shapes: a table variable used as a query source under a low compatibility level or a growing WHILE loop (stale/fixed cardinality estimate), a WHILE loop doing single-row DML keyed to its own tracked variable (RBAR), a cursor declared without LOCAL, COUNT(*) assigned to a variable then compared only to zero (a real full-set scan, unlike the inline scalar-subquery form the optimizer already rewrites), a non-aggregate HAVING predicate that belongs in WHERE, a UNION of provably disjoint branches, and a SELECT DISTINCT join not backed by a unique index.");
+            "Structurally-provable query shapes from two DBA-script-family sweep batches: a table variable used as a query source under a low compatibility level or a growing WHILE loop (stale/fixed cardinality estimate), a WHILE loop doing single-row DML keyed to its own tracked variable (RBAR), a cursor declared without LOCAL, COUNT(*) assigned to a variable then compared only to zero (a real full-set scan, unlike the inline scalar-subquery form the optimizer already rewrites), a non-aggregate HAVING predicate that belongs in WHERE, a UNION of provably disjoint branches, a SELECT DISTINCT join not backed by a unique index, an unqualified table reference at a real query site, three MERGE hazards (missing HOLDLOCK, a non-unique USING source, an unconditional DELETE branch), a recursive CTE with no MAXRECURSION option, a whole-table UPDATE/DELETE with no WHERE and no TOP, and a linked-server/cross-database table reference.");
 
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", "Detail"],
@@ -1108,6 +1110,28 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),
                 f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> IndexCoverage(ScanReport report, int level, string? pathBase)
+    {
+        if (report.IndexCoverageFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Index-coverage shapes ({report.IndexCoverageFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A WHERE-equality seek against a base table's own single candidate nonclustered index (never fired when a real alternative index exists too) whose key + INCLUDE columns do not cover every other column the statement references on that table - oracle-confirmed via real plan XML that this shape produces a Key/RID Lookup (Lookup=\"1\") per matched row.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Index", "Uncovered columns"],
+            [.. report.IndexCoverageFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.IndexName ?? "<unnamed>",
+                string.Join(", ", f.UncoveredColumns),
             })]);
     }
 
