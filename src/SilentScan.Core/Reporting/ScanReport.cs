@@ -44,6 +44,8 @@ public sealed record ScanReport(
     IReadOnlyList<WaitForFinding> WaitForFindings,
     IReadOnlyList<ViewOrderingFinding> ViewOrderingFindings,
     IReadOnlyList<TransactionHygieneFinding> TransactionHygieneFindings,
+    IReadOnlyList<CompositeIndexLeadingColumnFinding> CompositeIndexLeadingColumnFindings,
+    IReadOnlyList<IndexHintFinding> IndexHintFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -125,7 +127,9 @@ public sealed record ScanReport(
     /// <see cref="ViewOrderingFindings"/> (TOP(100) PERCENT / ORDER BY in a view or inline TVF).
     /// Bumped to 31 for the new <see cref="TransactionHygieneFindings"/> stream (docs/detection-
     /// checklist.md "Small precise adds": the first half of the "Transaction hygiene pair" item -
-    /// BEGIN TRANSACTION with no reachable COMMIT/ROLLBACK on some path).
+    /// BEGIN TRANSACTION with no reachable COMMIT/ROLLBACK on some path). Bumped to 32 for the
+    /// new <see cref="CompositeIndexLeadingColumnFindings"/> and <see cref="IndexHintFindings"/>
+    /// streams (docs/detection-checklist.md "Hint and index-shape catalog checks").
     /// </summary>
-    public const int CurrentSchemaVersion = 31;
+    public const int CurrentSchemaVersion = 32;
 }

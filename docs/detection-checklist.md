@@ -2655,21 +2655,121 @@ get an oracle fixture for the serial-plan consequence).
       real result, not a broken rule" precedent set by several other shipped
       streams.
 
-### Hint and index-shape catalog checks
+### Hint and index-shape catalog checks — shipped
 Folded in from the incumbent-catalog read (`detection-reference.md` Appendix
 7) — both need our catalog and neither is done properly anywhere surveyed.
 
-- [ ] **Hint validity against the catalog** — every surveyed tool flags
-      `INDEX`/`JOIN`/`TABLE`/`QUERY` hints as a *style* smell ("avoid hints").
-      The catalog-requiring version nobody does: an `INDEX(...)` hint naming an
-      index that **no longer exists**, or pinning an index the predicate cannot
-      seek anyway, so the hint forces a scan of the wrong index.
-- [ ] **Composite index leading-column violation** — predicate filters a
-      non-leading key column while the leading column is unconstrained. One
-      surveyed tool has this as a regex; against real index key ordering it
-      becomes precise. Scope it as a *predicate* finding ("this query cannot
-      seek this index"), never as an index recommendation, or it drifts into
-      the index-advisor skip.
+- [x] **Composite index leading-column violation — shipped.** A real composite
+      index exists on the table, the query genuinely constrains one of its
+      NON-leading key columns via a real AND-reachable comparison, but the
+      index's own leading key column is not referenced anywhere in the
+      statement at all — a composite index is a single B-tree keyed first by
+      its leading column, so without a bound on that column this specific
+      index structurally cannot be seek-used for this predicate. **Precision
+      guard, load-bearing:** only fires when no OTHER usable index on the
+      table leads with the same violating column either — a table with a real
+      alternative seek path is never flagged, keeping this a genuine "this
+      query cannot seek THIS index" claim rather than index-advisor noise.
+      `CompositeIndexLeadingColumnFinding`/`CompositeIndexLeadingColumnScanner`
+      (`src/SilentScan.Core/Predicates/CompositeIndexLeadingColumnScanner.cs`)
+      — pure catalog+AST, reuses `FromScopeResolver`/`ScalarExpressionResolver`
+      (the same machinery `PartialCompositeForeignKeyJoinScanner`/
+      `CatchAllPredicateScanner` already use) plus a local `FlattenAnd` for
+      AND-only-reachable comparisons (a column bound only inside an OR branch
+      never counts as constraining) and a deliberately liberal
+      `ColumnReferenceCollector` (referenced ANYWHERE, including inside OR,
+      counts toward suppressing — this set only ever suppresses, never
+      triggers, so being liberal is the safe direction). No plan-XML oracle
+      needed: the b-tree-prefix mechanism is architectural, not
+      cardinality-dependent, provable directly from `CatalogIndex.KeyColumns`'
+      own ordering. Deliberately scoped `SELECT`/`UPDATE`/`DELETE` only
+      (`MERGE`'s own `ON`/`USING` shape is out of v1 scope, the same reasoning
+      `CatchAllPredicateScanner`/`PartialCompositeForeignKeyJoinScanner`
+      already gave theirs), base-table-only, depth-0 predicates only.
+      **Oracle discovery mid-implementation, caught against real corpus text,
+      not just synthetic tests:** the collector's first version crashed with
+      a `NullReferenceException` on a `COUNT(*)`-shaped wildcard
+      `ColumnReferenceExpression` (no `MultiPartIdentifier`) nested inside a
+      scalar subquery's own `WHERE` clause — `ScalarExpressionResolver
+      .ResolveColumnReference` assumes a real column name is always present
+      and has no guard of its own; fixed by skipping `ColumnType.Wildcard`
+      nodes before ever calling it, in both this scanner and the index-hint
+      scanner below, with a regression test locking in the exact shape that
+      crashed. Unit-tested (`CompositeIndexLeadingColumnScannerTests`, 11
+      cases: fires on the canonical shape with correct violating-column/
+      position, never fires when the leading column is constrained, never
+      fires when the leading column is merely referenced anywhere (including
+      inside OR), never fires when the violating column itself is only
+      OR-reachable, never fires when an alternative index leads with the same
+      violating column, never fires on a single-column index, never fires on
+      a filtered index, suppressed by a JOIN ON clause supplying the leading
+      column, fires on UPDATE/DELETE, the wildcard-crash regression, and a
+      3-column index reporting the correct later position). Wired end-to-end
+      (`ScanReport` schema version 31 → 32, SARIF rule
+      `silentscan/index-shape/composite-leading-column-unconstrained`,
+      readable-report section). **Real coverage against the local RM_ test
+      database: 1,330 findings** — spot-checked one directly against real
+      deployed module text (`dbo.AddressListAllWithoutDependenciesSinceDate`,
+      filtering `dbo.tblTrips` by `AgencyID` alone against
+      `PK_tblTrips(ID, AgencyID)`) and confirmed a genuine true positive, the
+      same multi-tenant "`AgencyID` appended to a composite key but never
+      bound by the query" pattern this codebase's own partial-composite-FK-
+      join stream already documented finding in this corpus independently.
+- [x] **Hint validity against the catalog — shipped.** Two kinds, one finding
+      type (`IndexHintFindingKind.{IndexDoesNotExist,HintedIndexNotSeekable}`):
+      an `INDEX(...)` table hint naming an index that no longer exists in the
+      catalog, or naming a real index whose own leading key column is never
+      bound anywhere in the statement — the hint *requires* the engine use
+      this specific index (T-SQL's own documented semantics, not a mere
+      suggestion), so with no leading-column bound the optimizer cannot route
+      around the missing prefix the way it normally would with no hint at
+      all. **Oracle-confirmed directly (Docker instance, real seeded table,
+      2,000 rows, `UPDATE STATISTICS ... FULLSCAN`), both claims proven, not
+      assumed:** a nonexistent index name raises a hard compile error, Msg
+      308 ("Index '...' does not exist"), every time — real value shipping
+      it anyway, the same "names a provably-always-failing query with more
+      precision than the raw engine message" reasoning
+      `TempTableExecShapeFindingKind.ColumnCountMismatch` already used for an
+      identical guaranteed-error case; hinting a real index whose leading
+      column the query never touches degrades an otherwise-clean `Clustered
+      Index Seek` to `Index Scan` + `Nested Loops`, while hinting the same
+      index with its OWN leading column bound stays a clean `Index Seek` —
+      confirming the leading-column binding, not the hint syntax itself,
+      decides seek vs. scan. `IndexHintFinding`/`IndexHintScanner`
+      (`src/SilentScan.Core/Predicates/IndexHintScanner.cs`) shares its
+      "is the leading column bound anywhere" check with the composite-index
+      scanner above (deliberately the same conservative, liberal-to-suppress
+      test, generalized to single-column indexes too). **Known v1 scope
+      limits, stated honestly:** only the identifier form of `WITH
+      (INDEX(IndexName))` is inspected — the ordinal form (`INDEX(0)`/
+      `INDEX(1)`) has no catalog name to resolve against and is declined
+      rather than guessed at; `FORCESEEK`'s own optional index argument
+      (`ForceSeekTableHint`, a distinct ScriptDom node) and `FORCESCAN` are
+      related, similarly-scoped hint syntaxes deliberately left out of v1.
+      Unit-tested (`IndexHintScannerTests`, 7 cases: nonexistent index fires,
+      real index with unbound leading column fires, bound leading column
+      never fires, no hints never fires, ordinal `INDEX(0)` declines, an
+      UPDATE target hint via the extended FROM form fires, a hint on a
+      joined table with its leading column bound by the JOIN's own ON clause
+      never fires). Oracle-tested (`IndexHintOracleTests`, 4 tests: Msg 308
+      for a nonexistent index, a clean seek with no hint as the control, the
+      scan degradation with an unbound leading column, and the seek staying
+      intact with a bound leading column). Wired end-to-end (same schema
+      bump as the composite-index stream, SARIF rules
+      `silentscan/hint/{index-does-not-exist,index-not-seekable}`,
+      readable-report section). **Real coverage against the local RM_ test
+      database: 3 findings, all `HintedIndexNotSeekable`** (0
+      `IndexDoesNotExist` — a real, honest zero) — spot-checked one directly
+      against real deployed module text
+      (`dbo.spCustomerListIDSelectionForm2`) and found a genuinely
+      non-synthetic case: the author's own code comment reads "as a general
+      rule INDEX HINTS are bad... in this case though I know this index is
+      better as it eliminates the SORT required... It thinks it is going to
+      reduce the row count but the data just isn't like that" — a deliberate,
+      informed tradeoff (forcing a non-seeking scan specifically to avoid a
+      sort elsewhere in the plan), not an accidental bug, confirming the
+      finding's own structural claim is accurate even in a case where the
+      developer already reasoned through the tradeoff themselves.
 
 ### Second OSS/commercial sweep (7 repos, 2026-08-16)
 `s01nik/SQL-Performance-Analyzer` (9-rule regex toy), `felipebz/zpa` (Oracle

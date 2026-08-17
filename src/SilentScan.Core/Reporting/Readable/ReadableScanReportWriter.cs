@@ -106,6 +106,8 @@ public static class ReadableScanReportWriter
         blocks.AddRange(WaitFor(report, headingLevel, pathBase));
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
         blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
+        blocks.AddRange(CompositeIndexLeadingColumn(report, headingLevel, pathBase));
+        blocks.AddRange(IndexHint(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -181,6 +183,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "WAITFOR DELAY/TIME", report.WaitForFindings.Count);
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.ViewOrderingFindings.Count);
         AddCount(counts, "Unresolved BEGIN TRANSACTION", report.TransactionHygieneFindings.Count);
+        AddCount(counts, "Composite index leading-column violations", report.CompositeIndexLeadingColumnFindings.Count);
+        AddCount(counts, "INDEX hints naming a nonexistent or non-seekable index", report.IndexHintFindings.Count);
         AddCount(counts, "Comparisons that could not be classified", summary.UnknownCount);
         AddCount(counts, "Comparisons between genuinely incompatible types", summary.OperandClashCount);
         AddCount(counts, "Dynamic SQL call sites not statically analyzable", report.DynamicSqlSummary.UnanalyzableCount + report.DynamicSqlSummary.InnerParseFailedCount);
@@ -1156,6 +1160,52 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.BeginTransactionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 $"{f.SourcePath}:{f.UnresolvedExitLine}",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CompositeIndexLeadingColumn(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CompositeIndexLeadingColumnFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Composite index leading-column violations ({report.CompositeIndexLeadingColumnFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A real composite index's leading key column is never bound anywhere in this statement, while the query genuinely constrains one of that index's later key columns - the index is a single B-tree keyed first by its leading column, so this specific index cannot be seek-used for this predicate at all. Only fires when no other usable index on the table leads with the same violating column either, so this is not an index-recommendation or an overall-query-is-slow claim - just \"this query cannot seek this index\".");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Index", "Key columns", "Unconstrained leading column", "Violating column"],
+            [.. report.CompositeIndexLeadingColumnFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.IndexName ?? "(unnamed)",
+                string.Join(", ", f.IndexKeyColumns),
+                f.IndexKeyColumns[0],
+                $"{f.ViolatingColumnName} (position {f.ViolatingColumnPosition})",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> IndexHint(ScanReport report, int level, string? pathBase)
+    {
+        if (report.IndexHintFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"INDEX hints naming a nonexistent or non-seekable index ({report.IndexHintFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An INDEX(...) table hint either names an index that no longer exists (oracle-confirmed a hard compile error, Msg 308, every time this statement runs) or forces a real index whose own leading key column is never bound anywhere in the statement (oracle-confirmed to degrade the forced access path to a full index scan, since the hint requires this specific index rather than merely suggesting it).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Hinted index", "Problem"],
+            [.. report.IndexHintFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.HintedIndexName,
+                f.Kind == IndexHintFindingKind.IndexDoesNotExist ? "Index does not exist" : $"Leading column {f.LeadingColumnName} never bound",
             })]);
     }
 

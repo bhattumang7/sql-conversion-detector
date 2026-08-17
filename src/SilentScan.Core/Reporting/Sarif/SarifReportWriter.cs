@@ -76,6 +76,8 @@ public static class SarifReportWriter
         results.AddRange(report.WaitForFindings.Select(ToResult));
         results.AddRange(report.ViewOrderingFindings.Select(ToResult));
         results.AddRange(report.TransactionHygieneFindings.Select(ToResult));
+        results.AddRange(report.CompositeIndexLeadingColumnFindings.Select(ToResult));
+        results.AddRange(report.IndexHintFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -531,6 +533,38 @@ public static class SarifReportWriter
             $"BEGIN TRANSACTION at line {finding.BeginTransactionLine} reaches this point with no intervening COMMIT/ROLLBACK - @@TRANCOUNT is left elevated by one on this path, holding its locks until the session or connection pool eventually clears it.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.UnresolvedExitLine, finding.UnresolvedExitColumn);
+    }
+
+    private static SarifResult ToResult(CompositeIndexLeadingColumnFinding finding)
+    {
+        // Warning, not error: a provable structural (b-tree prefix) fact, but a per-index claim
+        // ("this index cannot seek this query"), never an index-recommendation or overall-query-
+        // is-slow claim - the same "structural risk" tier ForcedSerialFinding/WindowFrameFinding use.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CompositeIndexLeadingColumnRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var indexLabel = finding.IndexName ?? "(unnamed index)";
+        var message =
+            $"Index {indexLabel} on {finding.TableQualifiedName} is keyed ({string.Join(", ", finding.IndexKeyColumns)}) - this query constrains {finding.ViolatingColumnName} (key position {finding.ViolatingColumnPosition}) but never binds the leading key column {finding.IndexKeyColumns[0]} anywhere in the statement, and no other index on this table leads with {finding.ViolatingColumnName} either, so nothing here can seek {finding.ViolatingColumnName} through a real index.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(IndexHintFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexHintRuleId(finding.Kind), finding.Confidence);
+        var message = finding.Kind switch
+        {
+            IndexHintFindingKind.IndexDoesNotExist =>
+                $"INDEX hint on {finding.TableQualifiedName} names '{finding.HintedIndexName}', which does not exist in the catalog - oracle-confirmed this is a hard compile error (Msg 308) every time this statement runs.",
+            IndexHintFindingKind.HintedIndexNotSeekable =>
+                $"INDEX hint on {finding.TableQualifiedName} forces index '{finding.HintedIndexName}', whose leading key column {finding.LeadingColumnName} is never bound anywhere in this statement - oracle-confirmed this degrades the forced index to a full scan instead of a seek.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
+        };
+        var level = finding.Kind == IndexHintFindingKind.IndexDoesNotExist
+            ? FloorLevelForConfidence(LevelError, finding.Confidence)
+            : FloorLevelForConfidence(LevelWarning, finding.Confidence);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(ViewOrderingFinding finding)

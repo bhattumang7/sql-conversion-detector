@@ -490,6 +490,42 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<CompositeIndexLeadingColumnFinding> compositeIndexLeadingColumnFindings;
+        using (var compositeIndexStage = progress.Begin("scanning composite index leading-column violations", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = CompositeIndexLeadingColumnScanner.Scan(r, catalog);
+                    compositeIndexStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            compositeIndexLeadingColumnFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<IndexHintFinding> indexHintFindings;
+        using (var indexHintStage = progress.Begin("scanning INDEX hint validity", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = IndexHintScanner.Scan(r, catalog);
+                    indexHintStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            indexHintFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<CatchAllPredicateFinding> catchAllPredicateFindings;
         using (var catchAllStage = progress.Begin("scanning catch-all predicates", usableCount))
         {
@@ -798,6 +834,7 @@ public static class ScanReportBuilder
             temporalTableHistoryIndexGapFindings,
             moduleCompileFlagFindings,
             windowFrameFindings, waitForFindings, viewOrderingFindings, transactionHygieneFindings,
+            compositeIndexLeadingColumnFindings, indexHintFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

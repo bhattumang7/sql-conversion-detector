@@ -1,0 +1,239 @@
+using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
+using SilentScan.Core.Parsing;
+
+namespace SilentScan.Core.Predicates;
+
+/// <summary>
+/// docs/detection-checklist.md "Hint and index-shape catalog checks": "Hint validity against the
+/// catalog" - see <see cref="IndexHintFinding"/>/<see cref="IndexHintFindingKind"/> for the
+/// mechanism behind each kind. Own standalone scanner: needs the same whole-statement predicate
+/// visibility <see cref="CompositeIndexLeadingColumnScanner"/> needs (is the hinted index's
+/// leading column bound ANYWHERE in the statement, not just locally on the hinted table
+/// reference itself), plus a direct per-table-reference AST walk neither
+/// <see cref="TypedPredicateExtractor"/> nor that scanner performs (table hints live on the
+/// <see cref="NamedTableReference"/> node itself, not inside a predicate).
+/// </summary>
+public static class IndexHintScanner
+{
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+    public static IReadOnlyList<IndexHintFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
+    {
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        parseResult.Fragment.Accept(visitor);
+        return
+        [
+            .. visitor.Findings
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.Line)
+                .ThenBy(f => f.Column)
+                .ThenBy(f => f.HintedIndexName, StringComparer.OrdinalIgnoreCase),
+        ];
+    }
+
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    {
+        public List<IndexHintFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(QuerySpecification node)
+        {
+            Inspect(node.FromClause, node.WhereClause?.SearchCondition);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(UpdateStatement node)
+        {
+            var spec = node.UpdateSpecification;
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            InspectResolved(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, spec.Target);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(DeleteStatement node)
+        {
+            var spec = node.DeleteSpecification;
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            InspectResolved(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, spec.Target);
+            base.ExplicitVisit(node);
+        }
+
+        private FromScopeResolver.ResolutionContext ResolutionContext() =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+
+        private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition)
+        {
+            if (fromClause is null)
+            {
+                return;
+            }
+
+            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            InspectResolved(byAlias, ordered, fromClause, whereCondition, target: null);
+        }
+
+        private void InspectResolved(
+            IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered,
+            FromClause? fromClause, BooleanExpression? whereCondition, TableReference? target)
+        {
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
+
+            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(FlattenJoinNodes).ToList();
+
+            var anyReferencedColumns = new HashSet<(string Table, string Column)>();
+            var referenceVisitor = new ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
+            whereCondition?.Accept(referenceVisitor);
+            foreach (var join in joinNodes)
+            {
+                join.SearchCondition.Accept(referenceVisitor);
+            }
+
+            var namedTables = (fromClause is null ? [] : fromClause.TableReferences.SelectMany(FlattenNamedTables))
+                .Concat(target is NamedTableReference targetNamed ? [targetNamed] : [])
+                .ToList();
+
+            foreach (var namedTable in namedTables)
+            {
+                InspectNamedTable(namedTable, anyReferencedColumns);
+            }
+        }
+
+        private void InspectNamedTable(NamedTableReference namedTable, HashSet<(string Table, string Column)> anyReferencedColumns)
+        {
+            var indexHints = namedTable.TableHints.OfType<IndexTableHint>().ToList();
+            if (indexHints.Count == 0)
+            {
+                return;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedTable.SchemaObject));
+            var table = catalog.Find(qualifiedName);
+            if (table is null || table.Kind != CatalogTableKind.Table)
+            {
+                return;
+            }
+
+            foreach (var hint in indexHints)
+            {
+                foreach (var indexValue in hint.IndexValues)
+                {
+                    // Ordinal form (INDEX(0)/INDEX(1)) has no Identifier and no catalog name to
+                    // validate - deliberately out of v1 scope, see the finding's own doc comment.
+                    var hintedName = indexValue.Identifier?.Value;
+                    if (hintedName is null)
+                    {
+                        continue;
+                    }
+
+                    var matchedIndex = table.Indexes.FirstOrDefault(i => string.Equals(i.Name, hintedName, StringComparison.OrdinalIgnoreCase));
+                    if (matchedIndex is null)
+                    {
+                        Findings.Add(new IndexHintFinding(
+                            IndexHintFindingKind.IndexDoesNotExist, table.QualifiedName, hintedName, LeadingColumnName: null,
+                            sourcePath, hint.StartLine, hint.StartColumn));
+                        continue;
+                    }
+
+                    if (matchedIndex.KeyColumns.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var leadingColumn = matchedIndex.KeyColumns[0];
+                    if (!anyReferencedColumns.Contains((table.QualifiedName, leadingColumn)))
+                    {
+                        Findings.Add(new IndexHintFinding(
+                            IndexHintFindingKind.HintedIndexNotSeekable, table.QualifiedName, hintedName, leadingColumn,
+                            sourcePath, hint.StartLine, hint.StartColumn));
+                    }
+                }
+            }
+        }
+
+        /// <summary>Yields every <see cref="QualifiedJoin"/> node in the join tree - each carries its own ON clause.</summary>
+        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
+        {
+            switch (tableReference)
+            {
+                case QualifiedJoin join:
+                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    yield return join;
+                    break;
+
+                case JoinParenthesisTableReference parenthesis:
+                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+            }
+        }
+
+        /// <summary>Yields every leaf <see cref="NamedTableReference"/> in the join tree - the nodes that can actually carry a table hint.</summary>
+        private static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
+        {
+            switch (tableReference)
+            {
+                case NamedTableReference named:
+                    yield return named;
+                    break;
+
+                case QualifiedJoin join:
+                    foreach (var t in FlattenNamedTables(join.FirstTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    foreach (var t in FlattenNamedTables(join.SecondTableReference))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+
+                case JoinParenthesisTableReference parenthesis:
+                    foreach (var t in FlattenNamedTables(parenthesis.Join))
+                    {
+                        yield return t;
+                    }
+
+                    break;
+            }
+        }
+
+        /// <summary>Collects every base-column reference reachable anywhere under a boolean expression, OR branches included - deliberately liberal, since this set is only ever used to suppress a finding, never to trigger one (matches <see cref="CompositeIndexLeadingColumnScanner"/>'s own identical collector).</summary>
+        private sealed class ColumnReferenceCollector(
+            string sourcePath,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            HashSet<(string Table, string Column)> sink) : TSqlFragmentVisitor
+        {
+            public override void ExplicitVisit(ColumnReferenceExpression node)
+            {
+                // See CompositeIndexLeadingColumnScanner's identical guard: a wildcard reference
+                // (bare * or COUNT(*)'s own argument) has no MultiPartIdentifier and crashes
+                // ResolveColumnReference, oracle-found against real corpus text.
+                if (node.ColumnType != ColumnType.Wildcard)
+                {
+                    var provenance = ScalarExpressionResolver.ResolveColumnReference(node, scopeChain, sourcePath, ledger: null);
+                    if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
+                    {
+                        sink.Add((baseColumn.TableQualifiedName, baseColumn.ColumnName));
+                    }
+                }
+
+                base.ExplicitVisit(node);
+            }
+        }
+    }
+}
