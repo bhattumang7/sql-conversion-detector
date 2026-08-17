@@ -3391,6 +3391,208 @@ on record; queuing them below is what was actually missing.
 
 ---
 
+## DBA-script family sweep (2026-08-17) — the schema/index design gap
+
+Every incumbent surveyed until now was a linter: it reads code and never opens
+the catalog. The most-used SQL Server diagnostic tooling in the field is the
+opposite — live-server T-SQL scripts that read the catalog and never parse a
+module body (`detection-reference.md` §7.11). Surveying that family exposed a
+class of finding this list had dispositioned away years of decisions ago, under
+the pre-2026-08-16 rule that "an index advisor is a different tool". Under the
+current scope rule it is not: every item below is derivable from the catalog
+`LiveCatalogReader` already reads, several from fields it already populates and
+never reports on (`CatalogIndex.IsDisabled`/`IsUnique`/`KeyColumns`,
+`ForeignKeyRelationship`).
+
+**This section supersedes the compressed catch-all bullet at the end of Tier 4**
+for every item it names — that bullet listed a dozen of these as undifferentiated
+prose with no mechanism or priority attached, which is why none of them ever got
+picked up.
+
+**Framing that should survive into the study.** The catalog half of that
+family's checks is run by a DBA on a server that is already in production and
+already hurting. Every one of them could have been run against the developer's
+own database weeks earlier. Same finding, moved left — that is this project's
+actual pitch for the whole group, and it is a stronger one than "another
+index advisor".
+
+### A. Physical/schema design (catalog-only, no query text) — biggest single gap
+Ordered by precision, not by fame: the first four are deterministic set
+comparisons over catalog rows with no estimation or heuristic anywhere, which
+makes them the cleanest findings in this entire file.
+
+- [ ] **Duplicate and prefix-subsumed indexes** — exact key-list match
+      (ordering included) is an exact duplicate; index A's key list being a
+      proper prefix of B's with A's includes a subset of B's is subsumption.
+      Deterministic, zero-estimation. Cost is write amplification on every DML
+      touching the table plus wasted space; the fix is mechanical.
+      Precision guard: uniqueness, filter definition and index kind must all
+      match before calling two indexes duplicates — a unique index and a
+      non-unique index on the same keys are not the same object.
+- [ ] **Unindexed foreign key columns** — every FK column set with no index
+      leading on it. We already read both halves; this is a join over data in
+      hand. Costs: RI checks on parent delete/update scan the child, and every
+      join along the relationship has no seek path.
+- [ ] **Heap (no clustered index) on a table that has nonclustered indexes**,
+      and the sharper sibling, **heap with a nonclustered primary key** —
+      needs a clustered/nonclustered flag on `CatalogIndex`, which currently
+      models only `Index`/`PrimaryKey`/`UniqueConstraint` and cannot express
+      it. That field is a prerequisite for four items in this group.
+- [ ] **Table with no primary key at all** — the one design-bar check the
+      abandoned DacFx sample (`SRD0001`) and the live-server family agree on.
+- [ ] **Clustering-key quality**, three findings sharing one mechanism (every
+      nonclustered index silently carries the clustering key in its leaf, so
+      the clustered key's width and stability is a per-table multiplier):
+      non-unique clustered index (the engine adds a hidden 4-byte uniquifier);
+      wide clustered key (>3 key columns or >16 bytes, computed from the
+      column types we already have); `uniqueidentifier` clustered key with a
+      `NEWID()` default (random insert distribution → page splits and
+      fragmentation; `NEWSEQUENTIALID()` is the near-miss that must not fire).
+- [ ] **Over-indexing**: many nonclustered indexes on one table, and indexes
+      with ≥7 key columns. Threshold-based, so lower precision than the rest of
+      this group — ship with the threshold stated in the finding text.
+- [ ] **Disabled and hypothetical indexes** — `ALTER INDEX ... DISABLE` left in
+      place, and wizard-leftover `_dta_`-style hypothetical indexes. We already
+      carry `IsDisabled` and deliberately exclude it from seek eligibility;
+      reporting it as a finding of its own is a few lines.
+- [ ] **Filtered index whose filter columns are absent from its own key +
+      include list** — the engine cannot use the index for a query that does
+      not itself repeat the filter predicate. Needs the filter definition text
+      (not currently read) plus a parse of it.
+- [ ] **Identity/sequence range exhaustion** — current identity value against
+      the column type's own maximum, and a negative seed or an increment other
+      than 1. Pure arithmetic, and the failure mode is a hard production
+      outage (insert failure) rather than a slowdown, which makes it exactly a
+      before-prod finding.
+- [ ] **Deprecated LOB column types in the schema** — `text`/`ntext`/`image`
+      columns (and `timestamp` in favour of `rowversion`). The shipped
+      deprecated-syntax stream is statement-level and does not look at column
+      types at all.
+- [ ] **`float`/`real` as an index key column or an equality-predicate target**
+      — approximate types do not compare exactly; an equality seek on one is a
+      correctness trap before it is a performance one.
+- [ ] **Statistics-object flags**: `NO_RECOMPUTE`, and a partitioned table with
+      no incremental statistics. Catalog flags, not DMV state — in scope, unlike
+      "statistics are stale", which is not.
+- [ ] **Database-option gaps in the shipped `DatabaseConfigurationFindingKind`
+      stream** (6 kinds today): auto-create statistics off, auto-update
+      statistics off, and compatibility level behind the engine's own current
+      level. The last one is what silently keeps a database on an old
+      cardinality estimator nobody chose deliberately.
+- [ ] **Non-aligned index on a partitioned table** — breaks partition switching
+      outright, which is usually the reason the table was partitioned.
+- [ ] Lower-precision, listed for completeness rather than as priorities: wide
+      tables (35+ columns or >2000 non-LOB bytes), high nullable-column ratio,
+      high string-column ratio.
+
+### B. Query anti-patterns still unbuilt
+Cross-referenced against a widely-read practitioner code-review post: of its
+nine red flags, six already fire here (TVF joins, multi-referenced CTE,
+kitchen-sink `OR`, unindexed temp tables, `CROSS JOIN`, `BEGIN TRAN` without
+error handling). These are the ones that do not.
+
+- [ ] **`NOLOCK` / `READ UNCOMMITTED`** (table hint and `SET TRANSACTION
+      ISOLATION LEVEL` form) — the single most-cited item in this whole
+      literature, and pure syntax with nothing to infer. Frame it honestly as
+      a correctness finding (dirty reads, rows read twice or skipped during
+      page splits), not a performance one.
+- [ ] **Table variable used as a query source** — the shipped forced-serial
+      rule covers the DML *target* side only. A table variable in a `FROM`/
+      `JOIN` carries no statistics and a fixed 1-row estimate. Engine-version
+      sensitive, and the rule must say so: 2019+ deferred compilation fixes
+      the estimate for a table variable populated before first use, and does
+      not fix it inside a multi-statement loop or when the variable is a proc
+      parameter. 821 modules locally use table variables.
+- [ ] **`SELECT ... INTO #temp`** — no declared column types (they are inherited
+      from expressions, so a downstream join can silently mismatch), and the
+      column shape is invisible to any reader of the proc.
+- [ ] **Row-by-row processing beyond the shipped cursor rule** — a `WHILE` loop
+      whose body issues single-row DML against a table, and a cursor declared
+      without `LOCAL` (global-scope leak). The shipped rule covers cursor
+      declaration options and their forced-serial consequence, not RBAR shape.
+- [ ] **`COUNT(*)` used as an existence test** (`IF (SELECT COUNT(*) …) > 0`,
+      `WHERE (SELECT COUNT(*) …) = 0`) — counts the whole set where `EXISTS`
+      short-circuits at the first row.
+- [ ] **Non-aggregate predicate in `HAVING`** that belongs in `WHERE` — filters
+      after aggregation instead of before it.
+- [ ] **`UNION` where `UNION ALL` is sufficient**, and **`DISTINCT` masking a
+      join fan-out**. Both need a real precision story before shipping: the
+      first is only provable when the branches are provably disjoint, the
+      second only when the fan-out is provable from key metadata. Do not ship
+      either as a bare shape match — that is the incumbent failure mode this
+      project exists to avoid.
+- [ ] **Unqualified object references** in module bodies (`FROM Orders`, not
+      `FROM dbo.Orders`) — a real cost, not a style rule: name resolution is
+      per-user, so the plan cache holds one entry per schema-resolution context
+      and compilation takes an extra schema-stability lock. Exactly resolvable
+      against the catalog, so it fires only when the reference genuinely
+      resolves to a schema the caller may not default to.
+- [ ] **`MERGE` hazards** — missing `HOLDLOCK`/serializable on the target (the
+      documented race that produces primary-key violations under concurrency),
+      a non-unique `USING` join, and `WHEN MATCHED THEN DELETE`. Well-documented
+      engine bugs and semantics, not opinion; each needs its own fixture.
+- [ ] **Recursive CTE with no `MAXRECURSION` option** — the 100-level default
+      terminates the query with an error rather than a wrong answer, so this is
+      a "fails in prod on real depth" finding.
+- [ ] **`UPDATE`/`DELETE` with no `WHERE` and no `TOP`** — whole-table write.
+      Near-miss that must not fire: a deliberate full-table maintenance
+      statement in a migration script (see the source-context classification
+      idea in "Reporting ideas worth stealing" — this rule is the one that most
+      needs it).
+- [ ] **Missing `SET NOCOUNT ON`** in procedures and triggers — one extra
+      network round trip per statement executed, which is real in a chatty
+      proc and nothing in a single-statement one; rank accordingly.
+- [ ] **Linked-server 4-part names and cross-database predicates** — remote
+      queries are a serial zone and remote statistics are usually unavailable,
+      so the estimate is a guess. Previously skipped as "rare in corpus";
+      re-check the base rate against the local test database before building.
+- [ ] **Index-coverage shapes**, the two the field literature names most and the
+      only items in this group needing both halves of our machinery: a query
+      whose only candidate index seeks but does not cover its own output or
+      residual predicate (key-lookup-prone), and a join/filter column on the
+      inner side of a nested-loop with no supporting index at all
+      (eager-index-spool-prone). Both are statically provable from
+      catalog + AST, and both need a hard precision guard: fire only when a
+      single candidate index exists, never when the optimizer has a real
+      alternative. Plan-XML markers exist for both (`Lookup="1"` on a
+      `RelOp`, `<Spool><Index…>` on the inner side), so both are
+      oracle-confirmable rather than static-only.
+
+### C. Trigger correctness — unclaimed by every tool surveyed, either family
+The live-server family only reports *that* triggers exist; no linter surveyed
+looks inside one. This is the classic "worked in development, corrupted data in
+production" bug, and it is provable from the AST alone.
+
+- [ ] **Multi-row-unsafe trigger** — the body treats `inserted`/`deleted` as a
+      single row: `SELECT @var = col FROM inserted`, a scalar subquery over
+      `inserted`, or any use of a variable so assigned as the sole key of the
+      trigger's own DML. Correct for single-row DML, silently wrong for every
+      multi-row `INSERT`/`UPDATE`/`MERGE` — no error is raised, which puts it
+      in the same "silent data loss" family as the shipped write-loss stream
+      and makes it the highest-severity item in this whole sweep.
+      `TypedPredicateExtractor` and `NonSargablePredicateScanner` already
+      register `inserted`/`deleted` as relations, so the scope resolution
+      needed for this exists.
+- [ ] **Trigger without `SET NOCOUNT ON`** (client-visible rowcounts from a
+      trigger break some ORMs outright), **trigger with no early-out** for the
+      zero-row case, and **trigger whose own DML re-enters itself** (direct
+      recursion, visible in the proc call graph).
+
+### D. Cross-module analysis — the differentiator nobody in either family has
+- [ ] **Inconsistent lock ordering across modules** — proc A writes T1 then T2,
+      proc B writes T2 then T1: the textbook deadlock, invisible until two
+      users hit both at once in production, and provable statically from write
+      targets in call-graph order. We already build a proc call graph and
+      already extract DML targets. Precision is the whole problem — it must
+      account for transaction boundaries (only writes inside the same
+      transaction can deadlock) and reachability through the call graph — so
+      scope v1 tightly: explicit transactions, direct DML targets, base tables
+      only. Nothing surveyed in either family attempts this, and it is the kind
+      of finding that makes the case for static analysis over a live-server
+      script better than any single-statement rule can.
+
+---
+
 ## Research gates before publication (not detections)
 Two items from the wider-landscape/incumbent-catalog reads that are measurement
 tasks, not rule candidates — they don't belong in a detection tier, but need
@@ -4106,14 +4308,93 @@ exactly as originally scoped until its own turn comes up.
     common, deliberate idiom, not a bug); a `DuplicateSiblingCondition` in
     `dbo.spExecuteSqlWithAuditInsertsResolvingPK2` confirmed against the
     real module text.
-  * *Task-comment tracking* — `TODO`, `FIXME`.
-  * *Non-ANSI and deprecated spellings* — `!=`/`!<`/`!>`, `= NULL` in place of
-    `IS NULL`, a `LIKE` pattern containing no wildcard, legacy system
-    compatibility views, table hints written without `WITH`, index hints with
-    a two-part name, numbered procedures, string literals used as column
-    aliases, unparenthesised error-raising, an assortment of removed system
-    procedures. (The one member with real plan teeth, the old non-ANSI
-    outer-join operators, is already queued separately in Tier 2.)
+  * *Task-comment tracking and Non-ANSI/deprecated spellings — shipped
+    together as one finding type, both cross-checked against the real
+    decompiled source (not just this bullet's own paraphrase), never against
+    that third party's own code or numbers per CLAUDE.md.* New
+    `DeprecatedSyntaxFinding`/`DeprecatedSyntaxScanner`
+    (`src/SilentScan.Core/Predicates/DeprecatedSyntaxScanner.cs`) — fully
+    syntax-only, no catalog, no oracle except the two claims below that
+    needed one. `TODO`/`FIXME` word-boundary-matched in comments
+    (`FindingConfidence.Low`, SARIF Note — a workflow aid, not a defect).
+    Nine deprecated/non-ANSI syntax kinds shipped: `!=`/`!<`/`!>` (the ANSI
+    form has no directional "not less/greater than" spelling at all, and
+    `!=` is a T-SQL-specific spelling of the ANSI `<>` — `<>`/`NotEqualTo`
+    itself never fires this kind); `= NULL`/`<> NULL`/`!= NULL` (two kinds,
+    the sharper claim — **oracle-confirmed directly, a real seeded NULL
+    row**: `= NULL` and `<> NULL` both match zero rows under the default
+    `ANSI_NULLS ON`, including the genuinely NULL one, while `IS NULL`
+    correctly matches it — `FindingConfidence.High`, the same certainty
+    tier `NotInNullableSubqueryFinding` gets, since this is a provable
+    silent-wrong-result trap, not a conditional risk); a wildcard-free
+    `LIKE` pattern; a legacy pre-2005 system compatibility view
+    (`sysobjects`/`syscolumns`/... — Microsoft's own public "Mapping System
+    Tables to System Views" list, independently sourced, not reconstructed
+    from the third-party plugin); a table hint without `WITH` (**oracle-
+    confirmed still parses and executes** on the current engine); a
+    numbered-procedure-group definition and its `EXEC ...;N` invocation,
+    two kinds (**oracle-confirmed both still compile/execute**); a
+    string-literal column alias (**oracle-confirmed still parses and
+    executes**); a removed legacy security-administration system stored
+    procedure (`sp_addlogin`/`sp_password`/... — Microsoft's own public
+    "Deprecated Database Engine Features" list, independently sourced);
+    and `SET ROWCOUNT` (Microsoft's own documentation states it is not
+    honored by `INSERT`/`UPDATE`/`DELETE` in a future release — a genuinely
+    new concept this bullet's own paraphrase didn't name, found while
+    cross-checking the real source, which showed the underlying rule is
+    broader than the 10-item paraphrase suggested).
+    <br><br>
+    **Two related concepts closed, not built, oracle-confirmed as hard
+    parse errors** under this tool's own `TSql160Parser` dialect — the same
+    documented disposition `COMPUTE`/`COMPUTE BY` and the old `*=`/`=*`
+    outer-join operators already received elsewhere in this file: old-style
+    unparenthesized `RAISERROR 50001 'message'` (only the modern
+    parenthesized form parses); an `INDEX` table hint naming an index with
+    an explicit schema-qualified two-part name (`WITH (INDEX(dbo.IX_Foo))`
+    — only a bare, unqualified index name parses in an `INDEX` hint). A
+    real corpus file using either legacy shape would already fail to parse
+    as a whole, a stronger and more honest signal than a rule that can
+    never fire.
+    <br><br>
+    **Deliberately narrower than the real underlying source rule's full
+    scope**, found while cross-checking it directly: the source rule also
+    covers a substantially wider set of removed/deprecated features
+    (`GROUP BY ALL` — itself oracle-confirmed a hard parse error and thus
+    not shippable either; `SET REMOTE_PROC_TRANSACTIONS`; deprecated `DBCC`
+    commands like `DBREINDEX`/`INDEXDEFRAG`/`SHOWCONTIG`; the deprecated
+    `TORN_PAGE_DETECTION` database option; `TAPE` backup devices;
+    `PASSWORD`/`MEDIAPASSWORD` list operators; `fn_virtualservernodes`/
+    `fn_servershareddrives`; a direct reference to `sys.numbered_procedures`;
+    `GRANT ALL PRIVILEGES`). Left as an explicit, documented residual gap
+    rather than exhaustively rebuilt this pass — every member is a rare,
+    legacy-replication/backup-administration-era feature with essentially
+    no expected real-corpus yield, a lower-value use of further time than
+    the rest of Tier 4 still queued.
+    <br><br>
+    Wired end-to-end (`ScanReport` schema version 42 → 43, SARIF, readable
+    report). 33 unit tests (`DeprecatedSyntaxScannerTests`, fire/near-miss
+    per kind). Real oracle-caught bug during development: the raw
+    `ScriptTokenStream` includes `WhiteSpace` as its own token type (an
+    earlier version's table-hint-without-`WITH` lookback didn't skip it and
+    false-fired on the correctly-written `WITH (...)` form) — caught by a
+    unit test before shipping, fixed by skipping whitespace tokens on both
+    sides of the hint's own opening parenthesis. **Real coverage against
+    the local RM_ test database: 1,327 findings** (827
+    `StringLiteralColumnAlias`, 226 `LegacySystemCompatibilityView`, 225
+    `NonAnsiComparisonOperator`, 30 `TaskCommentTodo`, 9
+    `EqualsNullComparison`, 4 `DeprecatedSetRowcount`, 3
+    `LikeWithNoWildcard`, 2 `TableHintWithoutWith`, 1
+    `NotEqualsNullComparison`; real, honest zeros for
+    `NumberedProcedureDefinition`/`NumberedProcedureExecution`/
+    `RemovedSecurityStoredProcedure`/`TaskCommentFixme`) — spot-checked two
+    directly against real module text: an `EqualsNullComparison` in
+    `dbo.spFRCancelTripStopsAndSelectTripNames` is a genuine latent bug (a
+    `CASE WHEN tr.TripDescription = NULL THEN ' '` branch that can never
+    execute); a `StringLiteralColumnAlias` in
+    `dbo.AuditLogNotesForAuditLogID` is a real, deliberate
+    `FOR XML PATH('') ... AS 'data()'` idiom — a true positive either way,
+    confirming the finding states a real syntax fact regardless of whether
+    a given instance is a mistake or intentional advanced usage.
   * *Statement-shape advice* — `SELECT *`, `INSERT` without a column list,
     ordinal `ORDER BY`, `TOP` without `ORDER BY`, a table with no primary key,
     `UPDATE`/`DELETE` with no `WHERE`, an existence check over an unfiltered
@@ -4158,7 +4439,16 @@ exactly as originally scoped until its own turn comes up.
   rule, no collation-aware rule, no lineage-aware rule, and no plan oracle —
   recorded in `detection-reference.md`.
 - **Everything else the old Tier 3 excluded for a reason other than
-  production-only visibility** — same status as above, unbuilt candidates now:
+  production-only visibility** — same status as above, unbuilt candidates now.
+  **Superseded in part (2026-08-17):** the index/schema, `NOLOCK`, `MERGE`,
+  `DISTINCT`/`UNION` and correlated-subquery items below are now written up
+  properly, with mechanisms and precision guards, in "DBA-script family sweep
+  (2026-08-17)" later in this file; work them from there, not from this
+  bullet. What stays here and nowhere else: indexed-view `NOEXPAND` matching,
+  `OR` across different columns, partition-elimination defeat, Always
+  Encrypted comparison restrictions, Batch Mode on Rowstore eligibility loss,
+  the window-function Partition-Order-Covering shape, and the catalog half of
+  the `CHECK (col IN (...))` enum rule.
   `SELECT *`/`SET NOCOUNT`/`sp_` prefix/schema-prefix/ordinal `ORDER BY`
   style linting; missing/duplicate/unused indexes, heaps, fill factor,
   clustering-key width (index-advisor space); `NOLOCK`/`READ UNCOMMITTED`;

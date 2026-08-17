@@ -121,6 +121,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(Naming(report, headingLevel, pathBase));
         blocks.AddRange(DeadCode(report, headingLevel, pathBase));
         blocks.AddRange(Duplication(report, headingLevel, pathBase));
+        blocks.AddRange(DeprecatedSyntax(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -182,6 +183,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Naming and identifier risks", report.NamingFindings.Count);
         AddCount(counts, "Dead code and control-flow risks", report.DeadCodeFindings.Count);
         AddCount(counts, "Duplicated/redundant code shapes", report.DuplicationFindings.Count);
+        AddCount(counts, "Task comments and deprecated syntax", report.DeprecatedSyntaxFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -905,6 +907,27 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),
                 f.DetailText ?? f.ModuleQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> DeprecatedSyntax(ScanReport report, int level, string? pathBase)
+    {
+        if (report.DeprecatedSyntaxFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Task comments and deprecated syntax ({report.DeprecatedSyntaxFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A TODO/FIXME comment, a non-ANSI comparison operator, the \"= NULL\"/\"<> NULL\" silent always-false trap, a wildcard-free LIKE pattern, a legacy system compatibility view, a table hint without WITH, a numbered-procedure-group definition/invocation, a string-literal column alias, a removed legacy security stored procedure, or SET ROWCOUNT. The two NULL-comparison kinds are a real silent correctness trap under the default ANSI_NULLS ON setting; every other kind is a maintainability/forward-compatibility signal.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Detail"],
+            [.. report.DeprecatedSyntaxFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
             })]);
     }
 

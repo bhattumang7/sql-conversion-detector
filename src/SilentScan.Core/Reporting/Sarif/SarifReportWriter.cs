@@ -91,6 +91,7 @@ public static class SarifReportWriter
         results.AddRange(report.NamingFindings.Select(ToResult));
         results.AddRange(report.DeadCodeFindings.Select(ToResult));
         results.AddRange(report.DuplicationFindings.Select(ToResult));
+        results.AddRange(report.DeprecatedSyntaxFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -522,6 +523,21 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(DeprecatedSyntaxFinding finding)
+    {
+        // Note level for the two purely informational, workflow-tracking kinds (TODO/FIXME - not
+        // a defect at all); Warning for everything else - a real syntax/behavior risk, but not
+        // itself proof of a wrong result the way the EqualsNullComparison/NotEqualsNullComparison
+        // kinds' own High confidence already signals through the confidence-based level floor.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DeprecatedSyntaxRuleId(finding.Kind), finding.Confidence);
+        var baseLevel = finding.Kind is DeprecatedSyntaxFindingKind.TaskCommentTodo or DeprecatedSyntaxFindingKind.TaskCommentFixme
+            ? LevelNote
+            : LevelWarning;
+        var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
+
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(NotInNullableSubqueryFinding finding)

@@ -59,6 +59,7 @@ public sealed record ScanReport(
     IReadOnlyList<NamingFinding> NamingFindings,
     IReadOnlyList<DeadCodeFinding> DeadCodeFindings,
     IReadOnlyList<DuplicationFinding> DuplicationFindings,
+    IReadOnlyList<DeprecatedSyntaxFinding> DeprecatedSyntaxFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -195,5 +196,11 @@ public sealed record ScanReport(
     /// values deserves the same signal any other new content gets, matching the
     /// <see cref="Predicates.FindingConfidence"/> field's own precedent above.
     /// </summary>
-    public const int CurrentSchemaVersion = 42;
+    /// Bumped to 43 for the new <see cref="DeprecatedSyntaxFindings"/> stream (docs/detection-
+    /// checklist.md Tier 4 "Task-comment tracking" and "Non-ANSI and deprecated spellings"): TODO/
+    /// FIXME comments, non-ANSI comparison operators, the "= NULL"/"&lt;&gt; NULL" silent
+    /// always-false trap, a wildcard-free LIKE pattern, a legacy system compatibility view, a table
+    /// hint without WITH, a numbered-procedure-group definition/invocation, a string-literal column
+    /// alias, a removed legacy security stored procedure, and SET ROWCOUNT.
+    public const int CurrentSchemaVersion = 43;
 }

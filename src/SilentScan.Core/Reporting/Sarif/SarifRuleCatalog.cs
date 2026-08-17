@@ -77,6 +77,19 @@ public static class SarifRuleCatalog
     public const string DuplicationCollapsibleNestedIfRuleId = "silentscan/duplication/collapsible-nested-if";
     public const string DuplicationNestedConditionalExpressionRuleId = "silentscan/duplication/nested-conditional-expression";
     public const string DuplicationAlwaysTrueOrFalseLiteralComparisonRuleId = "silentscan/duplication/always-true-or-false-literal-comparison";
+    public const string DeprecatedSyntaxTaskCommentTodoRuleId = "silentscan/deprecated-syntax/task-comment-todo";
+    public const string DeprecatedSyntaxTaskCommentFixmeRuleId = "silentscan/deprecated-syntax/task-comment-fixme";
+    public const string DeprecatedSyntaxNonAnsiComparisonOperatorRuleId = "silentscan/deprecated-syntax/non-ansi-comparison-operator";
+    public const string DeprecatedSyntaxEqualsNullComparisonRuleId = "silentscan/deprecated-syntax/equals-null-comparison";
+    public const string DeprecatedSyntaxNotEqualsNullComparisonRuleId = "silentscan/deprecated-syntax/not-equals-null-comparison";
+    public const string DeprecatedSyntaxLikeWithNoWildcardRuleId = "silentscan/deprecated-syntax/like-with-no-wildcard";
+    public const string DeprecatedSyntaxLegacySystemCompatibilityViewRuleId = "silentscan/deprecated-syntax/legacy-system-compatibility-view";
+    public const string DeprecatedSyntaxTableHintWithoutWithRuleId = "silentscan/deprecated-syntax/table-hint-without-with";
+    public const string DeprecatedSyntaxNumberedProcedureDefinitionRuleId = "silentscan/deprecated-syntax/numbered-procedure-definition";
+    public const string DeprecatedSyntaxNumberedProcedureExecutionRuleId = "silentscan/deprecated-syntax/numbered-procedure-execution";
+    public const string DeprecatedSyntaxStringLiteralColumnAliasRuleId = "silentscan/deprecated-syntax/string-literal-column-alias";
+    public const string DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId = "silentscan/deprecated-syntax/removed-security-stored-procedure";
+    public const string DeprecatedSyntaxDeprecatedSetRowcountRuleId = "silentscan/deprecated-syntax/deprecated-set-rowcount";
     public const string NotInNullableSubqueryRuleId = "silentscan/correctness/not-in-nullable-subquery";
     public const string NonUniqueUpdateSourceRuleId = "silentscan/correctness/nonunique-update-source";
     public const string ForcedSerialTableVariableModificationRuleId = "silentscan/forced-serial/table-variable-modification";
@@ -270,6 +283,24 @@ public static class SarifRuleCatalog
         DuplicationFindingKind.NestedConditionalExpression => DuplicationNestedConditionalExpressionRuleId,
         DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison => DuplicationAlwaysTrueOrFalseLiteralComparisonRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DuplicationFindingKind."),
+    };
+
+    public static string DeprecatedSyntaxRuleId(DeprecatedSyntaxFindingKind kind) => kind switch
+    {
+        DeprecatedSyntaxFindingKind.TaskCommentTodo => DeprecatedSyntaxTaskCommentTodoRuleId,
+        DeprecatedSyntaxFindingKind.TaskCommentFixme => DeprecatedSyntaxTaskCommentFixmeRuleId,
+        DeprecatedSyntaxFindingKind.NonAnsiComparisonOperator => DeprecatedSyntaxNonAnsiComparisonOperatorRuleId,
+        DeprecatedSyntaxFindingKind.EqualsNullComparison => DeprecatedSyntaxEqualsNullComparisonRuleId,
+        DeprecatedSyntaxFindingKind.NotEqualsNullComparison => DeprecatedSyntaxNotEqualsNullComparisonRuleId,
+        DeprecatedSyntaxFindingKind.LikeWithNoWildcard => DeprecatedSyntaxLikeWithNoWildcardRuleId,
+        DeprecatedSyntaxFindingKind.LegacySystemCompatibilityView => DeprecatedSyntaxLegacySystemCompatibilityViewRuleId,
+        DeprecatedSyntaxFindingKind.TableHintWithoutWith => DeprecatedSyntaxTableHintWithoutWithRuleId,
+        DeprecatedSyntaxFindingKind.NumberedProcedureDefinition => DeprecatedSyntaxNumberedProcedureDefinitionRuleId,
+        DeprecatedSyntaxFindingKind.NumberedProcedureExecution => DeprecatedSyntaxNumberedProcedureExecutionRuleId,
+        DeprecatedSyntaxFindingKind.StringLiteralColumnAlias => DeprecatedSyntaxStringLiteralColumnAliasRuleId,
+        DeprecatedSyntaxFindingKind.RemovedSecurityStoredProcedure => DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId,
+        DeprecatedSyntaxFindingKind.DeprecatedSetRowcount => DeprecatedSyntaxDeprecatedSetRowcountRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled DeprecatedSyntaxFindingKind."),
     };
 
     public static string UntrustedConstraintRuleId(UntrustedConstraintFindingKind kind) => kind switch
@@ -512,6 +543,19 @@ public static class SarifRuleCatalog
             Rule(DuplicationCollapsibleNestedIfRuleId, "An IF with no ELSE whose entire body is a single nested IF, also with no ELSE - semantically identical to one IF combining both conditions with AND."),
             Rule(DuplicationNestedConditionalExpressionRuleId, "An IIF call is nested inside another IIF call's own THEN or ELSE branch - T-SQL's equivalent of a nested ternary expression."),
             Rule(DuplicationAlwaysTrueOrFalseLiteralComparisonRuleId, "A comparison between two literal values (never a column or variable) is provable at parse time regardless of any row's real data - the predicate is dead weight or can never match."),
+            Rule(DeprecatedSyntaxTaskCommentTodoRuleId, "A comment contains an untracked \"TODO\" marker."),
+            Rule(DeprecatedSyntaxTaskCommentFixmeRuleId, "A comment contains an untracked \"FIXME\" marker."),
+            Rule(DeprecatedSyntaxNonAnsiComparisonOperatorRuleId, "A non-ANSI comparison operator (!=, !<, !>) is used instead of the ANSI-standard spelling."),
+            Rule(DeprecatedSyntaxEqualsNullComparisonRuleId, "\"= NULL\" never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value - use \"IS NULL\" instead."),
+            Rule(DeprecatedSyntaxNotEqualsNullComparisonRuleId, "\"<> NULL\"/\"!= NULL\" never matches any row under the default ANSI_NULLS ON session setting - use \"IS NOT NULL\" instead."),
+            Rule(DeprecatedSyntaxLikeWithNoWildcardRuleId, "A LIKE pattern contains no wildcard character - behaviorally equivalent to a plain \"=\" comparison."),
+            Rule(DeprecatedSyntaxLegacySystemCompatibilityViewRuleId, "A reference to a pre-SQL-Server-2005 system compatibility view, retained only for backward compatibility and missing columns/rows the real sys.* catalog view exposes."),
+            Rule(DeprecatedSyntaxTableHintWithoutWithRuleId, "A table hint is written without the WITH keyword - a deprecated syntax form still accepted by the parser and engine."),
+            Rule(DeprecatedSyntaxNumberedProcedureDefinitionRuleId, "A procedure is defined as a numbered-procedure-group member - a deprecated T-SQL feature still accepted by the parser and engine."),
+            Rule(DeprecatedSyntaxNumberedProcedureExecutionRuleId, "A procedure is invoked by its numbered-procedure-group number."),
+            Rule(DeprecatedSyntaxStringLiteralColumnAliasRuleId, "A column alias is written as a string literal instead of a real identifier - a deprecated aliasing form still accepted by the parser and engine."),
+            Rule(DeprecatedSyntaxRemovedSecurityStoredProcedureRuleId, "A legacy security-administration system stored procedure is invoked, superseded by CREATE LOGIN/CREATE USER/ALTER ROLE - some names in this family are already fully removed from current SQL Server versions."),
+            Rule(DeprecatedSyntaxDeprecatedSetRowcountRuleId, "SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release."),
         ];
 
         // Both confidence-suffixed variants are generated for every base rule (except the

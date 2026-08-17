@@ -762,6 +762,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<DeprecatedSyntaxFinding> deprecatedSyntaxFindings;
+        using (var deprecatedSyntaxStage = progress.Begin("scanning task comments and deprecated syntax", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = DeprecatedSyntaxScanner.Scan(r);
+                    deprecatedSyntaxStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            deprecatedSyntaxFindings = unordered
+                .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<NotInNullableSubqueryFinding> notInNullableSubqueryFindings;
         using (var notInStage = progress.Begin("scanning NOT IN over nullable subquery columns", usableCount))
         {
@@ -1066,6 +1084,7 @@ public static class ScanReportBuilder
             namingFindings,
             deadCodeFindings,
             duplicationFindings,
+            deprecatedSyntaxFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
