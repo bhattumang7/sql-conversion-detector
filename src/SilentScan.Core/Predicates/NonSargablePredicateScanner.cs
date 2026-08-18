@@ -619,7 +619,7 @@ public static class NonSargablePredicateScanner
 
         private void Add(SargabilityFindingKind kind, string columnName, string? detail, TSqlFragment node, ColumnReferenceExpression columnRef)
         {
-            var (tableQualifiedName, indexed) = ResolveIndexInfo(columnRef);
+            var (tableQualifiedName, indexed, _) = ResolveIndexInfo(columnRef);
             Findings.Add(new SargabilityFinding(
                 kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn,
                 TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Rules.FragmentTextRenderer.Render(node)));
@@ -632,7 +632,7 @@ public static class NonSargablePredicateScanner
         /// </summary>
         private bool IsKnownNotNullColumn(ColumnReferenceExpression columnRef)
         {
-            var (tableQualifiedName, _) = ResolveIndexInfo(columnRef);
+            var (tableQualifiedName, _, _) = ResolveIndexInfo(columnRef);
             if (tableQualifiedName is not { } table || ColumnName(columnRef) is not { } columnName)
             {
                 return false;
@@ -735,13 +735,12 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            var (tableQualifiedName, _) = ResolveIndexInfo(columnRef);
+            var (tableQualifiedName, _, type) = ResolveIndexInfo(columnRef);
             if (tableQualifiedName is not { } table)
             {
                 return;
             }
 
-            var type = catalog.Find(table, CurrentProcScope)?.FindColumn(columnName)?.Type;
             if (type is not { Category: SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset or SqlTypeCategory.Time, Scale: { } columnScale })
             {
                 return;
@@ -796,17 +795,14 @@ public static class NonSargablePredicateScanner
         /// </summary>
         private void AddCaseFold(FunctionCall functionCall, (ColumnReferenceExpression Ref, string Name) named)
         {
-            var (tableQualifiedName, indexed) = ResolveIndexInfo(named.Ref);
+            var (tableQualifiedName, indexed, type) = ResolveIndexInfo(named.Ref);
 
             if (tableQualifiedName is { } table && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, table, functionCall))
             {
                 return;
             }
 
-            var collation = tableQualifiedName is { } resolvedTable
-                ? catalog.Find(resolvedTable, CurrentProcScope)?.FindColumn(named.Name)?.Type?.Collation
-                : null;
-            var detail = DescribeCaseFoldRemediation(functionCall.FunctionName.Value, collation);
+            var detail = DescribeCaseFoldRemediation(functionCall.FunctionName.Value, type?.Collation);
 
             Findings.Add(new SargabilityFinding(
                 SargabilityFindingKind.CaseFoldOnColumn, named.Name, detail, sourcePath, functionCall.StartLine, functionCall.StartColumn,
@@ -827,13 +823,20 @@ public static class NonSargablePredicateScanner
         /// finding carries the same "is this actually worth a reader's attention" signal. Never
         /// guesses: any provenance other than a direct BaseColumn/Declared passthrough (a
         /// CAST-derived column, a UNION branch, an unresolvable reference) reports
-        /// TableQualifiedName=null/Indexed=null rather than assuming either answer.
+        /// TableQualifiedName=null/Indexed=null/Type=null rather than assuming either answer.
+        /// <paramref name="columnRef"/>'s own resolved <see cref="SqlType"/> - already computed by
+        /// <c>ScalarExpressionResolver.ResolveColumnReference</c> as part of resolving the
+        /// provenance below - is returned alongside, so a caller that also needs the column's type
+        /// (case-fold collation, the temporal-boundary scale check) never re-queries the catalog a
+        /// second time for data this call already has in hand. Callers that also need a fact this
+        /// method does NOT resolve (nullability, which lives on the catalog column, not on
+        /// <see cref="SqlType"/> itself) still make their own single, additional catalog call.
         /// </summary>
-        private (string? TableQualifiedName, bool? Indexed) ResolveIndexInfo(ColumnReferenceExpression columnRef)
+        private (string? TableQualifiedName, bool? Indexed, SqlType? Type) ResolveIndexInfo(ColumnReferenceExpression columnRef)
         {
             if (ScopeStack.Count == 0)
             {
-                return (null, null);
+                return (null, null, null);
             }
 
             var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
@@ -843,7 +846,8 @@ public static class NonSargablePredicateScanner
             {
                 ColumnProvenance.BaseColumn baseColumn => (
                     baseColumn.TableQualifiedName,
-                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false),
+                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false,
+                    baseColumn.Type),
 
                 // A multi-statement TVF's own RETURNS TABLE(...) column has no real backing
                 // table, so TableQualifiedName stays null there - but a trigger's inserted/
@@ -852,9 +856,9 @@ public static class NonSargablePredicateScanner
                 // actually lives), so it must not be discarded the way TypedPredicateExtractor's
                 // identical Declared case doesn't discard it either. Indexed is always false
                 // regardless: neither shape is backed by a real catalog index.
-                ColumnProvenance.Declared declared => (declared.TableQualifiedName, false),
+                ColumnProvenance.Declared declared => (declared.TableQualifiedName, false, declared.Type),
 
-                _ => (null, null),
+                _ => (null, null, null),
             };
         }
 
