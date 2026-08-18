@@ -5423,27 +5423,31 @@ Two items from the wider-landscape/incumbent-catalog reads that are measurement
 tasks, not rule candidates — they don't belong in a detection tier, but need
 doing before the study can make certain public claims.
 
-- [ ] **Pre-publication gate: measure the second type-binding incumbent's
-      conversion rule against our direction fixtures — attempted 2026-08-17,
-      still open, not resolved.** Genuinely retried directly (fresh fetch of
-      the vendor's own rule page, the legacy static-doc URL scheme, a search
-      engine's own indexed snippet) rather than trusting the prior "vendor
-      site defeats fetching" finding secondhand — confirmed first-hand that
-      the entire site is now a client-rendered SPA with zero server-side
-      content, including the legacy static doc pages, which now redirect
-      through the same JS shell. A search engine's indexed snippet does
-      surface real rule prose, and it reads symmetrically ("two expressions
-      of different data types," no directional language) — but an absent
-      directional mention in a short snippet is not proof the underlying rule
-      logic is symmetric, so this stays an open question, not a confirmed
-      negative. Trial-install remains genuinely blocked in this environment
-      (Windows/SSMS-only product, headless Linux research environment, no
-      Windows host available) — not skipped for convenience. Full write-up,
-      including exactly what was tried and why each avenue failed, is
-      `detection-reference.md` Appendix 7 §7.10. **The study still cannot
-      claim "nothing [commercial] is direction-aware" until this resolves** —
-      needs either a Windows/SSMS environment for a real trial-install, or the
-      vendor publishing a non-JS-rendered rules reference.
+- [x] **Pre-publication gate: measure the second type-binding incumbent's
+      conversion rule against our direction fixtures — resolved 2026-08-19.**
+      The live site still defeats direct fetching (unchanged: a client-
+      rendered SPA with zero server-side content). Resolution came from a web
+      archive's snapshot of the vendor's own pre-rebuild static documentation
+      page (real server-rendered HTML, fetched directly and confirmed
+      genuine), which contains the rule's full write-up plus a worked example
+      with actual tool output, not marketing prose. The rule's own findings
+      are genuinely directional per-finding text (`FromType to ToType`), not
+      symmetric wording — settling the narrow question this gate was blocked
+      on. It does NOT settle the question that actually matters for this
+      study: every one of the tool's own four worked-example findings is the
+      ordinary precedence-favorable case (the value/parameter, already the
+      lower-precedence operand, converts up to match the column) — nothing in
+      the vendor's own docs demonstrates the reverse, seek-losing case (a
+      column with lower precedence than the compared value, so the COLUMN
+      converts) this study is built around, and the rule never mentions
+      collation, an index, or a seek/scan consequence at all — it reports a
+      type-pair fact, not a cost. Full write-up: `detection-reference.md`
+      Appendix 7 §7.10 update. **The study's claim should read precisely**:
+      no surveyed tool computes a seek/scan verdict or connects conversion to
+      catalog-known index/collation/lineage state; the one tool with
+      genuinely directional per-finding prose still never reports what a
+      conversion costs, and its own example never exercises the harder
+      column-converts case.
 - [x] **Follow-up gate, same shape as the pre-publication gate above: two new
       tools found need a closer look before being ruled out — closed
       2026-08-17, both tools' real rule source read directly.** Docs showed no

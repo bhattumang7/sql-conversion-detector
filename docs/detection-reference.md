@@ -67,7 +67,7 @@ them emits is an unverified static claim.
 | Tool | Type-aware? | Status | Conversion rule |
 |---|---|---|---|
 | `SqlServer.Rules` (DacFx; dormant original 80 rules + an actively developed superset fork shipping a CLI, IDE extensions and an MCP server — fork re-confirmed 2026-08-16 at **135 rules**, not 120; delta is 56, including exposing DacFx's own built-in SR0001–SR0016 for the first time) | **Yes** — DacFx semantic model, **base tables only** | Active (fork) | `SRP0016`, symmetric (measured, 1/3 precision) |
-| Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule, docs describe the general mechanism ("one type will be implicitly converted to the other") with no directional language either way; **still an unverified negative, not resolved** — see 2026-08-17 pre-publication-gate note below |
+| Commercial schema-bound analyzer (from the web sweep, not the source survey; previously recorded as dead) | **Yes** — connection-bound analysis context; type rules silently skipped without a connection | **Active** (extension update ~June 2026) | cross-type-operator rule; **resolved 2026-08-19, see below** — the rule's own worked example reports a genuinely directional `(FromType to ToType)` conversion pair per finding, not a symmetric claim, but only ever describes the source→target types textually: no seek/scan verdict, no collation handling, and every example in the tool's own doc happens to be the ordinary precedence-driven case (a literal/parameter converting up to match its column) — the harder column-loses-seek case this study exists to catch is untested in their own sample and not otherwise evidenced |
 | SonarQube T-SQL plugin (ANTLR `grammars-v4`) | No | Dormant since 2024 | none |
 | Same CI platform, paid-tier T-SQL analyzer, ~83 rules (hand-written grammar; source-read 2026-08-16, §7.8) | No — AST shape matches and name lists only | Active (closed source) | none |
 | Oracle PL/SQL analyzer | No (block-scope symbol table, no catalog) | Active | none; **no T-SQL support at all** |
@@ -1109,13 +1109,51 @@ What was tried:
   no Windows host available — genuinely infeasible here, not skipped for
   convenience.
 
-**Disposition: left open, not falsely closed.** The study still cannot claim
-"nothing [among commercial tools] is direction-aware" until this specific gate
-is resolved by someone with a Windows/SSMS environment to trial-install into,
-or until the vendor publishes a non-JS-rendered rules reference. Recorded here
-so the next attempt does not have to rediscover that the site itself, not the
-search process, is what blocks this — and so a false "confirmed symmetric"
-claim is never made on the strength of a documentation snippet alone.
+**Update 2026-08-19: resolved via the vendor's own last pre-rebuild static
+snapshot, found through a web archive rather than the live (now client-
+rendered) site.** The live site still defeats direct fetching exactly as
+above — this did not change. What changed: a web search surfaced a URL path
+belonging to what is evidently an in-progress replacement doc site, which
+404s (not yet live); pursuing why led to checking a public web archive for
+the *original* documentation page, which holds four snapshots, the most
+recent dated shortly before the SPA rebuild. That snapshot is real,
+server-rendered HTML (confirmed by fetching it directly, not through the
+live site) and contains the rule's full write-up plus a worked "Example Test
+SQL" with actual analysis output — not marketing prose, the tool's own
+literal finding text.
+
+The worked example runs the rule against a procedure with five predicates
+comparing a real column against a parameter/literal of a different type, and
+reports four findings, each with a `(FromType to ToType)` conversion pair:
+`int to nvarchar(50)`, `int to decimal(8,2)`, `int to money`, `nvarchar(20)
+to datetime`. Every one of the four is the operand with genuinely LOWER
+T-SQL type precedence converting up to the higher-precedence side — in three
+of the four that lower-precedence operand is the parameter/literal (`int`
+converting to `decimal`/`money`, `nvarchar` converting to `datetime`), which
+is also the column in each pair, so these examples happen to be exactly the
+ordinary, harmless "value converts, column stays sargable" case. **This
+settles the narrow factual question the gate was blocked on**: the rule's
+own message is genuinely directional, not the symmetric wording the earlier,
+JS-rendered marketing snippet's absence of directional language had left
+ambiguous. It does NOT settle the actually load-bearing question for this
+study: nothing in the vendor's own documentation demonstrates the rule
+correctly identifying and reporting the *reverse*, seek-losing case (a
+column with LOWER precedence than the compared value, so the COLUMN itself
+converts) — every shipped example is precedence-favorable to begin with.
+Nor does the rule ever mention collation, an index, or a seek/scan
+consequence at all; it reports a type-pair fact and a fixed "20 minutes to
+fix" estimate, nothing about whether that pair actually costs a seek.
+
+**Disposition: the narrow "is the wording symmetric" question is closed —
+it is not, the tool's actual output is directional prose per finding.
+The study's own comparative claim should read precisely**: no surveyed
+tool computes a seek/scan verdict, reasons about collation, or connects a
+conversion to catalog-known index/lineage state; the one tool whose own
+docs show genuinely directional per-finding text still only reports which
+type converts to which, never what that costs, and its own worked example
+never exercises the harder column-converts case this study is built
+around. That is precise and defensible without a Windows/SSMS trial-install,
+which remains infeasible here for the reason already recorded above.
 
 ### 7.11 The DBA-script family — surveyed 2026-08-17 (a family, not a tool, and the first one surveyed that isn't a linter)
 
