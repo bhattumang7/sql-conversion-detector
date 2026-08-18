@@ -76,8 +76,8 @@ public static class NonUniqueUpdateSourceScanner
 
         private void InspectJoin(QualifiedJoin join, string targetAlias, string targetQualifiedName, IList<SetClause> setClauses)
         {
-            var (firstAlias, firstQualifiedName) = ResolveDirectBaseTable(join.FirstTableReference);
-            var (secondAlias, secondQualifiedName) = ResolveDirectBaseTable(join.SecondTableReference);
+            var (firstAlias, firstQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.FirstTableReference);
+            var (secondAlias, secondQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference);
 
             string sourceAlias, sourceQualifiedName;
             if (string.Equals(firstAlias, targetAlias, StringComparison.OrdinalIgnoreCase) && secondAlias is not null && secondQualifiedName is not null)
@@ -106,7 +106,7 @@ public static class NonUniqueUpdateSourceScanner
                 .OfType<BooleanComparisonExpression>()
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                .Select(e => ColumnNameIfQualifiedByAlias(e, sourceAlias))
+                .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, sourceAlias))
                 .Where(c => c is not null)
                 .Select(c => c!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -150,45 +150,9 @@ public static class NonUniqueUpdateSourceScanner
 
         private static bool ReferencesAlias(ScalarExpression expression, string alias)
         {
-            var collector = new ColumnReferenceCollector();
+            var collector = new DirectBaseTableResolver.RawColumnReferenceCollector();
             expression.Accept(collector);
-            return collector.References.Any(columnRef => ColumnNameIfQualifiedByAlias(columnRef, alias) is not null);
-        }
-
-        private static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)
-        {
-            if (expression is not ColumnReferenceExpression columnRef)
-            {
-                return null;
-            }
-
-            var identifiers = columnRef.MultiPartIdentifier.Identifiers;
-            return identifiers.Count >= 2 && string.Equals(identifiers[^2].Value, alias, StringComparison.OrdinalIgnoreCase)
-                ? identifiers[^1].Value
-                : null;
-        }
-
-        private (string? Alias, string? QualifiedName) ResolveDirectBaseTable(TableReference tableReference)
-        {
-            if (tableReference is not NamedTableReference named)
-            {
-                return (null, null);
-            }
-
-            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } ? (alias, qualifiedName) : (null, null);
-        }
-
-        private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
-        {
-            public List<ColumnReferenceExpression> References { get; } = [];
-
-            public override void ExplicitVisit(ColumnReferenceExpression node)
-            {
-                References.Add(node);
-                base.ExplicitVisit(node);
-            }
+            return collector.References.Any(columnRef => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(columnRef, alias) is not null);
         }
     }
 }

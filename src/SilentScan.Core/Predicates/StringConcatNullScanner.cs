@@ -62,7 +62,7 @@ public static class StringConcatNullScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = ResolveDirectBaseTables(node.FromClause?.TableReferences);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences);
             if (tables.Count > 0)
             {
                 foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
@@ -77,7 +77,7 @@ public static class StringConcatNullScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var tables = ResolveDirectBaseTables(spec.FromClause?.TableReferences, spec.Target);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target);
             if (tables.Count > 0)
             {
                 foreach (var setClause in spec.SetClauses.OfType<AssignmentSetClause>())
@@ -250,47 +250,6 @@ public static class StringConcatNullScanner
             }
 
             return null;
-        }
-
-        private Dictionary<string, CatalogTable> ResolveDirectBaseTables(
-            IList<TableReference>? tableReferences, TableReference? extraTarget = null)
-        {
-            var tables = new Dictionary<string, CatalogTable>(StringComparer.OrdinalIgnoreCase);
-
-            if (extraTarget is not null && ResolveDirectBaseTable(extraTarget) is { } targetEntry)
-            {
-                tables[targetEntry.Alias] = targetEntry.Table;
-            }
-
-            if (tableReferences is null)
-            {
-                return tables;
-            }
-
-            foreach (var reference in tableReferences)
-            {
-                foreach (var leaf in PredicateTreeWalker.FlattenTableReferences(reference))
-                {
-                    if (ResolveDirectBaseTable(leaf) is { } entry)
-                    {
-                        tables[entry.Alias] = entry.Table;
-                    }
-                }
-            }
-
-            return tables;
-        }
-
-        private (string Alias, CatalogTable Table)? ResolveDirectBaseTable(TableReference tableReference)
-        {
-            if (tableReference is not NamedTableReference named)
-            {
-                return null;
-            }
-
-            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } table ? (alias, table) : null;
         }
 
         /// <summary>

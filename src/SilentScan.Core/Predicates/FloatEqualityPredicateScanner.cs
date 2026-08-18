@@ -10,11 +10,10 @@ namespace SilentScan.Core.Predicates;
 /// precision story, including why this is a standalone type/scanner rather than folded into
 /// <see cref="TypedPredicateExtractor"/>'s type-conversion-verdict machinery.
 ///
-/// Reuses the same "flatten the join tree to its direct base-table leaves, matched by alias" shape
-/// <see cref="NonUniqueUpdateSourceScanner"/> already established, rather than the full
-/// <see cref="Lineage.FromScopeResolver"/> scope-chain/lineage machinery - a real, known v1 scope
-/// limit (a float/real predicate reached through a view/CTE/derived table is left unanalyzed, not
-/// guessed at), matching that scanner's own precedent.
+/// Reuses <see cref="DirectBaseTableResolver"/>'s "flatten the join tree to its direct base-table
+/// leaves, matched by alias" shape rather than the full <see cref="Lineage.FromScopeResolver"/>
+/// scope-chain/lineage machinery - a real, known v1 scope limit (a float/real predicate reached
+/// through a view/CTE/derived table is left unanalyzed, not guessed at).
 /// </summary>
 public static class FloatEqualityPredicateScanner
 {
@@ -37,7 +36,7 @@ public static class FloatEqualityPredicateScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = ResolveDirectBaseTables(node.FromClause?.TableReferences);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences);
             // node.WhereClause.SearchCondition is null for a positioned "WHERE CURRENT OF
             // @cursor" - a WhereClause with no boolean search condition at all, not a normal
             // filter predicate - so this checks the condition itself, not just the clause.
@@ -54,7 +53,7 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var tables = ResolveDirectBaseTables(spec.FromClause?.TableReferences, spec.Target);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target);
             // See ExplicitVisit(QuerySpecification)'s own comment - a positioned "WHERE CURRENT
             // OF @cursor" carries a null SearchCondition.
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
@@ -70,7 +69,7 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var tables = ResolveDirectBaseTables(spec.FromClause?.TableReferences, spec.Target);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target);
             // See ExplicitVisit(QuerySpecification)'s own comment - a positioned "WHERE CURRENT
             // OF @cursor" carries a null SearchCondition.
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
@@ -182,56 +181,6 @@ public static class FloatEqualityPredicateScanner
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Flattens the FROM clause's join tree to its direct <see cref="NamedTableReference"/>
-        /// leaves, keyed by alias (or bare table name when unaliased) - only a leaf that resolves
-        /// to a real base <see cref="CatalogTableKind.Table"/> is kept; a view, TVF, derived table,
-        /// or unresolved reference is silently excluded rather than guessed at (this scanner's own
-        /// known v1 scope limit - see this type's own doc comment). <paramref name="extraTarget"/>
-        /// covers an UPDATE/DELETE with no explicit FROM clause at all, where the statement's own
-        /// target table is the only thing in scope.
-        /// </summary>
-        private Dictionary<string, CatalogTable> ResolveDirectBaseTables(
-            IList<TableReference>? tableReferences, TableReference? extraTarget = null)
-        {
-            var tables = new Dictionary<string, CatalogTable>(StringComparer.OrdinalIgnoreCase);
-
-            if (extraTarget is not null && ResolveDirectBaseTable(extraTarget) is { } targetEntry)
-            {
-                tables[targetEntry.Alias] = targetEntry.Table;
-            }
-
-            if (tableReferences is null)
-            {
-                return tables;
-            }
-
-            foreach (var reference in tableReferences)
-            {
-                foreach (var leaf in PredicateTreeWalker.FlattenTableReferences(reference))
-                {
-                    if (ResolveDirectBaseTable(leaf) is { } entry)
-                    {
-                        tables[entry.Alias] = entry.Table;
-                    }
-                }
-            }
-
-            return tables;
-        }
-
-        private (string Alias, CatalogTable Table)? ResolveDirectBaseTable(TableReference tableReference)
-        {
-            if (tableReference is not NamedTableReference named)
-            {
-                return null;
-            }
-
-            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } table ? (alias, table) : null;
         }
 
         /// <summary>

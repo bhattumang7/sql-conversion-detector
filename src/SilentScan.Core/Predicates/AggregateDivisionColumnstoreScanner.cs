@@ -37,7 +37,7 @@ public static class AggregateDivisionColumnstoreScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = ResolveDirectBaseTables(node.FromClause?.TableReferences);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences);
             if (tables.Count > 0 && tables.Values.Any(t => t.Indexes.Any(ix => ix.IsColumnstore)))
             {
                 var columnstoreTable = tables.Values.First(t => t.Indexes.Any(ix => ix.IsColumnstore));
@@ -119,40 +119,6 @@ public static class AggregateDivisionColumnstoreScanner
             }
 
             return false;
-        }
-
-        private Dictionary<string, CatalogTable> ResolveDirectBaseTables(IList<TableReference>? tableReferences)
-        {
-            var tables = new Dictionary<string, CatalogTable>(StringComparer.OrdinalIgnoreCase);
-            if (tableReferences is null)
-            {
-                return tables;
-            }
-
-            foreach (var reference in tableReferences)
-            {
-                foreach (var leaf in PredicateTreeWalker.FlattenTableReferences(reference))
-                {
-                    if (ResolveDirectBaseTable(leaf) is { } entry)
-                    {
-                        tables[entry.Alias] = entry.Table;
-                    }
-                }
-            }
-
-            return tables;
-        }
-
-        private (string Alias, CatalogTable Table)? ResolveDirectBaseTable(TableReference tableReference)
-        {
-            if (tableReference is not NamedTableReference named)
-            {
-                return null;
-            }
-
-            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } table ? (alias, table) : null;
         }
 
         private sealed class AggregateCallCollector : TSqlFragmentVisitor

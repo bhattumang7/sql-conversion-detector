@@ -400,7 +400,7 @@ public static class QueryAntiPatternScanner
                 .OfType<BooleanComparisonExpression>()
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                .Select(e => ColumnNameIfQualifiedByAlias(e, sourceAlias))
+                .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, sourceAlias))
                 .Where(c => c is not null)
                 .Select(c => c!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -810,7 +810,7 @@ public static class QueryAntiPatternScanner
                     continue;
                 }
 
-                var collector = new ColumnReferenceCollector();
+                var collector = new DirectBaseTableResolver.RawColumnReferenceCollector();
                 condition.Accept(collector);
                 if (collector.References.Count == 0)
                 {
@@ -866,7 +866,7 @@ public static class QueryAntiPatternScanner
 
             foreach (var join in node.FromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
-                var (joinedAlias, joinedQualifiedName) = ResolveDirectBaseTable(join.SecondTableReference);
+                var (joinedAlias, joinedQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference);
                 if (joinedAlias is null || joinedQualifiedName is null)
                 {
                     continue;
@@ -882,7 +882,7 @@ public static class QueryAntiPatternScanner
                     .OfType<BooleanComparisonExpression>()
                     .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                     .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                    .Select(e => ColumnNameIfQualifiedByAlias(e, joinedAlias))
+                    .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, joinedAlias))
                     .Where(c => c is not null)
                     .Select(c => c!)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1018,7 +1018,7 @@ public static class QueryAntiPatternScanner
                 return null;
             }
 
-            var columnAlias = ColumnNameIfQualifiedByAlias(columnExpr, alias);
+            var columnAlias = DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(columnExpr, alias);
             var columnName = columnAlias ?? (columnExpr.MultiPartIdentifier.Identifiers.Count == 1 ? columnExpr.MultiPartIdentifier.Identifiers[0].Value : null);
             return columnName is null ? null : (qualifiedName, columnName, literalExpr);
         }
@@ -1033,42 +1033,6 @@ public static class QueryAntiPatternScanner
             _ => null,
         };
 
-        // --- Shared join/predicate flattening helpers (matching NonUniqueUpdateSourceScanner) -
-
-        private (string? Alias, string? QualifiedName) ResolveDirectBaseTable(TableReference tableReference)
-        {
-            if (tableReference is not NamedTableReference named)
-            {
-                return (null, null);
-            }
-
-            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } ? (alias, qualifiedName) : (null, null);
-        }
-
-        private static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)
-        {
-            if (expression is not ColumnReferenceExpression columnRef)
-            {
-                return null;
-            }
-
-            var identifiers = columnRef.MultiPartIdentifier.Identifiers;
-            return identifiers.Count >= 2 && string.Equals(identifiers[^2].Value, alias, StringComparison.OrdinalIgnoreCase)
-                ? identifiers[^1].Value
-                : null;
-        }
-
-        private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
-        {
-            public List<ColumnReferenceExpression> References { get; } = [];
-
-            public override void ExplicitVisit(ColumnReferenceExpression node)
-            {
-                References.Add(node);
-                base.ExplicitVisit(node);
-            }
-        }
+        // --- Shared join/predicate flattening helpers live in DirectBaseTableResolver -
     }
 }
