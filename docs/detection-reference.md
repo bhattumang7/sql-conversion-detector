@@ -977,14 +977,11 @@ artefact of having surveyed only free tools.
 
 ### 7.9 Two more tools, closed out from the checklist's own "research gates" list (source-read 2026-08-17)
 
-Both cloned and read at source level via `gh repo clone` (public repos, no
-decompilation needed, unlike §7.7/7.8). This closes the checklist's "Follow-up
-gate" item — both tools' docs showed no implicit-conversion hit on a grep, but
-that was a docs-level read; the real question was whether their actual rule
-*source* has one, and if so whether it is direction-aware. **Both do, and both
-are.** This is a genuine correction to the checklist's working assumption that
-"nothing else exists" — it does, in two independent codebases, though neither
-is oracle-backed and neither is collation-aware.
+Both cloned and read at source level (public repos, no decompilation needed,
+unlike §7.7/7.8). A docs-level grep showed no implicit-conversion rule in
+either; their source has one in both cases, and both are direction-aware.
+Neither is oracle-backed or collation-aware. This corrects the earlier working
+assumption that no other direction-aware tool exists.
 
 **Tool A (Rust/WASM-delivered, ~103 T-SQL rules).** Has TWO separate,
 independent implicit-conversion rules, not one:
@@ -1066,94 +1063,34 @@ oracle confirmation, none of which either tool attempts.
 **Item closed.** No code changes needed on either finding — both are
 research-record corrections only.
 
-### 7.10 Pre-publication gate: commercial schema-bound analyzer — attempted, not resolved (2026-08-17)
+### 7.10 Pre-publication gate: commercial schema-bound analyzer — resolved 2026-08-19
 
-The checklist's other, higher-priority research gate — measuring the
-commercial schema-bound analyzer's own conversion rule (§7's table entry
-above) for direction-awareness before the study can claim "nothing is
-direction-aware" in public. **Genuinely attempted this session, not closed
-with a real answer — recording the attempt honestly rather than guessing.**
+Whether this tool's conversion rule is direction-aware, which the study's
+"nothing is direction-aware" claim depended on.
 
-What was tried:
-* Direct fetch of the vendor's own rule documentation page for the rule
-  (found via web search, both a current URL and a legacy-format URL pattern
-  the vendor used before a site rebuild) — the entire site is now a
-  client-side-rendered SPA (confirmed by inspecting the raw HTML response
-  directly: the server returns only a `<head>`/script-bundle shell with zero
-  rule content, and JS execution is required to render anything). This
-  reproduces, with direct first-hand confirmation rather than an inherited
-  assumption, the "vendor site defeats fetching" finding this gate item
-  already recorded.
-* The same client-side-rendering wall applies even to the vendor's own
-  legacy static documentation URL scheme (pre-rebuild `/help_*/html/<guid>.htm`
-  pages, confirmed still indexed and linkable via search) — these now also
-  route through the same JS shell rather than serving static HTML, so there
-  is no older, still-static mirror of the same content to fall back to.
-* A web search engine's own indexed snippet (which does appear to reflect
-  JS-rendered content, likely captured by the search engine's own crawler
-  executing the page's JS at index time) DOES surface real rule prose: the
-  rule "checks the SQL code for operators combining two expressions of
-  different data types and cause implicit conversion... Implicit conversion
-  can lead to data truncation and to performance issues appears in query
-  filter... The rule has a Batch scope and is applied only on the SQL
-  script." This description is symmetric in its own language — it describes
-  "two expressions of different data types," never singles out which side
-  converts — but this is circumstantial, not a confirmed negative: absence of
-  directional language in a short marketing-adjacent snippet is not proof the
-  underlying rule logic is symmetric, only that if it IS direction-aware, the
-  doc snippet doesn't say so (the same category of gap this gate item was
-  opened to close).
-* No downloadable rules export/XML/PDF reference was found for this rule.
-* Trial-install was not attempted: the product is a Windows/SSMS-integrated
-  desktop add-in and this research ran in a headless Linux environment with
-  no Windows host available — genuinely infeasible here, not skipped for
-  convenience.
+Resolved from the vendor's own last pre-rebuild static documentation snapshot,
+held in a public web archive. The live site is a client-rendered SPA that
+returns only a script shell, so it cannot be fetched directly — use the
+archive, not the live site, if this is ever revisited. A Windows/SSMS
+trial-install is infeasible in a headless Linux environment.
 
-**Update 2026-08-19: resolved via the vendor's own last pre-rebuild static
-snapshot, found through a web archive rather than the live (now client-
-rendered) site.** The live site still defeats direct fetching exactly as
-above — this did not change. What changed: a web search surfaced a URL path
-belonging to what is evidently an in-progress replacement doc site, which
-404s (not yet live); pursuing why led to checking a public web archive for
-the *original* documentation page, which holds four snapshots, the most
-recent dated shortly before the SPA rebuild. That snapshot is real,
-server-rendered HTML (confirmed by fetching it directly, not through the
-live site) and contains the rule's full write-up plus a worked "Example Test
-SQL" with actual analysis output — not marketing prose, the tool's own
-literal finding text.
+The snapshot carries the rule's full write-up and a worked example with real
+tool output: four findings, each a `(FromType to ToType)` pair — `int to
+nvarchar(50)`, `int to decimal(8,2)`, `int to money`, `nvarchar(20) to
+datetime`. So the rule's per-finding text is genuinely directional, not
+symmetric.
 
-The worked example runs the rule against a procedure with five predicates
-comparing a real column against a parameter/literal of a different type, and
-reports four findings, each with a `(FromType to ToType)` conversion pair:
-`int to nvarchar(50)`, `int to decimal(8,2)`, `int to money`, `nvarchar(20)
-to datetime`. Every one of the four is the operand with genuinely LOWER
-T-SQL type precedence converting up to the higher-precedence side — in three
-of the four that lower-precedence operand is the parameter/literal (`int`
-converting to `decimal`/`money`, `nvarchar` converting to `datetime`), which
-is also the column in each pair, so these examples happen to be exactly the
-ordinary, harmless "value converts, column stays sargable" case. **This
-settles the narrow factual question the gate was blocked on**: the rule's
-own message is genuinely directional, not the symmetric wording the earlier,
-JS-rendered marketing snippet's absence of directional language had left
-ambiguous. It does NOT settle the actually load-bearing question for this
-study: nothing in the vendor's own documentation demonstrates the rule
-correctly identifying and reporting the *reverse*, seek-losing case (a
-column with LOWER precedence than the compared value, so the COLUMN itself
-converts) — every shipped example is precedence-favorable to begin with.
-Nor does the rule ever mention collation, an index, or a seek/scan
-consequence at all; it reports a type-pair fact and a fixed "20 minutes to
-fix" estimate, nothing about whether that pair actually costs a seek.
+It reports a type pair and a fixed "20 minutes to fix" estimate, and never
+mentions collation, an index, or a seek/scan consequence. All four worked
+examples are the precedence-favorable case where the value converts and the
+column stays sargable; none exercises the reverse, seek-losing case this study
+is built around.
 
-**Disposition: the narrow "is the wording symmetric" question is closed —
-it is not, the tool's actual output is directional prose per finding.
-The study's own comparative claim should read precisely**: no surveyed
-tool computes a seek/scan verdict, reasons about collation, or connects a
-conversion to catalog-known index/lineage state; the one tool whose own
-docs show genuinely directional per-finding text still only reports which
-type converts to which, never what that costs, and its own worked example
-never exercises the harder column-converts case this study is built
-around. That is precise and defensible without a Windows/SSMS trial-install,
-which remains infeasible here for the reason already recorded above.
+**The study's comparative claim should read:** no surveyed tool computes a
+seek/scan verdict, reasons about collation, or connects a conversion to
+catalog-known index/lineage state; the one tool with genuinely directional
+per-finding text still only reports which type converts to which, never what
+that costs.
 
 ### 7.11 The DBA-script family — surveyed 2026-08-17 (a family, not a tool, and the first one surveyed that isn't a linter)
 
@@ -1258,6 +1195,25 @@ a `LIKE` pattern whose wildcard is truncated away — `'ABCDEF%'` assigned to a
 `varchar(4)` becomes `'ABCD'`, silently turning a prefix match into an equality
 match while still seeking.
 
+**A view's cached column metadata is never refreshed when a base column
+changes.** Retype a base column years after a view over it was last created or
+altered and SQL Server leaves the view's own `sys.columns` rows exactly as they
+were, short of an explicit `sp_refreshview`/`sp_refreshsqlmodule`. So on a live
+target, a view's or inline TVF's cached row is not ground truth — what the
+engine computes for it right now
+(`sys.dm_exec_describe_first_result_set`) is. This does not apply to a base
+table, whose `sys.columns` *is* its definition, nor to a multi-statement TVF,
+whose shape is its own authored `RETURNS @t TABLE(...)` clause; neither can go
+stale. It also does not apply to a freshly deployed corpus database, where
+nothing has been altered since deployment and staleness is structurally
+impossible.
+
+Consequence for the parity gate: a view/iTVF disagreement with the live answer
+is a tool bug. An object the server can no longer compile, or one whose cached
+metadata has merely drifted from a live answer our own inference agrees with,
+is a condition of the scanned database instead — worth reporting prominently,
+but not this tool being wrong.
+
 **`ANSI_PADDING` is a per-column property fixed at CREATE time.**
 `sys.columns.is_ansi_padded` records the session setting in force when the
 column was created, so a single table can hold both kinds. The stored data
@@ -1272,4 +1228,175 @@ exactly like `GETDATE()` and `SYSDATETIME()`. `NEWID()`, `CRYPT_GEN_RANDOM()`
 and `RAND(<non-constant expression>)` yield 200. Separately, per-row evaluation
 does not defeat a seek at all: `WHERE indexed_col = NEWID()` compiles to an
 Index Seek with `newid()` as the seek predicate. Both findings together killed
-a proposed rule; see the worked entry in `detection-checklist.md` Tier 2.
+a proposed rule; see Appendix 9.
+
+---
+
+## Appendix 9 — Candidates probed and killed (do not re-propose)
+
+Candidates proposed, probed against the Docker oracle or the parser, and found
+not to survive. Each was killed on a measurement; without that measurement
+recorded, each looks plausible enough to be re-proposed on the next sweep.
+
+**`ARITHABORT OFF` does not disable indexed views or filtered indexes.** The
+common summary of Microsoft's own docs lists `ARITHABORT` alongside
+`QUOTED_IDENTIFIER` and `NUMERIC_ROUNDABORT` as gating whether the optimizer
+may use an indexed view or filtered index. Probed directly (2022 Developer
+edition, real seeded data, a real filtered index and a real indexed view,
+`SET SHOWPLAN_XML` compile-only): `QUOTED_IDENTIFIER OFF` and
+`NUMERIC_ROUNDABORT ON` each demonstrably degrade a filtered-index seek to a
+table scan and an indexed-view match to a base-table scan, but **`ARITHABORT
+OFF` alone changed neither plan** — the filtered index still sought, the
+indexed view still matched, refuted twice. `ARITHABORT` was dropped from the
+SET-option stream rather than shipped unverified. `ANSI_NULLS`,
+`ANSI_WARNINGS` and `CONCAT_NULL_YIELDS_NULL` were later probed on the same
+mechanism and all three *do* degrade the seek, matching
+QUOTED_IDENTIFIER/NUMERIC_ROUNDABORT rather than ARITHABORT.
+
+*Oracle-test trap found here, worth remembering:* an unused index's name
+still appears in `OptimizerStatsUsage`/`StatisticsInfo` even when it was never
+chosen as an access path, so a substring match on the index name reports a
+seek that never happened. Check `PhysicalOp`/`IndexKind` precisely.
+
+**Non-foldable nondeterministic intrinsic in a predicate** — both halves of
+the premise are false; see Appendix 8 for the measurements. Bare `RAND()` is a
+runtime constant folded once (so the incumbent's `NEWID`/`RAND`/
+`CRYPT_GEN_RANDOM` list would have fired a false positive on its most commonly
+written member), and per-row evaluation does not cost the seek anyway.
+
+**A column-independent deterministic scalar UDF call in a predicate** — the
+optimizer already folds/hoists it to evaluate once, confirmed by an `Index
+Seek` on the probe, the same way it folds a bare `GETDATE()`/`RAND()`. No
+repeated-per-row cost exists for a rule to catch, and the column-*dependent*
+case is already the shipped scalar-UDF stream.
+
+**Global scalar aggregate with no `GROUP BY` as a forced-serial construct** —
+seeded to 550,000 rows, `SELECT COUNT(*) FROM dbo.T` planned `Parallel="0"`
+with `StatementSubTreeCost` 1.79, below the server's cost threshold for
+parallelism (5): serial for the ordinary cost-based reason, not a structural
+restriction. Re-seeded to 2,000,000 rows and the identical query went fully
+parallel (`Parallel="1"` throughout, no `NonParallelPlanReason`) — the
+opposite of what a genuine forced-serial construct shows. No mechanism here at
+all.
+
+**Generated-constraint-name collision on temp tables** — the premise (two
+unnamed-PK `#temp` tables colliding on their generated constraint names) can't
+occur: every `CREATE TABLE`, concurrent or sequential, same session or not,
+gets a fresh object identity and therefore a fresh generated name. Three
+successive unnamed-PK `#t1` creations produced three distinct names. Whatever
+version-specific behavior the incumbent's rule was written against does not
+reproduce on 2022.
+
+**`IF` statements containing queries inside a procedure** — SQL Server compiles
+each statement lazily on first execution (deferred compilation), so an untaken
+branch's query is never compiled at all. There is no compile-time cost specific
+to having several `IF` branches with queries, distinct from ordinary
+per-statement compilation.
+
+**Existence check over an unfiltered `SELECT`** — `EXISTS (SELECT * FROM T)`
+and `EXISTS (SELECT TOP 1 1 FROM T)` produce the identical plan over the same
+table (`EstimateRows="1"`, same `Nested Loops`/`Constant Scan`/`Compute Scalar`
+shape). The optimizer already treats `EXISTS` as a pure existence probe
+regardless of the inner column list or absence of `TOP`.
+
+**Requiring an explicit constraint-check mode** — `ALTER TABLE ... ADD
+CONSTRAINT` with neither `WITH CHECK` nor `WITH NOCHECK` already validates
+existing data by default (real Msg 547 on a seeded violating row, identical to
+stating `WITH CHECK`). Nothing survives beyond the shipped untrusted-constraint
+stream.
+
+**Empty statements** — structurally unreachable in this tool's own parser
+dialect. Against `TSql160Parser`, `BEGIN END` is a hard parse error
+("Incorrect syntax near 'END'.") in every context tried, and a bare `;`
+produces no statement AST node to attach a finding to. Same disposition as
+`COMPUTE`/`COMPUTE BY` and the `*=`/`=*` operators: closed, no dead code
+shipped for a shape that can never fire.
+
+**`ROWS` vs `RANGE` window frames — the usual framing is wrong, but a real
+effect survives.** An equivalent `ROWS` and `RANGE` frame produce the identical
+`PhysicalOp="Window Spool"` operator; there is no on-disk-vs-not distinction at
+the physical-operator level. What does reproduce: the `Window Spool`'s own
+`ActualCPUms` measured roughly 4x higher for `RANGE` than the equivalent `ROWS`
+frame across repeated runs on identical data (peer-group value comparison that
+`ROWS`'s physical-offset counting doesn't pay). Also confirmed: an `OVER` clause
+with `ORDER BY` and no explicit frame silently defaults to `RANGE BETWEEN
+UNBOUNDED PRECEDING AND CURRENT ROW` and carries the identical cost to writing
+`RANGE` explicitly.
+
+**Oversized parameter as a verdict-bearing finding** — probed whether a bare
+equality predicate against an oversized parameter shows any memory-grant
+difference in `SHOWPLAN_XML` on its own. It does not: only a downstream
+Sort/Hash-consuming operator sizes a grant off the declared length, and a
+compile-only equality predicate never reaches one. The rule ships as
+informational, with no verdict field.
+
+**"`IF`/`CASE` with no `ELSE` where a sibling has one"** — too noisy as framed;
+mixed `ELSE` presence across a routine's `IF`s is an ordinary, unopinionated
+T-SQL shape. The sharper claim it was gesturing at did ship: a *simple* `CASE`
+(`CASE <input> WHEN ...`) with no `ELSE` silently yields `NULL` on an unmatched
+value, confirmed on a real executed probe. The searched form
+(`CASE WHEN cond THEN ...`) is deliberately excluded — a partial condition set
+there is usually deliberate.
+
+## Appendix 10 — Calibrated thresholds
+
+Thresholds picked from the measured distribution of the local test database
+rather than copied from convention. Method: probe with the threshold at zero
+across the whole database, read the distribution, then pick a cutoff that
+selects a small, selective subset.
+
+**Code metrics** (percentiles measured across the whole database):
+
+| Metric | p50 | p90 | p95 | p99 | Threshold |
+| --- | --- | --- | --- | --- | --- |
+| Line length (chars) | 32 | 98 | 120 | 179 | **200** |
+| Module length (lines) | — | 270 | 614 | 3,191 | **1000** |
+| Routine length (lines) | — | 293 | 712 | 3,596 | **400** |
+| Parameter count | — | 10 | 20 | 42 | **15** |
+| Nesting depth | 3 | 16 | 30 | — | **10** |
+| AND/OR count in one IF/WHILE | — | 2 | 3 | 4 | **4** |
+| CASE WHEN-branch count | — | 2 | 3 | 4 | **5** |
+| CASE WHEN-branch body length | — | — | 1 | 6 | **5** |
+
+Nesting depth is the one worth noting: real procedural T-SQL nests
+meaningfully deeper than general-purpose-language advice assumes (p75 = 7,
+p90 = 16), so importing a conventional limit would have fired on nearly
+everything. 10 stays selective against actual T-SQL authoring habits.
+
+**Index design:**
+
+* `WideClusteredKeyMaxColumns` = 3, `WideClusteredKeyMaxBytes` = 16 — of 681
+  real clustered indexes, 7 (~1%) carry more than 3 key columns and 36 (~5%)
+  exceed 16 estimated key bytes. Mean key width ~15.3 bytes: many
+  single-column `uniqueidentifier` keys sit exactly at 16, just under the
+  line. Byte width is a best-effort estimate from modeled column types.
+* `ManyNonclusteredIndexesThreshold` = 7 — of 328 tables carrying at least one
+  active nonclustered index, 5 (~1.5%) carry 7 or more.
+* `ManyKeyColumnsThreshold` = 7 — of 1,227 real indexes, 1 (~0.08%) carries 7+
+  key columns.
+
+**Lineage:** `NestedViewDepthScanner` N=2 and `PostExpansionJoinWidthScanner`
+gap ≥ 3 were calibrated the same way.
+
+**Deliberately uncalibrated:** `IdentityRangeScanner`'s ≥90%-of-range
+exhaustion cutoff. Identity range is a data-state fact, and a development
+database is the wrong population to tune it against — a round number is the
+honest choice there.
+
+## Appendix 11 — Benchmark methodology
+
+Why the benchmark harness pins what it pins. The settings themselves are in
+`SilentScan.Bench`.
+
+* **Compatibility level 160 and MAXDOP 1** are pinned so a measured difference
+  is attributable to the predicate rather than to a compat-level behavior
+  change or to how many cores happened to be free.
+* **Both CE modes and both collation families are swept** rather than picking
+  one of each. The conversion verdict split (`SQL_*` → `ScanForced`, Windows →
+  `RangeSeek`) is collation-dependent by construction, and a reader who
+  disagrees with the cardinality estimator's role can otherwise dismiss the
+  whole result on the grounds that only one mode was measured. Sweeping both
+  removes that objection instead of arguing with it.
+* **Median of 5 warm runs, CSV out.** Median over mean because a single
+  unlucky run should not move the reported number; warm because cold-cache
+  timings measure the disk, not the plan.
