@@ -4531,48 +4531,137 @@ is carried into this file - only the mechanism and the design implication.
 
 ### E. New items from the full-archive sweep
 
-- [ ] **Filtered index whose predicate compares against a variable/parameter,
-      not a literal** — the optimizer can only match a filtered index's own
-      `WHERE` clause against a query filtering the SAME column with a literal
-      of the matching value; a query that filters via `@param`/a local
-      variable can never match it, so the index is silently, permanently
-      unused for that access path even though it looks like exactly the
-      right index. Schema+AST decidable: the filtered index's own predicate
-      text is already read; comparing its shape (column, operator, literal)
-      against the query's own predicate operand kind (literal vs.
-      parameter/variable) is the same operand-classification machinery the
-      conversion stream already has. High-value, nothing like it queued
-      before this sweep.
-- [ ] **Column too wide to ever be an index key** — a `varchar`/`nvarchar`
-      column whose declared max byte width exceeds the engine's fixed
-      900-byte index key-length ceiling can never be a key column as
-      declared; `CREATE INDEX` on it hard-fails. Pure column-type arithmetic
-      against the catalog, the same computation the shipped `WideClusteredKey`
-      byte-estimate already does — this is the single-column ceiling case of
-      the same arithmetic, worth its own finding since it explains a
-      structurally-forced full-scan on a column a developer might reasonably
-      expect to index.
-- [ ] **`INSTEAD OF INSERT` trigger with a filtered re-insert and no reject
-      path** — a body shaped `INSERT INTO target SELECT * FROM inserted
-      WHERE <predicate>` with nothing that signals or logs the filtered-out
-      rows. The caller's `INSERT` returns success; rows matching the negated
-      predicate are silently dropped, no error, no row count mismatch
-      visible without inspecting `@@ROWCOUNT` against the input batch size.
-      Same "silent data loss, no engine error" family as the shipped
-      write-loss stream and the already-queued multi-row-unsafe trigger rule
-      — a second, structurally distinct trigger defect, not a duplicate of
-      it. AST-decidable: `INSTEAD OF INSERT` trigger body, an `INSERT`
-      sourced from `inserted` with a `WHERE`/`JOIN`-filtered subset, no
-      companion branch handling the excluded rows.
-- [ ] **Trigger branching on `UPDATE(column)` alone** — `UPDATE()` in a
-      trigger reports whether a column was named in the statement's SET
-      list, not whether its value actually changed; a full-column UPDATE
-      issued by an ORM (common) sets every column every time, so
-      `IF UPDATE(Col) BEGIN ... END` fires on genuine no-op saves as often as
-      real changes. AST-decidable: a trigger body gating its logic on
-      `UPDATE(col)` with no corresponding value comparison between
-      `inserted.col`/`deleted.col`. Distinct mechanism from the multi-row bug
-      — a single-row UPDATE trips it just as easily.
+- [x] **Filtered index whose predicate compares against a variable/parameter,
+      not a literal — shipped** as the new `FilteredIndexParameterMismatchFinding`
+      stream (`TypedPredicateExtractor`, reusing the same operand-classification
+      machinery `LocalVariablePredicateFinding` already uses at the same
+      predicate site - exactly the reuse this item's own text called for).
+      Oracle-confirmed directly (Docker instance, `SET SHOWPLAN_XML`,
+      disposable scratch database, dropped immediately after) exactly as
+      drafted: `WHERE Status = 'Active'` against a filtered index
+      `WHERE Status = 'Active'` used the index via an Index Seek;
+      the IDENTICAL predicate through `DECLARE @p VARCHAR(20) = 'Active';
+      ... WHERE Status = @p` did NOT use the filtered index at all - it fell
+      back to a full Clustered Index Scan, even though the parameter's
+      runtime value was the exact same string as the index's own filter
+      literal. Also confirmed `OPTION (RECOMPILE)` does NOT fix this (still a
+      Clustered Index Scan) - a genuinely useful negative result, since the
+      sibling `LocalVariablePredicateFinding` IS fully resolved by RECOMPILE
+      and this finding deliberately is NOT suppressed by it, unlike that one.
+      Fires for both a formal parameter and a plain `DECLARE`d local variable
+      (unlike `LocalVariablePredicateFinding`, which excludes formal
+      parameters for its own, different reason) - the filtered-index-match
+      rule rejects every non-literal operand identically. Distinct from the
+      already-shipped `IndexDesignFindingKind.FilterColumnNotInIndex`
+      (confirmed before building: that kind is a covering-column gap in the
+      filtered index's OWN definition, nothing to do with how a query at a
+      call site phrases its own predicate). Scoped to the simplest,
+      unambiguous filter shape only (`Column = Literal`, the exact shape
+      `sys.indexes.filter_definition` renders a plain equality filter as,
+      confirmed directly against the oracle) - a multi-predicate filter or
+      non-equality operator is never guessed at. `FindingConfidence.High` -
+      the filter-literal match is exact text equality, and the underlying
+      optimizer rule is unconditional, not a threshold or estimation.
+      **Real coverage against the local test database: 0 findings** — a real,
+      honest zero, cross-checked directly (17 filtered indexes exist in the
+      catalog, `sys.indexes.has_filter = 1`, matching `FilterColumnNotInIndex`'s
+      own 9-finding base, but none of them is ever compared against a
+      parameter/variable anywhere in the scanned corpus) - not a detection gap.
+- [x] **Column too wide to ever be an index key — shipped, scope corrected
+      after oracle verification.** The original premise ("`CREATE INDEX`
+      hard-fails" once a column's declared max byte width exceeds a flat
+      900-byte ceiling) was WRONG on two counts, both caught directly against
+      the standing Docker oracle before building anything: (1) the ceiling is
+      NOT flat - 900 bytes for a CLUSTERED index/PRIMARY KEY/UNIQUE
+      constraint's own key, but 1700 bytes for a NONCLUSTERED index's own key
+      (the engine's own printed warning text states each number verbatim);
+      (2) `CREATE INDEX` only "hard-fails" for a FIXED-length type (`char`/
+      `nchar`/`binary`) over the ceiling - confirmed as a real DDL-time engine
+      error (Msg 1944), which is already this checklist's own established
+      exclusion elsewhere ("flagging something the engine already refuses to
+      compile adds no value beyond its own error message" - second sweep §H).
+      For a VARIABLE-length type (`varchar`/`nvarchar`/`varbinary`, non-MAX)
+      confirmed the opposite: `CREATE INDEX` SUCCEEDS with only a printed
+      warning (easily swallowed by deployment tooling), and the real failure
+      is deferred to a future `INSERT`/`UPDATE` that finally stores a
+      long-enough value (Msg 1946 "Operation failed... exceeds the maximum
+      length"), silently, possibly years later in production - genuinely THIS
+      codebase's target pattern, unlike the fixed-length case, so shipped
+      scoped to variable-length key columns only, as
+      `IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit` on the
+      existing `IndexDesignScanner`/`IndexDesignFinding` stream. Reuses the
+      exact `EstimateColumnKeyBytes` byte-estimation logic the shipped
+      `WideClusteredKey` kind already established, per this item's own
+      original instruction. `FindingConfidence.High` - a structurally-provable
+      catalog fact (declared width vs. a fixed engine ceiling), not a
+      threshold judgment call. **Real coverage against the local test
+      database: 0 findings** — a real, honest zero, independently cross-
+      checked with a hand-rolled `sys.indexes`/`sys.index_columns`/`sys.types`
+      query summing key-column byte width per index against the correct
+      900/1700 ceiling before trusting the scanner's own absence of a
+      finding: no `varchar`/`nvarchar`/`varbinary` key column in this
+      database's real indexes exceeds either limit.
+- [x] **`INSTEAD OF INSERT` trigger with a filtered re-insert and no reject
+      path — shipped** as `TriggerCorrectnessFindingKind.
+      InsteadOfInsertFilteredNoRejectPath`. Oracle-confirmed directly (Docker
+      instance, disposable scratch database, dropped immediately after)
+      exactly as drafted, no correction needed: an `INSTEAD OF INSERT`
+      trigger shaped `INSERT INTO target SELECT * FROM inserted WHERE
+      <predicate>` with no companion branch handling the excluded rows - a
+      4-row caller `INSERT` (2 rows matching the filter, 2 not) reported
+      `@@ROWCOUNT = 4` immediately after the statement (the FULL caller batch
+      size), no error, no warning, with only 2 rows genuinely present
+      afterward. AST-decidable: `INSTEAD OF INSERT` trigger body, an `INSERT`
+      sourced from `inserted` (bare, or one side of a join) with a
+      `WHERE`/join-filtered subset, no companion top-level `INSERT` at a
+      DIFFERENT target table and no `RAISERROR`/`THROW` anywhere in the body.
+      Precision correction found while building, not at verification time: a
+      companion top-level `INSERT` must be checked by DISTINCT TARGET rather
+      than by shape - the real reject/audit-table insert is naturally shaped
+      exactly like the same filtered-reinsert-from-inserted pattern too (it
+      selects the excluded subset), just against a different target, so
+      "any other INSERT not matching this shape" would have wrongly missed
+      the common real case. `FindingConfidence.High` - the caller-sees-
+      success-while-rows-vanish mechanism is a mechanical, oracle-confirmed
+      engine fact, unconditional on invocation size (even a single filtered
+      row in a single-row INSERT is silently dropped). **Real coverage
+      against the local test database: 0 findings.** Cross-checked directly
+      against `sys.triggers WHERE is_instead_of_trigger = 1` before trusting
+      the zero: 8 real `INSTEAD OF` triggers exist, and a real `INSTEAD OF
+      INSERT` trigger among them was read directly and confirmed to be a
+      genuine, structurally different shape - an unconditional `INSERT ...
+      SELECT ... FROM Inserted` into a DIFFERENT target table with a
+      narrowed COLUMN list (a legacy-schema migration shim, no `WHERE`/join
+      row-filtering anywhere) - not the row-filtered-reinsert pattern this
+      rule targets. A real, honest zero, not a detection gap.
+- [x] **Trigger branching on `UPDATE(column)` alone — shipped** as
+      `TriggerCorrectnessFindingKind.UpdateFunctionWithoutValueComparison`.
+      Oracle-confirmed directly (Docker instance, disposable scratch
+      database, dropped immediately after): an `UPDATE t SET Status = Status
+      WHERE Id = 1` (the column assigned its OWN current value, a true no-op)
+      against a trigger gated on bare `IF UPDATE(Status)` still fired the
+      branch. Adding the real guard (`IF UPDATE(Status) AND EXISTS (SELECT 1
+      FROM inserted i JOIN deleted d ON i.Id = d.Id WHERE i.Status <>
+      d.Status)`) was oracle-confirmed to correctly suppress on the same
+      no-op UPDATE and correctly still fire on a real value change - the
+      near-miss shape this kind must never flag. AST-decidable: a trigger
+      body gating logic on `UPDATE(col)` (ScriptDom's own dedicated
+      `UpdateCall` node) with no comparison, anywhere in the SAME predicate
+      expression (including inside an `EXISTS` subquery, the real-world
+      shape oracle-confirmed above), between two column references that BOTH
+      name that exact column - deliberately narrower than "any column-to-
+      column comparison" (which would have been fooled by an unrelated join-
+      key correlation like `i.Id = d.Id` sitting next to the real guard) and
+      confirmed correct by a dedicated near-miss test asserting exactly that
+      distinction. `FindingConfidence.High` - `UPDATE()`'s own named-vs-
+      changed distinction is a mechanical, oracle-confirmed engine fact.
+      — a single-row UPDATE trips it just as easily. **Real coverage against
+      the local test database: 16 findings.** Spot-checked one directly
+      against real module text (`dbo.tr_iu_tblAuxStorage`) - a genuine true
+      positive: `IF UPDATE(Blob) AND EXISTS (SELECT * FROM INSERTED WHERE
+      TypeID = 1)` gates a full checksum recompute with no comparison
+      anywhere against `inserted.Blob`/`deleted.Blob`, so re-saving the
+      identical `Blob` value still re-triggers the recompute every time.
 - [ ] **`TRY_CAST` in a non-persisted computed column used in a predicate** —
       `TRY_CAST` is session-`DATEFORMAT`-dependent and therefore
       non-deterministic, so a computed column built on it can never be
@@ -4592,17 +4681,31 @@ is carried into this file - only the mechanism and the design implication.
       filtered columns and checking them against the table's indexes is the
       same shape as any other predicate-vs-index check already in this
       project. New catalog read needed (security policies aren't read today).
-- [ ] **Columnstore index present on a table that is also a live DML target of
-      transactional code** — lock escalation on a columnstore index happens
-      at the rowgroup granularity, not the row granularity, so a single-row
-      DELETE inside an explicit transaction can block unrelated concurrent
-      access to every other row sharing that rowgroup — a correctness/
-      contention risk that doesn't exist on a rowstore index. Ship as a
-      structural risk flag only, never a proven-cost claim: catalog-decidable
-      that the table carries a columnstore index and is a DML target
-      somewhere in the call graph; whether contention actually occurs is
-      workload-dependent and out of reach. State that scope limit in the
-      finding text itself.
+- [x] **Columnstore index present on a table that is also a live DML target of
+      transactional code — shipped** as
+      `IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable`, a structural
+      risk flag only, exactly as drafted. Rowgroup-granularity locking
+      confirmed directly against the standing Docker oracle (disposable
+      scratch database, dropped immediately after): a single-row `DELETE`
+      inside an explicit transaction against a table carrying a clustered
+      columnstore index took a real `ROWGROUP`-granularity lock
+      (`sys.dm_tran_locks`, `resource_type = 'ROWGROUP'`, mode `UIX`) - not a
+      per-row lock the way an ordinary rowstore `DELETE` takes. Catalog-
+      decidable half (`CatalogIndex.IsColumnstore`) unchanged from the
+      draft; the "DML target somewhere in the call graph" half is
+      DIRECT-target only (new `DmlTargetTableScanner`, the same
+      direct-target-only scope `CrossModuleLockOrderScanner`'s own
+      write-target visitor already uses) rather than full call-graph-
+      transitive - a deliberate v1 scope-down matching this checklist's own
+      established precedent for the sibling lock-ordering stream, not a
+      soundness gap in what IS reported. `FindingConfidence.Medium` - the
+      structural precondition is exact, but actual contention is
+      workload-dependent and stated as an explicit scope limit in the
+      finding text itself, per the item's own instruction. **Real coverage
+      against the local test database: 0 findings** — a real, honest zero,
+      cross-checked directly (`sys.indexes WHERE type IN (5,6)` returns zero
+      rows - this database carries no columnstore index of any kind today),
+      not a detection gap.
 - [ ] **Aggregate argument containing a division (or other error-prone scalar
       expression) that relies on short-circuit elimination, on a table with a
       columnstore or batch-mode-eligible index** — a `COUNT`/aggregate
@@ -4690,18 +4793,70 @@ script-family sweep had. No source citation carried into this file.
       the same query. Distinct from the already-shipped `TOP(100) PERCENT`
       and TOP+ORDER-BY row-goal findings - this is the no-ORDER-BY-at-all
       case, a correctness claim, not a performance one.
-- [ ] **Multi-hop trigger recursion cycle across tables** (trigger on table A
-      writes to table B, whose own trigger writes back to table A) — checked
-      directly against the shipped `DirectRecursiveTrigger` implementation
-      before queuing this: it only catches a trigger writing to its OWN
-      target table (a direct self-loop via `SelfRecursionCollector`), not a
-      cycle mediated through a second trigger. A genuine, unbuilt extension:
-      needs the same call-graph machinery already built for procs
-      (`ProcCallGraph`/`ProcCallGraphBuilder`), applied to trigger DML
-      targets instead of proc calls, walking for a cycle back to the
-      starting table. Real engine consequence: exceeding the 32-level
-      nesting ceiling is a hard runtime error, so this is a "provably fails
-      past a certain depth" claim, not just a style concern.
+- [x] **Multi-hop trigger recursion cycle across tables — shipped** as the
+      new `TriggerRecursionCycleFinding` stream (`TriggerRecursionCycleScanner`,
+      a whole-scan pass mirroring `CrossModuleLockOrderScanner`'s own shape,
+      not `TriggerCorrectnessFindingKind` - the finding shape is a whole
+      cycle path across triggers/tables, materially different from every
+      other single-trigger kind in that stream). Confirmed directly against
+      the shipped `DirectRecursiveTrigger`/`SelfRecursionCollector` before
+      building: it only catches a trigger writing to its OWN target table, a
+      genuine, real gap this closes. Built the way this item sketched: the
+      same graph-construction shape as `ProcCallGraph`/`ProcCallGraphBuilder`
+      (collect every trigger-write edge across the whole scan, since the two
+      triggers forming a cycle routinely live in different files), applied to
+      trigger DML write targets instead of EXEC call sites, walked for a
+      directed cycle back to the starting table (capped at 8 hops - a stated
+      scope-down, not a soundness gap).
+      **The gating assumption in this item's own first draft was wrong and
+      was corrected during verification, the single most important finding
+      of this build**: it assumed `DirectRecursiveTrigger`'s own
+      `RECURSIVE_TRIGGERS` gate would carry over. Oracle-confirmed directly
+      (Docker instance, disposable scratch database, dropped immediately
+      after) that a cross-table cascade is controlled by a SEPARATE,
+      SERVER-level `sys.configurations` option, `nested triggers` (default
+      ON), not the database-level `RECURSIVE_TRIGGERS` option (default OFF,
+      and left OFF the entire time in every probe) at all: with the server
+      option ON, an UPDATE against table A fired table A's trigger, which
+      updated table B and genuinely fired table B's trigger, which updated
+      table A and fired table A's trigger AGAIN - a real, unbounded cascade,
+      entirely unaffected by `RECURSIVE_TRIGGERS`. With the server option
+      OFF (rebuilding fresh, since resetting probe rows is itself an UPDATE
+      that would contaminate the measurement), table A's own trigger still
+      fired once from the top-level statement and table B's trigger still
+      fired once from table A's own write (both direct, always-allowed
+      invocations), but table B's write back to table A did NOT cascade into
+      table A's trigger a second time - the real gate, exactly where the
+      server option said it should stop. New live-only
+      `DatabaseCatalog.IsNestedTriggersEnabled` property (`LiveCatalogReader`
+      reads `sys.configurations.value_in_use` for `'nested triggers'`) gates
+      this finding the same "never overclaim a risk that is not actually
+      live" way `IsRecursiveTriggersEnabled` already gates
+      `DirectRecursiveTrigger`. Also oracle-confirmed the item's own nesting-
+      ceiling claim exactly as drafted: forcing the cascade to continue hit a
+      real, hard runtime error at the documented limit - `Msg 217, Level 16:
+      Maximum stored procedure, function, trigger, or view nesting level
+      exceeded (limit 32)`. `FindingConfidence.Medium`, matching
+      `DirectRecursiveTrigger`'s own precedent for the identical reason: the
+      cascade mechanism is mechanical and oracle-confirmed once the gating
+      option is true, but whether every hop's own write statement is
+      actually reached at runtime (each may sit behind a condition this pass
+      does not evaluate) is real control-flow this pass cannot fully
+      resolve. **Wiring correction, found and fixed during a later
+      verification pass (2026-08-18):** this stream's scanner and finding
+      type were fully built and tested but never actually invoked from
+      `ScanReportBuilder`/wired into `ScanReport` at all - a real, complete
+      reporting gap, not a code defect, caught only by running a real
+      `scan-db` and finding the stream silently absent from every output
+      format. Fixed: `ScanReportBuilder` now calls `TriggerRecursionCycleScanner`
+      as its own whole-scan stage (schema version 54 → 55), with SARIF rule
+      catalog/writer and readable-report wiring added the same way every
+      other stream's own final integration step already works. **Real
+      coverage against the local test database: 0 findings** - a real,
+      honest zero, live-confirmed the gate is genuinely active first
+      (`sys.configurations`'s own `'nested triggers'` value is 1 on this
+      instance) rather than assuming the zero means the gate is off: of 51
+      real triggers in this database, none forms a cross-table write cycle.
 - [ ] **View defined with `SELECT *` whose compiled column list has gone
       stale against the base table's current shape** — a view's column list
       is frozen at `CREATE`/last `sp_refreshview` time; a later
@@ -4712,16 +4867,30 @@ script-family sweep had. No source citation carried into this file.
       table's `sys.columns` - a genuinely different claim from generic
       "don't SELECT *" style advice, since this is specifically about
       metadata drift, not query-time cost.
-- [ ] **Indexes sharing an identical key-column list and sort direction but
-      with different, non-overlapping `INCLUDE` sets** — each looks
-      individually legitimate (built for different queries), but they're
-      mergeable into one index carrying the union of both `INCLUDE` lists at
-      no cost to either original query, for less write/storage overhead than
-      carrying both. Distinct from the shipped exact-duplicate and
-      prefix-subsumption kinds - the divergence here is only in `INCLUDE`,
-      and the fix is a merge, not a drop. Catalog-decidable: pure
-      `CatalogIndex.KeyColumns`/sort-direction equality plus an
-      `IncludedColumns` set-difference.
+- [x] **Indexes sharing an identical key-column list and sort direction but
+      with different, non-overlapping `INCLUDE` sets — shipped** as
+      `IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly`, exactly
+      as drafted. This catalog had no per-column sort-direction field before
+      this item - added additively (`CatalogIndex.KeyColumnIsDescending`,
+      `sys.index_columns.is_descending_key`, live-only, empty/"unknown" for
+      file mode or an indexed view's own row, matching this session's
+      established additive-field pattern) and only ever compared when BOTH
+      candidate indexes' own sort-direction list is non-empty - an unknown
+      sort direction on either side is never guessed to match. Confirmed
+      distinct from the already-shipped exact-duplicate/prefix-subsumption
+      kinds before building (grep-checked): identical INCLUDE sets is
+      `DuplicateIndex`'s own territory, and a subset relationship either way
+      is already `SubsumedIndex`-eligible, so this kind only fires on a
+      genuine non-overlapping divergence on both sides. No oracle claim
+      needed beyond the well-established SQL Server index-merge mechanics
+      the item itself named as optional. `FindingConfidence.High` - a
+      structurally-provable catalog fact once sort direction is known, no
+      threshold or estimation involved. **Real coverage against the local
+      test database: 1 finding.** Spot-checked directly against
+      `sys.indexes`/`sys.index_columns` before trusting it - a genuine pair
+      of active, non-columnstore indexes on the same table sharing the exact
+      same ordered key-column list and sort direction, with disjoint
+      `INCLUDE` sets, real, mergeable write-amplification.
 - [ ] **String concatenation via the `+` operator silently nulls the entire
       result when any operand is NULL** — unlike `CONCAT()`, which treats
       NULL operands as empty string, `+` propagates a single NULL operand to
@@ -4732,13 +4901,32 @@ script-family sweep had. No source citation carried into this file.
       complaint. AST-decidable: `+` binary operator between string-typed
       operands where at least one is a nullable column reference, with no
       wrapping `ISNULL`/`COALESCE`.
-- [ ] **Logon trigger gating access on `HOST_NAME()`** — this value is
-      client-supplied via the connection string and trivially spoofable, so
-      a trigger using it in an allow/deny branch is a security control that
-      does not actually control anything. Genuinely correctness/security-
-      class, not performance, and fits the scope rule's security axis.
-      AST-decidable: logon-trigger body, `HOST_NAME()` feeding a conditional
-      that reaches a `ROLLBACK`/deny path.
+- [x] **Logon trigger gating access on `HOST_NAME()` — shipped** as
+      `TriggerCorrectnessFindingKind.LogonTriggerHostNameGate`. Oracle-
+      confirmed directly (Docker instance, disposable scratch database and a
+      real scratch login, dropped immediately after) exactly as drafted: a
+      logon trigger denying (via `ROLLBACK`) any login whose `HOST_NAME()`
+      did not equal an approved value genuinely blocked a connection using
+      the client's default workstation name, then genuinely let the SAME
+      login and password through once the client-side connection's own
+      Workstation ID was set to the approved value (`sqlcmd -H`, the
+      client-side equivalent of the connection string's `Workstation ID`
+      keyword) - proving the value really is attacker-supplied with no
+      server-side control over it at all. AST-decidable: a logon trigger
+      (`TriggerActions` containing `TriggerActionType.LogOn` - the same
+      `TriggerObject.Name == null` shape a DDL trigger also has, so the
+      action-type check is what actually distinguishes the two, confirmed by
+      a dedicated near-miss test) whose body has an `IF` feeding `HOST_NAME()`
+      into a predicate that reaches a `ROLLBACK` in its `THEN`/`ELSE`.
+      `FindingConfidence.High`, matching this project's own precedent for a
+      structurally-unambiguous, hard-fact security claim
+      (`SecurityFindingKind.HardCodedIpAddress`/`WeakHashAlgorithm`'s own
+      High tier) - `HOST_NAME()` being client-supplied and unauthenticated is
+      an unconditional engine fact with no exception. **Real coverage
+      against the local test database: 0 findings** — a real, honest zero,
+      cross-checked directly (`sys.triggers WHERE parent_class = 0`, the
+      server-scoped class logon triggers live under, returns zero rows -
+      this instance has no logon trigger of any kind), not a detection gap.
 - [ ] **`CHECK` constraint accidentally placed on an `IDENTITY` column** — a
       numeric-threshold `CHECK` on the identity column itself (e.g.
       `CHECK (Id > 5)`) blocks every insert until the auto-generated counter
@@ -4748,18 +4936,37 @@ script-family sweep had. No source citation carried into this file.
       Schema-decidable: `CatalogColumn.IsIdentity` plus a `CHECK`
       constraint's definition text referencing that same column, cheap
       catalog+text check.
-- [ ] **Monotonically increasing clustered key (an `IDENTITY` column, or any
-      other always-ascending key) with no `OPTIMIZE_FOR_SEQUENTIAL_KEY`** —
-      every insert lands on the same trailing page, so concurrent inserts
-      can serialize on that page's latch. The precise mirror image of the
-      already-shipped random-GUID-clustered-key fragmentation rule: one
-      direction (random) fragments the whole tree, the other (monotonic)
-      hotspots a single page. Ship as a structural risk flag only, same
-      discipline as the columnstore-lock-escalation item already queued -
-      the structural precondition (monotonic clustered key, no sequential-
-      key optimization) is catalog-decidable; whether it actually causes
-      contention depends on concurrent insert rate, which is workload data
-      and out of reach. State that scope limit in the finding text itself.
+- [x] **Monotonically increasing clustered key (an `IDENTITY` column, or any
+      other always-ascending key) with no `OPTIMIZE_FOR_SEQUENTIAL_KEY` —
+      shipped** as
+      `IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization`,
+      a structural risk flag only, exactly as drafted. `OPTIMIZE_FOR_SEQUENTIAL_KEY`
+      confirmed directly against the standing Docker oracle (SQL Server 2022;
+      the option itself shipped originally in SQL Server 2019 CU5, so this
+      finding is version-sensitive and should not be assumed available on an
+      older target) as a real, current index-level `ALTER INDEX ... SET`
+      option, and `sys.indexes.optimize_for_sequential_key` confirmed to read
+      back the real per-index on/off state (0 by default, flips to 1
+      immediately after enabling it) - added additively as
+      `CatalogIndex.OptimizeForSequentialKey`, read directly in the same
+      `sys.indexes` query that already reads every other index-level flag, so
+      this kind never false-positives against an index that already carries
+      the mitigation. Scoped to the clear, high-confidence case only, per the
+      item's own instruction: the clustered index's leading key column is an
+      `IDENTITY` column with a positive `IdentityIncrement` (a negative/zero
+      increment is not "always-ascending" and is deliberately excluded) -
+      broadening to other monotonic-by-construction patterns (a
+      sequence-defaulted column, an ever-increasing datetime default) was
+      evaluated and NOT done: no cheap, precise way to prove a non-IDENTITY
+      column is monotonic from the catalog alone without risking a false
+      positive. `FindingConfidence.Medium` - the structural precondition is
+      exact, but actual contention depends on concurrent insert rate, stated
+      as an explicit scope limit in the finding text itself. **Real coverage
+      against the local test database: 440 findings** (Medium confidence, so
+      only visible with `--confidence medium`/`low`, not the default) -
+      independently cross-checked with a hand-rolled `sys.indexes`/
+      `sys.identity_columns` query before trusting the scanner's own count;
+      the two agree exactly.
 
 ### H. Confirmations from the second sweep (no new items)
 

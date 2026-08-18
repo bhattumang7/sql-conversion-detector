@@ -38,6 +38,7 @@ public sealed class LiveCatalogReader
         catalog.DefaultCollation = await ReadDatabaseDefaultCollationAsync(connection, cancellationToken);
         catalog.CompatibilityLevel = await ReadCompatibilityLevelAsync(connection, cancellationToken);
         catalog.IsRecursiveTriggersEnabled = await ReadIsRecursiveTriggersEnabledAsync(connection, cancellationToken);
+        catalog.IsNestedTriggersEnabled = await ReadIsNestedTriggersEnabledAsync(connection, cancellationToken);
 
         foreach (var (qualifiedName, underlyingType) in await ReadTypeAliasesAsync(connection, cancellationToken))
         {
@@ -612,6 +613,27 @@ public sealed class LiveCatalogReader
         return result is bool isOn ? isOn : null;
     }
 
+    /// <summary>
+    /// Server-level <c>sys.configurations</c> option, distinct from the database-level
+    /// <c>RECURSIVE_TRIGGERS</c> option read by <see cref="ReadIsRecursiveTriggersEnabledAsync"/> -
+    /// see <see cref="DatabaseCatalog.IsNestedTriggersEnabled"/> for the oracle-confirmed
+    /// distinction. <c>value_in_use</c> (not <c>value</c>) is the running value - a changed
+    /// <c>value</c> only takes effect after <c>RECONFIGURE</c>, which <c>value_in_use</c> already
+    /// reflects.
+    /// </summary>
+    private static async Task<bool?> ReadIsNestedTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateReadOnlyCommand(
+            "SELECT value_in_use FROM sys.configurations WHERE name = 'nested triggers';");
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result switch
+        {
+            int intValue => intValue != 0,
+            bool boolValue => boolValue,
+            _ => null,
+        };
+    }
+
     private static async Task<List<(string QualifiedName, SqlType UnderlyingType)>> ReadTypeAliasesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
@@ -812,8 +834,9 @@ public sealed class LiveCatalogReader
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
-                   i.is_hypothetical, i.filter_definition,
-                   ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name
+                   i.is_hypothetical, i.filter_definition, i.optimize_for_sequential_key,
+                   ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name,
+                   ic.is_descending_key
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
             LEFT JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
@@ -847,26 +870,31 @@ public sealed class LiveCatalogReader
                     IsHypothetical: reader.GetBoolean(9),
                     KeyColumns: [],
                     IncludedColumns: [],
-                    FilterDefinition: filterDefinition);
+                    FilterDefinition: filterDefinition,
+                    OptimizeForSequentialKey: reader.GetBoolean(11));
                 rowsByIndex[key] = row;
             }
 
-            if (await reader.IsDBNullAsync(14, cancellationToken))
+            if (await reader.IsDBNullAsync(15, cancellationToken))
             {
                 // No sys.index_columns row at all (clustered columnstore) - the index row above
                 // was already recorded with empty key/included lists; nothing more to add.
                 continue;
             }
 
-            var isIncluded = reader.GetBoolean(12);
-            var columnName = reader.GetString(14);
+            var isIncluded = reader.GetBoolean(13);
+            var columnName = reader.GetString(15);
             if (isIncluded)
             {
                 row.IncludedColumns.Add(columnName);
             }
             else
             {
-                row.KeyColumns.Add((reader.GetByte(11), columnName));
+                // is_descending_key is meaningless (but non-null, always false) for an included
+                // column - only read it on the key-column branch, matching the shape KeyColumns
+                // itself already takes.
+                var isDescending = reader.GetBoolean(16);
+                row.KeyColumns.Add((reader.GetByte(12), columnName, isDescending));
             }
         }
 
@@ -875,7 +903,9 @@ public sealed class LiveCatalogReader
         {
             var kind = ClassifyIndexKind(row);
 
-            var orderedKeyColumns = row.KeyColumns.OrderBy(k => k.Ordinal).Select(k => k.Name).ToList();
+            var orderedKeyColumnRows = row.KeyColumns.OrderBy(k => k.Ordinal).ToList();
+            var orderedKeyColumns = orderedKeyColumnRows.Select(k => k.Name).ToList();
+            var orderedDescendingFlags = orderedKeyColumnRows.Select(k => k.IsDescending).ToList();
 
             var index = new CatalogIndex(
                 Name: row.Name,
@@ -888,7 +918,9 @@ public sealed class LiveCatalogReader
                 IsDisabled: row.IsDisabled,
                 IsClustered: row.TypeDesc.StartsWith("CLUSTERED", StringComparison.OrdinalIgnoreCase),
                 IsHypothetical: row.IsHypothetical,
-                FilterDefinition: row.FilterDefinition);
+                FilterDefinition: row.FilterDefinition,
+                KeyColumnIsDescendingRaw: orderedKeyColumns.Count > 0 ? orderedDescendingFlags : [],
+                OptimizeForSequentialKey: row.OptimizeForSequentialKey);
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -963,7 +995,7 @@ public sealed class LiveCatalogReader
         bool IsUniqueConstraint,
         bool HasFilter,
         bool IsDisabled,
-        List<(int Ordinal, string Name)> KeyColumns,
+        List<(int Ordinal, string Name, bool IsDescending)> KeyColumns,
         List<string> IncludedColumns,
         // Only ReadIndexesAsync's own query reads is_hypothetical - ReadIndexedViewsAsync shares
         // this same row shape but never sets it (an indexed view's own index is never a DTA/
@@ -972,7 +1004,11 @@ public sealed class LiveCatalogReader
         bool IsHypothetical = false,
         // Same reasoning as IsHypothetical above - only ReadIndexesAsync's own query reads
         // filter_definition; ReadIndexedViewsAsync never sets it.
-        string? FilterDefinition = null);
+        string? FilterDefinition = null,
+        // Same reasoning again - only ReadIndexesAsync's own query reads
+        // optimize_for_sequential_key; ReadIndexedViewsAsync never sets it (an indexed view's own
+        // clustered index is never the "monotonic clustered key" shape this field exists for).
+        bool OptimizeForSequentialKey = false);
 
     /// <summary>
     /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead
@@ -1033,7 +1069,10 @@ public sealed class LiveCatalogReader
             }
             else
             {
-                row.KeyColumns.Add((reader.GetByte(10), columnName));
+                // This query never reads is_descending_key - indexed views don't participate in
+                // the merge-candidate check that field exists for, so IsDescending is always false
+                // here rather than a real value.
+                row.KeyColumns.Add((reader.GetByte(10), columnName, false));
             }
         }
 

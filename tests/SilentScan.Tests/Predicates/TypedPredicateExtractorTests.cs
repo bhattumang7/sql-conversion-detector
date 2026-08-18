@@ -2147,6 +2147,121 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.LocalVariablePredicateFindings);
     }
+
+    // docs/detection-checklist.md full-archive practitioner sweep §E, "Filtered index whose
+    // predicate compares against a variable/parameter, not a literal" - oracle-confirmed
+    // (SET SHOWPLAN_XML, 2026-08-18): a query filtering the SAME column via a parameter/variable
+    // can never use a filtered index whose own filter is a literal-equality restatement of that
+    // comparison, even when the runtime value is identical. FilterDefinition is live-only
+    // (CatalogIndex's own doc comment) - CatalogBuilder (file mode) never populates it from DDL
+    // text alone, so these tests build the DDL catalog normally, then splice in a hand-built
+    // filtered index the same way IndexDesignScannerTests builds its own live-only catalog shapes.
+
+    private static PredicateExtractionResult ExtractWithFilteredIndex(string ddl, string filteredIndex, string query)
+    {
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", ddl);
+        var sqlResult = SqlScriptParser.ParseText("test.sql", query);
+        Assert.False(ddlResult.HasErrors, string.Join("; ", ddlResult.Errors.Select(e => e.Message)));
+        Assert.False(sqlResult.HasErrors, string.Join("; ", sqlResult.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([ddlResult]);
+        var table = catalog.Find("dbo.Customers")!;
+        var index = new CatalogIndex(
+            "IX_Active", CatalogIndexKind.Index, IsUnique: false, ["Status"], [],
+            IsFiltered: true, FilterDefinition: filteredIndex);
+        catalog.AddOrReplace(table with { Indexes = [.. table.Indexes, index] });
+
+        var lineage = LineageResolver.Resolve(catalog, [ddlResult, sqlResult]);
+        return TypedPredicateExtractor.Extract(sqlResult, catalog, lineage);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLocalVariable_SameColumnHasLiteralFilteredIndex_FiresFilteredIndexParameterMismatch()
+    {
+        var result = ExtractWithFilteredIndex(
+            "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
+            "([Status]='Active')",
+            "DECLARE @p VARCHAR(20) = 'Active'; SELECT 1 FROM dbo.Customers WHERE Status = @p;");
+
+        var finding = Assert.Single(result.FilteredIndexParameterMismatchFindings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Status", finding.ColumnName);
+        Assert.Equal("IX_Active", finding.IndexName);
+        Assert.Equal("'Active'", finding.FilterLiteralText);
+        Assert.Equal("@p", finding.VariableName);
+        Assert.False(finding.IsFormalParameter);
+        Assert.Equal("=", finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToFormalParameter_SameColumnHasLiteralFilteredIndex_AlsoFires()
+    {
+        // Unlike LocalVariablePredicateFinding, this fires for a formal parameter too - the
+        // optimizer's own filtered-index-match rule rejects every non-literal operand identically,
+        // sniffed parameter or plain local alike.
+        var result = ExtractWithFilteredIndex(
+            "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
+            "([Status]='Active')",
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE Status = @p; END");
+
+        var finding = Assert.Single(result.FilteredIndexParameterMismatchFindings);
+        Assert.True(finding.IsFormalParameter);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToLiteral_NeverFiresFilteredIndexParameterMismatch()
+    {
+        // The query itself restates the filter with a literal - the exact shape the filtered
+        // index CAN match, so this must never fire.
+        var result = ExtractWithFilteredIndex(
+            "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
+            "([Status]='Active')",
+            "SELECT 1 FROM dbo.Customers WHERE Status = 'Active';");
+
+        Assert.Empty(result.FilteredIndexParameterMismatchFindings);
+    }
+
+    [Fact]
+    public void Extract_DifferentColumnComparedToVariable_NeverFiresFilteredIndexParameterMismatch()
+    {
+        // The filtered index is on Status, not the column this predicate actually filters -
+        // no relationship between them, must never fire.
+        var result = ExtractWithFilteredIndex(
+            "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL, Code VARCHAR(20) NOT NULL);",
+            "([Status]='Active')",
+            "DECLARE @p VARCHAR(20) = 'X'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
+
+        Assert.Empty(result.FilteredIndexParameterMismatchFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToVariable_OptionRecompile_StillFires()
+    {
+        // Deliberately NOT suppressed by RECOMPILE, unlike LocalVariablePredicateFinding - oracle-
+        // confirmed the filtered index still goes unused under a recompiled plan (this finding's
+        // own doc comment): the limitation is evaluated against the predicate's compile-time
+        // shape, not the value a recompile would re-sniff.
+        var result = ExtractWithFilteredIndex(
+            "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
+            "([Status]='Active')",
+            "DECLARE @p VARCHAR(20) = 'Active'; SELECT 1 FROM dbo.Customers WHERE Status = @p OPTION (RECOMPILE);");
+
+        Assert.Single(result.FilteredIndexParameterMismatchFindings);
+    }
+
+    [Fact]
+    public void Extract_ColumnComparedToVariable_MultiPredicateFilter_NeverGuessesMatch()
+    {
+        // A multi-predicate filter reparses fine as a search condition but is NOT the simple
+        // Column = Literal shape TryExtractSimpleLiteralEqualityFilter requires - never guessed
+        // at, so this must not fire.
+        var result = ExtractWithFilteredIndex(
+            "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL);",
+            "([Status]='Active' AND [Region]='West')",
+            "DECLARE @p VARCHAR(20) = 'Active'; SELECT 1 FROM dbo.Customers WHERE Status = @p;");
+
+        Assert.Empty(result.FilteredIndexParameterMismatchFindings);
+    }
 }
 
 /// <summary>

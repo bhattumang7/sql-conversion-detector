@@ -413,6 +413,29 @@ public sealed class DatabaseCatalog
     /// </summary>
     public bool? IsRecursiveTriggersEnabled { get; set; }
 
+    /// <summary>
+    /// The connected SERVER's own <c>sys.configurations</c> <c>'nested triggers'</c> option
+    /// (<c>value_in_use</c>) - live-mode only, same "live-only, never guessed" shape as
+    /// <see cref="IsRecursiveTriggersEnabled"/>, but deliberately a SEPARATE property: this is a
+    /// server-wide setting, not a per-database one, and governs a materially different mechanism.
+    /// <see cref="IsRecursiveTriggersEnabled"/> (database-level <c>RECURSIVE_TRIGGERS</c>) only
+    /// gates a trigger recursively invoking ITSELF (directly, or indirectly through a chain that
+    /// loops back to the same trigger) - oracle-confirmed directly (Docker instance, disposable
+    /// scratch database) that a DML statement inside one trigger firing a SECOND trigger on a
+    /// DIFFERENT table is controlled by this server-level option instead: with it OFF (default is
+    /// ON), a table-A trigger's own write to table B still fires table B's trigger (that first hop
+    /// is the ORIGINAL statement's own top-level trigger firing, always allowed), but table B's
+    /// trigger writing back to table A does NOT cascade into table A's trigger a second time; with
+    /// it ON, the cascade continues for real and is capped only by the engine's hard 32-level
+    /// nesting ceiling (oracle-confirmed: <c>Msg 217, Maximum stored procedure, function, trigger,
+    /// or view nesting level exceeded (limit 32)</c>). So
+    /// <see cref="Predicates.TriggerCorrectnessScanner"/>'s cross-table cycle kind gates on THIS
+    /// property being live-confirmed <c>true</c>, never on <see cref="IsRecursiveTriggersEnabled"/>
+    /// - null (file-mode, or a live scan that never read it) means the finding stays unreported
+    /// rather than overclaiming a risk that may not be live.
+    /// </summary>
+    public bool? IsNestedTriggersEnabled { get; set; }
+
     /// <summary>Everything Pass 1 saw but could not resolve into catalog data - never silently dropped.</summary>
     public SkipLedger Skipped { get; } = new();
 

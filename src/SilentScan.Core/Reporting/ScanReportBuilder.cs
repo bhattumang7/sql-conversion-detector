@@ -955,6 +955,16 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        IReadOnlyList<TriggerRecursionCycleFinding> triggerRecursionCycleFindings;
+        using (var triggerRecursionStage = progress.Begin("scanning multi-hop trigger recursion cycles"))
+        {
+            // Same "whole-scan, not per-file" reasoning as CrossModuleLockOrderScanner just above -
+            // a genuine two-table cycle's two triggers routinely live in different files.
+            triggerRecursionCycleFindings = TriggerRecursionCycleScanner.Scan(usableParseResults, catalog);
+            triggerRecursionStage.Complete($"{triggerRecursionCycleFindings.Count:N0} findings");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<ForcedSerialFinding> forcedSerialFindings;
         using (var forcedSerialStage = progress.Begin("scanning forced-serial constructs", usableCount))
         {
@@ -1081,6 +1091,8 @@ public static class ScanReportBuilder
         var ansiPaddingMismatchFindings = extractionResults.SelectMany(r => r.AnsiPaddingMismatchFindings)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         var localVariablePredicateFindings = extractionResults.SelectMany(r => r.LocalVariablePredicateFindings)
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
+        var filteredIndexParameterMismatchFindings = extractionResults.SelectMany(r => r.FilteredIndexParameterMismatchFindings)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
         PhaseMemory.ReleaseBetweenPhases();
 
@@ -1219,6 +1231,7 @@ public static class ScanReportBuilder
         setOptionFindings = [.. setOptionFindings.Where(f => f.Confidence <= minimumConfidence)];
         catchAllPredicateFindings = [.. catchAllPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
         localVariablePredicateFindings = [.. localVariablePredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
+        filteredIndexParameterMismatchFindings = [.. filteredIndexParameterMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
         notInNullableSubqueryFindings = [.. notInNullableSubqueryFindings.Where(f => f.Confidence <= minimumConfidence)];
         nonUniqueUpdateSourceFindings = [.. nonUniqueUpdateSourceFindings.Where(f => f.Confidence <= minimumConfidence)];
         forcedSerialFindings = [.. forcedSerialFindings.Where(f => f.Confidence <= minimumConfidence)];
@@ -1259,12 +1272,13 @@ public static class ScanReportBuilder
         indexCoverageFindings = [.. indexCoverageFindings.Where(f => f.Confidence <= minimumConfidence)];
         triggerCorrectnessFindings = [.. triggerCorrectnessFindings.Where(f => f.Confidence <= minimumConfidence)];
         crossModuleLockOrderFindings = [.. crossModuleLockOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
+        triggerRecursionCycleFindings = [.. triggerRecursionCycleFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,
             maxTypedColumnFindings, oversizedParameterFindings, underLengthParameterFindings, ansiPaddingMismatchFindings, partialCompositeForeignKeyJoinFindings, setOptionFindings,
-            catchAllPredicateFindings, localVariablePredicateFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
+            catchAllPredicateFindings, localVariablePredicateFindings, filteredIndexParameterMismatchFindings, notInNullableSubqueryFindings, nonUniqueUpdateSourceFindings, forcedSerialFindings,
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
             nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings, unparameterizedDynamicSqlFindings,
             nonPersistedComputedColumnFindings,
@@ -1307,6 +1321,7 @@ public static class ScanReportBuilder
             indexCoverageFindings,
             triggerCorrectnessFindings,
             crossModuleLockOrderFindings,
+            triggerRecursionCycleFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

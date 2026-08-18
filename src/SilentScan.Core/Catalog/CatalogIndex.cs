@@ -62,6 +62,26 @@ namespace SilentScan.Core.Catalog;
 /// can only use a filtered index for a query whose own WHERE clause restates (or logically
 /// implies) the filter predicate, and it can only prove that inexpensively when every column the
 /// filter predicate needs is already sitting in the index itself.
+///
+/// <paramref name="KeyColumnIsDescendingRaw"/> (docs/detection-checklist.md second full-archive
+/// practitioner sweep §G, "Indexes sharing an identical key-column list and sort direction but
+/// with different, non-overlapping INCLUDE sets") is <c>sys.index_columns.is_descending_key</c>,
+/// one entry per <see cref="KeyColumns"/> entry at the same ordinal position - empty for a
+/// non-live-read index (an indexed view's own row, or file mode, neither of which populates this),
+/// which <see cref="Predicates.IndexDesignScanner"/>'s merge-candidate check treats as "sort
+/// direction unknown, never guess" rather than assuming all-ascending. Added additively for this
+/// one new consumer - no existing reader depended on sort direction before this field existed.
+/// Read through the computed <see cref="KeyColumnIsDescending"/> property below, never this raw
+/// nullable parameter directly.
+///
+/// <paramref name="OptimizeForSequentialKey"/> (same sweep §G, "Monotonically increasing clustered
+/// key ... with no OPTIMIZE_FOR_SEQUENTIAL_KEY") is <c>sys.indexes.optimize_for_sequential_key</c>
+/// directly - <see langword="true"/> iff the mitigation is already turned on for this exact index,
+/// so <see cref="Predicates.IndexDesignScanner"/> never false-positives on an index that already
+/// carries it. Live-only, same as <see cref="IsClustered"/>/<see cref="IsHypothetical"/> - defaults
+/// to <see langword="false"/> so file mode (which never sets it) reads as "not yet on" rather than
+/// crashing; file mode never invokes the scanner that reads this field at all (see that scanner's
+/// own doc comment).
 /// </summary>
 public sealed record CatalogIndex(
     string? Name,
@@ -74,4 +94,14 @@ public sealed record CatalogIndex(
     bool IsDisabled = false,
     bool IsClustered = false,
     bool IsHypothetical = false,
-    string? FilterDefinition = null);
+    string? FilterDefinition = null,
+    IReadOnlyList<bool>? KeyColumnIsDescendingRaw = null,
+    bool OptimizeForSequentialKey = false)
+{
+    /// <summary>
+    /// Positional parameter is nullable (<see cref="KeyColumnIsDescendingRaw"/>) purely so every
+    /// existing call site written before this field existed keeps compiling without passing one
+    /// explicitly; this property is what every real reader consults, always non-null.
+    /// </summary>
+    public IReadOnlyList<bool> KeyColumnIsDescending => KeyColumnIsDescendingRaw ?? [];
+}

@@ -70,7 +70,19 @@ public static class IndexDesignScanner
     /// </summary>
     public const double HighStringColumnRatioThreshold = 0.8;
 
-    public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog)
+    /// <summary>
+    /// docs/detection-checklist.md full-archive practitioner sweep §E "Columnstore index present on
+    /// a table that is also a live DML target of transactional code" - <paramref name="dmlTargetTables"/>
+    /// is the set of table qualified names (ordinal-ignore-case) this scan run found a direct
+    /// INSERT/UPDATE/DELETE/MERGE target somewhere in the scanned corpus (computed once by the
+    /// caller from the same parsed modules the rest of the pipeline already walks, via
+    /// <see cref="DmlTargetTableScanner.Scan"/> - never by this catalog-only scanner itself, which
+    /// has no AST access of its own). <see langword="null"/> (the default) means the caller never
+    /// computed this set at all - e.g. file mode, which never invokes this scanner in the first
+    /// place - and <see cref="IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable"/> is
+    /// correctly never reported rather than treating "no data" as "no DML targets".
+    /// </summary>
+    public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
     {
         var defaultTextByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var expression in catalog.SchemaExpressions)
@@ -106,6 +118,10 @@ public static class IndexDesignScanner
             ScanColumnTypeSignals(table, findings);
             ScanFloatOrRealIndexKeyColumns(table, findings);
             ScanNoRecomputeStatistics(table, findings);
+            ScanVariableLengthKeyColumnWidth(table, findings);
+            ScanMergeableIncludeOnlyIndexes(table, findings);
+            ScanColumnstoreOnDmlTargetTable(table, dmlTargetTables, findings);
+            ScanMonotonicClusteredKeyMissingSequentialOptimization(table, findings);
         }
 
         ScanUnindexedForeignKeys(catalog, findings);
@@ -605,6 +621,52 @@ public static class IndexDesignScanner
         return [.. collector.Names];
     }
 
+    /// <summary>
+    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Filtered index whose
+    /// predicate compares against a variable/parameter, not a literal" - reused by
+    /// <see cref="TypedPredicateExtractor"/> (see <see cref="FilteredIndexParameterMismatchFinding"/>'s
+    /// own doc comment for why that finding lives in its own type rather than here). The optimizer
+    /// can only match a filtered index against a query filtering the SAME column with a LITERAL
+    /// restating this exact filter, so only the simplest, unambiguous shape is extracted: a single
+    /// <c>Column = Literal</c> equality (the shape <c>sys.indexes.filter_definition</c> renders a
+    /// plain <c>WHERE Column = 'Value'</c> filter as, confirmed directly against the standing Docker
+    /// oracle) - <see langword="null"/> for anything else (a multi-predicate filter, a non-equality
+    /// operator, a filter against an expression rather than a bare column) rather than guessing at a
+    /// looser shape this pass hasn't verified the optimizer's own matching rule for.
+    /// </summary>
+    public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition)
+    {
+        var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
+        if (result.HasErrors
+            || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { WhereClause.SearchCondition: { } searchCondition } }] }] })
+        {
+            return null;
+        }
+
+        // sys.indexes.filter_definition always wraps its own predicate in parentheses (e.g.
+        // "([Status]='Active')", confirmed directly against the standing Docker oracle) - strip
+        // any number of nested BooleanParenthesisExpression layers before matching the real shape
+        // underneath, the same way a hand-typed filter with extra parens would still need to.
+        var condition = searchCondition;
+        while (condition is BooleanParenthesisExpression parenthesized)
+        {
+            condition = parenthesized.Expression;
+        }
+
+        if (condition is not BooleanComparisonExpression
+            {
+                ComparisonType: BooleanComparisonType.Equals,
+                FirstExpression: ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { Value: { } columnName }] },
+                SecondExpression: Literal literal,
+            }
+            || Rules.LiteralTextRenderer.Render(literal) is not { } literalText)
+        {
+            return null;
+        }
+
+        return (columnName, literalText);
+    }
+
     private sealed class ColumnNameCollector : TSqlFragmentVisitor
     {
         public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -712,6 +774,180 @@ public static class IndexDesignScanner
                 table.SourceLine,
                 Confidence: FindingConfidence.Medium));
         }
+    }
+
+    /// <summary>
+    /// Confirmed directly against the standing Docker oracle (2026-08-18): the engine's own printed
+    /// warning at CREATE INDEX time states this exact number, verbatim, for a clustered index /
+    /// PRIMARY KEY / UNIQUE constraint's own key: "The maximum key length for a clustered index is
+    /// 900 bytes."
+    /// </summary>
+    public const int ClusteredKeyLimitBytes = 900;
+
+    /// <summary>
+    /// Same oracle confirmation as <see cref="ClusteredKeyLimitBytes"/>, for a NONCLUSTERED index's
+    /// own key: "The maximum key length for a nonclustered index is 1700 bytes." - a materially
+    /// different, larger ceiling than the clustered case, so <see
+    /// cref="ScanVariableLengthKeyColumnWidth"/> checks <see cref="Catalog.CatalogIndex.IsClustered"/>
+    /// per index rather than assuming one flat number for every index type.
+    /// </summary>
+    public const int NonclusteredKeyLimitBytes = 1700;
+
+    /// <summary>
+    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Column too wide to ever be
+    /// an index key" - see <see cref="IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit"/>'s
+    /// own doc comment for the full oracle-verified correction (fixed-length excluded as an
+    /// already-hard-DDL-error case; variable-length only, since CREATE INDEX there only warns and
+    /// the real failure is deferred to a future INSERT/UPDATE). Only active (non-disabled) indexes
+    /// are checked - a disabled index already has its own, separate finding
+    /// (<see cref="IndexDesignFindingKind.DisabledIndex"/>) and cannot fail an INSERT today since it
+    /// serves no query and enforces nothing.
+    /// </summary>
+    private static void ScanVariableLengthKeyColumnWidth(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        foreach (var index in table.Indexes)
+        {
+            if (index.IsDisabled || index.IsColumnstore || index.KeyColumns.Count == 0)
+            {
+                continue;
+            }
+
+            var limit = index.IsClustered ? ClusteredKeyLimitBytes : NonclusteredKeyLimitBytes;
+
+            foreach (var columnName in index.KeyColumns)
+            {
+                var column = table.FindColumn(columnName);
+                if (column?.Type is not { IsMax: false } type
+                    || type.Category is not (SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.VarBinary)
+                    || EstimateColumnKeyBytes(type) is not { } declaredBytes
+                    || declaredBytes <= limit)
+                {
+                    continue;
+                }
+
+                findings.Add(new IndexDesignFinding(
+                    IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit,
+                    table.QualifiedName,
+                    index.Name,
+                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' key column '{columnName}' is declared {type} - a {declaredBytes}-byte maximum width, over the engine's {limit}-byte {(index.IsClustered ? "clustered" : "nonclustered")} key limit. CREATE INDEX only warns, it does not fail - the first INSERT/UPDATE that actually stores a value long enough to exceed {limit} bytes fails at that moment instead, silently until then.",
+                    table.SourcePath,
+                    table.SourceLine));
+            }
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md second full-archive practitioner sweep §G, "Indexes sharing an
+    /// identical key-column list and sort direction but with different, non-overlapping INCLUDE
+    /// sets" - see <see cref="IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly"/>'s own
+    /// doc comment for the precision guards. Candidates are the same active/unfiltered/non-
+    /// columnstore/non-empty-key population <see cref="ScanDuplicateAndSubsumedIndexes"/> already
+    /// uses.
+    /// </summary>
+    private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        var candidates = table.Indexes
+            .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0 && i.KeyColumnIsDescending.Count == i.KeyColumns.Count)
+            .ToList();
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            for (var j = i + 1; j < candidates.Count; j++)
+            {
+                var a = candidates[i];
+                var b = candidates[j];
+                if (a.IsUnique != b.IsUnique || a.Kind != b.Kind || a.KeyColumns.Count != b.KeyColumns.Count)
+                {
+                    continue;
+                }
+
+                if (!KeyColumnsEqual(a.KeyColumns, b.KeyColumns) || !a.KeyColumnIsDescending.SequenceEqual(b.KeyColumnIsDescending))
+                {
+                    continue;
+                }
+
+                var aIncluded = new HashSet<string>(a.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+                var bIncluded = new HashSet<string>(b.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+
+                // Identical INCLUDE sets is DuplicateIndex's own territory, not this kind's - and a
+                // subset relationship either way means one index is already SubsumedIndex-eligible
+                // (same key list counts as a trivial "prefix" of itself) - only a genuine
+                // non-overlapping divergence on BOTH sides belongs here.
+                if (aIncluded.SetEquals(bIncluded) || aIncluded.IsSubsetOf(bIncluded) || bIncluded.IsSubsetOf(aIncluded))
+                {
+                    continue;
+                }
+
+                var union = string.Join(", ", aIncluded.Concat(bIncluded).OrderBy(c => c, StringComparer.OrdinalIgnoreCase).Distinct(StringComparer.OrdinalIgnoreCase));
+                findings.Add(new IndexDesignFinding(
+                    IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly,
+                    table.QualifiedName,
+                    b.Name,
+                    $"'{table.QualifiedName}' indexes '{a.Name ?? "<unnamed>"}' and '{b.Name ?? "<unnamed>"}' share the identical key list ({string.Join(", ", a.KeyColumns)}) and sort direction but carry different, non-overlapping INCLUDE columns ('{a.Name ?? "<unnamed>"}': {string.Join(", ", a.IncludedColumns)}; '{b.Name ?? "<unnamed>"}': {string.Join(", ", b.IncludedColumns)}) - mergeable into one index carrying the union ({union}) at no seek cost to either original query, for less write/storage overhead than carrying both.",
+                    table.SourcePath,
+                    table.SourceLine));
+            }
+        }
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Columnstore index present on
+    /// a table that is also a live DML target of transactional code" - see
+    /// <see cref="IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable"/>'s own doc comment for
+    /// the oracle-confirmed rowgroup-lock mechanism and the explicit workload-dependent scope limit.
+    /// </summary>
+    private static void ScanColumnstoreOnDmlTargetTable(CatalogTable table, IReadOnlySet<string>? dmlTargetTables, List<IndexDesignFinding> findings)
+    {
+        if (dmlTargetTables is null || !dmlTargetTables.Contains(table.QualifiedName))
+        {
+            return;
+        }
+
+        var columnstoreIndex = table.Indexes.FirstOrDefault(i => !i.IsDisabled && i.IsColumnstore);
+        if (columnstoreIndex is null)
+        {
+            return;
+        }
+
+        findings.Add(new IndexDesignFinding(
+            IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable,
+            table.QualifiedName,
+            columnstoreIndex.Name,
+            $"'{table.QualifiedName}' carries a columnstore index ('{columnstoreIndex.Name ?? "<unnamed>"}') and is also a direct INSERT/UPDATE/DELETE/MERGE target elsewhere in this codebase - lock escalation on a columnstore index happens at ROWGROUP granularity, not row granularity, so a single-row write inside an explicit transaction can block unrelated concurrent access to every other row sharing that rowgroup. Structural risk flag only: whether contention actually occurs is workload-dependent (concurrent access pattern, rowgroup size) and out of reach for this static pass.",
+            table.SourcePath,
+            table.SourceLine,
+            FindingConfidence.Medium));
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md second full-archive practitioner sweep §G, "Monotonically
+    /// increasing clustered key ... with no OPTIMIZE_FOR_SEQUENTIAL_KEY" - see
+    /// <see cref="IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization"/>'s own
+    /// doc comment for the oracle-confirmed feature/flag verification and the explicit
+    /// IDENTITY-only scope limit.
+    /// </summary>
+    private static void ScanMonotonicClusteredKeyMissingSequentialOptimization(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore && !i.IsDisabled);
+        if (clusteredIndex is null || clusteredIndex.KeyColumns.Count == 0 || clusteredIndex.OptimizeForSequentialKey)
+        {
+            return;
+        }
+
+        var leadingColumn = table.FindColumn(clusteredIndex.KeyColumns[0]);
+        if (leadingColumn is not { IsIdentity: true, IdentityIncrement: > 0 })
+        {
+            return;
+        }
+
+        findings.Add(new IndexDesignFinding(
+            IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization,
+            table.QualifiedName,
+            clusteredIndex.Name,
+            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? "<unnamed>"}' leads on '{leadingColumn.Name}', an always-ascending IDENTITY column, with OPTIMIZE_FOR_SEQUENTIAL_KEY not enabled - every insert lands on the same trailing page, so concurrent inserts can serialize on that page's latch. Structural risk flag only: whether this actually causes contention depends on concurrent insert rate, which is workload data out of reach for this static pass.",
+            table.SourcePath,
+            table.SourceLine,
+            FindingConfidence.Medium));
     }
 
     /// <summary>

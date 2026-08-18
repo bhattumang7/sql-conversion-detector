@@ -247,6 +247,107 @@ public enum IndexDesignFindingKind
     /// flag can honestly claim.
     /// </summary>
     NoRecomputeStatistics,
+
+    /// <summary>
+    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Column too wide to ever be
+    /// an index key" - CORRECTED in scope after direct oracle verification (2026-08-18), not built
+    /// as originally worded. The checklist item claimed <c>CREATE INDEX</c> "hard-fails" once a
+    /// column's declared max byte width exceeds the engine's key-length ceiling; verified directly
+    /// against the standing Docker oracle that this is true ONLY for a FIXED-length type (<c>char</c>/
+    /// <c>nchar</c>/<c>binary</c>) - which the engine already refuses to compile at all
+    /// (<c>CREATE INDEX</c> itself fails, Msg 1944/1946-family), the exact "hard DDL-time engine
+    /// error, not a silent defect" shape this checklist's own second-sweep §H already excludes
+    /// elsewhere (flagging something the engine already refuses to compile adds no value beyond its
+    /// own error message). For a VARIABLE-length type (<c>varchar</c>/<c>nvarchar</c>/<c>varbinary</c>,
+    /// non-MAX) confirmed the opposite: <c>CREATE INDEX</c> SUCCEEDS with only a printed warning
+    /// (easily swallowed by deployment tooling that doesn't surface SQL warnings) - the real failure
+    /// is deferred to a future <c>INSERT</c>/<c>UPDATE</c> that finally stores a long-enough value
+    /// (Msg 1946 "Operation failed... exceeds the maximum length"), silently, possibly years later
+    /// in production. That deferred-failure shape genuinely IS this codebase's target pattern, so
+    /// this kind ships scoped to variable-length key columns only. Also corrected the ceiling
+    /// itself: NOT a flat 900 bytes for every index type as the checklist assumed - confirmed
+    /// 900 bytes for a CLUSTERED index/PRIMARY KEY/UNIQUE constraint's own key
+    /// (<see cref="Catalog.CatalogIndex.IsClustered"/>), 1700 bytes for a NONCLUSTERED index's own
+    /// key, both exact engine-stated ceilings reproduced verbatim from the oracle's own warning
+    /// text. Catalog-only: reuses <see cref="Predicates.IndexDesignScanner.EstimateColumnKeyBytes"/>
+    /// against each active (non-disabled) index's own key columns, restricted to
+    /// <see cref="Catalog.SqlTypeCategory.VarChar"/>/<see cref="Catalog.SqlTypeCategory.NVarChar"/>/
+    /// <see cref="Catalog.SqlTypeCategory.VarBinary"/> (non-MAX, since MAX already estimates
+    /// <see langword="null"/> and SQL Server refuses a MAX column as a key column outright - a
+    /// separate, already-engine-blocked case, not this one).
+    /// </summary>
+    VariableLengthKeyColumnExceedsKeyLimit,
+
+    /// <summary>
+    /// docs/detection-checklist.md second full-archive practitioner sweep §G, "Indexes sharing an
+    /// identical key-column list and sort direction but with different, non-overlapping INCLUDE
+    /// sets". Distinct from <see cref="DuplicateIndex"/> (identical key list AND identical INCLUDE
+    /// list) and <see cref="SubsumedIndex"/> (a proper key-list PREFIX relationship) - the
+    /// divergence here is ONLY in the INCLUDE columns: same key columns, same order, same per-column
+    /// sort direction (<see cref="Catalog.CatalogIndex.KeyColumnIsDescending"/>), same
+    /// <see cref="Catalog.CatalogIndex.IsUnique"/>/<see cref="Catalog.CatalogIndex.Kind"/> - the
+    /// same precision guards <see cref="DuplicateIndex"/> already applies - but each index's own
+    /// <see cref="Catalog.CatalogIndex.IncludedColumns"/> set is genuinely non-overlapping with the
+    /// other's (neither is a subset of the other - a subset relationship there would already make
+    /// one of them <see cref="SubsumedIndex"/> instead, so this never double-reports the same pair
+    /// under both kinds). Each index individually looks legitimate (built for a different query),
+    /// but they are mergeable into one index carrying the union of both INCLUDE lists, at no seek
+    /// cost to either original query, for less write/storage overhead than carrying both separately.
+    /// Only ever compared when BOTH indexes' own <see cref="Catalog.CatalogIndex.KeyColumnIsDescending"/>
+    /// is non-empty (i.e. actually read from a live catalog) - an empty ("unknown") sort-direction
+    /// list on either side means this pass cannot confirm the sort direction genuinely matches, and
+    /// never guesses that it does.
+    /// </summary>
+    MergeableIndexesDifferingIncludeOnly,
+
+    /// <summary>
+    /// docs/detection-checklist.md full-archive practitioner sweep §E, "Columnstore index present on
+    /// a table that is also a live DML target of transactional code" - shipped as a STRUCTURAL RISK
+    /// FLAG ONLY, exactly as the checklist's own instruction requires, never a proven-cost claim.
+    /// Mechanism confirmed directly against the standing Docker oracle (2026-08-18): a single-row
+    /// <c>DELETE</c> inside an explicit transaction against a table carrying a clustered columnstore
+    /// index takes a real <c>ROWGROUP</c>-granularity lock (<c>sys.dm_tran_locks</c>,
+    /// <c>resource_type = 'ROWGROUP'</c>, mode <c>UIX</c>) - not a per-row lock the way an ordinary
+    /// rowstore DELETE takes, so unrelated concurrent access to every OTHER row sharing that same
+    /// rowgroup can genuinely block behind this one row's transaction. Catalog-decidable: the table
+    /// carries a columnstore index (<see cref="Catalog.CatalogIndex.IsColumnstore"/>, any of
+    /// clustered or nonclustered columnstore) AND is a direct INSERT/UPDATE/DELETE/MERGE target
+    /// somewhere in the scanned corpus (the same direct-target-only scope
+    /// <see cref="CrossModuleLockOrderScanner"/>'s own write-target visitor already uses - never
+    /// through a view, never through dynamic SQL this pass can't see inside). Whether contention
+    /// actually occurs is workload-dependent (concurrent access pattern, rowgroup size, whether the
+    /// DML actually lands in a compressed rowgroup vs. the deltastore) and structurally out of
+    /// reach for a static pass - stated as an explicit scope limit in the finding text itself, the
+    /// same discipline <see cref="MonotonicClusteredKeyMissingSequentialOptimization"/> uses.
+    /// </summary>
+    ColumnstoreIndexOnDmlTargetTable,
+
+    /// <summary>
+    /// docs/detection-checklist.md second full-archive practitioner sweep §G, "Monotonically
+    /// increasing clustered key ... with no OPTIMIZE_FOR_SEQUENTIAL_KEY" - the precise mirror image
+    /// of <see cref="RandomClusteredKeyGuidDefault"/>: one direction (random) fragments the whole
+    /// clustered B-tree, the other (monotonic) hotspots a single trailing page instead, since every
+    /// insert lands immediately after the last row - concurrent inserts can serialize on that one
+    /// page's latch. Shipped as a STRUCTURAL RISK FLAG ONLY, same discipline as
+    /// <see cref="ColumnstoreIndexOnDmlTargetTable"/>: the structural precondition is catalog-
+    /// decidable, but whether it actually causes contention depends on concurrent insert rate, which
+    /// is workload data this pass cannot see - stated as an explicit scope limit in the finding text
+    /// itself. <c>OPTIMIZE_FOR_SEQUENTIAL_KEY</c> confirmed directly against the standing Docker
+    /// oracle (SQL Server 2022, but the option shipped originally in SQL Server 2019 CU5) as a real,
+    /// current index-level option, and <c>sys.indexes.optimize_for_sequential_key</c> confirmed to
+    /// read back the real per-index on/off state (0 by default, flips to 1 immediately after
+    /// <c>ALTER INDEX ... SET (OPTIMIZE_FOR_SEQUENTIAL_KEY = ON)</c>) - so this kind never
+    /// false-positives against an index that already carries the mitigation
+    /// (<see cref="Catalog.CatalogIndex.OptimizeForSequentialKey"/>). Scoped to the clear,
+    /// high-confidence case only, per the checklist's own instruction: the clustered index's leading
+    /// key column is an <c>IDENTITY</c> column (<see cref="Catalog.CatalogColumn.IsIdentity"/>) with
+    /// a positive <see cref="Catalog.CatalogColumn.IdentityIncrement"/> (a negative or zero increment
+    /// is not "always-ascending" and is deliberately excluded rather than guessed about) - broadening
+    /// to other monotonic-by-construction patterns (a sequence-defaulted column, an ever-increasing
+    /// datetime default) was evaluated and NOT done: this pass has no cheap, precise way to prove a
+    /// non-IDENTITY column is monotonic from the catalog alone without risking a false positive.
+    /// </summary>
+    MonotonicClusteredKeyMissingSequentialOptimization,
 }
 
 /// <summary>

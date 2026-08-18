@@ -55,6 +55,7 @@ public static class SarifReportWriter
         results.AddRange(report.AnsiPaddingMismatchFindings.Select(ToResult));
         results.AddRange(report.CatchAllPredicateFindings.Select(ToResult));
         results.AddRange(report.LocalVariablePredicateFindings.Select(ToResult));
+        results.AddRange(report.FilteredIndexParameterMismatchFindings.Select(ToResult));
         results.AddRange(report.NotInNullableSubqueryFindings.Select(ToResult));
         results.AddRange(report.NonUniqueUpdateSourceFindings.Select(ToResult));
         results.AddRange(report.ForcedSerialFindings.Select(ToResult));
@@ -102,6 +103,7 @@ public static class SarifReportWriter
         results.AddRange(report.IndexCoverageFindings.Select(ToResult));
         results.AddRange(report.TriggerCorrectnessFindings.Select(ToResult));
         results.AddRange(report.CrossModuleLockOrderFindings.Select(ToResult));
+        results.AddRange(report.TriggerRecursionCycleFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -377,6 +379,20 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LocalVariablePredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - a DECLARE'd local, not a formal parameter, so its value is invisible to the cardinality estimator (falls back to average-density statistics). The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(FilteredIndexParameterMismatchFinding finding)
+    {
+        // Error, not Note: unlike LocalVariablePredicateFinding/ParameterReassignmentPredicateFinding
+        // above (a cardinality-ESTIMATE risk only, predicate still seeks), this is a real access-
+        // path defect - the filtered index is oracle-confirmed genuinely unusable for this query
+        // shape, not merely mis-estimated.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FilteredIndexParameterMismatchRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var operandKind = finding.IsFormalParameter ? "formal parameter" : "local variable";
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - filtered index '{finding.IndexName ?? "<unnamed>"}' filters this exact column against the literal {finding.FilterLiteralText}, but the optimizer can only match a filtered index against a query that restates its filter with a LITERAL, never a {operandKind}. This query can never use that index, no matter what value {finding.VariableName} holds at runtime - a compile-time limitation OPTION (RECOMPILE) does not fix.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
@@ -1014,6 +1030,11 @@ public static class SarifReportWriter
         var baseLevel = finding.Kind switch
         {
             IndexDesignFindingKind.WideClusteredKey => LevelWarning,
+            // Both are the checklist's own "structural risk flag only, never a proven-cost claim"
+            // kinds (Medium confidence) - Warning, the same tier WideClusteredKey uses for its own
+            // threshold-based judgment call, not Error's "structurally-provable, no-estimation" tier.
+            IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable => LevelWarning,
+            IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization => LevelWarning,
             IndexDesignFindingKind.TimestampColumnNaming => LevelNote,
             _ => LevelError,
         };
@@ -1097,6 +1118,9 @@ public static class SarifReportWriter
             TriggerCorrectnessFindingKind.MultiRowUnsafeKeyedDml => LevelError,
             TriggerCorrectnessFindingKind.NoEarlyOutForEmptyInvocation => LevelNote,
             TriggerCorrectnessFindingKind.DirectRecursiveTrigger => LevelWarning,
+            TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath => LevelError,
+            TriggerCorrectnessFindingKind.UpdateFunctionWithoutValueComparison => LevelWarning,
+            TriggerCorrectnessFindingKind.LogonTriggerHostNameGate => LevelError,
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled TriggerCorrectnessFindingKind."),
         };
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerCorrectnessRuleId(finding.Kind), finding.Confidence);
@@ -1119,6 +1143,19 @@ public static class SarifReportWriter
             $"'{second.ProcedureQualifiedName}' ({second.SourcePath}:{second.SecondWriteLine}) writes them in the opposite order ('{finding.SecondTableQualifiedName}' at line {second.SecondWriteLine} then '{finding.FirstTableQualifiedName}' at line {second.FirstWriteLine}) - the textbook cross-session deadlock shape.";
 
         return BuildResult(ruleId, level, message, first.SourcePath, first.ProcedureLine, startColumn: null);
+    }
+
+    private static SarifResult ToResult(TriggerRecursionCycleFinding finding)
+    {
+        // Same "static structural risk, gated on a live-confirmed engine setting" framing as
+        // TriggerCorrectnessFindingKind.DirectRecursiveTrigger - warning, floored by confidence.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerRecursionCycleRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var firstHop = finding.Hops[0];
+        var cycle = string.Join(" -> ", finding.CycleTableQualifiedNames) + " -> " + finding.CycleTableQualifiedNames[0];
+        var message = $"Trigger recursion cycle across tables: {cycle} - '{firstHop.TriggerQualifiedName}' ({firstHop.SourcePath}:{firstHop.WriteLine}) writes '{firstHop.ToTableQualifiedName}', and the cycle closes back to '{firstHop.FromTableQualifiedName}' through {finding.Hops.Count} trigger hop(s), live-confirmed reachable while the server's own 'nested triggers' option is on.";
+
+        return BuildResult(ruleId, level, message, firstHop.SourcePath, firstHop.TriggerLine, startColumn: null);
     }
 
     private static SarifResult ToResult(TempTableExecShapeFinding finding)

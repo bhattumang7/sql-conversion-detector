@@ -25,6 +25,7 @@ public sealed record ScanReport(
     IReadOnlyList<SetOptionFinding> SetOptionFindings,
     IReadOnlyList<CatchAllPredicateFinding> CatchAllPredicateFindings,
     IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings,
+    IReadOnlyList<FilteredIndexParameterMismatchFinding> FilteredIndexParameterMismatchFindings,
     IReadOnlyList<NotInNullableSubqueryFinding> NotInNullableSubqueryFindings,
     IReadOnlyList<NonUniqueUpdateSourceFinding> NonUniqueUpdateSourceFindings,
     IReadOnlyList<ForcedSerialFinding> ForcedSerialFindings,
@@ -70,6 +71,7 @@ public sealed record ScanReport(
     IReadOnlyList<IndexCoverageFinding> IndexCoverageFindings,
     IReadOnlyList<TriggerCorrectnessFinding> TriggerCorrectnessFindings,
     IReadOnlyList<CrossModuleLockOrderFinding> CrossModuleLockOrderFindings,
+    IReadOnlyList<TriggerRecursionCycleFinding> TriggerRecursionCycleFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -311,5 +313,27 @@ public sealed record ScanReport(
     /// PROCEDURE</c> forms <see cref="StatementShapeScanner"/> had never visited (a real, if
     /// narrow, pre-existing coverage gap found while verifying that claim, not part of the sweep
     /// itself).
-    public const int CurrentSchemaVersion = 53;
+    /// Bumped to 54 for docs/detection-checklist.md full-archive and second full-archive
+    /// practitioner sweeps §E/§G's index/catalog-design items: the new
+    /// <see cref="FilteredIndexParameterMismatchFindings"/> stream (a filtered index's own
+    /// literal-equality filter, oracle-confirmed unmatchable by a real query-site predicate that
+    /// filters the same column via a parameter/variable instead of the literal - a structural
+    /// compile-time optimizer limitation, not fixed by RECOMPILE); four new
+    /// <see cref="Predicates.IndexDesignFindingKind"/> members
+    /// (<see cref="Predicates.IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit"/>,
+    /// scoped to variable-length types only after oracle verification showed the checklist's
+    /// original "CREATE INDEX hard-fails" premise was wrong for them - true only for fixed-length
+    /// types, which are already-excluded hard-DDL-error territory;
+    /// <see cref="Predicates.IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly"/>;
+    /// <see cref="Predicates.IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable"/> and
+    /// <see cref="Predicates.IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization"/>,
+    /// both structural risk flags only); and two new additive <see cref="Catalog.CatalogIndex"/>
+    /// fields those last two kinds and the merge-candidate kind need
+    /// (<see cref="Catalog.CatalogIndex.KeyColumnIsDescending"/>,
+    /// <see cref="Catalog.CatalogIndex.OptimizeForSequentialKey"/>).
+    /// Bumped to 55 for the new <see cref="TriggerRecursionCycleFindings"/> stream
+    /// (docs/detection-checklist.md "Second full-archive practitioner sweep (2026-08-18)" §G
+    /// "Multi-hop trigger recursion cycle across tables") - the scanner and finding type existed
+    /// already but were never actually wired into this report; this bump is that wiring landing.
+    public const int CurrentSchemaVersion = 55;
 }

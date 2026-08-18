@@ -97,6 +97,80 @@ public enum TriggerCorrectnessFindingKind
     /// pass does not evaluate) is real data/control-flow this pass cannot fully resolve.
     /// </summary>
     DirectRecursiveTrigger,
+
+    /// <summary>
+    /// docs/detection-checklist.md "Full-archive practitioner sweep (2026-08-18)" §E: an <c>INSTEAD
+    /// OF INSERT</c> trigger whose body re-inserts a filtered SUBSET of <c>inserted</c> into the
+    /// real target table (<c>WHERE</c>/join-filtered), with no companion branch handling the rows
+    /// the filter excludes (a second INSERT into a rejects/audit table, a <c>RAISERROR</c>, ... -
+    /// any signal at all that a row was dropped). Oracle-confirmed directly (Docker instance,
+    /// disposable scratch database, dropped immediately after) exactly as the sweep described it,
+    /// no correction needed: a 4-row caller INSERT (2 rows matching the filter, 2 not) against a
+    /// table with exactly this trigger shape reported <c>@@ROWCOUNT = 4</c> - the FULL caller batch
+    /// size, not the 2 rows actually written - immediately after the statement, with no error, no
+    /// warning, and only 2 rows genuinely present afterward. This is a materially different
+    /// mechanism than <see cref="MultiRowUnsafeSingleRowAssignment"/>'s "wrong row" bug (the wrong
+    /// row is never asked for here - it's a subset of rows silently never written at all) and than
+    /// the shipped write-loss stream (a different trigger family entirely) - a distinct, real
+    /// silent-data-loss shape. <see cref="FindingConfidence.High"/>: the caller-sees-success-while-
+    /// rows-vanish mechanism is a mechanical, oracle-confirmed engine behavior for this exact shape,
+    /// unconditional on invocation size (even a single filtered-out row in a single-row INSERT is
+    /// silently dropped) - the only real-world unknown is whether a given trigger's caller ever
+    /// actually sends a row that fails the filter, which is why this is reported as a structural
+    /// risk rather than a certainty, exactly like the sibling multi-row kinds.
+    /// </summary>
+    InsteadOfInsertFilteredNoRejectPath,
+
+    /// <summary>
+    /// docs/detection-checklist.md "Full-archive practitioner sweep (2026-08-18)" §E: a trigger
+    /// body gating logic on <c>UPDATE(column)</c> alone, with no reachable comparison between
+    /// <c>inserted.column</c>/<c>deleted.column</c> in the same branch. <c>UPDATE()</c> reports only
+    /// whether the column was NAMED in the statement's own SET list, never whether its value
+    /// actually changed - a full-column UPDATE (an ORM's generated statement is the common real-
+    /// world source) names every column every time, so this branch fires on a genuine no-op save as
+    /// often as a real change. Oracle-confirmed directly (Docker instance, disposable scratch
+    /// database, dropped immediately after) exactly as the sweep described it: an
+    /// <c>UPDATE t SET Status = Status WHERE Id = 1</c> - the column assigned its OWN current value,
+    /// a true no-op by any reasonable definition - against a trigger gated on bare
+    /// <c>IF UPDATE(Status)</c> still incremented a downstream audit counter, proving the branch
+    /// really did fire on a value-identical update. Adding the real guard
+    /// (<c>IF UPDATE(Status) AND EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON i.Id = d.Id
+    /// WHERE i.Status &lt;&gt; d.Status)</c>) was oracle-confirmed to correctly suppress on the same
+    /// no-op UPDATE and correctly still fire on a real value change - the near-miss shape this kind
+    /// must never flag. <see cref="FindingConfidence.High"/>: <c>UPDATE()</c>'s own
+    /// named-vs-changed distinction is a mechanical, oracle-confirmed engine fact, not a magnitude
+    /// estimate; whether a given trigger's real callers ever actually send a value-identical UPDATE
+    /// is real-world usage this pass cannot see (an ORM's full-column UPDATE makes it common, not
+    /// certain), which is why this is reported as a structural risk rather than a per-call
+    /// certainty, matching every other kind in this stream.
+    /// </summary>
+    UpdateFunctionWithoutValueComparison,
+
+    /// <summary>
+    /// docs/detection-checklist.md "Second full-archive practitioner sweep (2026-08-18)" §G: a
+    /// logon trigger (<c>CREATE/ALTER/CREATE OR ALTER TRIGGER ... ON ALL SERVER ... FOR LOGON</c>)
+    /// whose body feeds <c>HOST_NAME()</c> into a conditional that reaches a <c>ROLLBACK</c> - the
+    /// standard logon-trigger deny mechanism (a logon trigger has no batch to abort other than the
+    /// connection attempt itself; <c>ROLLBACK</c> is how it refuses the logon). Oracle-confirmed
+    /// directly (Docker instance, disposable scratch database and a real scratch login, dropped
+    /// immediately after): a logon trigger denying (via <c>ROLLBACK</c>) any login whose
+    /// <c>HOST_NAME()</c> did not equal an approved value genuinely blocked a connection using the
+    /// client's default workstation name, then genuinely let the SAME login and password through
+    /// once the client-side connection string's own Workstation ID was set to the approved value
+    /// (<c>sqlcmd -H</c>, the client-side equivalent of the connection string's <c>Workstation
+    /// ID</c> keyword) - proving the value really is attacker-supplied and the check really is
+    /// trivially bypassable with no server-side control over it at all. Security/correctness-class,
+    /// not a performance claim - fits CLAUDE.md's scope rule on the same basis as every other
+    /// detectable-from-code security fact this project already reports (see
+    /// <see cref="SecurityFindingKind"/>). <see cref="FindingConfidence.High"/>: matches this
+    /// project's own precedent for a structurally-unambiguous, hard-fact security claim (<see
+    /// cref="SecurityFindingKind.HardCodedIpAddress"/>/<see cref="SecurityFindingKind.
+    /// WeakHashAlgorithm"/>'s own High tier) - <c>HOST_NAME()</c> being client-supplied and
+    /// unauthenticated is an unconditional engine fact with no exception, and the AST shape (this
+    /// value specifically feeding a conditional that specifically reaches a deny path) is exact
+    /// once matched, not a heuristic guess.
+    /// </summary>
+    LogonTriggerHostNameGate,
 }
 
 public sealed record TriggerCorrectnessFinding(

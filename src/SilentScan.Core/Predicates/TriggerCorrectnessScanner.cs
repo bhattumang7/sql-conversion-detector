@@ -60,17 +60,30 @@ public static class TriggerCorrectnessScanner
             {
                 InspectMultiRowUnsafeAssignments(qualifiedName, topLevelStatements);
                 InspectMissingEarlyOut(qualifiedName, node, topLevelStatements);
+                InspectInsteadOfInsertFilteredReinsert(qualifiedName, node, topLevelStatements);
             }
 
             if (triggerObject.Name is { } targetTableName)
             {
                 InspectDirectRecursion(qualifiedName, node, targetTableName, statementList);
             }
+            else if (statementList is not null && IsLogonTrigger(node))
+            {
+                InspectLogonTriggerHostNameGate(qualifiedName, statementList);
+            }
+
+            if (statementList is not null)
+            {
+                InspectUpdateFunctionWithoutValueComparison(qualifiedName, statementList);
+            }
 
             // Predicate/lineage-level pieces of this codebase already resolve inserted/deleted
             // scope for typed predicate work; this scanner stays a pure AST/catalog pass and does
-            // not need that machinery for any of its own four kinds.
+            // not need that machinery for any of its own seven kinds.
         }
+
+        private static bool IsLogonTrigger(TriggerStatementBody node) =>
+            node.TriggerActions is { } actions && actions.Any(a => a.TriggerActionType == TriggerActionType.LogOn);
 
         // --- Multi-row-unsafe single-row assignment (kinds 1 & 2) -------------------------------
 
@@ -254,6 +267,270 @@ public static class TriggerCorrectnessScanner
             private static bool ExistsOverPseudoTable(BooleanExpression expression) =>
                 expression is ExistsPredicate { Subquery.QueryExpression: QuerySpecification { FromClause.TableReferences: [NamedTableReference named, ..] } }
                 && PseudoTableNames.Contains(named.SchemaObject.BaseIdentifier.Value);
+        }
+
+        // --- INSTEAD OF INSERT filtered re-insert, no reject path (kind 5) ----------------------
+
+        /// <summary>
+        /// Fires when this <c>INSTEAD OF INSERT</c> trigger's own body re-inserts a WHERE/join-
+        /// filtered SUBSET of <c>inserted</c> into a real base table, with no companion signal for
+        /// the rows the filter excludes anywhere in the body (a second top-level INSERT - a
+        /// rejects/audit table is the common real shape - or a <c>RAISERROR</c>/<c>THROW</c> at any
+        /// depth). See <see cref="TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath"/>
+        /// for the oracle evidence.
+        /// </summary>
+        private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> topLevelStatements)
+        {
+            if (node.TriggerType != TriggerType.InsteadOf
+                || node.TriggerActions is not { } actions
+                || !actions.Any(a => a.TriggerActionType == TriggerActionType.Insert))
+            {
+                return;
+            }
+
+            var filteredInserts = topLevelStatements
+                .OfType<InsertStatement>()
+                .Where(ins => ins.InsertSpecification.Target is NamedTableReference
+                    && ins.InsertSpecification.InsertSource is SelectInsertSource { Select: QuerySpecification spec }
+                    && IsFilteredReinsertFromInserted(spec))
+                .ToList();
+
+            if (filteredInserts.Count == 0)
+            {
+                return;
+            }
+
+            // A companion top-level INSERT (any target - a rejects/audit table is the common real
+            // shape) means the excluded rows ARE handled somewhere, just not by this statement.
+            var hasCompanionInsert = topLevelStatements.OfType<InsertStatement>().Count() > filteredInserts.Count;
+            var hasRaiseErrorOrThrow = ContainsRaiseErrorOrThrow(topLevelStatements);
+
+            if (hasCompanionInsert || hasRaiseErrorOrThrow)
+            {
+                return;
+            }
+
+            foreach (var insert in filteredInserts)
+            {
+                Findings.Add(new TriggerCorrectnessFinding(
+                    TriggerCorrectnessFindingKind.InsteadOfInsertFilteredNoRejectPath, triggerQualifiedName, sourcePath,
+                    insert.StartLine, insert.StartColumn,
+                    "INSTEAD OF INSERT trigger re-inserts a WHERE/join-filtered subset of inserted with no companion INSERT/RAISERROR/THROW anywhere in the body - the caller's own INSERT reports success while rows matching the negated filter are silently dropped, no error, no trace.",
+                    FindingConfidence.High));
+            }
+        }
+
+        /// <summary>
+        /// True when <paramref name="spec"/>'s own FROM clause references the bare <c>inserted</c>
+        /// pseudo-table (directly, or as one side of a join) AND the source is genuinely filtered -
+        /// either a <c>WHERE</c> clause, or a join itself (an INNER/CROSS join against inserted
+        /// inherently narrows to matching rows even with no WHERE at all). A bare
+        /// <c>SELECT * FROM inserted</c> with neither is the normal, complete re-insert shape and
+        /// must never fire.
+        /// </summary>
+        private static bool IsFilteredReinsertFromInserted(QuerySpecification spec)
+        {
+            if (spec.FromClause is not { TableReferences: { Count: > 0 } tableReferences })
+            {
+                return false;
+            }
+
+            var referencesInserted = tableReferences.Any(ReferencesInsertedTable);
+            var isFiltered = spec.WhereClause is not null || tableReferences.Any(tr => tr is QualifiedJoin);
+            return referencesInserted && isFiltered;
+        }
+
+        private static bool ReferencesInsertedTable(TableReference reference) => reference switch
+        {
+            NamedTableReference { SchemaObject.SchemaIdentifier: null } named
+                => string.Equals(named.SchemaObject.BaseIdentifier.Value, "inserted", StringComparison.OrdinalIgnoreCase),
+            QualifiedJoin join => ReferencesInsertedTable(join.FirstTableReference) || ReferencesInsertedTable(join.SecondTableReference),
+            _ => false,
+        };
+
+        private static bool ContainsRaiseErrorOrThrow(IList<TSqlStatement> statements)
+        {
+            var collector = new RaiseErrorOrThrowCollector();
+            foreach (var statement in statements)
+            {
+                statement.Accept(collector);
+            }
+
+            return collector.Found;
+        }
+
+        private sealed class RaiseErrorOrThrowCollector : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(RaiseErrorStatement node) => Found = true;
+
+            public override void ExplicitVisit(ThrowStatement node) => Found = true;
+        }
+
+        // --- UPDATE(column) with no value comparison (kind 6) -----------------------------------
+
+        /// <summary>
+        /// Fires on every <c>UPDATE(column)</c> call (<see cref="UpdateCall"/> - a dedicated
+        /// ScriptDom boolean-function node, not an ordinary <see cref="FunctionCall"/>) found
+        /// anywhere in the trigger body's own <c>IF</c> predicates whose SAME predicate expression
+        /// contains no genuine value-change comparison for that exact column - see
+        /// <see cref="TriggerCorrectnessFindingKind.UpdateFunctionWithoutValueComparison"/> for the
+        /// oracle evidence, including the near-miss guard shape this must never flag.
+        /// </summary>
+        private void InspectUpdateFunctionWithoutValueComparison(string triggerQualifiedName, StatementList statementList)
+        {
+            var collector = new IfPredicateCollector();
+            statementList.Accept(collector);
+
+            foreach (var predicate in collector.Predicates)
+            {
+                var updateCalls = new UpdateCallCollector();
+                predicate.Accept(updateCalls);
+
+                foreach (var updateCall in updateCalls.Calls)
+                {
+                    var columnName = updateCall.Identifier.Value;
+                    if (HasSameColumnValueComparison(predicate, columnName))
+                    {
+                        continue;
+                    }
+
+                    Findings.Add(new TriggerCorrectnessFinding(
+                        TriggerCorrectnessFindingKind.UpdateFunctionWithoutValueComparison, triggerQualifiedName, sourcePath,
+                        updateCall.StartLine, updateCall.StartColumn,
+                        $"IF UPDATE({columnName}) gates this branch with no comparison between inserted.{columnName}/deleted.{columnName} in the same predicate - UPDATE() reports whether the column was NAMED in the SET list, not whether its value changed, so a full-column UPDATE (an ORM's generated statement, e.g.) fires this branch on a genuine no-op save.",
+                        FindingConfidence.High));
+                }
+            }
+        }
+
+        /// <summary>
+        /// True when <paramref name="predicate"/> contains, anywhere within it (including inside an
+        /// <c>EXISTS</c> subquery's own WHERE/join, the real-world shape this was oracle-confirmed
+        /// against), a comparison between two column references that BOTH name
+        /// <paramref name="columnName"/> - the precise signature of a genuine before/after
+        /// value-change guard (<c>i.Col &lt;&gt; d.Col</c>) as opposed to an unrelated join-key
+        /// comparison (e.g. an <c>i.Id = d.Id</c> correlation) that happens to also compare two
+        /// columns but not THIS one.
+        /// </summary>
+        private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName)
+        {
+            var collector = new SameColumnComparisonCollector(columnName);
+            predicate.Accept(collector);
+            return collector.Found;
+        }
+
+        private sealed class IfPredicateCollector : TSqlFragmentVisitor
+        {
+            public List<BooleanExpression> Predicates { get; } = [];
+
+            public override void ExplicitVisit(IfStatement node)
+            {
+                Predicates.Add(node.Predicate);
+                base.ExplicitVisit(node);
+            }
+        }
+
+        private sealed class UpdateCallCollector : TSqlFragmentVisitor
+        {
+            public List<UpdateCall> Calls { get; } = [];
+
+            public override void ExplicitVisit(UpdateCall node) => Calls.Add(node);
+        }
+
+        private sealed class SameColumnComparisonCollector(string columnName) : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(BooleanComparisonExpression node)
+            {
+                if (IsColumnNamed(node.FirstExpression, columnName) && IsColumnNamed(node.SecondExpression, columnName))
+                {
+                    Found = true;
+                }
+
+                base.ExplicitVisit(node);
+            }
+
+            private static bool IsColumnNamed(ScalarExpression expression, string columnName) =>
+                expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] }
+                && string.Equals(last.Value, columnName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // --- Logon trigger gating on HOST_NAME() (kind 7) ---------------------------------------
+
+        /// <summary>
+        /// Fires on any <c>IF</c> in a <c>FOR LOGON</c> trigger's own body whose predicate feeds
+        /// <c>HOST_NAME()</c> into a conditional that reaches a <c>ROLLBACK</c> - the standard
+        /// logon-trigger deny mechanism. See
+        /// <see cref="TriggerCorrectnessFindingKind.LogonTriggerHostNameGate"/> for the oracle
+        /// evidence that this value is genuinely client-supplied and trivially spoofable.
+        /// </summary>
+        private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, StatementList statementList)
+        {
+            var collector = new HostNameGateCollector();
+            statementList.Accept(collector);
+
+            foreach (var site in collector.Sites)
+            {
+                Findings.Add(new TriggerCorrectnessFinding(
+                    TriggerCorrectnessFindingKind.LogonTriggerHostNameGate, triggerQualifiedName, sourcePath,
+                    site.Line, site.Column,
+                    "Logon trigger denies/allows a connection based on HOST_NAME(), which is client-supplied via the connection string's own Workstation ID and unauthenticated - oracle-confirmed trivially spoofable, so this check does not actually control access.",
+                    FindingConfidence.High));
+            }
+        }
+
+        private sealed class HostNameGateCollector : TSqlFragmentVisitor
+        {
+            public List<(int Line, int Column)> Sites { get; } = [];
+
+            public override void ExplicitVisit(IfStatement node)
+            {
+                if (ContainsHostNameCall(node.Predicate) && (ContainsRollback(node.ThenStatement) || (node.ElseStatement is not null && ContainsRollback(node.ElseStatement))))
+                {
+                    Sites.Add((node.StartLine, node.StartColumn));
+                }
+
+                base.ExplicitVisit(node);
+            }
+
+            private static bool ContainsHostNameCall(TSqlFragment fragment)
+            {
+                var collector = new FunctionCallCollector("HOST_NAME");
+                fragment.Accept(collector);
+                return collector.Found;
+            }
+
+            private static bool ContainsRollback(TSqlFragment fragment)
+            {
+                var collector = new RollbackCollector();
+                fragment.Accept(collector);
+                return collector.Found;
+            }
+        }
+
+        private sealed class FunctionCallCollector(string functionName) : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(FunctionCall node)
+            {
+                if (string.Equals(node.FunctionName.Value, functionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    Found = true;
+                }
+
+                base.ExplicitVisit(node);
+            }
+        }
+
+        private sealed class RollbackCollector : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(RollbackTransactionStatement node) => Found = true;
         }
 
         // --- Direct self-recursion (kind 4) -----------------------------------------------------

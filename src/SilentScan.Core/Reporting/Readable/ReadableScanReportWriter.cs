@@ -86,6 +86,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(AnsiPaddingMismatch(report, headingLevel, pathBase));
         blocks.AddRange(CatchAllPredicate(report, headingLevel, pathBase));
         blocks.AddRange(LocalVariablePredicate(report, headingLevel, pathBase));
+        blocks.AddRange(FilteredIndexParameterMismatch(report, headingLevel, pathBase));
         blocks.AddRange(NotInNullableSubquery(report, headingLevel, pathBase));
         blocks.AddRange(NonUniqueUpdateSource(report, headingLevel, pathBase));
         blocks.AddRange(ForcedSerial(report, headingLevel, pathBase));
@@ -132,6 +133,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
         blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
         blocks.AddRange(CrossModuleLockOrder(report, headingLevel, pathBase));
+        blocks.AddRange(TriggerRecursionCycle(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -187,6 +189,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "LIKE predicates that can never match a non-ANSI-padded column", report.AnsiPaddingMismatchFindings.Count);
         AddCount(counts, "Catch-all / kitchen-sink optional-filter predicates", report.CatchAllPredicateFindings.Count);
         AddCount(counts, "Predicates against a local variable (cardinality-estimate risk only)", report.LocalVariablePredicateFindings.Count);
+        AddCount(counts, "Filtered index matched only against a literal, query uses a parameter/variable", report.FilteredIndexParameterMismatchFindings.Count);
         AddCount(counts, "Predicates against a reassigned formal parameter (sniffing defeated)", report.ParameterReassignmentPredicateFindings.Count);
         AddCount(counts, "Size/complexity metric thresholds exceeded", report.CodeMetricFindings.Count);
         AddCount(counts, "Formatting and layout risks", report.FormattingFindings.Count);
@@ -204,6 +207,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
         AddCount(counts, "Trigger correctness", report.TriggerCorrectnessFindings.Count);
         AddCount(counts, "Cross-module lock ordering", report.CrossModuleLockOrderFindings.Count);
+        AddCount(counts, "Multi-hop trigger recursion cycles", report.TriggerRecursionCycleFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -799,6 +803,30 @@ public static class ReadableScanReportWriter
             })]);
     }
 
+    private static IEnumerable<ReadableBlock> FilteredIndexParameterMismatch(ScanReport report, int level, string? pathBase)
+    {
+        if (report.FilteredIndexParameterMismatchFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Filtered index matched only against a literal, but the query uses a parameter/variable ({report.FilteredIndexParameterMismatchFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A real access-path defect, oracle-confirmed (SET SHOWPLAN_XML, 2026-08-18): the optimizer can only match a filtered index against a query whose own WHERE clause restates the filter with a LITERAL value - a query filtering the same column via a parameter or local variable can never use that index, even when the runtime value is identical to the index's own filter literal. Not a cardinality-estimate risk like a plain local-variable predicate; the access path itself is unavailable. Not suppressed by OPTION (RECOMPILE)/WITH RECOMPILE - confirmed directly that a recompiled plan still cannot match the index, since the limitation is evaluated against the predicate's compile-time shape, not its runtime value.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Filtered index", "Filter literal", "Variable", "Operator"],
+            [.. report.FilteredIndexParameterMismatchFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.IndexName ?? "<unnamed>",
+                f.FilterLiteralText,
+                f.VariableName,
+                f.Operator,
+            })]);
+    }
+
     private static IEnumerable<ReadableBlock> ParameterReassignmentPredicate(ScanReport report, int level, string? pathBase)
     {
         if (report.ParameterReassignmentPredicateFindings.Count == 0)
@@ -1180,6 +1208,27 @@ public static class ReadableScanReportWriter
                 f.SecondTableQualifiedName,
                 $"{f.FirstTableFirstOrdering.ProcedureQualifiedName} ({Where(f.FirstTableFirstOrdering.SourcePath, f.FirstTableFirstOrdering.FirstWriteLine, dynamicSqlCallSite: null, pathBase, f.Confidence)})",
                 $"{f.SecondTableFirstOrdering.ProcedureQualifiedName} ({Where(f.SecondTableFirstOrdering.SourcePath, f.SecondTableFirstOrdering.SecondWriteLine, dynamicSqlCallSite: null, pathBase, f.Confidence)})",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TriggerRecursionCycle(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TriggerRecursionCycleFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Multi-hop trigger recursion cycles ({report.TriggerRecursionCycleFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A directed cycle of triggers across two or more distinct tables (table A's trigger writes to table B, whose own trigger writes back toward A) - oracle-confirmed reachable while the server's own 'nested triggers' option is on (not RECURSIVE_TRIGGERS, which only governs a trigger recursing into itself), and confirmed to hit a real Msg 217 nesting-level-exceeded error once the cascade runs unbounded. V1 scope: only a direct INSERT/UPDATE/DELETE/MERGE target inside a trigger's own body counts as a hop, base tables only, cycle search capped at 8 hops - see the finding's own doc comment for the full precision story.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Cycle", "Hops"],
+            [.. report.TriggerRecursionCycleFindings.Select(f => new List<string>
+            {
+                Where(f.Hops[0].SourcePath, f.Hops[0].TriggerLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                string.Join(" -> ", f.CycleTableQualifiedNames) + " -> " + f.CycleTableQualifiedNames[0],
+                string.Join("; ", f.Hops.Select(h => $"{h.TriggerQualifiedName}: {h.FromTableQualifiedName} -> {h.ToTableQualifiedName} ({h.SourcePath}:{h.WriteLine})")),
             })]);
     }
 

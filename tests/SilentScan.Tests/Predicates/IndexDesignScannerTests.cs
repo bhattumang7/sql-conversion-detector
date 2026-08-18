@@ -895,4 +895,249 @@ public sealed class IndexDesignScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.NoRecomputeStatistics);
     }
+
+    // docs/detection-checklist.md full-archive practitioner sweep §E, "Column too wide to ever be
+    // an index key" - VariableLengthKeyColumnExceedsKeyLimit, scoped to variable-length types only
+    // after oracle verification (see that kind's own doc comment).
+    [Fact]
+    public void NonclusteredKeyColumn_VarcharOverNonclusteredLimit_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("IX_Wide", CatalogIndexKind.Index, IsUnique: false, ["Notes"], []);
+        catalog.AddOrReplace(Table("dbo", "Docs", [Column("Notes", new SqlType(SqlTypeCategory.VarChar, Length: 1701))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void NonclusteredKeyColumn_VarcharAtNonclusteredLimit_NeverFires()
+    {
+        // Exactly at the 1700-byte ceiling, not over it - the near-miss boundary case.
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("IX_AtLimit", CatalogIndexKind.Index, IsUnique: false, ["Notes"], []);
+        catalog.AddOrReplace(Table("dbo", "Docs", [Column("Notes", new SqlType(SqlTypeCategory.VarChar, Length: 1700))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    [Fact]
+    public void ClusteredKeyColumn_VarcharOverClusteredButUnderNonclusteredLimit_Fires()
+    {
+        // 901 bytes clears the tighter 900-byte clustered ceiling even though it's well under the
+        // 1700-byte nonclustered one - confirms the per-index-type ceiling, not one flat number.
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Code"], [], IsClustered: true);
+        catalog.AddOrReplace(Table("dbo", "Docs", [Column("Code", new SqlType(SqlTypeCategory.VarChar, Length: 901))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    [Fact]
+    public void FixedLengthKeyColumn_CharOverLimit_NeverFires()
+    {
+        // Fixed-length (char/nchar/binary) over the ceiling is already a hard CREATE INDEX-time
+        // engine error (oracle-confirmed) - this codebase's own established precedent for not
+        // flagging something the engine already refuses to compile.
+        var catalog = new DatabaseCatalog();
+        var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Code"], [], IsClustered: true);
+        catalog.AddOrReplace(Table("dbo", "Docs", [Column("Code", new SqlType(SqlTypeCategory.Char, Length: 901))], [index]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit);
+    }
+
+    // docs/detection-checklist.md second full-archive practitioner sweep §G, "Indexes sharing an
+    // identical key-column list and sort direction but with different, non-overlapping INCLUDE
+    // sets" - MergeableIndexesDifferingIncludeOnly.
+    [Fact]
+    public void TwoIndexes_SameKeySortDirection_NonOverlappingInclude_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"], KeyColumnIsDescendingRaw: [false]);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Phone"], KeyColumnIsDescendingRaw: [false]);
+        catalog.AddOrReplace(Table(
+            "dbo", "Customers",
+            [Column("CustomerId", IntType), Column("Email", new SqlType(SqlTypeCategory.VarChar, Length: 100)), Column("Phone", new SqlType(SqlTypeCategory.VarChar, Length: 20))],
+            [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.Single(findings, f => f.Kind == IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly);
+    }
+
+    [Fact]
+    public void TwoIndexes_SameKeyDifferentSortDirection_NeverFires()
+    {
+        // Same key column, opposite sort direction - not actually mergeable without changing scan
+        // order for one of the two original queries, so this must NOT fire.
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"], KeyColumnIsDescendingRaw: [false]);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Phone"], KeyColumnIsDescendingRaw: [true]);
+        catalog.AddOrReplace(Table(
+            "dbo", "Customers",
+            [Column("CustomerId", IntType), Column("Email", new SqlType(SqlTypeCategory.VarChar, Length: 100)), Column("Phone", new SqlType(SqlTypeCategory.VarChar, Length: 20))],
+            [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly);
+    }
+
+    [Fact]
+    public void TwoIndexes_UnknownSortDirection_NeverGuessesMerge()
+    {
+        // KeyColumnIsDescending empty ("unknown", e.g. never read from a live catalog) on either
+        // side - never guess that the sort direction genuinely matches.
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"]);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Phone"]);
+        catalog.AddOrReplace(Table(
+            "dbo", "Customers",
+            [Column("CustomerId", IntType), Column("Email", new SqlType(SqlTypeCategory.VarChar, Length: 100)), Column("Phone", new SqlType(SqlTypeCategory.VarChar, Length: 20))],
+            [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly);
+    }
+
+    [Fact]
+    public void TwoIndexes_SubsetInclude_NeverFiresMergeable()
+    {
+        // One index's INCLUDE is a subset of the other's - already SubsumedIndex-eligible
+        // territory, never double-reported under MergeableIndexesDifferingIncludeOnly too.
+        var catalog = new DatabaseCatalog();
+        var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"], KeyColumnIsDescendingRaw: [false]);
+        var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email", "Phone"], KeyColumnIsDescendingRaw: [false]);
+        catalog.AddOrReplace(Table(
+            "dbo", "Customers",
+            [Column("CustomerId", IntType), Column("Email", new SqlType(SqlTypeCategory.VarChar, Length: 100)), Column("Phone", new SqlType(SqlTypeCategory.VarChar, Length: 20))],
+            [a, b]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly);
+    }
+
+    // docs/detection-checklist.md full-archive practitioner sweep §E, "Columnstore index present on
+    // a table that is also a live DML target of transactional code" - ColumnstoreIndexOnDmlTargetTable.
+    [Fact]
+    public void ColumnstoreIndex_OnDmlTargetTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var columnstore = new CatalogIndex("CCI_Facts", CatalogIndexKind.Index, IsUnique: false, [], [], IsClustered: true, IsColumnstore: true);
+        catalog.AddOrReplace(Table("dbo", "Facts", [Column("Id", IntType)], [columnstore]));
+
+        var findings = IndexDesignScanner.Scan(catalog, dmlTargetTables: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dbo.Facts" });
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable, finding.Kind);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void ColumnstoreIndex_NotADmlTarget_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var columnstore = new CatalogIndex("CCI_Facts", CatalogIndexKind.Index, IsUnique: false, [], [], IsClustered: true, IsColumnstore: true);
+        catalog.AddOrReplace(Table("dbo", "Facts", [Column("Id", IntType)], [columnstore]));
+
+        var findings = IndexDesignScanner.Scan(catalog, dmlTargetTables: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable);
+    }
+
+    [Fact]
+    public void ColumnstoreIndex_NoDmlTargetSetProvided_NeverFires()
+    {
+        // dmlTargetTables omitted entirely (file mode never computes it) - "no data" must never
+        // read as "no DML targets", so this must never fire rather than false-negative silently
+        // as clean.
+        var catalog = new DatabaseCatalog();
+        var columnstore = new CatalogIndex("CCI_Facts", CatalogIndexKind.Index, IsUnique: false, [], [], IsClustered: true, IsColumnstore: true);
+        catalog.AddOrReplace(Table("dbo", "Facts", [Column("Id", IntType)], [columnstore]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable);
+    }
+
+    [Fact]
+    public void RowstoreIndex_OnDmlTargetTable_NeverFiresColumnstore()
+    {
+        var catalog = new DatabaseCatalog();
+        var rowstore = new CatalogIndex("PK_Facts", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true);
+        catalog.AddOrReplace(Table("dbo", "Facts", [Column("Id", IntType)], [rowstore]));
+
+        var findings = IndexDesignScanner.Scan(catalog, dmlTargetTables: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dbo.Facts" });
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable);
+    }
+
+    // docs/detection-checklist.md second full-archive practitioner sweep §G, "Monotonically
+    // increasing clustered key ... with no OPTIMIZE_FOR_SEQUENTIAL_KEY" - MonotonicClusteredKeyMissingSequentialOptimization.
+    [Fact]
+    public void IdentityClusteredKey_NoSequentialKeyOptimization_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var identityColumn = new CatalogColumn("Id", IntType, IsNullable: false, IsIdentity: true, IsComputed: false, IsPersisted: false, IdentitySeed: 1, IdentityIncrement: 1);
+        var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true, OptimizeForSequentialKey: false);
+        catalog.AddOrReplace(Table("dbo", "Orders", [identityColumn], [clustered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization, finding.Kind);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void IdentityClusteredKey_SequentialKeyOptimizationAlreadyOn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var identityColumn = new CatalogColumn("Id", IntType, IsNullable: false, IsIdentity: true, IsComputed: false, IsPersisted: false, IdentitySeed: 1, IdentityIncrement: 1);
+        var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true, OptimizeForSequentialKey: true);
+        catalog.AddOrReplace(Table("dbo", "Orders", [identityColumn], [clustered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization);
+    }
+
+    [Fact]
+    public void NonIdentityClusteredKey_NeverFiresMonotonic()
+    {
+        // Scoped to the IDENTITY case only - a plain non-identity leading key column is never
+        // guessed to be monotonic-by-construction.
+        var catalog = new DatabaseCatalog();
+        var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderCode"], [], IsClustered: true, OptimizeForSequentialKey: false);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20))], [clustered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization);
+    }
+
+    [Fact]
+    public void IdentityClusteredKey_NegativeIncrement_NeverFiresMonotonic()
+    {
+        // A negative/zero increment is not "always-ascending" - deliberately excluded rather than
+        // guessed about.
+        var catalog = new DatabaseCatalog();
+        var identityColumn = new CatalogColumn("Id", IntType, IsNullable: false, IsIdentity: true, IsComputed: false, IsPersisted: false, IdentitySeed: 1000, IdentityIncrement: -1);
+        var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true, OptimizeForSequentialKey: false);
+        catalog.AddOrReplace(Table("dbo", "Orders", [identityColumn], [clustered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization);
+    }
 }

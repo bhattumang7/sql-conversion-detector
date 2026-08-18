@@ -284,6 +284,8 @@ public sealed class ReadableScanReportWriterTests
             [],
             [],
             [],
+            [],
+            [],
             SkippedConstructSummary.From([]), TypedPredicateSummary.From([]), DynamicSqlSummary.From([]));
 
         var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
@@ -367,6 +369,8 @@ public sealed class ReadableScanReportWriterTests
         [],
         [],
             [],
+        [],
+        [],
         [],
         [],
         [],

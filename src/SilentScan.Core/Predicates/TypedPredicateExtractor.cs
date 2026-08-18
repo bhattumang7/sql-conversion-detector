@@ -31,7 +31,7 @@ public static class TypedPredicateExtractor
         var visitor = new Visitor(parseResult.SourcePath, catalog, resolvedViews, externalVariables, ledger, enclosingScope, callerScopeByCalleeScope);
         visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
-        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings, visitor.LocalVariablePredicateFindings);
+        return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings, visitor.LocalVariablePredicateFindings, visitor.FilteredIndexParameterMismatchFindings);
     }
 
     private sealed class Visitor(
@@ -175,6 +175,68 @@ public static class TypedPredicateExtractor
         public List<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings { get; } = [];
 
         public List<LocalVariablePredicateFinding> LocalVariablePredicateFindings { get; } = [];
+
+        public List<FilteredIndexParameterMismatchFinding> FilteredIndexParameterMismatchFindings { get; } = [];
+
+        /// <summary>
+        /// docs/detection-checklist.md full-archive practitioner sweep §E, "Filtered index whose
+        /// predicate compares against a variable/parameter, not a literal" - built once, lazily
+        /// (most scanned corpora have few or no filtered indexes at all, so most callers never pay
+        /// for this): every table's filtered index whose own filter reparses as a simple
+        /// <c>Column = Literal</c> equality (<see cref="IndexDesignScanner.TryExtractSimpleLiteralEqualityFilter"/>),
+        /// keyed by <c>(TableQualifiedName, ColumnName)</c> ordinal-ignore-case on both parts - the
+        /// same key shape <see cref="TryAddFilteredIndexParameterMismatchFinding"/> looks up against
+        /// a real predicate site's own resolved column.
+        /// </summary>
+        private Dictionary<(string Table, string Column), List<(string? IndexName, string LiteralText)>>? _literalEqualityFilteredIndexesByColumn;
+
+        private Dictionary<(string Table, string Column), List<(string? IndexName, string LiteralText)>> LiteralEqualityFilteredIndexesByColumn
+        {
+            get
+            {
+                if (_literalEqualityFilteredIndexesByColumn is not null)
+                {
+                    return _literalEqualityFilteredIndexesByColumn;
+                }
+
+                var map = new Dictionary<(string, string), List<(string?, string)>>(TableColumnKeyComparer.Instance);
+                foreach (var table in catalog.Tables)
+                {
+                    foreach (var index in table.Indexes)
+                    {
+                        if (!index.IsFiltered || index.FilterDefinition is not { } filterDefinition
+                            || IndexDesignScanner.TryExtractSimpleLiteralEqualityFilter(filterDefinition) is not { } extracted)
+                        {
+                            continue;
+                        }
+
+                        var key = (table.QualifiedName, extracted.ColumnName);
+                        if (!map.TryGetValue(key, out var entries))
+                        {
+                            entries = [];
+                            map[key] = entries;
+                        }
+
+                        entries.Add((index.Name, extracted.LiteralText));
+                    }
+                }
+
+                _literalEqualityFilteredIndexesByColumn = map;
+                return map;
+            }
+        }
+
+        private sealed class TableColumnKeyComparer : IEqualityComparer<(string Table, string Column)>
+        {
+            public static readonly TableColumnKeyComparer Instance = new();
+
+            public bool Equals((string Table, string Column) x, (string Table, string Column) y) =>
+                string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.Column, y.Column, StringComparison.OrdinalIgnoreCase);
+
+            public int GetHashCode((string Table, string Column) obj) =>
+                HashCode.Combine(obj.Table.ToUpperInvariant(), obj.Column.ToUpperInvariant());
+        }
 
         /// <summary>
         /// True for the whole body of a procedure declared <c>WITH RECOMPILE</c>
@@ -1285,6 +1347,7 @@ public static class TypedPredicateExtractor
             TryAddUnderLengthParameterFinding(column, other, otherIsLiteral, operatorText, node);
             TryAddAnsiPaddingMismatchFinding(column, other, operatorText, node);
             TryAddLocalVariablePredicateFinding(column, other, operatorText, node);
+            TryAddFilteredIndexParameterMismatchFinding(column, other, operatorText, node);
         }
 
         /// <summary>
@@ -1303,6 +1366,35 @@ public static class TypedPredicateExtractor
             LocalVariablePredicateFindings.Add(new LocalVariablePredicateFinding(
                 column.TableQualifiedName, column.ColumnName, column.Indexed, column.Depth,
                 variableName, operatorText, sourcePath, node.StartLine, node.StartColumn));
+        }
+
+        /// <summary>
+        /// docs/detection-checklist.md full-archive practitioner sweep §E, "Filtered index whose
+        /// predicate compares against a variable/parameter, not a literal" - see
+        /// <see cref="FilteredIndexParameterMismatchFinding"/>'s own doc comment for the full
+        /// oracle-confirmed reasoning, including why this is deliberately NEVER gated on an active
+        /// RECOMPILE guard, unlike <see cref="TryAddLocalVariablePredicateFinding"/> right above.
+        /// Fires for BOTH a formal parameter and a plain <c>DECLARE</c>d local variable - unlike
+        /// <see cref="LocalVariablePredicateFinding"/>, which deliberately excludes a formal
+        /// parameter (its own claim is specific to a local's estimator-invisibility), the filtered-
+        /// index match rule this finding reports treats every non-literal operand identically: the
+        /// optimizer's own filtered-index-matching rule only ever accepts a literal, full stop,
+        /// regardless of whether the non-literal operand is a sniffed parameter or a plain local.
+        /// </summary>
+        private void TryAddFilteredIndexParameterMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        {
+            if (other is not PredicateOperand.Value { VariableName: { } variableName, IsFormalParameter: var isFormalParameter }
+                || !LiteralEqualityFilteredIndexesByColumn.TryGetValue((column.TableQualifiedName, column.ColumnName), out var candidates))
+            {
+                return;
+            }
+
+            foreach (var (indexName, literalText) in candidates)
+            {
+                FilteredIndexParameterMismatchFindings.Add(new FilteredIndexParameterMismatchFinding(
+                    column.TableQualifiedName, column.ColumnName, indexName, literalText,
+                    variableName, isFormalParameter, operatorText, sourcePath, node.StartLine, node.StartColumn));
+            }
         }
 
         /// <summary>

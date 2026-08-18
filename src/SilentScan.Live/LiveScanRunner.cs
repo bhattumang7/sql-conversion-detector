@@ -218,7 +218,14 @@ public static class LiveScanRunner
         // depends on is itself live-only.
         using (var indexDesignStage = progress.Begin("checking clustered/heap index design"))
         {
-            var indexDesignFindings = IndexDesignScanner.Scan(catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
+            // docs/detection-checklist.md full-archive practitioner sweep §E "Columnstore index
+            // present on a table that is also a live DML target of transactional code" -
+            // IndexDesignScanner is catalog-only and has no AST access of its own, so the one AST
+            // fact it needs (which tables are a direct DML target anywhere in this corpus) is
+            // computed here, once, from the same parse results the rest of this pipeline already
+            // walks.
+            var dmlTargetTables = DmlTargetTableScanner.Scan(parseResultSource(), catalog);
+            var indexDesignFindings = IndexDesignScanner.Scan(catalog, dmlTargetTables).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report with { IndexDesignFindings = indexDesignFindings };
             indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
         }

@@ -51,4 +51,5 @@ public sealed record PredicateExtractionResult(
     IReadOnlyList<OversizedParameterFinding> OversizedParameterFindings,
     IReadOnlyList<UnderLengthParameterFinding> UnderLengthParameterFindings,
     IReadOnlyList<AnsiPaddingMismatchFinding> AnsiPaddingMismatchFindings,
-    IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings);
+    IReadOnlyList<LocalVariablePredicateFinding> LocalVariablePredicateFindings,
+    IReadOnlyList<FilteredIndexParameterMismatchFinding> FilteredIndexParameterMismatchFindings);
