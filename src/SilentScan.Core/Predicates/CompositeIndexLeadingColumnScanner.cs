@@ -100,7 +100,7 @@ public static class CompositeIndexLeadingColumnScanner
                 .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
                 .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
                 .OfType<BooleanComparisonExpression>()
-                .SelectMany(c => ResolveBothSides(c, scopeChain))
+                .SelectMany(c => BaseColumnResolver.ResolveBothSides(c, sourcePath, scopeChain))
                 .ToHashSet();
 
             // Referenced anywhere at all - deliberately broader than the AND-constrained set
@@ -108,7 +108,7 @@ public static class CompositeIndexLeadingColumnScanner
             // suppress a violation, never to trigger one, so being liberal here is the safe
             // direction: a leading column referenced ANYWHERE, even weakly, is enough to decline.
             var anyReferencedColumns = new HashSet<(string Table, string Column)>();
-            var referenceVisitor = new ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
             whereCondition?.Accept(referenceVisitor);
             foreach (var join in joinNodes)
             {
@@ -168,58 +168,5 @@ public static class CompositeIndexLeadingColumnScanner
             }
         }
 
-        private IEnumerable<(string Table, string Column)> ResolveBothSides(
-            BooleanComparisonExpression predicate,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            foreach (var side in new[] { predicate.FirstExpression, predicate.SecondExpression })
-            {
-                if (ResolveBaseColumn(side, scopeChain) is { } resolved)
-                {
-                    yield return resolved;
-                }
-            }
-        }
-
-        private (string Table, string Column)? ResolveBaseColumn(
-            ScalarExpression expression,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (expression is not ColumnReferenceExpression columnRef)
-            {
-                return null;
-            }
-
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
-            return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
-                ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)
-                : null;
-        }
-
-        /// <summary>Collects every base-column reference reachable anywhere under a boolean expression, OR branches included - deliberately liberal, since this set is only ever used to suppress a finding, never to trigger one.</summary>
-        private sealed class ColumnReferenceCollector(
-            string sourcePath,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
-            HashSet<(string Table, string Column)> sink) : TSqlFragmentVisitor
-        {
-            public override void ExplicitVisit(ColumnReferenceExpression node)
-            {
-                // A wildcard reference (bare * in SELECT *, or COUNT(*)'s own single argument) has
-                // no MultiPartIdentifier at all - ResolveColumnReference assumes a real column name
-                // is present and crashes on this shape, oracle-found against real corpus text (a
-                // COUNT(*) nested inside a scalar subquery's own WHERE clause). Nothing to resolve
-                // here regardless - a wildcard is never a specific column reference.
-                if (node.ColumnType != ColumnType.Wildcard)
-                {
-                    var provenance = ScalarExpressionResolver.ResolveColumnReference(node, scopeChain, sourcePath, ledger: null);
-                    if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
-                    {
-                        sink.Add((baseColumn.TableQualifiedName, baseColumn.ColumnName));
-                    }
-                }
-
-                base.ExplicitVisit(node);
-            }
-        }
     }
 }

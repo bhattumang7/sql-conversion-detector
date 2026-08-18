@@ -82,7 +82,7 @@ public static class IndexHintScanner
             var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
 
             var anyReferencedColumns = new HashSet<(string Table, string Column)>();
-            var referenceVisitor = new ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
             whereCondition?.Accept(referenceVisitor);
             foreach (var join in joinNodes)
             {
@@ -156,28 +156,5 @@ public static class IndexHintScanner
             }
         }
 
-        /// <summary>Collects every base-column reference reachable anywhere under a boolean expression, OR branches included - deliberately liberal, since this set is only ever used to suppress a finding, never to trigger one (matches <see cref="CompositeIndexLeadingColumnScanner"/>'s own identical collector).</summary>
-        private sealed class ColumnReferenceCollector(
-            string sourcePath,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
-            HashSet<(string Table, string Column)> sink) : TSqlFragmentVisitor
-        {
-            public override void ExplicitVisit(ColumnReferenceExpression node)
-            {
-                // See CompositeIndexLeadingColumnScanner's identical guard: a wildcard reference
-                // (bare * or COUNT(*)'s own argument) has no MultiPartIdentifier and crashes
-                // ResolveColumnReference, oracle-found against real corpus text.
-                if (node.ColumnType != ColumnType.Wildcard)
-                {
-                    var provenance = ScalarExpressionResolver.ResolveColumnReference(node, scopeChain, sourcePath, ledger: null);
-                    if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
-                    {
-                        sink.Add((baseColumn.TableQualifiedName, baseColumn.ColumnName));
-                    }
-                }
-
-                base.ExplicitVisit(node);
-            }
-        }
     }
 }

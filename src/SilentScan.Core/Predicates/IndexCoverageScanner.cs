@@ -99,7 +99,7 @@ public static class IndexCoverageScanner
                 .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
                 .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
                 .OfType<BooleanComparisonExpression>()
-                .SelectMany(c => ResolveBothSides(c, scopeChain))
+                .SelectMany(c => BaseColumnResolver.ResolveBothSides(c, sourcePath, scopeChain))
                 .ToHashSet();
 
             // Every base column of every table in scope referenced ANYWHERE in the whole
@@ -107,7 +107,7 @@ public static class IndexCoverageScanner
             // question needs this broader set, unlike CompositeIndexLeadingColumnScanner's own
             // narrower "referenced anywhere, used only to suppress" set.
             var allReferencedColumns = new HashSet<(string Table, string Column)>();
-            var referenceVisitor = new ColumnReferenceCollector(sourcePath, scopeChain, allReferencedColumns);
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, allReferencedColumns);
             node.Accept(referenceVisitor);
 
             foreach (var table in baseTables)
@@ -187,56 +187,5 @@ public static class IndexCoverageScanner
                 sourcePath, node.StartLine, node.StartColumn));
         }
 
-        private IEnumerable<(string Table, string Column)> ResolveBothSides(
-            BooleanComparisonExpression predicate,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            foreach (var side in new[] { predicate.FirstExpression, predicate.SecondExpression })
-            {
-                if (ResolveBaseColumn(side, scopeChain) is { } resolved)
-                {
-                    yield return resolved;
-                }
-            }
-        }
-
-        private (string Table, string Column)? ResolveBaseColumn(
-            ScalarExpression expression,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (expression is not ColumnReferenceExpression columnRef)
-            {
-                return null;
-            }
-
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
-            return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
-                ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)
-                : null;
-        }
-
-        /// <summary>Collects every base-column reference reachable anywhere under the whole
-        /// statement fragment - deliberately broad (SELECT list, WHERE, ORDER BY, GROUP BY, JOIN
-        /// ON, HAVING all count), since the coverage question this rule asks needs every column the
-        /// statement touches on the table, not just the ones that constrain a predicate.</summary>
-        private sealed class ColumnReferenceCollector(
-            string sourcePath,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
-            HashSet<(string Table, string Column)> sink) : TSqlFragmentVisitor
-        {
-            public override void ExplicitVisit(ColumnReferenceExpression node)
-            {
-                if (node.ColumnType != ColumnType.Wildcard)
-                {
-                    var provenance = ScalarExpressionResolver.ResolveColumnReference(node, scopeChain, sourcePath, ledger: null);
-                    if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn)
-                    {
-                        sink.Add((baseColumn.TableQualifiedName, baseColumn.ColumnName));
-                    }
-                }
-
-                base.ExplicitVisit(node);
-            }
-        }
     }
 }

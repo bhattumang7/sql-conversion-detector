@@ -267,8 +267,8 @@ public static class PartialCompositeForeignKeyJoinScanner
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             CompositeForeignKey fk, ForeignKeyColumnPair pair)
         {
-            var left = ResolveBaseColumn(predicate.FirstExpression, scopeChain);
-            var right = ResolveBaseColumn(predicate.SecondExpression, scopeChain);
+            var left = BaseColumnResolver.ResolveBaseColumn(predicate.FirstExpression, sourcePath, scopeChain);
+            var right = BaseColumnResolver.ResolveBaseColumn(predicate.SecondExpression, sourcePath, scopeChain);
             if (left is null || right is null)
             {
                 return false;
@@ -282,26 +282,6 @@ public static class PartialCompositeForeignKeyJoinScanner
             resolved is { } r
             && string.Equals(r.Table, table, StringComparison.OrdinalIgnoreCase)
             && string.Equals(r.Column, column, StringComparison.OrdinalIgnoreCase);
-
-        private (string Table, string Column)? ResolveBaseColumn(
-            ScalarExpression expression,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (expression is not ColumnReferenceExpression columnRef)
-            {
-                return null;
-            }
-
-            // Depth == 0 required: a column reached through a view layer is not a direct base-
-            // table predicate this scanner's base-table-only scope covers (see the finding's own
-            // doc comment). The ledger is null throughout this pass, since NonSargablePredicateScanner
-            // and TypedPredicateExtractor already run full coverage reporting over the same files
-            // and this scanner's own unresolved references would just be duplicate noise.
-            var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
-            return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
-                ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)
-                : null;
-        }
 
         private string? ResolveDirectBaseTable(TableReference tableReference)
         {
