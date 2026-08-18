@@ -6828,15 +6828,36 @@ verifiable.
         divergent signatures (extra bool flags, different target node types)
         and still need their own design pass — left open below as
         `CollectorVisitor<T>`.
-  - [ ] Generic `CollectorVisitor<T>` and a shared leaf-table-reference
-        walker for the remaining `Flatten` family (`ScalarUdfScanner`'s and
-        `TvfFenceScanner`'s own `Flatten`, `AggregateDivisionColumnstoreScanner`'s
-        `FlattenTableReferences`, `StringConcatNullScanner`'s/`IndexHintScanner`'s/
-        `CartesianJoinScanner`'s `FlattenNamedTables`, `FloatEqualityPredicateScanner`'s
-        `FlattenJoins`) — each has a genuinely different shape (extra
-        parameters, different leaf node types), so this needs a real design
-        pass rather than a mechanical extraction like `PredicateTreeWalker`
-        above.
+  - [x] **Did the design pass; four more pieces were genuinely safe to
+        extract, one `CollectorVisitor<T>` generic was not.** Added
+        `PredicateTreeWalker.FlattenTableReferences` (byte-identical across
+        `AggregateDivisionColumnstoreScanner`, `StringConcatNullScanner`, and
+        a third copy inside `FloatEqualityPredicateScanner` itself) and
+        `PredicateTreeWalker.FlattenNamedTables` (`IndexHintScanner`/
+        `CartesianJoinScanner`), and pointed `FloatEqualityPredicateScanner`'s
+        own `FlattenJoins` at the existing `FlattenJoinNodes`. Consolidating
+        `FlattenNamedTables` surfaced a real bug, fixed as a side effect: the
+        two copies had silently drifted - `IndexHintScanner`'s never
+        recursed into an `UnqualifiedJoin` (CROSS JOIN, CROSS/OUTER APPLY),
+        so a table hint on a table joined that way was never checked at
+        all; `CartesianJoinScanner`'s copy already handled it correctly.
+        Both scanners now get the correct version, with a new fixture
+        (`HintOnTableUnderCrossApply_Fires`) proving it. Net -92 lines
+        while fixing that gap.
+        <br><br>
+        The remaining two (`ScalarUdfScanner.Flatten`, `TvfFenceScanner.Flatten`)
+        are NOT extractable the same way: both perform side-effecting
+        emission (`TryEmitNested`) directly inside the recursion rather than
+        collecting leaves first, and `TvfFenceScanner`'s also threads
+        path-dependent context (`isApplySecondSide`) that a pure "flatten to
+        leaves" enumerator would have to carry alongside every yielded node.
+        A generic `CollectorVisitor<T>`/policy-parameterized walker covering
+        all of this would need enough parameters (which join kinds recurse,
+        which leaf types match, whether to thread context) to become more
+        code than the ~15-20 lines per scanner it would replace - the same
+        "obscures more than it saves" outcome the `OrderBy`/nested-emission
+        pieces above already hit. Left as-is; each scanner's own recursion
+        is genuinely a different traversal, not copy-paste drift.
   - Deliberately NOT in scope: a generic self-registering rule engine
     (scanners genuinely differ in traversal shape — region stacks, polarity
     tracking, claim sets — and one framework would re-tangle them on a
