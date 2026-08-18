@@ -18,7 +18,18 @@ public sealed record SarifDriver(string Name, string Version, string? Informatio
 
 public sealed record SarifRule(string Id, SarifMessage ShortDescription);
 
-public sealed record SarifResult(string RuleId, string Level, SarifMessage Message, IReadOnlyList<SarifLocation> Locations);
+public sealed record SarifResult(
+    string RuleId, string Level, SarifMessage Message, IReadOnlyList<SarifLocation> Locations, SarifResultProperties? Properties = null);
+
+/// <summary>
+/// SARIF's own <c>result.properties</c> extensibility bag, holding exactly one custom key:
+/// <see cref="Tier"/> - the same <c>Proven</c>/<c>Contextual</c>/<c>Advisory</c> vocabulary a
+/// surveyed incumbent tool uses (docs/detection-checklist.md "Reporting ideas worth stealing").
+/// A named tier lets a CI consumer gate on stable semantics ("only fail on Proven") instead of
+/// SARIF's own <c>level</c>, whose error/warning/note meaning is configured differently by every
+/// consumer - <c>level</c> stays exactly as before for tools that already key off it.
+/// </summary>
+public sealed record SarifResultProperties(string Tier);
 
 public sealed record SarifMessage(string Text);
 

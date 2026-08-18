@@ -1424,6 +1424,23 @@ public static class SarifReportWriter
         _ => LevelNote,
     };
 
+    private const string TierProven = "Proven";
+    private const string TierContextual = "Contextual";
+    private const string TierAdvisory = "Advisory";
+
+    /// <summary>
+    /// Names the same axis every <c>BuildResult</c> call already computes into <c>level</c> - a
+    /// finding that reaches <c>error</c> only does so after surviving every per-kind severity/
+    /// indexed/confidence computation upstream, so naming it here (rather than re-deriving it
+    /// from the finding itself) can never drift from what <c>level</c> already says.
+    /// </summary>
+    private static string DetermineTier(string level) => level switch
+    {
+        LevelError => TierProven,
+        LevelWarning => TierContextual,
+        _ => TierAdvisory,
+    };
+
     private static string IndexedDisplay(bool? indexed) => indexed is { } value ? value.ToString() : "unknown";
 
     private static string DynamicSqlOriginNote(SourceSpan? callSite) =>
@@ -1467,7 +1484,8 @@ public static class SarifReportWriter
             ruleId,
             level,
             new SarifMessage(message),
-            [new SarifLocation(new SarifPhysicalLocation(new SarifArtifactLocation(ToUri(sourcePath)), new SarifRegion(line, startColumn)))]);
+            [new SarifLocation(new SarifPhysicalLocation(new SarifArtifactLocation(ToUri(sourcePath)), new SarifRegion(line, startColumn)))],
+            new SarifResultProperties(DetermineTier(level)));
 
     /// <summary>
     /// Emits a real <c>file://</c> URI for an absolute path, or a percent-encoded relative

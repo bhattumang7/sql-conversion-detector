@@ -151,6 +151,7 @@ public sealed class SarifReportWriterTests
         var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
         Assert.Equal("error", result.GetProperty("level").GetString());
         Assert.Equal("silentscan/verdict/scan-forced", result.GetProperty("ruleId").GetString());
+        Assert.Equal("Proven", result.GetProperty("properties").GetProperty("tier").GetString());
     }
 
     [Fact]
@@ -253,6 +254,7 @@ public sealed class SarifReportWriterTests
 
         var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
         Assert.Equal("warning", result.GetProperty("level").GetString());
+        Assert.Equal("Contextual", result.GetProperty("properties").GetProperty("tier").GetString());
     }
 
     [Fact]
@@ -453,6 +455,7 @@ public sealed class SarifReportWriterTests
 
         var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
         Assert.Equal("warning", result.GetProperty("level").GetString());
+        Assert.Equal("Contextual", result.GetProperty("properties").GetProperty("tier").GetString());
     }
 
     [Fact]
@@ -546,6 +549,7 @@ public sealed class SarifReportWriterTests
         var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
         Assert.Equal("note", result.GetProperty("level").GetString());
         Assert.Equal("silentscan/dynamic-sql/analyzed", result.GetProperty("ruleId").GetString());
+        Assert.Equal("Advisory", result.GetProperty("properties").GetProperty("tier").GetString());
     }
 
     [Fact]
@@ -640,6 +644,7 @@ public sealed class SarifReportWriterTests
         Assert.Equal("warning", result.GetProperty("level").GetString());
         Assert.Equal("silentscan/dynamic-sql/unanalyzable", result.GetProperty("ruleId").GetString());
         Assert.Contains("non-literal-argument", result.GetProperty("message").GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal("Contextual", result.GetProperty("properties").GetProperty("tier").GetString());
     }
 
     [Fact]
@@ -733,6 +738,7 @@ public sealed class SarifReportWriterTests
         var result = document.RootElement.GetProperty("runs")[0].GetProperty("results")[0];
         Assert.Equal("warning", result.GetProperty("level").GetString());
         Assert.Equal("silentscan/dynamic-sql/inner-parse-failed", result.GetProperty("ruleId").GetString());
+        Assert.Equal("Contextual", result.GetProperty("properties").GetProperty("tier").GetString());
     }
 
     [Fact]
