@@ -1197,6 +1197,69 @@ public static class ScanReportBuilder
             .ThenBy(s => s.Column)
             .ToList();
 
+        // Every stream landed after the original eight (filtered just above, lines ~1131-1137)
+        // never got this same minimumConfidence cut applied - a real gap, not a deliberate
+        // design choice: CLAUDE.md's own contract for this parameter is "the least confident a
+        // finding may be and still appear in the report," and a Low/Medium-confidence finding
+        // from any of these streams was silently bypassing that promise regardless of what the
+        // caller (scan-db --confidence, scan-corpus --confidence) actually asked for. Fixed by
+        // applying the identical `<= minimumConfidence` cut to every remaining stream, in one
+        // place, right before construction, so a future new stream only has to be added to this
+        // one block rather than remembering to filter itself inline the way each new stream's
+        // own scan phase above never did.
+        columnCollationDriftFindings = [.. columnCollationDriftFindings.Where(f => f.Confidence <= minimumConfidence)];
+        crossTableTypeDriftFindings = [.. crossTableTypeDriftFindings.Where(f => f.Confidence <= minimumConfidence)];
+        procCallArgumentMismatchFindings = [.. procCallArgumentMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
+        temporalBoundaryFindings = [.. temporalBoundaryFindings.Where(f => f.Confidence <= minimumConfidence)];
+        maxTypedColumnFindings = [.. maxTypedColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
+        oversizedParameterFindings = [.. oversizedParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
+        underLengthParameterFindings = [.. underLengthParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
+        ansiPaddingMismatchFindings = [.. ansiPaddingMismatchFindings.Where(f => f.Confidence <= minimumConfidence)];
+        partialCompositeForeignKeyJoinFindings = [.. partialCompositeForeignKeyJoinFindings.Where(f => f.Confidence <= minimumConfidence)];
+        setOptionFindings = [.. setOptionFindings.Where(f => f.Confidence <= minimumConfidence)];
+        catchAllPredicateFindings = [.. catchAllPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
+        localVariablePredicateFindings = [.. localVariablePredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
+        notInNullableSubqueryFindings = [.. notInNullableSubqueryFindings.Where(f => f.Confidence <= minimumConfidence)];
+        nonUniqueUpdateSourceFindings = [.. nonUniqueUpdateSourceFindings.Where(f => f.Confidence <= minimumConfidence)];
+        forcedSerialFindings = [.. forcedSerialFindings.Where(f => f.Confidence <= minimumConfidence)];
+        untrustedConstraintFindings = [.. untrustedConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
+        cascadingForeignKeyFindings = [.. cascadingForeignKeyFindings.Where(f => f.Confidence <= minimumConfidence)];
+        multiReferencedCteFindings = [.. multiReferencedCteFindings.Where(f => f.Confidence <= minimumConfidence)];
+        nestedViewDepthFindings = [.. nestedViewDepthFindings.Where(f => f.Confidence <= minimumConfidence)];
+        postExpansionJoinWidthFindings = [.. postExpansionJoinWidthFindings.Where(f => f.Confidence <= minimumConfidence)];
+        selectStarViewFindings = [.. selectStarViewFindings.Where(f => f.Confidence <= minimumConfidence)];
+        nonPersistedComputedColumnFindings = [.. nonPersistedComputedColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
+        selfReferencingDmlFindings = [.. selfReferencingDmlFindings.Where(f => f.Confidence <= minimumConfidence)];
+        temporalTableHistoryIndexGapFindings = [.. temporalTableHistoryIndexGapFindings.Where(f => f.Confidence <= minimumConfidence)];
+        moduleCompileFlagFindings = [.. moduleCompileFlagFindings.Where(f => f.Confidence <= minimumConfidence)];
+        windowFrameFindings = [.. windowFrameFindings.Where(f => f.Confidence <= minimumConfidence)];
+        waitForFindings = [.. waitForFindings.Where(f => f.Confidence <= minimumConfidence)];
+        viewOrderingFindings = [.. viewOrderingFindings.Where(f => f.Confidence <= minimumConfidence)];
+        transactionHygieneFindings = [.. transactionHygieneFindings.Where(f => f.Confidence <= minimumConfidence)];
+        compositeIndexLeadingColumnFindings = [.. compositeIndexLeadingColumnFindings.Where(f => f.Confidence <= minimumConfidence)];
+        indexHintFindings = [.. indexHintFindings.Where(f => f.Confidence <= minimumConfidence)];
+        sessionDateSettingFindings = [.. sessionDateSettingFindings.Where(f => f.Confidence <= minimumConfidence)];
+        cartesianJoinFindings = [.. cartesianJoinFindings.Where(f => f.Confidence <= minimumConfidence)];
+        undersizedDeclarationFindings = [.. undersizedDeclarationFindings.Where(f => f.Confidence <= minimumConfidence)];
+        truncateSwallowedFindings = [.. truncateSwallowedFindings.Where(f => f.Confidence <= minimumConfidence)];
+        unindexedTempTableUsageFindings = [.. unindexedTempTableUsageFindings.Where(f => f.Confidence <= minimumConfidence)];
+        outputParameterFindings = [.. outputParameterFindings.Where(f => f.Confidence <= minimumConfidence)];
+        parameterReassignmentPredicateFindings = [.. parameterReassignmentPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
+        codeMetricFindings = [.. codeMetricFindings.Where(f => f.Confidence <= minimumConfidence)];
+        formattingFindings = [.. formattingFindings.Where(f => f.Confidence <= minimumConfidence)];
+        namingFindings = [.. namingFindings.Where(f => f.Confidence <= minimumConfidence)];
+        deadCodeFindings = [.. deadCodeFindings.Where(f => f.Confidence <= minimumConfidence)];
+        duplicationFindings = [.. duplicationFindings.Where(f => f.Confidence <= minimumConfidence)];
+        deprecatedSyntaxFindings = [.. deprecatedSyntaxFindings.Where(f => f.Confidence <= minimumConfidence)];
+        statementShapeFindings = [.. statementShapeFindings.Where(f => f.Confidence <= minimumConfidence)];
+        controlFlowRiskFindings = [.. controlFlowRiskFindings.Where(f => f.Confidence <= minimumConfidence)];
+        securityFindings = [.. securityFindings.Where(f => f.Confidence <= minimumConfidence)];
+        floatEqualityFindings = [.. floatEqualityFindings.Where(f => f.Confidence <= minimumConfidence)];
+        queryAntiPatternFindings = [.. queryAntiPatternFindings.Where(f => f.Confidence <= minimumConfidence)];
+        indexCoverageFindings = [.. indexCoverageFindings.Where(f => f.Confidence <= minimumConfidence)];
+        triggerCorrectnessFindings = [.. triggerCorrectnessFindings.Where(f => f.Confidence <= minimumConfidence)];
+        crossModuleLockOrderFindings = [.. crossModuleLockOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
+
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
             tvfFenceFindings, scalarUdfFindings, columnCollationDriftFindings, crossTableTypeDriftFindings, procCallArgumentMismatchFindings, temporalBoundaryFindings,

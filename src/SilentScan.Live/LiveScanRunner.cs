@@ -193,8 +193,9 @@ public static class LiveScanRunner
                 .SelectMany(r => TempTableExecShapeCandidateScanner.Scan(r, catalog))
                 .ToList();
             tempTableExecShape = await new TempTableExecShapeChecker(connectionString).CheckAsync(candidates, cancellationToken);
-            report = report with { TempTableExecShapeFindings = tempTableExecShape.Findings };
-            tempTableStage.Complete($"{tempTableExecShape.Findings.Count:N0} findings, {tempTableExecShape.Unanalyzed.Count:N0} unanalyzed");
+            var filteredTempTableFindings = tempTableExecShape.Findings.Where(f => f.Confidence <= minimumConfidence).ToList();
+            report = report with { TempTableExecShapeFindings = filteredTempTableFindings };
+            tempTableStage.Complete($"{filteredTempTableFindings.Count:N0} findings, {tempTableExecShape.Unanalyzed.Count:N0} unanalyzed");
         }
         PhaseMemory.ReleaseBetweenPhases();
 
@@ -204,7 +205,8 @@ public static class LiveScanRunner
         // per module - the same live-only-merge pattern the temp-table-shape stage above uses.
         using (var databaseConfigStage = progress.Begin("reading database-level configuration flags"))
         {
-            var databaseConfigFindings = await new DatabaseConfigurationReader(connectionString).ReadAsync(cancellationToken);
+            var databaseConfigFindings = (await new DatabaseConfigurationReader(connectionString).ReadAsync(cancellationToken))
+                .Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report with { DatabaseConfigurationFindings = databaseConfigFindings };
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
@@ -216,7 +218,7 @@ public static class LiveScanRunner
         // depends on is itself live-only.
         using (var indexDesignStage = progress.Begin("checking clustered/heap index design"))
         {
-            var indexDesignFindings = IndexDesignScanner.Scan(catalog);
+            var indexDesignFindings = IndexDesignScanner.Scan(catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report with { IndexDesignFindings = indexDesignFindings };
             indexDesignStage.Complete($"{indexDesignFindings.Count:N0} findings");
         }
@@ -227,7 +229,7 @@ public static class LiveScanRunner
         // merged in the same live-only shape as IndexDesignFindings just above.
         using (var identityRangeStage = progress.Begin("checking identity/sequence range"))
         {
-            var identityRangeFindings = IdentityRangeScanner.Scan(catalog);
+            var identityRangeFindings = IdentityRangeScanner.Scan(catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report with { IdentityRangeFindings = identityRangeFindings };
             identityRangeStage.Complete($"{identityRangeFindings.Count:N0} findings");
         }
