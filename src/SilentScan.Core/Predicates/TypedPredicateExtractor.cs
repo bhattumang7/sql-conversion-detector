@@ -34,6 +34,15 @@ public static class TypedPredicateExtractor
         return new PredicateExtractionResult(visitor.Findings, visitor.ExpressionDerivedFindings, visitor.CollationConflictFindings, visitor.WriteLossFindings, ledger.Entries, visitor.OversizedParameterFindings, visitor.UnderLengthParameterFindings, visitor.AnsiPaddingMismatchFindings, visitor.LocalVariablePredicateFindings, visitor.FilteredIndexParameterMismatchFindings);
     }
 
+    // CS9107: sourcePath/catalog/resolvedViews/ledger are used throughout this class's own body
+    // (way beyond scope resolution - literal typing, catalog column lookups, finding
+    // construction, ...) AND forwarded to ScopedSqlVisitorBase for its own, separate CTE/scope
+    // bookkeeping - a deliberate, harmless double capture, not the accidental one this warning
+    // exists to catch. Splitting the base's storage out into protected accessors instead would
+    // mean rewriting every one of this class's own (non-scope-related) usages of these four
+    // parameters to go through the base, which is real, separate, higher-risk work, not a
+    // byproduct of extracting the scope harness.
+#pragma warning disable CS9107
     private sealed class Visitor(
         string sourcePath,
         DatabaseCatalog catalog,
@@ -41,7 +50,9 @@ public static class TypedPredicateExtractor
         IReadOnlyDictionary<string, SqlType?>? externalVariables,
         SkipLedger ledger,
         DynamicSqlScope? enclosingScope = null,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
+        : ScopedSqlVisitorBase(sourcePath, catalog, resolvedViews, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope)
+#pragma warning restore CS9107
     {
         /// <summary>Skip-ledger construct kind shared by every "this operand has no type resolution" entry below - one label for the whole family of unresolved-operand reasons.</summary>
         private const string PredicateOperandConstructKind = "predicate operand";
@@ -76,16 +87,12 @@ public static class TypedPredicateExtractor
         /// </summary>
         private const string UnresolvedColumnComparisonConstructKind = "unresolved column comparison";
 
-        private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
-        private string? _currentProcScope = enclosingScope?.ProcScope;
-
         /// <summary>Pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack, if any - called once, before the visitor starts walking, so they're visible for the whole reparsed fragment exactly like a real trigger body's own VisitTriggerBody does.</summary>
         public void SeedEnclosingScope(TSqlFragment rootFragment)
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {
-                _cteStack.Push(BuildTriggerPseudoTableRelations(target, rootFragment));
+                PushCteRelations(BuildTriggerPseudoTableRelations(target, rootFragment));
             }
         }
 
@@ -285,12 +292,12 @@ public static class TypedPredicateExtractor
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            _cteStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
 
             // Consumed here, before any recursion at all (a derived-table subquery inside this
             // SELECT's own FROM/select list is itself a QuerySpecification, and must never see
@@ -335,7 +342,7 @@ public static class TypedPredicateExtractor
 
             _negated = previousNegated;
             _position = previousPosition;
-            _scopeStack.Pop();
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(WhereClause node)
@@ -376,16 +383,16 @@ public static class TypedPredicateExtractor
         {
             var spec = node.UpdateSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            _scopeStack.Pop();
-            _cteStack.Pop();
+            ScopeStack.Pop();
+            PopCteScope();
         }
 
         // Roadmap Phase E1: write-side (INSERT) analysis is additive to the WHERE/ON/HAVING
-        // predicate scanning above - no FROM scope is pushed onto _scopeStack for the target
+        // predicate scanning above - no FROM scope is pushed onto ScopeStack for the target
         // table itself (unlike UPDATE/DELETE/MERGE, an INSERT target is never referenced by a
         // predicate; its own catalog columns are looked up directly by AnalyzeInsertWriteLoss),
         // only CTEs, so a CTE referenced by an INSERT ... SELECT source still resolves.
@@ -405,31 +412,31 @@ public static class TypedPredicateExtractor
             AnalyzeInsertWriteLoss(spec);
             spec.Accept(this);
 
-            _cteStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            _scopeStack.Pop();
-            _cteStack.Pop();
+            ScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(MergeStatement node)
         {
             var spec = node.MergeSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            _scopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
             _statementHasOptionRecompile = previousStatementHasOptionRecompile;
-            _scopeStack.Pop();
-            _cteStack.Pop();
+            ScopeStack.Pop();
+            PopCteScope();
         }
 
         /// <summary>
@@ -492,7 +499,7 @@ public static class TypedPredicateExtractor
         {
             if (node.Column is { } columnRef)
             {
-                var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+                var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
                 if (ResolveOperand(columnRef, scopeChain) is PredicateOperand.Column target && target.Type is { } targetType)
                 {
                     var sourceType = OperandType(ResolveOperand(node.NewValue, scopeChain));
@@ -659,36 +666,6 @@ public static class TypedPredicateExtractor
             return true;
         }
 
-        private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
-        {
-            var currentCtes = CurrentCteRelations();
-            var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger, _currentProcScope);
-            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
-        }
-
-        private IReadOnlyDictionary<string, ResolvedRelation> CurrentCteRelations() =>
-            _cteStack.Count > 0 ? _cteStack.Peek() : EmptyCteRelations;
-
-        private FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
-            new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope, callerScopeByCalleeScope);
-
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
-
-        private static Dictionary<string, ResolvedRelation> MergeCtes(
-            IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
-        {
-            // Inner (this statement's own) CTEs take precedence over an outer statement's
-            // same-named CTE, matching how an inner scope shadows an outer one everywhere else
-            // in this pass.
-            var merged = new Dictionary<string, ResolvedRelation>(outer, StringComparer.OrdinalIgnoreCase);
-            foreach (var (name, relation) in inner)
-            {
-                merged[name] = relation;
-            }
-
-            return merged;
-        }
-
         /// <summary>
         /// Resolves an INSERT target that is a plain named table/view, then dispatches to the
         /// shape-specific analysis for whatever its InsertSource turns out to be. A target that
@@ -742,14 +719,14 @@ public static class TypedPredicateExtractor
             }
 
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            var table = catalog.Find(qualifiedName, _currentProcScope);
+            var table = catalog.Find(qualifiedName, CurrentProcScope);
 
             // Same "#temp is session-scoped, not proc-scoped" fallback ResolveNamedTableReference
             // uses for a SELECT's own FROM clause - an INSERT into a #temp table created by one
             // of this proc's known callers is exactly as common a pattern as querying one.
-            if (table is null && _currentProcScope is not null
+            if (table is null && CurrentProcScope is not null
                 && callerScopeByCalleeScope is not null
-                && callerScopeByCalleeScope.TryGetValue(_currentProcScope, out var callerScopes))
+                && callerScopeByCalleeScope.TryGetValue(CurrentProcScope, out var callerScopes))
             {
                 table = FromScopeResolver.TryResolveFromCallerScopes(catalog, qualifiedName, callerScopes);
             }
@@ -792,7 +769,7 @@ public static class TypedPredicateExtractor
 
         private void AnalyzeValuesInsertSource(ValuesInsertSource values, List<CatalogColumn?> targetColumns, string targetTableQualifiedName)
         {
-            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
             foreach (var columnValues in values.RowValues.Select(row => row.ColumnValues))
             {
                 var count = Math.Min(columnValues.Count, targetColumns.Count);
@@ -815,7 +792,7 @@ public static class TypedPredicateExtractor
 
         private void AnalyzeSelectListWriteLoss(IList<SelectElement> selectElements, IReadOnlyList<CatalogColumn?> targetColumns, string targetTableQualifiedName)
         {
-            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
             var count = Math.Min(selectElements.Count, targetColumns.Count);
             for (var i = 0; i < count; i++)
             {
@@ -864,10 +841,10 @@ public static class TypedPredicateExtractor
             _procedureHasWithRecompile = node is ProcedureStatementBody { Options: { } options }
                 && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
 
-            var previousScope = _currentProcScope;
-            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+            var previousScope = CurrentProcScope;
+            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
-            _currentProcScope = previousScope;
+            CurrentProcScope = previousScope;
             _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
@@ -876,8 +853,8 @@ public static class TypedPredicateExtractor
             _variables.Clear();
             _formalParameterNames.Clear();
 
-            var previousScope = _currentProcScope;
-            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+            var previousScope = CurrentProcScope;
+            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
 
             // A DDL trigger (ON DATABASE/ON ALL SERVER) or LOGON trigger has no target object -
             // TriggerObject.Name is null whenever TriggerScope isn't Normal (coverage-
@@ -892,7 +869,7 @@ public static class TypedPredicateExtractor
                     AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
                     "DDL/LOGON trigger", $"trigger scope '{triggerObject.TriggerScope}' has no target table - no inserted/deleted pseudo-tables to resolve");
                 node.AcceptChildren(this);
-                _currentProcScope = previousScope;
+                CurrentProcScope = previousScope;
                 return;
             }
 
@@ -900,11 +877,11 @@ public static class TypedPredicateExtractor
             // top-level SELECT - pushed onto the same CTE stack a real WITH clause uses (they're
             // resolved identically by FromScopeResolver, a named relation checked before the
             // catalog/views), so nested subqueries inherit them the same way a CTE would.
-            _cteStack.Push(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName, node)));
+            PushCteRelations(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName, node)));
             node.AcceptChildren(this);
-            _cteStack.Pop();
+            PopCteScope();
 
-            _currentProcScope = previousScope;
+            CurrentProcScope = previousScope;
         }
 
         /// <summary>
@@ -919,6 +896,8 @@ public static class TypedPredicateExtractor
         /// resolvedViews (the same lookup FromScopeResolver's own NamedTableReference case checks
         /// before falling back to the catalog) is consulted first.
         /// </summary>
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
         private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
@@ -937,7 +916,7 @@ public static class TypedPredicateExtractor
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
                     "trigger inserted/deleted", $"trigger target '{qualifiedName}' has no known DDL and is not a resolved view - inserted/deleted left unresolved");
-                return EmptyCteRelations;
+                return EmptyResolvedViews;
             }
 
             return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
@@ -979,7 +958,7 @@ public static class TypedPredicateExtractor
             var isNotBetween = node.TernaryExpressionType == BooleanTernaryExpressionType.NotBetween || _negated;
             if (isNotBetween)
             {
-                if (_scopeStack.Count > 0 && _position == PredicatePosition.Seekable)
+                if (ScopeStack.Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT BETWEEN is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
@@ -1014,7 +993,7 @@ public static class TypedPredicateExtractor
                 // wrong cause: fixing the type mismatch would not make this predicate seek. Only
                 // recorded when this would otherwise have been a candidate (real scope, real
                 // filter context) - mirrors every other "not eligible for a verdict" skip below.
-                if (_scopeStack.Count > 0 && _position == PredicatePosition.Seekable)
+                if (ScopeStack.Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 }
@@ -1038,7 +1017,7 @@ public static class TypedPredicateExtractor
 
         public override void Visit(InPredicate node)
         {
-            if (_scopeStack.Count == 0)
+            if (ScopeStack.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
@@ -1064,7 +1043,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
             _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
@@ -1101,7 +1080,7 @@ public static class TypedPredicateExtractor
         /// </summary>
         public override void Visit(SubqueryComparisonPredicate node)
         {
-            if (_scopeStack.Count == 0)
+            if (ScopeStack.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
@@ -1130,7 +1109,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
             _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
@@ -1209,7 +1188,7 @@ public static class TypedPredicateExtractor
 
         private void TryAddFinding(ScalarExpression first, ScalarExpression second, string operatorText, TSqlFragment node)
         {
-            if (_scopeStack.Count == 0)
+            if (ScopeStack.Count == 0)
             {
                 // A comparison genuinely outside any FROM scope - a bare IF @x = 1/WHILE
                 // condition, or any other scalar check with no query underneath it. UPDATE/
@@ -1251,7 +1230,7 @@ public static class TypedPredicateExtractor
             // Innermost scope first, then progressively outer ones - a correlated subquery's
             // predicate can legitimately reference an enclosing query's alias
             // (docs/audit-remediation-plan.md Phase 2.2).
-            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
             _currentPredicateFragment = node;
             var left = ResolveOperand(first, scopeChain);
             var right = ResolveOperand(second, scopeChain);
@@ -1490,7 +1469,7 @@ public static class TypedPredicateExtractor
                 return;
             }
 
-            var catalogColumn = catalog.Find(column.TableQualifiedName, _currentProcScope)?.FindColumn(column.ColumnName);
+            var catalogColumn = catalog.Find(column.TableQualifiedName, CurrentProcScope)?.FindColumn(column.ColumnName);
             if (catalogColumn is not { IsAnsiPadded: false })
             {
                 return;
@@ -1778,7 +1757,7 @@ public static class TypedPredicateExtractor
         private SqlType? ResolveInSubqueryType(ScalarSubquery subquery)
         {
             var innerCtes = CurrentCteRelations();
-            var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, _currentProcScope);
+            var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, CurrentProcScope);
             if (columns.Count != 1)
             {
                 // A genuinely single-output-column subquery is the only shape this pass has a
@@ -1813,7 +1792,7 @@ public static class TypedPredicateExtractor
                 // catalog entry and always reported Indexed=false for any indexed temp
                 // object - a real table was never stored with a scope, so passing one is always
                 // safe (DatabaseCatalog falls back to the unscoped lookup automatically).
-                var matchedIndex = catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.FindIndexedColumn(baseColumn.ColumnName);
+                var matchedIndex = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindIndexedColumn(baseColumn.ColumnName);
                 var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
                 return new PredicateOperand.Column(
                     baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, matchedIndex is not null, baseColumn.Depth, baseColumn,
@@ -1874,7 +1853,7 @@ public static class TypedPredicateExtractor
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             var underlyingBaseColumns = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(provenance)
-                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(bc.ColumnName) ?? false))
+                .Select(bc => new UnderlyingBaseColumn(bc.TableQualifiedName, bc.ColumnName, catalog.Find(bc.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(bc.ColumnName) ?? false))
                 .ToList();
 
             if (underlyingBaseColumns.Count == 0)

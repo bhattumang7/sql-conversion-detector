@@ -79,13 +79,18 @@ public static class NonSargablePredicateScanner
         return (visitor.Findings, visitor.TemporalBoundaryFindings);
     }
 
+    // CS9107: sourcePath/catalog/resolvedViews/ledger are used throughout this class's own body
+    // (way beyond scope resolution) AND forwarded to ScopedSqlVisitorBase for its own, separate
+    // CTE/scope bookkeeping - a deliberate, harmless double capture, not the accidental one this
+    // warning exists to catch. See TypedPredicateExtractor's identical suppression for the full
+    // rationale.
+#pragma warning disable CS9107
     private sealed class Visitor(
         string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, DynamicSqlScope? enclosingScope = null,
-        SkipLedger? ledger = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) : TSqlFragmentVisitor
+        SkipLedger? ledger = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
+        : ScopedSqlVisitorBase(sourcePath, catalog, resolvedViews, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope)
+#pragma warning restore CS9107
     {
-        private readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> _scopeStack = new();
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
-        private string? _currentProcScope = enclosingScope?.ProcScope;
         private bool _inFilterContext;
 
         public List<SargabilityFinding> Findings { get; } = [];
@@ -97,7 +102,7 @@ public static class NonSargablePredicateScanner
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {
-                _cteStack.Push(BuildTriggerPseudoTableRelations(target));
+                PushCteRelations(BuildTriggerPseudoTableRelations(target));
             }
         }
 
@@ -110,7 +115,7 @@ public static class NonSargablePredicateScanner
         /// </summary>
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _scopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
 
             var previous = _inFilterContext;
             _inFilterContext = false;
@@ -129,14 +134,14 @@ public static class NonSargablePredicateScanner
             node.WindowClause?.Accept(this);
 
             _inFilterContext = previous;
-            _scopeStack.Pop();
+            ScopeStack.Pop();
         }
 
         public override void ExplicitVisit(SelectStatement node)
         {
             PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            _cteStack.Pop();
+            PopCteScope();
         }
 
         /// <summary>UPDATE/DELETE/MERGE predicates get the same FROM-scope resolution SELECT gets (docs/audit-remediation-plan.md Phase 4.1's coverage gap, mirrored here for index resolution).</summary>
@@ -144,35 +149,35 @@ public static class NonSargablePredicateScanner
         {
             var spec = node.UpdateSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             base.ExplicitVisit(node);
-            _scopeStack.Pop();
-            _cteStack.Pop();
+            ScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            _scopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, CurrentResolutionContext()));
             base.ExplicitVisit(node);
-            _scopeStack.Pop();
-            _cteStack.Pop();
+            ScopeStack.Pop();
+            PopCteScope();
         }
 
         public override void ExplicitVisit(MergeStatement node)
         {
             var spec = node.MergeSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
-            _scopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
+            ScopeStack.Push(FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, CurrentResolutionContext()));
 
             var previousFilterContext = _inFilterContext;
             _inFilterContext = true;
             base.ExplicitVisit(node);
             _inFilterContext = previousFilterContext;
 
-            _scopeStack.Pop();
-            _cteStack.Pop();
+            ScopeStack.Pop();
+            PopCteScope();
         }
 
         // SelectStatement/UpdateStatement/DeleteStatement/MergeStatement above all push CTE
@@ -189,7 +194,7 @@ public static class NonSargablePredicateScanner
         {
             PushCteScope(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            _cteStack.Pop();
+            PopCteScope();
         }
 
         // Mirrors TypedPredicateExtractor's identical overrides (ScriptDOM's visitor binds
@@ -248,17 +253,17 @@ public static class NonSargablePredicateScanner
 
         private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
         {
-            var previousScope = _currentProcScope;
-            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+            var previousScope = CurrentProcScope;
+            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
             node.AcceptChildren(this);
-            _currentProcScope = previousScope;
+            CurrentProcScope = previousScope;
         }
 
         /// <summary>Mirrors TypedPredicateExtractor's identical override - without it, a #temp table declared in a trigger body resolved under no scope key at all in Tier-1, and inserted/deleted were never visible here regardless.</summary>
         private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
         {
-            var previousScope = _currentProcScope;
-            _currentProcScope = SchemaObjectNameHelper.Qualify(name);
+            var previousScope = CurrentProcScope;
+            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
 
             // A DDL/LOGON trigger has no target object and no inserted/deleted rowset (it gets
             // its data from EVENTDATA()) - nothing to seed, but still walk the body, since it may
@@ -266,15 +271,15 @@ public static class NonSargablePredicateScanner
             if (triggerObject.Name is not { } targetTableName)
             {
                 node.AcceptChildren(this);
-                _currentProcScope = previousScope;
+                CurrentProcScope = previousScope;
                 return;
             }
 
-            _cteStack.Push(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName)));
+            PushCteRelations(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName)));
             node.AcceptChildren(this);
-            _cteStack.Pop();
+            PopCteScope();
 
-            _currentProcScope = previousScope;
+            CurrentProcScope = previousScope;
         }
 
         /// <summary>Mirrors TypedPredicateExtractor's identical helper - inserted/deleted are shaped like the trigger's own target table or view, but never claim its index (they're a version-store rowset with none of their own).</summary>
@@ -633,7 +638,7 @@ public static class NonSargablePredicateScanner
                 return false;
             }
 
-            var column = catalog.Find(table, _currentProcScope)?.FindColumn(columnName);
+            var column = catalog.Find(table, CurrentProcScope)?.FindColumn(columnName);
             return column is { IsNullable: false };
         }
 
@@ -736,7 +741,7 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            var type = catalog.Find(table, _currentProcScope)?.FindColumn(columnName)?.Type;
+            var type = catalog.Find(table, CurrentProcScope)?.FindColumn(columnName)?.Type;
             if (type is not { Category: SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset or SqlTypeCategory.Time, Scale: { } columnScale })
             {
                 return;
@@ -799,7 +804,7 @@ public static class NonSargablePredicateScanner
             }
 
             var collation = tableQualifiedName is { } resolvedTable
-                ? catalog.Find(resolvedTable, _currentProcScope)?.FindColumn(named.Name)?.Type?.Collation
+                ? catalog.Find(resolvedTable, CurrentProcScope)?.FindColumn(named.Name)?.Type?.Collation
                 : null;
             var detail = DescribeCaseFoldRemediation(functionCall.FunctionName.Value, collation);
 
@@ -826,19 +831,19 @@ public static class NonSargablePredicateScanner
         /// </summary>
         private (string? TableQualifiedName, bool? Indexed) ResolveIndexInfo(ColumnReferenceExpression columnRef)
         {
-            if (_scopeStack.Count == 0)
+            if (ScopeStack.Count == 0)
             {
                 return (null, null);
             }
 
-            var scopeChain = _scopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
             var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger);
 
             return provenance switch
             {
                 ColumnProvenance.BaseColumn baseColumn => (
                     baseColumn.TableQualifiedName,
-                    catalog.Find(baseColumn.TableQualifiedName, _currentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false),
+                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false),
 
                 // A multi-statement TVF's own RETURNS TABLE(...) column has no real backing
                 // table, so TableQualifiedName stays null there - but a trigger's inserted/
@@ -853,29 +858,5 @@ public static class NonSargablePredicateScanner
             };
         }
 
-        private void PushCteScope(WithCtesAndXmlNamespaces? withClause)
-        {
-            var currentCtes = CurrentCteRelations();
-            var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger, _currentProcScope);
-            _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
-        }
-
-        private IReadOnlyDictionary<string, ResolvedRelation> CurrentCteRelations() =>
-            _cteStack.Count > 0 ? _cteStack.Peek() : EmptyResolvedViews;
-
-        private FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
-            new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), _currentProcScope, callerScopeByCalleeScope);
-
-        private static Dictionary<string, ResolvedRelation> MergeCtes(
-            IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
-        {
-            var merged = new Dictionary<string, ResolvedRelation>(outer, StringComparer.OrdinalIgnoreCase);
-            foreach (var (name, relation) in inner)
-            {
-                merged[name] = relation;
-            }
-
-            return merged;
-        }
     }
 }
