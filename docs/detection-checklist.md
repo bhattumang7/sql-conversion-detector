@@ -6731,12 +6731,20 @@ verifiable.
         (base owns the scope push/pop, subclasses hook in their own extra
         state) plus a deliberate decision on the ledger discrepancy - left
         open below rather than force-merged.
-  - [ ] **Unify `VisitProcedureOrFunctionBody`/`VisitTriggerBody`/the nine
-        `CreateOrAlter*` overrides** via template-method hooks on
-        `ScopedSqlVisitorBase`, and decide (don't silently pick) whether
-        `NonSargablePredicateScanner`'s `BuildTriggerPseudoTableRelations`
-        should start ledgering a DDL/LOGON trigger's missing target table the
-        way `TypedPredicateExtractor`'s already does.
+  - [x] **Unify `VisitProcedureOrFunctionBody`/`VisitTriggerBody`/the nine
+        `CreateOrAlter*` overrides** — shipped. Moved into
+        `ScopedSqlVisitorBase` as template methods with
+        `OnEnter`/`OnLeaveProcedureOrFunctionBody` and `OnEnterTriggerBody`
+        hooks; `TypedPredicateExtractor` overrides them for its own variable-
+        reset/WITH-RECOMPILE tracking, `NonSargablePredicateScanner` needs
+        neither. Decided the ledger discrepancy: `BuildTriggerPseudoTableRelations`
+        moved to the base outright (not a hook) with the ledger calls
+        included, so `NonSargablePredicateScanner` now also records a DDL/
+        LOGON trigger's missing target table instead of silently returning
+        empty - the gap was a real honesty shortfall in the less-careful
+        copy, not a deliberate design difference worth preserving. Net -56
+        lines while adding that behavior. Full test suite (3,663) passed
+        clean.
   - [x] **Stop re-resolving a column's type after `ResolveIndexInfo` already
         has it** — shipped 2026-08-18, in place of a new `ResolvedColumnFacts`
         abstraction. Turned out narrower than scoped: `ColumnProvenance.
