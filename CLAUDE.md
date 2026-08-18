@@ -57,6 +57,9 @@ committing), do everything else and surface that step in passing.
   `indexed`, `depth` and `origin` (see `PredicateOperand.Column`), and findings
   rank indexed + depth ≥ 1 first. A rule with no predicate to resolve carries
   location and confidence only — it never fills those fields with a guess.
+* When inference is uncertain the answer is `Unknown`, never a guess, and
+  `Unknown`/unanalyzable counts are reported honestly wherever results are
+  published.
 * Every rule states its engine-version sensitivity (2017 interleaved
   execution, 2019 UDF inlining, 2022 CE behavior) rather than assuming one.
 * Pass order is Parsing → Catalog → Lineage → Predicates/Rules → Reporting, and
@@ -64,113 +67,44 @@ committing), do everything else and surface that step in passing.
   resolves against tables only, never views, because view resolution is
   Lineage's job and depending on it would invert the order.
 
-## The conversion type rules (shipped stream — the template; keep exactly right)
-
-* **Only column-side conversion loses the seek.** T-SQL precedence converts the
-  LOWER-precedence side. `varchar` column vs `nvarchar` value/param → the COLUMN
-  converts → seek lost. `nvarchar` column vs `varchar` value → the VALUE converts
-  → harmless (`SeekPreserved`). Direction errors are the #1 way this study dies
-  in public.
-* **Collation is a first-class input.** For `varchar` column vs `nvarchar` value:
-  `SQL_*` collations → `ScanForced`; Windows collations → `RangeSeek`
-  (`GetRangeThroughConvert` — cheaper than a scan, dearer than a seek), and
-  benchmarked separately. Collation unknown and unpinned by the manifest →
-  `Unknown`. Never guess silently.
-* **Precedence matrix** encodes the official T-SQL list; seek/scan ground truth
-  cross-checked against Kehayias' implicit conversion matrix (sqlskills.com) —
-  cite it, but verify every pair we report against our own Docker oracle rather
-  than trusting either source. The Docker instance is standing infrastructure,
-  not a gated resource: run the oracle whenever a rule's real behavior is in
-  question, without waiting for a go-ahead.
-* **Literal typing:** `N'x'` nvarchar, `'x'` varchar, integer literal int, `1.5`
-  numeric(p,s), date literals stay strings until compared.
-* **Syntactic (Tier-1, no type info):** function-wrapped column, CAST/CONVERT on
-  column, column arithmetic, leading-wildcard `LIKE`, non-literal `LIKE` pattern.
-* **Hard cases** — explicit rule with fixtures, or `Unknown`: CASE/COALESCE/
-  NULLIF result typing, mixed-type `IN` lists, `BETWEEN`, computed columns
-  (persisted + indexed can still seek), `sql_variant`, date/time vs string.
-* When inference is uncertain → `Unknown`, never a guess. `Unknown` and
-  unanalyzable counts are reported honestly wherever results are published.
-
 ## Dynamic SQL
 
-`EXEC`/`sp_executesql` arguments are analyzed when they can be **proved
-constant**, then run back through the normal pipeline with findings remapped to
-their true source lines and the call site kept as provenance: literal or literal
-concatenation; `sp_executesql`'s own params declaration for exact parameter
-types; and reaching-definitions tracing of DECLARE/SET/SELECT chains through
-straight-line code, recursing up to 5 levels. Anything not provably constant is
-reported with a machine-readable reason and counted in `DynamicSqlSummary` —
-never silently counted as clean. Soundness first: no heuristic string guessing.
+`EXEC`/`sp_executesql` arguments are analyzed only when they can be **proved
+constant**, and findings from them remap to their true source lines with the
+call site kept as provenance. Anything not provably constant is reported with a
+machine-readable reason and counted in `DynamicSqlSummary` — never silently
+counted as clean. Soundness first: no heuristic string guessing.
 
-## Verification and benchmarks
+## Verification
 
 * **Oracle is plan-XML based, never plan-shape based.** A conversion finding is
   confirmed iff the plan contains `CONVERT_IMPLICIT` applied to the COLUMN side
-  of the predicate; each new stream defines its own equally-specific plan-XML
-  marker (the checklist records them). Whether a tiny table happened to seek
+  of the predicate; every stream defines its own equally-specific marker
+  (`detection-reference.md` Appendix 1). Whether a tiny table happened to seek
   or scan is irrelevant.
-* Per repo: deploy DDL to a fresh database → diff inferred view column
-  types/collations against `sys.columns` (any mismatch is a P0 lineage bug) →
-  for each `ScanForced` finding, submit a self-authored probe `SELECT` under
-  `SET SHOWPLAN_XML ON` (compile-only, empty tables). The plain `sys.columns`
-  diff is sound here because the DDL was just deployed and nothing has been
-  altered since — staleness is structurally impossible.
-* `scan-db`'s lineage parity gate can't assume that: a live target may have had
-  a base column retyped years after a view over it was last altered, and SQL
-  Server never refreshes a view's or inline TVF's cached column metadata when
-  that happens (short of `sp_refreshview`/`sp_refreshsqlmodule`). So for a view
-  or inline TVF, ground truth is what the engine computes **right now**
+* Lineage parity uses whatever is actually authoritative for the object: for a
+  view or inline TVF on a live target, the engine's answer right now
   (`sys.dm_exec_describe_first_result_set`), never its cached `sys.columns`
-  row; disagreement is a P0 lineage bug and fails the scan. An object the
-  server can no longer compile, and an object whose cached metadata has merely
-  drifted from a live answer our inference agrees with, are conditions of the
-  scanned database rather than tool bugs — reported prominently, neither fails
-  the scan. Base tables and multi-statement TVFs keep the plain
-  `sys.columns`/authored-shape diff: a base table's `sys.columns` *is* its
-  definition, and an MSTVF's shape is its own `RETURNS @t TABLE(...)` clause.
+  row — see `detection-reference.md` Appendix 8 for why. A disagreement there
+  is a P0 lineage bug and fails the scan; a database's own stale metadata or
+  an object the server can no longer compile is reported, never failed on.
 * Static verdicts never depend on the cardinality estimator — they state what
-  the predicate makes possible for the engine. Benchmarks pin compat level 160
-  and MAXDOP 1, and sweep both CE modes and both collation families so the
-  numbers can't be dismissed. Median of 5 warm runs; CSV out.
-* The study reports only oracle-confirmed findings; static-only findings go in
-  an appendix.
-
-## Corpus
-
-`corpus/manifest.json` is checked in and pins repo URL, commit SHA, license, DDL
-vs proc paths, and declared/assumed collation. Only repos whose SQL is plausibly
-SQL Server (GO separators, bracket quoting, `dbo.`) are curated into the manifest
-in the first place. ScriptDOM parse success ≥ 90% of a repo's files is the
-dialect-sniffing bar (`ParseHealthReport.PassesDialectSniffing`) both
-`scan-corpus` and `verify-corpus` check per repo: a repo that falls below it
-gets a loud warning and a non-zero exit code (findings are still reported,
-never silently dropped) rather than scanning as if it were clean — a MySQL
-file parsed as T-SQL is noise, and this is what catches it. Do not invent our
-own corpus or hand-write repros: rule fixtures come from real, internet-sourced
-bugs.
-
-The **study** (prevalence/cost numbers across public repos) is written only
-when it's actually about to be published: run the full scan-corpus/
-verify-corpus/bench pipeline fresh and write the narrative from those live
-numbers. Never maintain it as a standing checked-in file and never hand-edit a
-previously-written paragraph.
-
-Ethics: aggregate stats are public, no maintainer outreach required, no GitHub
-issues or PRs filed on scanned repos, never name-and-shame in tone. Nothing gets
-published externally without Umang's explicit go-ahead.
+  the predicate makes possible for the engine.
 
 ## Working agreements
 
 * **Correct on the first pass.** No placeholders, dummy values, or TODOs left to
   clean up later. Leaving an edge case unimplemented is fine; faking it is not.
-* **Tests:** xUnit; fixtures in `tests/SilentScan.Tests/fixtures/`, named
-  `RULEID_fires.sql` / `RULEID_clean.sql`. Every rule ships a fixture it fires
-  on, a near-miss it stays quiet on, and an oracle test if it's verdict-bearing.
-  Keep a real balance of unit and integration tests. Fixtures must be repeatable
-  and clean up unconditionally; no flaky state across runs. No numeric coverage
-  target — the bar is that every rule's fire/near-miss/oracle triple exists and
-  asserts the real thing.
+* **Tests:** every rule ships a fixture it fires on, a near-miss it stays quiet
+  on, and an oracle test if it's verdict-bearing — named `RULEID_fires.sql` /
+  `RULEID_clean.sql`, and drawn from real, internet-sourced bugs rather than
+  invented repros. Fixtures are repeatable and clean up unconditionally; no
+  flaky state across runs. No numeric coverage target: the bar is that the
+  triple exists and asserts the real thing.
+* **Verify against our own oracle**, never a published matrix alone — the
+  Docker instance is standing infrastructure, not a gated resource, so run it
+  whenever a rule's real behavior is in question without waiting for a
+  go-ahead.
 * **Quality gates:** build (warnings are errors) and test clean before every
   commit. The Sonar scan (`sonar-scan.ps1` — scans, waits for processing,
   prints the result; `-Verbose` for full output) runs when a logical unit of
@@ -180,6 +114,13 @@ published externally without Umang's explicit go-ahead.
   that.
 * Deterministic output ordering. No network calls in Core. Findings schema is
   versioned JSON; SARIF export doubles the tool as a CI gate.
+* **Publishing:** nothing goes out externally without Umang's explicit
+  go-ahead. Aggregate stats only, no maintainer outreach, no issues or PRs
+  filed on scanned repos, never name-and-shame in tone. The study is written
+  only when it's actually about to be published — run the pipeline fresh and
+  write the narrative from those live numbers, never maintaining it as a
+  standing checked-in file or hand-editing a previously-written paragraph. It
+  reports only oracle-confirmed findings; static-only ones go in an appendix.
 * **Git:** conventional commits, authored as Umang Bhatt
   <bhatt.umang7@gmail.com>. Never credit Claude or any other model/company as
   co-author. Commit messages say what changed and why — never "resolve item
