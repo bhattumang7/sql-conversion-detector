@@ -3,432 +3,827 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SilentScan</title>
-<meta name="description" content="A static analyzer for SQL Server / T-SQL that finds the bugs only the query plan reveals — implicit conversions, silent data loss, and lineage-aware sargability — verified against real plan XML.">
+<title>SilentScan — the bugs SQL Server never warns you about</title>
+<meta name="description" content="A free static analyzer for SQL Server / T-SQL. 234 rules across 11 families, read from your code and schema — no execution plan needed. Runs locally against a dev copy, so silent defects are caught on your machine, not in production.">
+<meta property="og:title" content="SilentScan — the bugs SQL Server never warns you about">
+<meta property="og:description" content="Free static analyzer for SQL Server / T-SQL. 234 rules read from code and schema — no execution plan needed. Runs locally and read-only.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #eef2f6;
-    --panel: #e2e9f0;
-    --fg: #12202e;
-    --muted: #56687b;
-    --border: #c7d2dc;
-    --code-bg: #dde5ed;
-    --seek: #0f7d92;
-    --seek-bg: #dcf1f3;
-    --scan: #b5501a;
-    --scan-bg: #fbe6d8;
-    --rule: #b9c6d2;
+    color-scheme: dark light;
+
+    --ink: #080d13;
+    --ink-2: #0c131b;
+    --panel: #111922;
+    --panel-2: #15202b;
+    --edge: #26313d;
+    --edge-soft: #1b242e;
+    --fg: #edeee9;
+    --dim: #94a0aa;
+    --faint: #6a7681;
+
+    --signal: #f0a936;
+    --signal-bg: rgba(240, 169, 54, 0.11);
+    --solid: #f0a936;
+    --solid-fg: #17120a;
+    --alert: #fb5138;
+    --alert-bg: rgba(251, 81, 56, 0.12);
+    --accent: #f0a936;
+    --accent-bg: rgba(240, 169, 54, 0.1);
+
+    --grid: rgba(255, 255, 255, 0.026);
+    --glow: rgba(240, 169, 54, 0.1);
+    --shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 18px 40px -24px rgba(0,0,0,0.9);
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --gut: clamp(1.15rem, 4vw, 2.5rem);
+    --wide: 1120px;
   }
-  @media (prefers-color-scheme: dark) {
+
+  @media (prefers-color-scheme: light) {
     :root {
-      --bg: #0b1420;
-      --panel: #101d2c;
-      --fg: #dbe6f0;
-      --muted: #7e93a8;
-      --border: #223447;
-      --code-bg: #0e1b28;
-      --seek: #63d4e6;
-      --seek-bg: #0e2b30;
-      --scan: #ef9455;
-      --scan-bg: #35210f;
-      --rule: #1c2c3c;
+      --ink: #f1f3f6;
+      --ink-2: #ffffff;
+      --panel: #ffffff;
+      --panel-2: #f8f9fb;
+      --edge: #dde2e8;
+      --edge-soft: #e8ecf1;
+      --fg: #0f141a;
+      --dim: #545e68;
+      --faint: #808a94;
+
+      --signal: #9a6100;
+      --signal-bg: rgba(154, 97, 0, 0.09);
+      --solid: #b3730a;
+      --solid-fg: #ffffff;
+      --alert: #b8351d;
+      --alert-bg: rgba(184, 53, 29, 0.09);
+      --accent: #8f5a00;
+      --accent-bg: rgba(154, 97, 0, 0.08);
+
+      --grid: rgba(15, 20, 26, 0.034);
+      --glow: rgba(154, 97, 0, 0.09);
+      --shadow: 0 1px 2px rgba(11,21,32,0.04), 0 18px 40px -30px rgba(11,21,32,0.35);
     }
   }
+
   * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
   body {
     margin: 0;
-    background: var(--bg);
+    background: var(--ink);
     color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    line-height: 1.65;
-  }
-  main {
-    max-width: 780px;
-    margin: 0 auto;
-    padding: 4rem 1.5rem 6rem;
-  }
-  .mono {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  }
-  .eyebrow {
-    display: block;
-    font-size: 0.78rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 1.1rem;
-  }
-  .eyebrow .dot {
-    color: var(--scan);
-  }
-  h1 {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    font-weight: 600;
-    font-size: 2.5rem;
-    line-height: 1.18;
-    letter-spacing: -0.01em;
-    margin: 0 0 1.3rem;
-  }
-  .tagline {
-    color: var(--muted);
-    font-size: 1.08rem;
-    max-width: 46ch;
-    margin: 0 0 2.5rem;
+    font-family: var(--body);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* --- signature: plan-diff panel --- */
-  .plandiff {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--panel);
-    padding: 1.4rem 1.5rem 1.6rem;
-    margin: 0 0 2.75rem;
-  }
-  .plandiff .stmt {
-    font-size: 0.86rem;
-    color: var(--muted);
-    margin-bottom: 1.1rem;
-  }
-  .plandiff .stmt .col { color: var(--fg); }
-  .plandiff .rows {
-    display: grid;
-    gap: 0.6rem;
-  }
-  .plandiff .row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    gap: 1rem;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 0.65rem 0.85rem;
-    background: var(--bg);
-  }
-  .plandiff .row .expr { font-size: 0.85rem; }
-  .plandiff .row .expr .hi { color: var(--scan); }
-  .plandiff .row.ok .expr .hi { color: var(--seek); }
-  .plandiff .verdict {
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.28rem 0.6rem;
-    border-radius: 5px;
-    white-space: nowrap;
-  }
-  .row.bad .verdict { color: var(--scan); background: var(--scan-bg); }
-  .row.ok .verdict { color: var(--seek); background: var(--seek-bg); }
-  .plandiff .footnote {
-    margin-top: 1rem;
-    font-size: 0.78rem;
-    color: var(--muted);
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(900px 420px at 50% -140px, var(--glow), transparent 70%),
+      repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 88px),
+      repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 88px);
   }
 
-  .chain {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--panel);
-    padding: 1.3rem 1.5rem 1.5rem;
-    margin: 0 0 2.75rem;
+  .wrap { position: relative; z-index: 1; max-width: var(--wide); margin: 0 auto; padding: 0 var(--gut); }
+  .mono { font-family: var(--mono); }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--ink) 82%, transparent);
+    backdrop-filter: blur(14px) saturate(1.3);
+    border-bottom: 1px solid var(--edge-soft);
   }
-  .chain .lede {
-    font-size: 0.86rem;
-    color: var(--muted);
-    margin-bottom: 1.1rem;
-  }
-  .chain .hops {
+  .navrow {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.25rem;
+    height: 58px;
+  }
+  .brand {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 0.98rem;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+    display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.82rem;
+    margin-right: auto;
   }
-  .chain .hop {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    padding: 0.45rem 0.7rem;
+  .brand:hover { text-decoration: none; }
+  .brand .caret {
+    width: 9px; height: 17px;
+    background: var(--signal);
+    border-radius: 1px;
+    box-shadow: 0 0 12px var(--signal);
   }
-  .chain .hop .k {
-    display: block;
-    font-size: 0.68rem;
-    letter-spacing: 0.04em;
+  .navlink { color: var(--dim); font-size: 0.9rem; }
+  .navlink:hover { color: var(--fg); text-decoration: none; }
+  .pill {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--signal);
+    background: var(--signal-bg);
+    border: 1px solid color-mix(in srgb, var(--signal) 35%, transparent);
+    border-radius: 100px;
+    padding: 0.2rem 0.6rem;
+  }
+  @media (max-width: 620px) { .navlink.hide-sm { display: none; } }
+
+  /* ---------- hero ---------- */
+  header.hero { padding: clamp(3.5rem, 9vw, 7rem) 0 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+  }
+  .eyebrow b { color: var(--signal); font-weight: 500; }
+  .eyebrow .sep { color: var(--edge); }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(2.5rem, 7.4vw, 4.6rem);
+    line-height: 0.98;
+    letter-spacing: -0.038em;
+    margin: 0 0 1.5rem;
+    max-width: 16ch;
+  }
+  h1 em { font-style: normal; color: var(--dim); }
+
+  .lede {
+    font-size: clamp(1.02rem, 1.9vw, 1.2rem);
+    color: var(--dim);
+    max-width: 60ch;
+    margin: 0 0 2.1rem;
+  }
+  .lede strong { color: var(--fg); font-weight: 500; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--mono);
+    font-size: 0.92rem;
+    font-weight: 500;
+    padding: 0.72rem 1.15rem;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn-primary {
+    background: var(--solid);
+    color: var(--solid-fg);
+    box-shadow: 0 10px 30px -16px color-mix(in srgb, var(--solid) 80%, transparent);
+  }
+  .btn-primary:hover { box-shadow: 0 16px 36px -16px color-mix(in srgb, var(--solid) 90%, transparent); }
+  .btn-ghost { border-color: var(--edge); color: var(--fg); background: var(--panel); }
+  .btn-ghost:hover { border-color: var(--accent); }
+  .cta-note { font-size: 0.85rem; color: var(--faint); font-family: var(--mono); }
+
+  /* ---------- signature: the silence readout ---------- */
+  .readout {
+    position: relative;
+    overflow: hidden;
+    margin: clamp(2.5rem, 6vw, 4rem) 0 0;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    box-shadow: var(--shadow);
+  }
+  .readout .head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.7rem 1.15rem;
+    border-bottom: 1px solid var(--edge-soft);
+    font-family: var(--mono);
+    font-size: 0.73rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .readout .head .tag { color: var(--alert); }
+  .readout .body { padding: 1.4rem 1.15rem 1.15rem; }
+  .readout .stmt {
+    font-family: var(--mono);
+    font-size: clamp(0.95rem, 2.4vw, 1.22rem);
+    letter-spacing: -0.01em;
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 0.2rem;
+  }
+  .readout .stmt .kw { color: var(--faint); }
+  .readout .stmt .col { color: var(--fg); }
+  .readout .stmt .var { color: var(--alert); }
+
+  .lane {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    align-items: center;
+    gap: 0 1rem;
+    padding: 0.7rem 0;
+    border-top: 1px dashed var(--edge-soft);
+  }
+  .lane .who {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .lane .trace { display: block; width: 100%; height: 34px; }
+  .lane .verdict {
+    grid-column: 2;
+    font-family: var(--mono);
+    font-size: 0.83rem;
+    margin-top: 0.15rem;
+  }
+  .lane.quiet .verdict { color: var(--faint); }
+  .lane.loud .verdict { color: var(--alert); }
+  .lane.loud .verdict b { font-weight: 500; }
+  @media (max-width: 560px) {
+    .readout .stmt .clip { display: none; }
+    .lane { grid-template-columns: 1fr; gap: 0.3rem; }
+    .lane .verdict { grid-column: 1; }
+  }
+
+  .readout .foot {
+    border-top: 1px solid var(--edge-soft);
+    padding: 1rem 1.15rem 1.1rem;
+    font-size: 0.88rem;
+    color: var(--dim);
+    margin: 1.15rem -1.15rem -1.15rem;
+  }
+  .readout .foot code { color: var(--fg); }
+
+  .sweep {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 140px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--signal) 14%, transparent), transparent);
+    opacity: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .sweep { animation: sweep 6.5s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+    @keyframes sweep {
+      0%   { transform: translateX(-160px); opacity: 0; }
+      12%  { opacity: 1; }
+      70%  { opacity: 1; }
+      82%, 100% { transform: translateX(1200px); opacity: 0; }
+    }
+  }
+
+  /* ---------- stat rail ---------- */
+  .rail {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 1.25rem;
+    background: var(--panel);
+  }
+  .rail div { padding: 1.05rem 1rem; border-left: 1px solid var(--edge-soft); }
+  .rail div:first-child { border-left: 0; }
+  .rail .n {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 1.85rem;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+  .rail .l {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-top: 0.15rem;
+  }
+  @media (max-width: 640px) {
+    .rail { grid-template-columns: repeat(2, 1fr); }
+    .rail div:nth-child(3) { border-left: 0; }
+    .rail div:nth-child(n+3) { border-top: 1px solid var(--edge-soft); }
+  }
+
+  /* ---------- sections ---------- */
+  section { padding: clamp(3.5rem, 8vw, 6.5rem) 0 0; }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 0.9rem;
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(1.7rem, 3.6vw, 2.4rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    margin: 0 0 1rem;
+    max-width: 22ch;
+  }
+  .sub { color: var(--dim); max-width: 62ch; margin: 0 0 2.2rem; }
+  p { margin: 0 0 1rem; }
+
+  /* ---------- the loop ---------- */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 800px) { .steps { grid-template-columns: 1fr; } }
+  .step {
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--panel);
+    padding: 1.3rem 1.25rem 1.4rem;
+    position: relative;
+  }
+  .step .no {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    display: block;
+    margin-bottom: 0.85rem;
+  }
+  .step h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.12rem;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.45rem;
+  }
+  .step p { color: var(--dim); font-size: 0.93rem; margin: 0; }
+  .step code { background: var(--ink-2); border: 1px solid var(--edge-soft); }
+
+  /* ---------- families ---------- */
+  .families { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--edge-soft); border: 1px solid var(--edge); border-radius: 12px; overflow: hidden; }
+  @media (max-width: 900px) { .families { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .families { grid-template-columns: 1fr; } }
+  .fam { background: var(--panel); padding: 1.25rem 1.2rem 1.35rem; transition: background 0.18s ease; }
+  .fam:hover { background: var(--panel-2); }
+  .fam h3 {
+    font-size: 0.98rem;
+    font-weight: 500;
+    font-family: var(--body);
+    margin: 0 0 0.4rem;
+    letter-spacing: -0.01em;
+  }
+  .fam p { color: var(--dim); font-size: 0.885rem; margin: 0; }
+  .fam code { font-size: 0.85em; }
+  .fam-cta { display: block; color: inherit; background: var(--panel-2); }
+  .fam-cta:hover { text-decoration: none; background: var(--accent-bg); }
+  .fam-cta h3 { color: var(--accent); }
+
+  /* ---------- split panels ---------- */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+  .card {
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--panel);
+    padding: 1.4rem 1.35rem 1.5rem;
+  }
+  .card h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.08rem;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.6rem;
+  }
+  .card p { color: var(--dim); font-size: 0.92rem; }
+  .card p:last-child { margin-bottom: 0; }
+
+  .hops { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.4rem; margin: 1.1rem 0 0.9rem; }
+  .hop {
+    border: 1px solid var(--edge-soft);
+    border-radius: 8px;
+    background: var(--ink-2);
+    padding: 0.5rem 0.7rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+  }
+  .hop .k {
+    display: block;
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
     margin-bottom: 0.15rem;
   }
-  .chain .arrow {
-    color: var(--muted);
-    flex: 0 0 auto;
-  }
-  .chain .badge {
+  .arrow { color: var(--edge); align-self: center; }
+  .badge {
     display: inline-block;
-    margin-top: 1.1rem;
-    font-size: 0.78rem;
-    color: var(--seek);
-    background: var(--seek-bg);
-    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--signal);
+    background: var(--signal-bg);
+    border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent);
+    border-radius: 7px;
     padding: 0.3rem 0.6rem;
   }
 
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
-    background: var(--border);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-    margin-bottom: 3rem;
-  }
-  .stats div {
-    background: var(--panel);
-    padding: 1rem 0.75rem;
-    text-align: center;
-  }
-  .stats .n {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 1.5rem;
-    font-weight: 600;
-  }
-  .stats .l {
-    font-size: 0.72rem;
-    color: var(--muted);
-    letter-spacing: 0.03em;
-    margin-top: 0.15rem;
-  }
-  @media (max-width: 560px) {
-    .stats { grid-template-columns: repeat(2, 1fr); }
-  }
+  /* ---------- checklist ---------- */
+  .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.9rem; max-width: 78ch; }
+  .checks li { display: grid; grid-template-columns: 1.4rem 1fr; gap: 0.6rem; color: var(--dim); font-size: 0.95rem; }
+  .checks li b { color: var(--fg); font-weight: 500; }
+  .checks .mark { color: var(--signal); font-family: var(--mono); }
 
-  h2 {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.85rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-weight: 600;
-    margin: 3rem 0 1.1rem;
-    padding-bottom: 0.6rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .families {
-    display: grid;
-    gap: 1.1rem;
-  }
-  .families dt {
-    font-weight: 600;
-    font-size: 0.95rem;
-    margin-bottom: 0.2rem;
-  }
-  .families dd {
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-
-  p { margin: 0 0 1rem; }
-  code, pre {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: var(--code-bg);
-    border-radius: 6px;
-  }
-  code { padding: 0.15em 0.4em; font-size: 0.87em; }
+  /* ---------- code block ---------- */
   pre {
-    padding: 1rem 1.1rem;
+    font-family: var(--mono);
+    background: var(--ink-2);
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    padding: 1.15rem 1.2rem;
     overflow-x: auto;
-    font-size: 0.84em;
-    border: 1px solid var(--border);
-  }
-  a { color: var(--seek); text-decoration-color: var(--border); text-underline-offset: 3px; }
-  a:hover { text-decoration-color: currentColor; }
-  a:focus-visible, button:focus-visible {
-    outline: 2px solid var(--seek);
-    outline-offset: 2px;
-  }
-  .rulelink {
-    display: inline-block;
-    margin-top: 0.3rem;
-    font-size: 0.92rem;
-  }
-  footer {
-    margin-top: 4rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
-    color: var(--muted);
     font-size: 0.85rem;
+    line-height: 1.85;
+    margin: 0 0 1.1rem;
   }
-  footer a { color: var(--muted); }
+  pre .c { color: var(--faint); }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+  code {
+    font-family: var(--mono);
+    background: var(--panel-2);
+    border-radius: 5px;
+    padding: 0.12em 0.38em;
+    font-size: 0.87em;
+  }
 
+  /* ---------- closing cta ---------- */
+  .close {
+    margin-top: clamp(3.5rem, 8vw, 6.5rem);
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    background: linear-gradient(160deg, var(--panel-2), var(--panel));
+    padding: clamp(2rem, 5vw, 3.2rem);
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+  .close h2 { margin: 0 auto 0.8rem; max-width: 18ch; }
+  .close .sub { margin: 0 auto 1.8rem; }
+  .close .cta { justify-content: center; }
+
+  footer {
+    margin-top: 3rem;
+    padding: 1.6rem 0 3.5rem;
+    border-top: 1px solid var(--edge-soft);
+    color: var(--faint);
+    font-size: 0.85rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1.5rem;
+    justify-content: space-between;
+  }
+  footer a { color: var(--dim); }
+
+  /* ---------- motion ---------- */
   @media (prefers-reduced-motion: no-preference) {
-    .plandiff, h1, .tagline, .chain, .stats { animation: rise 0.5s ease-out both; }
-    .chain { animation-delay: 0.05s; }
-    .stats { animation-delay: 0.1s; }
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+    .rise { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.2, 0.7, 0.3, 1); }
+    .rise.in { opacity: 1; transform: none; }
+    .d1 { transition-delay: 0.06s; } .d2 { transition-delay: 0.12s; } .d3 { transition-delay: 0.18s; }
   }
 </style>
 </head>
 <body>
-<main>
 
-  <span class="eyebrow">Static analysis <span class="dot">·</span> SQL Server / T-SQL</span>
-  <h1>Finds the bugs that only<br>show up in the query plan.</h1>
-  <p class="tagline">
-    SilentScan connects to a real SQL Server database — a disposable dev
-    copy, never assumed to be production — and reads its catalog straight
-    from engine metadata instead of guessing from parsed DDL text. It
-    resolves lineage through views and table-valued functions down to the
-    base column, and confirms every plan claim against a real plan, never
-    a guess from plan shape.
-  </p>
+<nav>
+  <div class="wrap navrow">
+    <a class="brand" href="#top"><span class="caret" aria-hidden="true"></span>silentscan</a>
+    <a class="navlink" href="rules.html">234 rules</a>
+    <a class="navlink hide-sm" href="#loop">How it works</a>
+    <a class="navlink" href="https://github.com/bhattumang7/mssql-silentscan">GitHub</a>
+    <span class="pill">Free</span>
+  </div>
+</nav>
 
-  <div class="plandiff" aria-label="Example: direction-aware implicit conversion">
-    <div class="stmt mono">
-      <span class="col">orders.OrderCode</span> <span style="opacity:.6">varchar(20)</span> compared against a caller's value —
-      same mismatch, opposite direction:
+<main id="top">
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow rise in">
+      <b>Free to use</b><span class="sep">/</span>SQL Server &amp; T-SQL<span class="sep">/</span>runs on your machine
     </div>
-    <div class="rows">
-      <div class="row bad">
-        <span class="expr mono">WHERE OrderCode = <span class="hi">@code</span> <span style="opacity:.55">-- @code nvarchar(20)</span></span>
-        <span class="verdict">column converted &middot; scan</span>
-      </div>
-      <div class="row ok">
-        <span class="expr mono">WHERE OrderCode = <span class="hi">CAST(@code AS varchar(20))</span></span>
-        <span class="verdict">value converted &middot; seek</span>
-      </div>
-    </div>
-    <p class="footnote">
-      T-SQL always converts the lower-precedence side. When that's the
-      column, the index seek silently becomes a scan — no error, no warning,
-      just a slower plan the next time someone looks. SilentScan only calls
-      the first one a finding, and only after the plan XML shows
-      <code>CONVERT_IMPLICIT</code> sitting on the column side of the predicate.
+    <h1 class="rise in d1">The bugs SQL Server never warns you about.</h1>
+    <p class="lede rise in d2">
+      SilentScan is a static analyzer for T-SQL. <strong>234 rules</strong> read
+      your code and your database's real catalog, and resolve lineage through
+      views and functions down to the base column. <strong>No execution plan
+      needed</strong> — nothing has to run first. Point it at a dev copy and it
+      finds what compiles, runs, returns the right rows on test data — and is
+      still wrong.
     </p>
-  </div>
+    <div class="cta rise in d3">
+      <a class="btn btn-primary" href="https://github.com/bhattumang7/mssql-silentscan">Get it on GitHub &rarr;</a>
+      <a class="btn btn-ghost" href="rules.html">Browse the rule catalog</a>
+      <span class="cta-note">Free &middot; read-only &middot; nothing leaves your machine</span>
+    </div>
 
-  <div class="chain" aria-label="Example: a finding traced through dynamic SQL and two nested views">
-    <p class="lede">
-      Most static analyzers stop at whichever layer they parse first — a
-      raw SQL string, or one view's own column list. SilentScan doesn't
-      stop there. A dynamic-SQL string proven constant at compile time is
-      reparsed and handed back into the <em>same</em> lineage resolver
-      static SQL uses — so a predicate buried inside <code>EXEC(@sql)</code>,
-      against a view built on another view, still traces to the real base
-      column:
+    <div class="readout rise in d3" aria-label="Example: a silent implicit conversion">
+      <div class="sweep" aria-hidden="true"></div>
+      <div class="head">
+        <span class="tag">Silent failure</span>
+        <span>orders.OrderCode varchar(20) &middot; @code nvarchar(20)</span>
+      </div>
+      <div class="body">
+        <div class="stmt">
+          <span class="clip"><span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="col">orders</span> </span><span class="kw">WHERE</span> <span class="col">OrderCode</span> = <span class="var">@code</span>
+        </div>
+
+        <div class="lane quiet">
+          <span class="who">SQL Server</span>
+          <svg class="trace" viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0 17 H600" fill="none" stroke="currentColor" stroke-width="1.25" opacity="0.32"/>
+          </svg>
+          <span class="verdict">no error &middot; no warning &middot; no log entry</span>
+        </div>
+
+        <div class="lane loud">
+          <span class="who">SilentScan</span>
+          <svg class="trace" viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0 17 H286 L300 3 L314 31 L326 17 H600" fill="none" stroke="var(--alert)" stroke-width="1.6"/>
+          </svg>
+          <span class="verdict"><b>column converted, not the value</b> &middot; index seek lost &middot; read from the types alone</span>
+        </div>
+
+        <p class="foot">
+          T-SQL always converts the lower-precedence side. When that side is the
+          column, the seek quietly becomes a scan — same results, more reads,
+          every time it runs. Flip the cast to the parameter and the seek comes
+          back. Two declared types and a predicate are all it takes to know
+          that, so SilentScan says it without running the query. The execution
+          plan is where the rule was <em>proven</em>, not where the finding
+          comes from.
+        </p>
+      </div>
+    </div>
+
+    <div class="rail rise">
+      <div><div class="n">234</div><div class="l">rules</div></div>
+      <div><div class="n">11</div><div class="l">families</div></div>
+      <div><div class="n">150</div><div class="l">fire / near-miss fixtures</div></div>
+      <div><div class="n">0</div><div class="l">guessed verdicts</div></div>
+    </div>
+  </div>
+</header>
+
+<section id="loop">
+  <div class="wrap">
+    <div class="kicker rise">The loop</div>
+    <h2 class="rise">Caught on your machine, not in production.</h2>
+    <p class="sub rise">
+      Every rule is provable from the code and the schema, which is what lets
+      the scan run before the commit instead of after the incident. That matters
+      most for SQL nobody read closely — the kind an assistant drafts in seconds
+      and a reviewer skims because it looks fine.
     </p>
-    <div class="hops mono">
-      <div class="hop"><span class="k">app code</span>EXEC('...WHERE Col = N''x''')</div>
-      <span class="arrow">&rarr;</span>
-      <div class="hop"><span class="k">reparsed</span>view vw_T_L2</div>
-      <span class="arrow">&rarr;</span>
-      <div class="hop"><span class="k">resolved</span>view vw_T_L1</div>
-      <span class="arrow">&rarr;</span>
-      <div class="hop"><span class="k">resolved</span>dbo.T.Col</div>
+    <div class="steps">
+      <div class="step rise">
+        <span class="no">01</span>
+        <h3>Write</h3>
+        <p>You or your AI assistant drafts the SQL. It compiles and it passes the smoke test — that was never the hard part.</p>
+      </div>
+      <div class="step rise d1">
+        <span class="no">02</span>
+        <h3>Scan</h3>
+        <p>Run <code>scan-db</code> against a disposable dev copy. It reads the catalog and your module text — no plan, no workload, nothing executed.</p>
+      </div>
+      <div class="step rise d2">
+        <span class="no">03</span>
+        <h3>Fix</h3>
+        <p>Findings come back as JSON or SARIF with rule id, location, base column and the evidence behind the verdict. Fix, re-scan, watch it disappear.</p>
+      </div>
     </div>
-    <span class="badge">depth 2 &middot; CONVERT_IMPLICIT confirmed against a real plan</span>
   </div>
+</section>
 
-  <div class="stats">
-    <div><div class="n">234</div><div class="l">rules</div></div>
-    <div><div class="n">11</div><div class="l">detection families</div></div>
-    <div><div class="n">150</div><div class="l">fire / near-miss fixtures</div></div>
-    <div><div class="n">0</div><div class="l">guessed verdicts</div></div>
+<section>
+  <div class="wrap">
+    <div class="kicker rise">Coverage</div>
+    <h2 class="rise">Eleven families. One finding schema.</h2>
+    <p class="sub rise">
+      Some rules are oracle-backed and carry a verdict about what the plan will
+      do. Some are pure catalog facts. Some are syntax-only and cheap. All of
+      them read the same code and schema, report the same way, filter the same
+      way, and gate CI the same way.
+    </p>
+    <div class="families rise">
+      <div class="fam">
+        <h3>Conversions &amp; silent write loss</h3>
+        <p>Direction- and collation-aware conversion detection — column side vs. value side, inherited through views and dynamic SQL — plus DML that truncates or rounds your data with no engine error at all.</p>
+      </div>
+      <div class="fam">
+        <h3>Sargability &amp; index shape</h3>
+        <p>Function-wrapped columns, leading-wildcard <code>LIKE</code>, column arithmetic, and composite-index predicates that constrain a trailing key while leaving the leading one wide open.</p>
+      </div>
+      <div class="fam">
+        <h3>Lineage metrics</h3>
+        <p>The numbers that need the lineage pass to exist at all: real join width after every view and function expands, nested-view depth, CTEs re-run once per reference.</p>
+      </div>
+      <div class="fam">
+        <h3>Catalog &amp; database config</h3>
+        <p>Untrusted foreign keys and CHECK constraints, cascading deletes, collation drift, temporal history tables missing the current table's indexes, and database options that quietly cost you.</p>
+      </div>
+      <div class="fam">
+        <h3>Plan shape &amp; correctness</h3>
+        <p>Multi-statement functions used as row-count fences, scalar UDFs that block inlining, forced-serial constructs, and predicates that defeat cached-plan cardinality sniffing.</p>
+      </div>
+      <div class="fam">
+        <h3>Control flow &amp; transactions</h3>
+        <p><code>BEGIN TRANSACTION</code> with no guaranteed commit path, a <code>TRUNCATE</code> whose failure a <code>CATCH</code> swallows, an <code>OUTPUT</code> parameter left unassigned on some return path.</p>
+      </div>
+      <div class="fam">
+        <h3>Dynamic SQL</h3>
+        <p>Text that can be <em>proven</em> constant is analyzed exactly like static SQL, remapped to its real source line. Anything unprovable is counted and reported, never quietly treated as clean.</p>
+      </div>
+      <div class="fam">
+        <h3>Index &amp; physical design</h3>
+        <p>Unindexed foreign keys, duplicate and prefix-subsumed indexes, clustering-key quality, and identity ranges heading for exhaustion — the catalog half of a DBA review.</p>
+      </div>
+      <div class="fam">
+        <h3>Query anti-patterns</h3>
+        <p>Row-by-row DML, cursors without <code>LOCAL</code>, <code>MERGE</code> without <code>HOLDLOCK</code>, recursive CTEs with no <code>MAXRECURSION</code>, <code>DISTINCT</code> masking a join fan-out.</p>
+      </div>
+      <div class="fam">
+        <h3>Triggers &amp; cross-module</h3>
+        <p>Triggers that collapse a multi-row <code>inserted</code> set into one scalar, triggers re-entering their own table, and write ordering across two procedures that only lineage can see.</p>
+      </div>
+      <div class="fam">
+        <h3>Code quality &amp; security</h3>
+        <p>Structural metrics, dataflow-based dead code, duplication, naming, deprecated syntax, hard-coded credentials and weak hash algorithms — same finding schema as everything above.</p>
+      </div>
+      <a class="fam fam-cta" href="rules.html">
+        <h3>All 234 rules &rarr;</h3>
+        <p>Every rule gets its own page: what it finds, why it matters, and how to fix it.</p>
+      </a>
+    </div>
   </div>
+</section>
 
-  <h2>What it looks for</h2>
-  <dl class="families">
-    <div>
-      <dt>Implicit conversions and silent write loss</dt>
-      <dd>Direction- and collation-aware conversion detection — column-side
-        vs. value-side, inherited through views and dynamic SQL — plus DML
-        that truncates or rounds data with no engine error at all.</dd>
+<section>
+  <div class="wrap">
+    <div class="kicker rise">Precision</div>
+    <h2 class="rise">A finding you can trust is worth ten you have to check.</h2>
+    <p class="sub rise">
+      Precision beats recall everywhere in this tool. One false positive costs
+      more attention than ten missed true positives, so a rule that can't prove
+      its claim says so instead of guessing.
+    </p>
+    <div class="split">
+      <div class="card rise">
+        <h3>Proven in the lab, not at scan time</h3>
+        <p>
+          Your scan never asks the server for a plan. But before a
+          verdict-bearing rule ships, it has to earn its claim: it defines a
+          specific plan-XML marker and is checked against a live SQL Server
+          instance rather than a published compatibility matrix. A conversion
+          rule ships only once the plan shows <code>CONVERT_IMPLICIT</code> on
+          the column side — never inferred from whether a small table happened
+          to scan anyway.
+        </p>
+        <p>
+          Rules state their engine-version sensitivity too: 2017 interleaved
+          execution, 2019 UDF inlining, 2022 cardinality-estimator behavior.
+          Rules that state a purely structural fact need no oracle and claim
+          none. What you get back is what your code makes possible for the
+          engine — a static verdict, never a guess about your workload.
+        </p>
+      </div>
+      <div class="card rise d1">
+        <h3>Lineage all the way down</h3>
+        <p>
+          Most analyzers stop at whichever layer they parse first. A dynamic-SQL
+          string proven constant at compile time is reparsed and handed back to
+          the <em>same</em> lineage resolver static SQL uses — so a predicate
+          buried inside <code>EXEC(@sql)</code>, against a view built on another
+          view, still traces to the real base column — all of it from the text
+          and the catalog, with nothing executed.
+        </p>
+        <div class="hops">
+          <div class="hop"><span class="k">app code</span>EXEC(@sql)</div>
+          <span class="arrow">&rarr;</span>
+          <div class="hop"><span class="k">reparsed</span>view L2</div>
+          <span class="arrow">&rarr;</span>
+          <div class="hop"><span class="k">resolved</span>view L1</div>
+          <span class="arrow">&rarr;</span>
+          <div class="hop"><span class="k">resolved</span>dbo.T.Col</div>
+        </div>
+        <span class="badge">depth 2 &middot; resolved without running a thing</span>
+      </div>
     </div>
-    <div>
-      <dt>Sargability and index shape</dt>
-      <dd>Function-wrapped columns, leading-wildcard <code>LIKE</code>,
-        column arithmetic, and composite-index predicates that constrain a
-        trailing key column while leaving the leading one wide open.</dd>
-    </div>
-    <div>
-      <dt>Lineage-metric findings</dt>
-      <dd>The numbers that need the lineage pass to exist at all: real
-        join width after every view and TVF expands, nested-view depth,
-        and CTEs re-run once per reference instead of materialized once.</dd>
-    </div>
-    <div>
-      <dt>Plan-shape and correctness</dt>
-      <dd>MSTVFs used as row-count fences, scalar UDFs that block plan
-        inlining, forced-serial constructs, and predicates that defeat
-        cached-plan cardinality sniffing.</dd>
-    </div>
-    <div>
-      <dt>Dynamic SQL</dt>
-      <dd>Text that can be <em>proven</em> constant is analyzed exactly
-        like static SQL, with findings remapped to their real source line
-        — chained through nested views to a base column the same way
-        static SQL is. Anything not provably constant is counted, never
-        silently skipped.</dd>
-    </div>
-    <div>
-      <dt>Physical schema and index design</dt>
-      <dd>Unindexed foreign keys, duplicate and prefix-subsumed indexes,
-        clustering-key quality, and identity ranges heading toward
-        exhaustion — the catalog-only half of a DBA review.</dd>
-    </div>
-    <div>
-      <dt>Triggers, transactions, and cross-module correctness</dt>
-      <dd>Multi-row-unsafe triggers that collapse <code>inserted</code>/
-        <code>deleted</code> into one scalar, transactions with no guaranteed
-        commit path, and write-ordering that only lineage can see across
-        two separate procedures.</dd>
-    </div>
-    <div>
-      <dt>Code quality and maintainability</dt>
-      <dd>Structural metrics, dead code, duplication, naming, and
-        deprecated syntax — the syntax-only rules, same finding schema as
-        everything else above.</dd>
-    </div>
-  </dl>
-  <a class="rulelink" href="rules.html">Browse the full catalog &rarr;</a>
+  </div>
+</section>
 
-  <h2>How it's verified</h2>
-  <p>
-    A conversion finding is confirmed only when the execution plan actually
-    shows <code>CONVERT_IMPLICIT</code> on the column side of the predicate
-    — never inferred from whether a small table happened to scan anyway.
-    Every verdict-bearing rule defines its own equally specific plan marker
-    and is checked against a live SQL Server instance, not a published
-    compatibility matrix. Where inference is uncertain, the answer is
-    <code>Unknown</code>, reported honestly, never guessed.
-  </p>
-  <p>
-    Rules also state their engine-version sensitivity — 2017 interleaved
-    execution, 2019 UDF inlining, 2022 cardinality-estimator behavior —
-    instead of assuming one SQL Server version's behavior is every version's.
-  </p>
+<section>
+  <div class="wrap">
+    <div class="kicker rise">Built for the AI development loop</div>
+    <h2 class="rise">Written for a machine to read, and to stay put.</h2>
+    <p class="sub rise">
+      Nothing about SilentScan is AI-specific, and that is exactly what makes it
+      usable by an assistant: it is a command-line tool whose entire output is
+      machine-readable, running where the code is being written.
+    </p>
+    <ul class="checks rise">
+      <li><span class="mark">&#9679;</span><span><b>Machine-readable by default.</b> Versioned JSON or SARIF, deterministically ordered, every finding carrying its rule id, location, resolved base column, indexed flag, confidence tier and the evidence behind the verdict. Enough for an assistant to fix the SQL and re-run the scan to prove the finding is gone.</span></li>
+      <li><span class="mark">&#9679;</span><span><b>It stays on your machine.</b> The scan is read-only — <code>SELECT</code>s only, no DDL, no DML — the analysis core makes no network calls, and nothing is uploaded to a service or a model provider. Your schema, your module text, your findings.</span></li>
+      <li><span class="mark">&#9679;</span><span><b>It says what it doesn't know.</b> Uncertain inference reports <code>Unknown</code>. Dynamic SQL that can't be proven constant is counted with a machine-readable reason. An assistant acting on a confident wrong answer is worse than one told plainly what isn't known.</span></li>
+      <li><span class="mark">&#9679;</span><span><b>Or just gate CI.</b> The same run emits SARIF, with each rule's <code>helpUri</code> pointing at its own page in the catalog — so the explanation travels with the finding.</span></li>
+    </ul>
+  </div>
+</section>
 
-  <h2>Usage</h2>
-  <pre class="mono"><code>silentscan scan-db &lt;connection-string&gt;        # read-only, SELECT-only
-silentscan scan-corpus-live &lt;manifest.json&gt;</code></pre>
-  <p>
-    Output is versioned JSON, with a SARIF export for CI — each rule's
-    <code>helpUri</code> links straight to its own page in the
-    <a href="rules.html">catalog</a>.
-  </p>
+<section>
+  <div class="wrap">
+    <div class="kicker rise">Usage</div>
+    <h2 class="rise">One command, one pass, every rule.</h2>
+    <p class="sub rise">
+      SilentScan connects to a live database, reads its catalog from engine
+      metadata instead of guessing from parsed DDL, and runs every readable
+      view, procedure, function and trigger through all 234 rules in a single pass.
+    </p>
+    <pre class="rise"><code>silentscan scan-db &lt;connection-string&gt;                  <span class="c"># readable report</span>
+silentscan scan-db &lt;connection-string&gt; --format json    <span class="c"># for a tool or an assistant</span>
+silentscan scan-db &lt;connection-string&gt; --format sarif   <span class="c"># for CI</span>
+silentscan scan-corpus-live &lt;manifest.json&gt;             <span class="c"># many repositories at once</span></code></pre>
+    <p class="sub rise">
+      Types, per-column collations and the indexed flag are facts read from the
+      engine, never guessed. Read-only by design: no DDL or DML is ever executed
+      against the database you connect to.
+    </p>
 
-  <h2>Project</h2>
-  <p>
-    Source, issue tracker, and full documentation:
-    <a href="https://github.com/bhattumang7/mssql-silentscan">github.com/bhattumang7/mssql-silentscan</a>.
-  </p>
+    <div class="close rise">
+      <h2>Free, and it never leaves your laptop.</h2>
+      <p class="sub">
+        Clone it, point it at a dev copy, read the findings. No account, no
+        upload, no service in the middle.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/bhattumang7/mssql-silentscan">github.com/bhattumang7/mssql-silentscan</a>
+        <a class="btn btn-ghost" href="rules.html">See what it finds</a>
+      </div>
+    </div>
 
-  <footer>
-    Parsing via <code>Microsoft.SqlServer.TransactSql.ScriptDom</code> — SQL Server / T-SQL only.
-  </footer>
+    <footer>
+      <span>Parsing via <code>Microsoft.SqlServer.TransactSql.ScriptDom</code> — SQL Server / T-SQL only.</span>
+      <span><a href="https://github.com/bhattumang7/mssql-silentscan">Source</a> &middot; <a href="rules.html">Rule catalog</a></span>
+    </footer>
+  </div>
+</section>
 </main>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var items = document.querySelectorAll('.rise:not(.in)');
+    if (reduce.matches || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+    items.forEach(function (el) { io.observe(el); });
+  })();
+</script>
 </body>
 </html>
