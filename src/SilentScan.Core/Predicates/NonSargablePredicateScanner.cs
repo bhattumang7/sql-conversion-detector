@@ -401,26 +401,14 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            if (IsCaseFoldFunction(functionCall.FunctionName.Value))
+            if (Rules.SargabilityClassifier.IsCaseFoldFunction(functionCall.FunctionName.Value))
             {
                 AddCaseFold(functionCall, named);
                 return;
             }
 
-            // Calling ISNULL with a NOT NULL column as the first argument and a default
-            // value as the second is a false positive the blanket function wrap rule
-            // otherwise cannot catch. See the detection checklist, Tier 1, the type aware
-            // upgrade of the sargability stream, item 1, for the full write up. Confirmed
-            // directly against the standing oracle that the optimizer proves that call is
-            // equivalent to the bare column and simplifies the wrap away entirely,
-            // regardless of the default argument's own type. Even a widening default value
-            // still seeks, so this is purely a nullability fact and never a type question.
-            // COALESCE gets no equivalent suppression. Confirmed separately against the
-            // same oracle that the identical call shape written with COALESCE instead still
-            // scans even with no type conversion at all, since COALESCE is CASE syntax
-            // sugar and the optimizer never folds it the way it folds ISNULL.
             if (string.Equals(functionCall.FunctionName.Value, "ISNULL", StringComparison.OrdinalIgnoreCase)
-                && IsKnownNotNullColumn(named.Ref))
+                && Rules.SargabilityClassifier.ShouldSuppressIsNullOnKnownNotNullColumn(functionCall.FunctionName.Value, IsKnownNotNullColumn(named.Ref)))
             {
                 return;
             }
@@ -429,7 +417,7 @@ public static class NonSargablePredicateScanner
             // upgrade of the sargability stream" #2) - oracle-verified structurally
             // identical to case-folding: always forces a scan, no type/verdict question,
             // only the computed-column precision guard can suppress it.
-            if (IsDateFunction(functionCall.FunctionName.Value))
+            if (Rules.SargabilityClassifier.IsDateFunction(functionCall.FunctionName.Value))
             {
                 if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } dateTable
                     && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, dateTable, functionCall))
@@ -597,9 +585,8 @@ public static class NonSargablePredicateScanner
                 return false;
             }
 
-            var detail = comparisonType == BooleanComparisonType.Equals && otherSide is IntegerLiteral { Value: "1" }
-                ? "CHARINDEX(x, col) = 1 is a prefix match - rewritable to col LIKE 'x%', which restores the seek."
-                : "CHARINDEX(x, col) is a substring search - no sargable rewrite exists (unlike the = 1 prefix-match case).";
+            var isExactPrefixMatch = comparisonType == BooleanComparisonType.Equals && otherSide is IntegerLiteral { Value: "1" };
+            var detail = Rules.SargabilityClassifier.DescribeCharindexRemediation(isExactPrefixMatch);
 
             if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } table
                 && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, table, functionCall))
@@ -619,10 +606,9 @@ public static class NonSargablePredicateScanner
                 return false;
             }
 
-            var detail = comparisonType == BooleanComparisonType.Equals
-                && otherSide is StringLiteral { Value: { } literalValue } && literalValue.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) == lengthText
-                ? "LEFT(col, n) = 'x' (LEN('x') = n) is a prefix match - rewritable to col LIKE 'x%', which restores the seek."
-                : "LEFT(col, n) wraps the column - no sargable rewrite applies unless the compared literal's own length exactly matches n.";
+            var isExactPrefixMatch = comparisonType == BooleanComparisonType.Equals
+                && otherSide is StringLiteral { Value: { } literalValue } && literalValue.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) == lengthText;
+            var detail = Rules.SargabilityClassifier.DescribeLeftRemediation(isExactPrefixMatch);
 
             if (ResolveIndexInfo(named.Ref).TableQualifiedName is { } table
                 && ComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, table, leftCall))
@@ -665,8 +651,7 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            var fractionalDigits = CountFractionalDigits(upperBoundText);
-            if (fractionalDigits >= columnScale)
+            if (!Rules.TemporalBoundaryClassifier.HasInsufficientFractionalPrecision(columnScale, upperBoundText, out var fractionalDigits))
             {
                 return;
             }
@@ -675,43 +660,6 @@ public static class NonSargablePredicateScanner
                 table, columnName, columnScale, fractionalDigits, upperBoundText, sourcePath, node.StartLine, node.StartColumn));
         }
 
-        private static int CountFractionalDigits(string text)
-        {
-            var dotIndex = text.LastIndexOf('.');
-            if (dotIndex < 0)
-            {
-                return 0;
-            }
-
-            var digits = 0;
-            for (var i = dotIndex + 1; i < text.Length && char.IsDigit(text[i]); i++)
-            {
-                digits++;
-            }
-
-            return digits;
-        }
-
-        private static readonly HashSet<string> DateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "YEAR", "MONTH", "DAY", "DATEPART", "DATEDIFF", "DATEADD", "DATENAME",
-        };
-
-        private static bool IsDateFunction(string functionName) => DateFunctionNames.Contains(functionName);
-
-        private static bool IsCaseFoldFunction(string functionName) =>
-            string.Equals(functionName, "UPPER", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(functionName, "LOWER", StringComparison.OrdinalIgnoreCase);
-
-        /// <summary>
-        /// UPPER/LOWER get their own finding kind and their own remediation text, not the
-        /// generic FunctionWrappedColumn one - oracle-verified (docs/detection-checklist.md Tier
-        /// 1 "Type-aware upgrade of the sargability stream" #4) that the wrap forces a scan under
-        /// EITHER collation family, so it's never suppressed by collation the way the checklist
-        /// originally assumed; only the remediation advice changes: a case-insensitive column's
-        /// wrap is a provably safe no-op to delete (the result set is identical either way), a
-        /// case-sensitive/binary column's wrap is load-bearing and needs a real rewrite.
-        /// </summary>
         private void AddCaseFold(FunctionCall functionCall, (ColumnReferenceExpression Ref, string Name) named)
         {
             var (tableQualifiedName, indexed, type) = ResolveIndexInfo(named.Ref);
@@ -721,19 +669,12 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            var detail = DescribeCaseFoldRemediation(functionCall.FunctionName.Value, type?.Collation);
+            var detail = Rules.SargabilityClassifier.DescribeCaseFoldRemediation(functionCall.FunctionName.Value, type?.Collation);
 
             Findings.Add(new SargabilityFinding(
                 SargabilityFindingKind.CaseFoldOnColumn, named.Name, detail, sourcePath, functionCall.StartLine, functionCall.StartColumn,
                 TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Rules.FragmentTextRenderer.Render(functionCall)));
         }
-
-        private static string DescribeCaseFoldRemediation(string functionName, Catalog.Collation? collation) => collation switch
-        {
-            null => $"{functionName} wraps the column, forcing a scan - collation unresolved, cannot confirm whether the wrap is provably redundant.",
-            { IsCaseSensitive: true } => $"{functionName} wraps the column, forcing a scan, and the column's collation ({collation.Name}) is case-sensitive - the wrap is load-bearing for correctness; rewrite via an indexed computed column or a case-insensitive COLLATE on the literal instead of the column.",
-            _ => $"{functionName} wraps the column, forcing a scan, but the column's collation ({collation.Name}) is already case-insensitive - the wrap changes nothing about which rows match and can be deleted with zero result-set risk.",
-        };
 
         /// <summary>
         /// Resolves <paramref name="columnRef"/> through the current scope chain to find out
