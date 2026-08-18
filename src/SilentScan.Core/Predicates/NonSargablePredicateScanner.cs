@@ -25,8 +25,6 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class NonSargablePredicateScanner
 {
-    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
     /// <summary>
     /// Real-world aggregate functions never lose "sargability" the way a scalar function wrap does -
     /// COUNT/SUM/AVG/etc. wrapping a column in a HAVING clause (the only place they can appear
@@ -74,7 +72,7 @@ public static class NonSargablePredicateScanner
         IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog, lineage.AllRelations, enclosingScope, ledger, callerScopeByCalleeScope);
-        visitor.SeedEnclosingScope();
+        visitor.SeedEnclosingScope(parseResult.Fragment);
         parseResult.Fragment.Accept(visitor);
         return (visitor.Findings, visitor.TemporalBoundaryFindings);
     }
@@ -98,11 +96,11 @@ public static class NonSargablePredicateScanner
         public List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings { get; } = [];
 
         /// <summary>Mirrors TypedPredicateExtractor's identical seed - pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack before the visitor starts walking, so a reparsed dynamic SQL fragment found inside a trigger body sees them too.</summary>
-        public void SeedEnclosingScope()
+        public void SeedEnclosingScope(TSqlFragment rootFragment)
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {
-                PushCteRelations(BuildTriggerPseudoTableRelations(target));
+                PushCteRelations(BuildTriggerPseudoTableRelations(target, rootFragment));
             }
         }
 
@@ -197,29 +195,6 @@ public static class NonSargablePredicateScanner
             PopCteScope();
         }
 
-        // Mirrors TypedPredicateExtractor's identical overrides (ScriptDOM's visitor binds
-        // ExplicitVisit at compile time to the most specific node type, so a base-type-only
-        // override never fires for e.g. AlterProcedureStatement) - needed here so a temp
-        // table/table variable declared inside a procedure body resolves through the same
-        // scoped catalog key TypedPredicateExtractor and CatalogBuilder use.
-        public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
-
-        public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
-
-        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
-
-        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
-
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
-
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
-
         public override void ExplicitVisit(WhereClause node)
         {
             var previous = _inFilterContext;
@@ -251,62 +226,6 @@ public static class NonSargablePredicateScanner
             _inFilterContext = previous;
         }
 
-        private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
-        {
-            var previousScope = CurrentProcScope;
-            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
-            node.AcceptChildren(this);
-            CurrentProcScope = previousScope;
-        }
-
-        /// <summary>Mirrors TypedPredicateExtractor's identical override - without it, a #temp table declared in a trigger body resolved under no scope key at all in Tier-1, and inserted/deleted were never visible here regardless.</summary>
-        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
-        {
-            var previousScope = CurrentProcScope;
-            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
-
-            // A DDL/LOGON trigger has no target object and no inserted/deleted rowset (it gets
-            // its data from EVENTDATA()) - nothing to seed, but still walk the body, since it may
-            // still contain ordinary predicates against real tables.
-            if (triggerObject.Name is not { } targetTableName)
-            {
-                node.AcceptChildren(this);
-                CurrentProcScope = previousScope;
-                return;
-            }
-
-            PushCteRelations(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName)));
-            node.AcceptChildren(this);
-            PopCteScope();
-
-            CurrentProcScope = previousScope;
-        }
-
-        /// <summary>Mirrors TypedPredicateExtractor's identical helper - inserted/deleted are shaped like the trigger's own target table or view, but never claim its index (they're a version-store rowset with none of their own).</summary>
-        private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName)
-        {
-            var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
-
-            ResolvedRelation relation;
-            if (resolvedViews.TryGetValue(qualifiedName, out var viewRelation))
-            {
-                relation = FromScopeResolver.ToPseudoTableRelation(viewRelation, qualifiedName);
-            }
-            else if (catalog.Find(qualifiedName) is { } table)
-            {
-                relation = FromScopeResolver.ToPseudoTableRelation(table, qualifiedName);
-            }
-            else
-            {
-                return EmptyResolvedViews;
-            }
-
-            return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["inserted"] = relation,
-                ["deleted"] = relation,
-            };
-        }
 
         public override void Visit(BooleanComparisonExpression node)
         {

@@ -510,18 +510,6 @@ public static class TypedPredicateExtractor
             base.ExplicitVisit(node);
         }
 
-        // ScriptDOM's visitor double-dispatches through each concrete node type's own Accept()
-        // method, which binds at compile time to the most specific ExplicitVisit overload that
-        // exists - so overriding only the common ProcedureStatementBodyBase base type would
-        // never fire for e.g. an AlterProcedureStatement node. Real-world corpora routinely ship
-        // a body-less "CREATE PROCEDURE ... AS RETURN 0" stub followed by the real body via
-        // ALTER PROCEDURE (the dynamic SQL engine already had to handle this same pattern for the
-        // First Responder Kit corpus repo) - without these overrides, an ALTER PROCEDURE body
-        // was walked with the PREVIOUS procedure's stale _variables still in scope, and its own
-        // parameters were never recorded at all (docs/audit-remediation-plan.md Phase 2.3). The
-        // qualified name each override passes through is also this body's temp-table/table-
-        // variable scope key (Phase 2.5), matching CatalogBuilder's identical scoping so a
-        // predicate inside a procedure can find that same procedure's own temp objects.
         /// <summary>
         /// DECLARE'd variable types are batch-scoped in real T-SQL (a `GO`-separated batch
         /// starts with none) - without this, an ad-hoc batch with no CREATE PROCEDURE/FUNCTION/
@@ -550,24 +538,6 @@ public static class TypedPredicateExtractor
 
             node.AcceptChildren(this);
         }
-
-        public override void ExplicitVisit(CreateProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
-
-        public override void ExplicitVisit(AlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
-
-        public override void ExplicitVisit(CreateOrAlterProcedureStatement node) => VisitProcedureOrFunctionBody(node, node.ProcedureReference.Name);
-
-        public override void ExplicitVisit(CreateFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
-
-        public override void ExplicitVisit(AlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
-
-        public override void ExplicitVisit(CreateOrAlterFunctionStatement node) => VisitProcedureOrFunctionBody(node, node.Name);
-
-        public override void ExplicitVisit(CreateTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
-
-        public override void ExplicitVisit(AlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
-
-        public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {
@@ -824,106 +794,34 @@ public static class TypedPredicateExtractor
                 sourcePath, sourceExpression.StartLine, sourceExpression.StartColumn));
         }
 
-        private void VisitProcedureOrFunctionBody(ProcedureStatementBodyBase node, SchemaObjectName name)
+        /// <summary>
+        /// Local declarations and parameters don't cross a proc/function boundary, so every
+        /// body - however it was introduced - starts with a clean slate. Options (WITH RECOMPILE/
+        /// ENCRYPTION/...) exists on ProcedureStatementBody (a procedure), not the shared
+        /// ProcedureStatementBodyBase this hook also fires for functions/triggers through - a
+        /// scalar/table function can never carry WITH RECOMPILE at all, so the check is naturally
+        /// false for those, no special-casing needed beyond the type pattern itself.
+        /// </summary>
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
-            // Local declarations and parameters don't cross a proc/function boundary, so every
-            // body - however it was introduced - starts with a clean slate.
             _variables.Clear();
             _formalParameterNames.Clear();
             RecordParameters(node.Parameters);
 
-            // Options (WITH RECOMPILE/ENCRYPTION/...) exists on ProcedureStatementBody (a
-            // procedure), not the shared ProcedureStatementBodyBase this helper also handles
-            // functions/triggers through - a scalar/table function can never carry WITH
-            // RECOMPILE at all, so the check is naturally false for those, no special-casing
-            // needed beyond the type pattern itself.
-            var previousProcedureHasWithRecompile = _procedureHasWithRecompile;
+            _previousProcedureHasWithRecompile = _procedureHasWithRecompile;
             _procedureHasWithRecompile = node is ProcedureStatementBody { Options: { } options }
                 && options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile);
-
-            var previousScope = CurrentProcScope;
-            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
-            node.AcceptChildren(this);
-            CurrentProcScope = previousScope;
-            _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
-        private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
+        protected override void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node) =>
+            _procedureHasWithRecompile = _previousProcedureHasWithRecompile;
+
+        private bool _previousProcedureHasWithRecompile;
+
+        protected override void OnEnterTriggerBody(TriggerStatementBody node)
         {
             _variables.Clear();
             _formalParameterNames.Clear();
-
-            var previousScope = CurrentProcScope;
-            CurrentProcScope = SchemaObjectNameHelper.Qualify(name);
-
-            // A DDL trigger (ON DATABASE/ON ALL SERVER) or LOGON trigger has no target object -
-            // TriggerObject.Name is null whenever TriggerScope isn't Normal (coverage-
-            // remediation-plan.md Phase 0.3, reproduced: this used to be an unguarded dereference
-            // that took down the whole scan). Neither kind has an inserted/deleted rowset at all (a
-            // DDL trigger gets its data from EVENTDATA(), not a pseudo-table), so there is nothing
-            // to guess here - record it and still walk the body, since it may still contain
-            // ordinary predicates against real tables.
-            if (triggerObject.Name is not { } targetTableName)
-            {
-                ledger.Record(
-                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
-                    "DDL/LOGON trigger", $"trigger scope '{triggerObject.TriggerScope}' has no target table - no inserted/deleted pseudo-tables to resolve");
-                node.AcceptChildren(this);
-                CurrentProcScope = previousScope;
-                return;
-            }
-
-            // inserted/deleted are visible throughout the whole trigger body, not just a single
-            // top-level SELECT - pushed onto the same CTE stack a real WITH clause uses (they're
-            // resolved identically by FromScopeResolver, a named relation checked before the
-            // catalog/views), so nested subqueries inherit them the same way a CTE would.
-            PushCteRelations(MergeCtes(CurrentCteRelations(), BuildTriggerPseudoTableRelations(targetTableName, node)));
-            node.AcceptChildren(this);
-            PopCteScope();
-
-            CurrentProcScope = previousScope;
-        }
-
-        /// <summary>
-        /// inserted/deleted are shaped exactly like the trigger's own target table or view (docs/
-        /// audit-remediation-plan.md, trigger inserted/deleted resolution - a gap found auditing
-        /// this pass, not on the original remediation plan): a predicate against inserted.Col
-        /// reflects that real column's type, but NOT its index - inserted/deleted are a version-
-        /// store rowset with no index of their own (coverage-remediation-plan.md Phase 1.1), so
-        /// this uses <see cref="FromScopeResolver.ToPseudoTableRelation(Catalog.CatalogTable?, string)"/> rather than the ordinary
-        /// FROM-clause conversion, which would wrongly inherit a real index. An INSTEAD OF trigger
-        /// can target a VIEW rather than a table (Phase 3.3) - DatabaseCatalog holds no views, so
-        /// resolvedViews (the same lookup FromScopeResolver's own NamedTableReference case checks
-        /// before falling back to the catalog) is consulted first.
-        /// </summary>
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
-        private IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
-        {
-            var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
-
-            ResolvedRelation relation;
-            if (resolvedViews.TryGetValue(qualifiedName, out var viewRelation))
-            {
-                relation = FromScopeResolver.ToPseudoTableRelation(viewRelation, qualifiedName);
-            }
-            else if (catalog.Find(qualifiedName) is { } table)
-            {
-                relation = FromScopeResolver.ToPseudoTableRelation(table, qualifiedName);
-            }
-            else
-            {
-                ledger.Record(
-                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn,
-                    "trigger inserted/deleted", $"trigger target '{qualifiedName}' has no known DDL and is not a resolved view - inserted/deleted left unresolved");
-                return EmptyResolvedViews;
-            }
-
-            return new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["inserted"] = relation,
-                ["deleted"] = relation,
-            };
         }
 
         public override void Visit(BooleanComparisonExpression node)
