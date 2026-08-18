@@ -79,7 +79,7 @@ public static class IndexHintScanner
         {
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
 
-            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(FlattenJoinNodes).ToList();
+            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
 
             var anyReferencedColumns = new HashSet<(string Table, string Column)>();
             var referenceVisitor = new ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
@@ -153,35 +153,6 @@ public static class IndexHintScanner
                         IndexHintFindingKind.HintedIndexNotSeekable, table.QualifiedName, hintedName, leadingColumn,
                         sourcePath, hint.StartLine, hint.StartColumn));
                 }
-            }
-        }
-
-        /// <summary>Yields every <see cref="QualifiedJoin"/> node in the join tree - each carries its own ON clause.</summary>
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
             }
         }
 

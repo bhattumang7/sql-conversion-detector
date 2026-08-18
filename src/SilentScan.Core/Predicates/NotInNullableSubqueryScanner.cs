@@ -69,44 +69,9 @@ public static class NotInNullableSubqueryScanner
                 return;
             }
 
-            foreach (var predicate in FlattenAnd(searchCondition).OfType<InPredicate>())
+            foreach (var predicate in PredicateTreeWalker.FlattenAnd(searchCondition).OfType<InPredicate>())
             {
                 TryMatch(predicate);
-            }
-        }
-
-        /// <summary>Flattens top-level AND-connected fragments - an <c>InPredicate</c> nested inside an OR is left unmatched (a deliberate, narrow v1 scope: the OR could be masking an already-safe alternate path, and guessing would risk a false positive).</summary>
-        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
-        {
-            switch (expression)
-            {
-                case null:
-                    break;
-
-                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                    foreach (var e in FlattenAnd(and.FirstExpression))
-                    {
-                        yield return e;
-                    }
-
-                    foreach (var e in FlattenAnd(and.SecondExpression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                case BooleanParenthesisExpression paren:
-                    foreach (var e in FlattenAnd(paren.Expression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                default:
-                    yield return expression;
-                    break;
             }
         }
 
@@ -157,7 +122,7 @@ public static class NotInNullableSubqueryScanner
             BooleanExpression? subqueryWhere, string tableQualifiedName, string columnName,
             IReadOnlyDictionary<string, ScopeEntry> innerByAlias, IReadOnlyList<ScopeEntry> innerOrdered)
         {
-            foreach (var clause in FlattenAnd(subqueryWhere))
+            foreach (var clause in PredicateTreeWalker.FlattenAnd(subqueryWhere))
             {
                 if (clause is not BooleanIsNullExpression { IsNot: true, Expression: ColumnReferenceExpression filterColumnRef })
                 {

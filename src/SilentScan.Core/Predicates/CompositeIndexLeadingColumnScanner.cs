@@ -92,15 +92,13 @@ public static class CompositeIndexLeadingColumnScanner
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
 
-            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(FlattenJoinNodes).ToList();
+            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
 
-            // AND-constrained: reachable without crossing an OR - the same discipline
-            // PartialCompositeForeignKeyJoinScanner's own FlattenAnd already applies, since a
-            // column only bound inside an OR branch doesn't guarantee the leading column is ever
-            // actually supplied.
+            // AND-constrained: reachable without crossing an OR - a column only bound inside an
+            // OR branch doesn't guarantee the leading column is ever actually supplied.
             var andConstrainedColumns = joinNodes
-                .SelectMany(j => FlattenAnd(j.SearchCondition))
-                .Concat(FlattenAnd(whereCondition))
+                .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
+                .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
                 .OfType<BooleanComparisonExpression>()
                 .SelectMany(c => ResolveBothSides(c, scopeChain))
                 .ToHashSet();
@@ -196,70 +194,6 @@ public static class CompositeIndexLeadingColumnScanner
             return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
                 ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)
                 : null;
-        }
-
-        /// <summary>Yields every <see cref="QualifiedJoin"/> node in the join tree - each carries its own ON clause.</summary>
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
-        }
-
-        /// <summary>AND-flattens a search condition, never descending through OR - see this class's own doc comment.</summary>
-        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
-        {
-            switch (expression)
-            {
-                case null:
-                    yield break;
-
-                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                    foreach (var e in FlattenAnd(and.FirstExpression))
-                    {
-                        yield return e;
-                    }
-
-                    foreach (var e in FlattenAnd(and.SecondExpression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                case BooleanParenthesisExpression paren:
-                    foreach (var e in FlattenAnd(paren.Expression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                default:
-                    yield return expression;
-                    break;
-            }
         }
 
         /// <summary>Collects every base-column reference reachable anywhere under a boolean expression, OR branches included - deliberately liberal, since this set is only ever used to suppress a finding, never to trigger one.</summary>

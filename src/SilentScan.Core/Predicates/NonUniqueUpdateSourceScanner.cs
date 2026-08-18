@@ -63,7 +63,7 @@ public static class NonUniqueUpdateSourceScanner
                 return;
             }
 
-            foreach (var join in spec.FromClause!.TableReferences.SelectMany(FlattenJoinNodes))
+            foreach (var join in spec.FromClause!.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
                 InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses);
             }
@@ -102,7 +102,7 @@ public static class NonUniqueUpdateSourceScanner
             // Matched by the join's own ALIAS, not a resolved base-table qualified name - a
             // self-join aliases the identical table twice, so a qualified-name-only comparison
             // could not tell the target side's own column from the source side's.
-            var joinColumns = FlattenAnd(join.SearchCondition)
+            var joinColumns = PredicateTreeWalker.FlattenAnd(join.SearchCondition)
                 .OfType<BooleanComparisonExpression>()
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
@@ -178,70 +178,6 @@ public static class NonUniqueUpdateSourceScanner
             var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
             return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } ? (alias, qualifiedName) : (null, null);
-        }
-
-        /// <summary>Yields every <see cref="QualifiedJoin"/> node in the join tree - same shape as <see cref="PartialCompositeForeignKeyJoinScanner"/>'s own flattening.</summary>
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
-        }
-
-        /// <summary>AND-flattens a search condition, never descending through OR - an equality only reachable through an OR branch doesn't unconditionally establish the join column, so it must never count toward "these columns are equated."</summary>
-        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
-        {
-            switch (expression)
-            {
-                case null:
-                    yield break;
-
-                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                    foreach (var e in FlattenAnd(and.FirstExpression))
-                    {
-                        yield return e;
-                    }
-
-                    foreach (var e in FlattenAnd(and.SecondExpression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                case BooleanParenthesisExpression paren:
-                    foreach (var e in FlattenAnd(paren.Expression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                default:
-                    yield return expression;
-                    break;
-            }
         }
 
         private sealed class ColumnReferenceCollector : TSqlFragmentVisitor

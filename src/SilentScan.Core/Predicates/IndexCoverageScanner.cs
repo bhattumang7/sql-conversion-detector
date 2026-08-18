@@ -91,13 +91,13 @@ public static class IndexCoverageScanner
             }
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(FlattenJoinNodes).ToList();
+            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
 
             // AND-constrained columns (a real seek-enabling comparison) - identical discipline to
             // CompositeIndexLeadingColumnScanner.
             var andConstrainedColumns = joinNodes
-                .SelectMany(j => FlattenAnd(j.SearchCondition))
-                .Concat(FlattenAnd(whereCondition))
+                .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
+                .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
                 .OfType<BooleanComparisonExpression>()
                 .SelectMany(c => ResolveBothSides(c, scopeChain))
                 .ToHashSet();
@@ -213,68 +213,6 @@ public static class IndexCoverageScanner
             return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
                 ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)
                 : null;
-        }
-
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
-        }
-
-        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
-        {
-            switch (expression)
-            {
-                case null:
-                    yield break;
-
-                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                    foreach (var e in FlattenAnd(and.FirstExpression))
-                    {
-                        yield return e;
-                    }
-
-                    foreach (var e in FlattenAnd(and.SecondExpression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                case BooleanParenthesisExpression paren:
-                    foreach (var e in FlattenAnd(paren.Expression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                default:
-                    yield return expression;
-                    break;
-            }
         }
 
         /// <summary>Collects every base-column reference reachable anywhere under the whole

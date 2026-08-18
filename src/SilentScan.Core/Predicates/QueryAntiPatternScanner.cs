@@ -396,7 +396,7 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var joinColumns = FlattenAnd(spec.SearchCondition)
+            var joinColumns = PredicateTreeWalker.FlattenAnd(spec.SearchCondition)
                 .OfType<BooleanComparisonExpression>()
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
@@ -803,7 +803,7 @@ public static class QueryAntiPatternScanner
                 .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var condition in FlattenAnd(having))
+            foreach (var condition in PredicateTreeWalker.FlattenAnd(having))
             {
                 if (ContainsAggregate(condition))
                 {
@@ -864,7 +864,7 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            foreach (var join in node.FromClause.TableReferences.SelectMany(FlattenJoinNodes))
+            foreach (var join in node.FromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
                 var (joinedAlias, joinedQualifiedName) = ResolveDirectBaseTable(join.SecondTableReference);
                 if (joinedAlias is null || joinedQualifiedName is null)
@@ -878,7 +878,7 @@ public static class QueryAntiPatternScanner
                     continue;
                 }
 
-                var joinColumns = FlattenAnd(join.SearchCondition)
+                var joinColumns = PredicateTreeWalker.FlattenAnd(join.SearchCondition)
                     .OfType<BooleanComparisonExpression>()
                     .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                     .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
@@ -1045,68 +1045,6 @@ public static class QueryAntiPatternScanner
             var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
             return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } ? (alias, qualifiedName) : (null, null);
-        }
-
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
-        }
-
-        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
-        {
-            switch (expression)
-            {
-                case null:
-                    yield break;
-
-                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                    foreach (var e in FlattenAnd(and.FirstExpression))
-                    {
-                        yield return e;
-                    }
-
-                    foreach (var e in FlattenAnd(and.SecondExpression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                case BooleanParenthesisExpression paren:
-                    foreach (var e in FlattenAnd(paren.Expression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                default:
-                    yield return expression;
-                    break;
-            }
         }
 
         private static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)

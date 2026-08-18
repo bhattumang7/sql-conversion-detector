@@ -110,7 +110,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 (byAlias, ordered),
             };
 
-            var joinNodes = fromClause.TableReferences.SelectMany(FlattenJoinNodes).ToList();
+            var joinNodes = fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
             if (joinNodes.Count == 0 && fromClause.TableReferences.Count < 2)
             {
                 return;
@@ -121,8 +121,8 @@ public static class PartialCompositeForeignKeyJoinScanner
             // across a JOIN's ON and a WHERE-clause filter (a real, common pattern) is never
             // misread as a bug.
             var statementWideEqualities = joinNodes
-                .SelectMany(j => FlattenAnd(j.SearchCondition))
-                .Concat(FlattenAnd(whereClause?.SearchCondition))
+                .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
+                .Concat(PredicateTreeWalker.FlattenAnd(whereClause?.SearchCondition))
                 .OfType<BooleanComparisonExpression>()
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .ToList();
@@ -134,35 +134,6 @@ public static class PartialCompositeForeignKeyJoinScanner
             }
 
             InspectCommaJoins(ordered, statementWideEqualities, scopeChain, directlyJoinedTablePairs, fromClause);
-        }
-
-        /// <summary>Yields every <see cref="QualifiedJoin"/> node in the join tree, innermost/outermost alike - each one independently checked, since each carries its own ON clause.</summary>
-        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenJoinNodes(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenJoinNodes(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    yield return join;
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenJoinNodes(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
         }
 
         private void InspectJoin(
@@ -184,7 +155,7 @@ public static class PartialCompositeForeignKeyJoinScanner
 
             directlyJoinedTablePairs.Add(NormalizedPair(firstTable, secondTable));
 
-            var joinEqualities = FlattenAnd(join.SearchCondition)
+            var joinEqualities = PredicateTreeWalker.FlattenAnd(join.SearchCondition)
                 .OfType<BooleanComparisonExpression>()
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .ToList();
@@ -353,39 +324,5 @@ public static class PartialCompositeForeignKeyJoinScanner
         private static (string, string) NormalizedPair(string a, string b) =>
             string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
 
-        /// <summary>AND-flattens a search condition, never descending through OR - a column pair only reachable through an OR branch doesn't guarantee the equality holds, so it must never count as "covered".</summary>
-        private static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
-        {
-            switch (expression)
-            {
-                case null:
-                    yield break;
-
-                case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And } and:
-                    foreach (var e in FlattenAnd(and.FirstExpression))
-                    {
-                        yield return e;
-                    }
-
-                    foreach (var e in FlattenAnd(and.SecondExpression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                case BooleanParenthesisExpression paren:
-                    foreach (var e in FlattenAnd(paren.Expression))
-                    {
-                        yield return e;
-                    }
-
-                    break;
-
-                default:
-                    yield return expression;
-                    break;
-            }
-        }
     }
 }
