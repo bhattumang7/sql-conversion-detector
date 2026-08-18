@@ -140,13 +140,17 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
         // CrossModuleLockOrderScanner whole-scan pass, docs/detection-checklist.md "DBA-script
         // family sweep (2026-08-17)" §C "Trigger correctness" and §D "Cross-module analysis" -
         // both enumerate usableParseResults exactly once each, same as every other full-corpus
-        // stream above), so this
+        // stream above); +3 for the three new full-corpus passes from docs/detection-checklist.md
+        // "Second full-archive practitioner sweep" §G - BareTopNoOrderByScanner,
+        // StringConcatNullScanner, and AggregateDivisionColumnstoreScanner, each enumerating
+        // usableParseResults exactly once, same as every other full-corpus stream above (51 total),
+        // so this
         // fails the moment the loop stops reusing its one materialization and starts scaling with
         // round count again, while still tolerating a future +/-1 shift from unrelated changes
         // elsewhere in the method (e.g. the next new full-corpus stream).
         Assert.True(
-            countingSource.EnumerationCount <= 48,
-            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 48 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
+            countingSource.EnumerationCount <= 51,
+            $"expected the source to be enumerated a small, round-count-independent number of times (measured: 51 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
     /// <summary>Wraps a fixed sequence, counting how many independent enumerations it's ever asked for - never caching, so re-enumerating genuinely re-walks the source.</summary>

@@ -108,6 +108,9 @@ public static class SarifReportWriter
         results.AddRange(report.DefaultNullableConstraintFindings.Select(ToResult));
         results.AddRange(report.TryCastComputedColumnPredicateFindings.Select(ToResult));
         results.AddRange(report.StaleSelectStarViewFindings.Select(ToResult));
+        results.AddRange(report.BareTopNoOrderByFindings.Select(ToResult));
+        results.AddRange(report.StringConcatNullFindings.Select(ToResult));
+        results.AddRange(report.AggregateDivisionColumnstoreFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -752,6 +755,40 @@ public static class SarifReportWriter
         var message = $"'{finding.ViewQualifiedName}' (SELECT * FROM '{finding.BaseTableQualifiedName}') has a compiled column list [{viewColumns}] that no longer matches '{finding.BaseTableQualifiedName}''s current columns [{tableColumns}] - a later ALTER TABLE ADD/DROP COLUMN never propagated to this view; if a drop and a later add shifted column identity, this view may be silently surfacing real data under a stale, wrong column label, not merely missing/adding a column.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(BareTopNoOrderByFinding finding)
+    {
+        // Warning at High confidence, floored to Note here since BareTopNoOrderByFinding ships at
+        // Medium - see its own doc comment: the nondeterminism mechanism is a certain, documented
+        // engine fact, but whether any real caller depends on the returned row set is workload
+        // intent this pass cannot see.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BareTopNoOrderByRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = "TOP with no ORDER BY anywhere in this query - SQL Server does not guarantee which rows TOP returns, or their order, without an ORDER BY; the returned row set can change run to run with plan choice, parallelism, or statistics drift.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(StringConcatNullFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StringConcatNullRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is nullable and concatenated with + with no ISNULL/COALESCE guard - unlike CONCAT(), + propagates a single NULL operand to NULL for the whole expression, silently, with no error.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(AggregateDivisionColumnstoreFinding finding)
+    {
+        // Note, not Warning - see AggregateDivisionColumnstoreFinding's own doc comment: shipped
+        // as a structural risk flag only, Low confidence, after a genuine but unsuccessful
+        // live-reproduction attempt against this tool's own standing engine build.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AggregateDivisionColumnstoreRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
+        var message = $"{finding.AggregateFunctionName}(...) on '{finding.TableQualifiedName}' (backed by a columnstore index) contains a CASE-guarded division by a non-constant divisor - historically reported as unreliable under batch-mode/vectorized execution's own CASE-branch evaluation, unlike rowstore scalar evaluation.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(CascadingForeignKeyFinding finding)

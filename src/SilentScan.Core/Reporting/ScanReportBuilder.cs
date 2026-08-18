@@ -692,6 +692,63 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<BareTopNoOrderByFinding> bareTopNoOrderByFindings;
+        using (var bareTopStage = progress.Begin("scanning bare TOP with no ORDER BY", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = BareTopNoOrderByScanner.Scan(r);
+                    bareTopStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            bareTopNoOrderByFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+            bareTopStage.Complete($"{bareTopNoOrderByFindings.Count:N0} findings");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<StringConcatNullFinding> stringConcatNullFindings;
+        using (var stringConcatStage = progress.Begin("scanning + operator string concatenation NULL propagation", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = StringConcatNullScanner.Scan(r, catalog);
+                    stringConcatStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            stringConcatNullFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+            stringConcatStage.Complete($"{stringConcatNullFindings.Count:N0} findings");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<AggregateDivisionColumnstoreFinding> aggregateDivisionColumnstoreFindings;
+        using (var aggregateDivisionStage = progress.Begin("scanning CASE-guarded division inside aggregates on columnstore tables", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = AggregateDivisionColumnstoreScanner.Scan(r, catalog);
+                    aggregateDivisionStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            aggregateDivisionColumnstoreFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+            aggregateDivisionStage.Complete($"{aggregateDivisionColumnstoreFindings.Count:N0} findings");
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<ParameterReassignmentPredicateFinding> parameterReassignmentPredicateFindings;
         using (var reassignmentStage = progress.Begin("scanning reassigned-parameter predicates", usableCount))
         {
@@ -1314,6 +1371,9 @@ public static class ScanReportBuilder
         triggerRecursionCycleFindings = [.. triggerRecursionCycleFindings.Where(f => f.Confidence <= minimumConfidence)];
         defaultNullableConstraintFindings = [.. defaultNullableConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
         tryCastComputedColumnPredicateFindings = [.. tryCastComputedColumnPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
+        bareTopNoOrderByFindings = [.. bareTopNoOrderByFindings.Where(f => f.Confidence <= minimumConfidence)];
+        stringConcatNullFindings = [.. stringConcatNullFindings.Where(f => f.Confidence <= minimumConfidence)];
+        aggregateDivisionColumnstoreFindings = [.. aggregateDivisionColumnstoreFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1372,6 +1432,9 @@ public static class ScanReportBuilder
             // in afterward, same pattern IndexDesignFindings/IdentityRangeFindings already
             // established.
             [],
+            bareTopNoOrderByFindings,
+            stringConcatNullFindings,
+            aggregateDivisionColumnstoreFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

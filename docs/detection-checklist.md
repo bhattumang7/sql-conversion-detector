@@ -4823,18 +4823,56 @@ is carried into this file - only the mechanism and the design implication.
       cross-checked directly (`sys.indexes WHERE type IN (5,6)` returns zero
       rows - this database carries no columnstore index of any kind today),
       not a detection gap.
-- [ ] **Aggregate argument containing a division (or other error-prone scalar
+- [x] **Aggregate argument containing a division (or other error-prone scalar
       expression) that relies on short-circuit elimination, on a table with a
-      columnstore or batch-mode-eligible index** — a `COUNT`/aggregate
-      argument shaped like `SomeExpr / 0`-guarded-by-a-CASE that the rowstore
-      optimizer silently elides evaluating on rows where it would error no
-      longer gets the same elision under batch-mode execution, so a query
-      that has run safely for years starts throwing the day someone adds a
-      columnstore/batch-mode-eligible index to the table — genuinely
-      correctness-class, not a performance claim, and cheap: a syntactic
-      pattern (division/error-prone expression inside an aggregate argument)
-      cross-checked against the table's own columnstore/batch-mode
-      eligibility in the catalog.
+      columnstore or batch-mode-eligible index — shipped, honestly downgraded
+      to a structural risk flag.** Shipped as `AggregateDivisionColumnstoreFinding`/
+      `AggregateDivisionColumnstoreScanner`. Real, genuine effort was spent
+      trying to reproduce the underlying mechanism directly against the
+      standing Docker instance (a disposable scratch database, dropped
+      immediately after) before shipping: a 50,000-row table with a
+      deliberately-seeded zero-divisor subset, a real nonclustered columnstore
+      index, and a live-confirmed `ActualExecutionMode="Batch"` plan (`SET
+      STATISTICS XML ON`) - across the CASE-guarded form
+      (`SUM(CASE WHEN Denom <> 0 THEN Num/Denom ELSE 0 END)`), a
+      WHERE-filtered form, a `GROUP BY`/hash-aggregate form, swapped THEN/ELSE
+      branch order, and `MAXDOP`-forced parallelism, every variant returned
+      the correct, error-free result on this environment's engine build (SQL
+      Server 2022, RTM-CU23) - no live divide-by-zero error was ever produced.
+      This does not disprove the underlying claim (the practitioner reports
+      this item is drawn from predominantly describe earlier columnstore
+      batch-mode engine generations, 2016-2019 era, which this tool's own
+      standing Docker instance cannot reproduce since it only runs one
+      pinned, current engine build) - it means this tool cannot claim to have
+      proven the failure live on the engine build it actually runs against,
+      unlike every oracle-confirmed stream in this codebase. Shipped anyway,
+      at `FindingConfidence.Low` (SARIF Note) rather than dropped, matching
+      the precedent this file's own instruction called for and the structural-
+      risk-only discipline `IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable`/
+      `MonotonicClusteredKeyMissingSequentialOptimization` already established
+      for a catalog-decidable structural precondition whose downstream harm
+      this pass cannot itself prove.
+      **Scope correction on "batch-mode-eligible":** SQL Server 2019+ can also
+      run batch mode over an ordinary rowstore table with no columnstore
+      index at all ("Batch Mode on Rowstore"), triggered by the optimizer's
+      own cost/cardinality estimate - real, but NOT schema-decidable (workload
+      data this static pass cannot see), so this only fires on the
+      definitively provable case: the table carries an actual columnstore
+      index (`Catalog.CatalogIndex.IsColumnstore`, already populated in BOTH
+      file mode (`CatalogBuilder`) and live mode (`LiveCatalogReader`), so
+      this stream runs in both modes, not live-only). AST-decidable: an
+      aggregate function call (`SUM`/`AVG`/`COUNT`/`COUNT_BIG`/`MIN`/`MAX`)
+      whose argument tree contains a CASE expression with a division inside
+      one of its THEN/ELSE result expressions, where the divisor is not a
+      literal constant (a literal divisor can never be zero and is
+      deliberately excluded), cross-checked against whether any table the
+      query's own FROM clause resolves through a direct base-table alias
+      carries a columnstore index. **Real coverage against the local test
+      database: 0 findings** — a real, honest zero, independently
+      cross-checked (`SELECT COUNT(*) FROM sys.indexes WHERE type IN (5,6)`
+      returns 0 - this database has no columnstore index of any kind at all),
+      so the structural precondition this rule needs never occurs here; not a
+      detection gap.
 
 ### F. Corrections and confirmations from the sweep (no new items)
 
@@ -4932,14 +4970,45 @@ script-family sweep had. No source citation carried into this file.
       10 rows - correctly out of scope by the same "a real column, a real
       persistent table" reasoning `SchemaExpressionCollector`'s own doc
       comment already states for computed columns.
-- [ ] **Bare `TOP (n)` with no `ORDER BY` anywhere in the query** — the row
-      set returned is not guaranteed deterministic (parallelism/plan choice
-      can change which rows come back run to run), so code relying on "the
-      first N rows" without an explicit order is trusting undefined
-      behavior. AST-decidable: `TopRowFilter` present, no `OrderByClause` in
-      the same query. Distinct from the already-shipped `TOP(100) PERCENT`
-      and TOP+ORDER-BY row-goal findings - this is the no-ORDER-BY-at-all
-      case, a correctness claim, not a performance one.
+- [x] **Bare `TOP (n)` with no `ORDER BY` anywhere in the query — shipped**
+      as `BareTopNoOrderByFinding`/`BareTopNoOrderByScanner`. The claim rests
+      on SQL Server's own documented absence of a determinism guarantee, not
+      on reproducing nondeterminism on demand - attempted directly against
+      the standing Docker instance anyway, on brand: the identical `SELECT
+      TOP (5) * FROM t` re-run repeatedly against a small, unchanged table
+      returned the identical row set and order every time in this
+      environment (a small heap, one thread, no statistics drift between
+      runs) - a real, honest negative result, stated plainly rather than
+      overclaimed; it does not contradict the documented lack of a guarantee,
+      it simply means this pass could not force a different plan shape to
+      demonstrate it live. AST-decidable, no catalog needed: a
+      `QuerySpecification` whose own `TopRowFilter` is present and whose own
+      `OrderByClause` is null - both live on the identical node, so "the same
+      query" is exactly this one query specification. `TOP (100) PERCENT` is
+      deliberately excluded (100 percent of a result set is every row
+      regardless of TOP's own row-selection nondeterminism - only the row
+      ORDER is at risk there, an already-shipped, narrower, view/inline-TVF-
+      scoped claim, `ViewOrderingFindingKind.TopPercentOrderByNeverLimits`,
+      confirmed never to overlap since that stream requires an ORDER BY to be
+      present and this one requires it to be absent). Unlike
+      `ViewOrderingFinding`, this scanner is NOT limited to a view/inline
+      TVF's own outermost query - every `QuerySpecification` in the fragment
+      is inspected. `FindingConfidence.Medium`: the mechanism is a certain,
+      documented engine fact, but whether any real caller actually depends on
+      the returned row SET (rather than using TOP as a sampling/existence-
+      probe convenience) is workload intent this pass cannot see. **Real
+      coverage against the local test database: 454 findings** across 196
+      distinct modules. Independently cross-checked with a hand-rolled catalog
+      query (`sys.sql_modules` text scan for modules containing `TOP` and NOT
+      containing `ORDER BY` anywhere): 184 modules - lower than this scanner's
+      196 by design, since the hand-rolled heuristic excludes a WHOLE module
+      the instant ANY `ORDER BY` appears anywhere in it (even an unrelated
+      one paired with a *different* statement's TOP), while this scanner
+      correctly still fires on the specific TOP site that has no ORDER BY of
+      its own. Direct inspection of two sampled findings confirmed genuine
+      true positives (e.g. `dbo.GetAgencyRegisteredName`: `RETURN (SELECT TOP
+      1 RegisteredName from dbo.tblAgency)`, no ORDER BY anywhere in the
+      function).
 - [x] **Multi-hop trigger recursion cycle across tables — shipped** as the
       new `TriggerRecursionCycleFinding` stream (`TriggerRecursionCycleScanner`,
       a whole-scan pass mirroring `CrossModuleLockOrderScanner`'s own shape,
@@ -5084,16 +5153,52 @@ script-family sweep had. No source citation carried into this file.
       of active, non-columnstore indexes on the same table sharing the exact
       same ordered key-column list and sort direction, with disjoint
       `INCLUDE` sets, real, mergeable write-amplification.
-- [ ] **String concatenation via the `+` operator silently nulls the entire
-      result when any operand is NULL** — unlike `CONCAT()`, which treats
-      NULL operands as empty string, `+` propagates a single NULL operand to
-      NULL for the whole expression. Code building a display string or a
-      composite key from nullable columns with `+` and no `ISNULL`/
-      `COALESCE` guard silently produces NULL instead of a partial string,
-      no error raised - a real semantic-preservation gotcha, not a style
-      complaint. AST-decidable: `+` binary operator between string-typed
-      operands where at least one is a nullable column reference, with no
-      wrapping `ISNULL`/`COALESCE`.
+- [x] **String concatenation via the `+` operator silently nulls the entire
+      result when any operand is NULL — shipped** as `StringConcatNullFinding`/
+      `StringConcatNullScanner`. Oracle-confirmed directly (Docker instance,
+      disposable scratch database, dropped immediately after):
+      `SELECT 'a' + NULL + 'b'` genuinely evaluated to NULL, while
+      `SELECT CONCAT('a', NULL, 'b')` genuinely evaluated to `'ab'` - the
+      identical NULL operand, two different silent outcomes depending purely
+      on which operator built the string. AST+catalog-decidable: a `+` chain
+      (flattened through nesting/parens, so `a+b+c` is one finding, not
+      three) where every leaf resolves with no guessing to a string literal,
+      a column reference resolved through the immediate statement's own
+      direct base-table FROM-clause alias to a char-family catalog column, or
+      an `ISNULL`/`COALESCE` call whose own arguments are themselves each one
+      of those shapes recursively (a guarded leaf never counts as the
+      "nullable operand" trigger); any other leaf shape makes the whole chain
+      Unknown and declines rather than guesses. Fires only when at least one
+      leaf is an unguarded, catalog-nullable column. `FindingConfidence.High`:
+      the NULL-propagation mechanism is unconditional, oracle-confirmed
+      engine behavior; SARIF Warning (workload-dependent risk, not a
+      proven-wrong-result-today claim), matching `DefaultNullableConstraintFinding`'s
+      own precedent for an analogous "the code silently does something other
+      than it reads like it does" mismatch. **A real correctness bug was
+      caught and fixed while verifying this against the local test
+      database**: `COALESCE` parses to its own dedicated ScriptDOM node type
+      (`CoalesceExpression`, an `Expressions` list), never a generic
+      `FunctionCall` the way `ISNULL` does - the first implementation's
+      COALESCE-guard check silently never matched anything, producing 6 false
+      positives against real `COALESCE`-guarded concatenations in the corpus
+      (e.g. `dbo.spFRRunsActualLoad`'s `COALESCE(addr1 + ' ' + ..., addr1 +
+      ' ' + ...)` shape). Found via manual spot-check of the raw findings
+      before trusting the count, not by the test suite (the scanner unit
+      tests' own COALESCE near-miss case happened to pass for the wrong
+      reason - the call was classified `Unknown` and declined rather than
+      correctly classified `Guarded`, which still produces the same
+      never-fires assertion). Fixed by giving `CoalesceExpression` its own
+      case in both the per-operand leaf classifier and the top-level
+      chain-root collector, and a dedicated regression test
+      (`CoalesceExpression_NotAFunctionCall_StillGuardsBothChains`) added to
+      catch a future regression the original near-miss test could not.
+      **Real coverage against the local test database: 35 findings** (41
+      before the COALESCE fix - the 6-finding drop is exactly the false
+      positives it eliminated). Independently cross-checked by direct
+      inspection of two sampled findings against the real column DDL: a
+      nullable `tblAuditLogNotes.Note`/`tblUserDef.Description`, each
+      concatenated via `+` with a literal and no guard, both confirmed
+      genuine true positives.
 - [x] **Logon trigger gating access on `HOST_NAME()` — shipped** as
       `TriggerCorrectnessFindingKind.LogonTriggerHostNameGate`. Oracle-
       confirmed directly (Docker instance, disposable scratch database and a

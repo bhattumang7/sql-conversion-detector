@@ -76,6 +76,9 @@ public sealed record ScanReport(
     IReadOnlyList<DefaultNullableConstraintFinding> DefaultNullableConstraintFindings,
     IReadOnlyList<TryCastComputedColumnPredicateFinding> TryCastComputedColumnPredicateFindings,
     IReadOnlyList<StaleSelectStarViewFinding> StaleSelectStarViewFindings,
+    IReadOnlyList<BareTopNoOrderByFinding> BareTopNoOrderByFindings,
+    IReadOnlyList<StringConcatNullFinding> StringConcatNullFindings,
+    IReadOnlyList<AggregateDivisionColumnstoreFinding> AggregateDivisionColumnstoreFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -356,5 +359,18 @@ public sealed record ScanReport(
     /// table's current shape - oracle-confirmed to silently surface real data under a stale,
     /// wrong column label, not merely a missing/extra column - live-mode only, needing the new
     /// <see cref="Catalog.DatabaseCatalog.TryGetViewCompiledColumns"/> registry).
-    public const int CurrentSchemaVersion = 57;
+    /// Bumped to 58 for three new streams from docs/detection-checklist.md "Second full-archive
+    /// practitioner sweep" §G: <see cref="BareTopNoOrderByFindings"/> (a bare <c>TOP (n)</c> with no
+    /// <c>ORDER BY</c> anywhere in the query - the returned row set is not guaranteed deterministic
+    /// per SQL Server's own documented absence of a guarantee; runs in both file and live mode,
+    /// pure AST, no catalog needed); <see cref="StringConcatNullFindings"/> (the <c>+</c> operator
+    /// silently propagating a single NULL operand to NULL for a whole concatenated string,
+    /// oracle-confirmed against <c>CONCAT()</c>'s different, non-nulling behavior; runs in both
+    /// modes); and <see cref="AggregateDivisionColumnstoreFindings"/> (a CASE-guarded division
+    /// inside an aggregate argument on a table carrying a columnstore index - shipped as a
+    /// structural risk flag only, Low confidence, after a real but unsuccessful live-reproduction
+    /// attempt against this environment's own engine build; runs in both modes, using the same
+    /// <see cref="Catalog.CatalogIndex.IsColumnstore"/> flag already populated by both the file-mode
+    /// and live-mode catalog builders).
+    public const int CurrentSchemaVersion = 58;
 }

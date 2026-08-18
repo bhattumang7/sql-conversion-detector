@@ -138,6 +138,9 @@ public static class ReadableScanReportWriter
         blocks.AddRange(DefaultNullableConstraint(report, headingLevel, pathBase));
         blocks.AddRange(TryCastComputedColumnPredicate(report, headingLevel, pathBase));
         blocks.AddRange(StaleSelectStarView(report, headingLevel, pathBase));
+        blocks.AddRange(BareTopNoOrderBy(report, headingLevel, pathBase));
+        blocks.AddRange(StringConcatNull(report, headingLevel, pathBase));
+        blocks.AddRange(AggregateDivisionColumnstore(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -216,6 +219,9 @@ public static class ReadableScanReportWriter
         AddCount(counts, "DEFAULT constraint on a still-nullable column", report.DefaultNullableConstraintFindings.Count);
         AddCount(counts, "TRY_CAST computed column referenced in a predicate", report.TryCastComputedColumnPredicateFindings.Count);
         AddCount(counts, "SELECT * view stale against base table's current shape", report.StaleSelectStarViewFindings.Count);
+        AddCount(counts, "Bare TOP with no ORDER BY", report.BareTopNoOrderByFindings.Count);
+        AddCount(counts, "+ concatenation of a nullable string column with no NULL guard", report.StringConcatNullFindings.Count);
+        AddCount(counts, "CASE-guarded aggregate division on a columnstore-backed table", report.AggregateDivisionColumnstoreFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1431,6 +1437,67 @@ public static class ReadableScanReportWriter
                 f.BaseTableQualifiedName,
                 string.Join(", ", f.ViewCompiledColumns),
                 string.Join(", ", f.BaseTableCurrentColumns),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> BareTopNoOrderBy(ScanReport report, int level, string? pathBase)
+    {
+        if (report.BareTopNoOrderByFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Bare TOP with no ORDER BY ({report.BareTopNoOrderByFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A TOP (n) with no ORDER BY anywhere in the same query. SQL Server's own documentation does not guarantee which rows TOP returns, or their order, without an explicit ORDER BY - the returned row set can change run to run with plan choice, parallelism, or statistics drift. TOP (100) PERCENT is excluded: 100 percent of a result set is every row regardless of TOP's own row-selection nondeterminism.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader],
+            [.. report.BareTopNoOrderByFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> StringConcatNull(ScanReport report, int level, string? pathBase)
+    {
+        if (report.StringConcatNullFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"+ concatenation of a nullable string column with no NULL guard ({report.StringConcatNullFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A + concatenation chain includes a nullable string column with no ISNULL/COALESCE guard. Unlike CONCAT(), which treats a NULL operand as empty string, + propagates a single NULL operand to NULL for the whole expression, silently, with no error.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Column"],
+            [.. report.StringConcatNullFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AggregateDivisionColumnstore(ScanReport report, int level, string? pathBase)
+    {
+        if (report.AggregateDivisionColumnstoreFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"CASE-guarded aggregate division on a columnstore-backed table ({report.AggregateDivisionColumnstoreFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An aggregate argument contains a CASE-guarded division by a non-constant divisor, on a table backed by a columnstore index. Historically reported as a class of bug where batch-mode (vectorized) execution does not reliably preserve the same per-row CASE-branch short-circuit elision rowstore scalar execution provides. Shipped as a structural risk flag only, Low confidence, after a genuine but unsuccessful attempt to reproduce a live failure against this tool's own standing engine build - not a proven-current-behavior claim.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Aggregate", "Table"],
+            [.. report.AggregateDivisionColumnstoreFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.AggregateFunctionName,
+                f.TableQualifiedName,
             })]);
     }
 
