@@ -6766,9 +6766,11 @@ verifiable.
   - [ ] **Pure per-rule classifiers** for decisions currently inline in
         visitors — no longer waiting for each rule to be opportunistically
         touched; working through this list directly, one item at a time:
-    - [ ] `CrossTableTypeDriftScanner` hand-rolls the collation-mismatch test
+    - [x] `CrossTableTypeDriftScanner` hand-rolls the collation-mismatch test
           its own doc comment cites `VerdictClassifier` for — route it
-          through the real one.
+          through the real one. Shipped: extracted `HasGenuineCollationMismatch`
+          out of `VerdictClassifier.ClassifyWithReason` into its own named,
+          reusable method; both callers now share one implementation.
     - [ ] `NonSargablePredicateScanner`'s case-fold function set (inline
           `HashSet<string>`) — extract to a pure classifier.
     - [ ] `NonSargablePredicateScanner`'s date-function set — extract to a
