@@ -21,6 +21,11 @@ public static class IndexDesignScanner
     /// unusual shape worth flagging, not a routine one.</summary>
     public const int WideClusteredKeyMaxColumns = 3;
 
+    /// <summary>Placeholder used in every finding message when an index has no name at all
+    /// (a system-generated or otherwise unnamed constraint index) - centralized as a constant
+    /// since this exact literal recurs across nearly every finding message in this scanner.</summary>
+    private const string UnnamedIndexPlaceholder = "<unnamed>";
+
     /// <summary>Same calibration pass as <see cref="WideClusteredKeyMaxColumns"/>: of 681 real
     /// clustered indexes, the average key width was ~15.3 bytes (many single-column
     /// <c>uniqueidentifier</c> keys sit exactly at 16) and 36 (~5%) exceed 16 bytes - kept at the
@@ -169,13 +174,13 @@ public static class IndexDesignScanner
                 IndexDesignFindingKind.HeapWithNonclusteredPrimaryKey,
                 table.QualifiedName,
                 nonclusteredPrimaryKey.Name,
-                $"'{table.QualifiedName}' has no clustered index anywhere - its own PRIMARY KEY constraint ('{nonclusteredPrimaryKey.Name ?? "<unnamed>"}') is declared NONCLUSTERED. Every nonclustered index on this table (including this one) points back to its base row with an 8-byte RID instead of the clustering key.",
+                $"'{table.QualifiedName}' has no clustered index anywhere - its own PRIMARY KEY constraint ('{nonclusteredPrimaryKey.Name ?? UnnamedIndexPlaceholder}') is declared NONCLUSTERED. Every nonclustered index on this table (including this one) points back to its base row with an 8-byte RID instead of the clustering key.",
                 table.SourcePath,
                 table.SourceLine));
             return;
         }
 
-        var names = string.Join(", ", activeNonclustered.Select(i => i.Name ?? "<unnamed>"));
+        var names = string.Join(", ", activeNonclustered.Select(i => i.Name ?? UnnamedIndexPlaceholder));
         findings.Add(new IndexDesignFinding(
             IndexDesignFindingKind.HeapWithNonclusteredIndexes,
             table.QualifiedName,
@@ -197,17 +202,29 @@ public static class IndexDesignScanner
             return;
         }
 
-        if (!clusteredIndex.IsUnique)
+        CheckNonUniqueClusteredIndex(table, clusteredIndex, findings);
+        CheckWideClusteredKey(table, clusteredIndex, findings);
+        CheckRandomClusteredKeyGuidDefault(table, clusteredIndex, defaultTextByColumn, findings);
+    }
+
+    private static void CheckNonUniqueClusteredIndex(CatalogTable table, CatalogIndex clusteredIndex, List<IndexDesignFinding> findings)
+    {
+        if (clusteredIndex.IsUnique)
         {
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.NonUniqueClusteredIndex,
-                table.QualifiedName,
-                clusteredIndex.Name,
-                $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? "<unnamed>"}' ({string.Join(", ", clusteredIndex.KeyColumns)}) is not unique - the engine adds a hidden 4-byte uniquifier to every duplicate-keyed row, widening the clustering key that every nonclustered index on this table also carries in its own leaf rows.",
-                table.SourcePath,
-                table.SourceLine));
+            return;
         }
 
+        findings.Add(new IndexDesignFinding(
+            IndexDesignFindingKind.NonUniqueClusteredIndex,
+            table.QualifiedName,
+            clusteredIndex.Name,
+            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? UnnamedIndexPlaceholder}' ({string.Join(", ", clusteredIndex.KeyColumns)}) is not unique - the engine adds a hidden 4-byte uniquifier to every duplicate-keyed row, widening the clustering key that every nonclustered index on this table also carries in its own leaf rows.",
+            table.SourcePath,
+            table.SourceLine));
+    }
+
+    private static void CheckWideClusteredKey(CatalogTable table, CatalogIndex clusteredIndex, List<IndexDesignFinding> findings)
+    {
         var keyColumnTypes = clusteredIndex.KeyColumns.Select(table.FindColumn).ToList();
         var wideByColumnCount = clusteredIndex.KeyColumns.Count > WideClusteredKeyMaxColumns;
 
@@ -229,19 +246,25 @@ public static class IndexDesignScanner
         }
 
         var wideByBytes = totalBytes is { } bytes && bytes > WideClusteredKeyMaxBytes;
-        if (wideByColumnCount || wideByBytes)
+        if (!wideByColumnCount && !wideByBytes)
         {
-            var bytesText = totalBytes is { } b ? $"{b} bytes" : "byte width unresolved for at least one key column";
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.WideClusteredKey,
-                table.QualifiedName,
-                clusteredIndex.Name,
-                $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? "<unnamed>"}' has {clusteredIndex.KeyColumns.Count} key column(s) ({string.Join(", ", clusteredIndex.KeyColumns)}, {bytesText}) - every nonclustered index on this table carries a full copy of this key in every leaf row.",
-                table.SourcePath,
-                table.SourceLine,
-                FindingConfidence.Medium));
+            return;
         }
 
+        var bytesText = totalBytes is { } b ? $"{b} bytes" : "byte width unresolved for at least one key column";
+        findings.Add(new IndexDesignFinding(
+            IndexDesignFindingKind.WideClusteredKey,
+            table.QualifiedName,
+            clusteredIndex.Name,
+            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? UnnamedIndexPlaceholder}' has {clusteredIndex.KeyColumns.Count} key column(s) ({string.Join(", ", clusteredIndex.KeyColumns)}, {bytesText}) - every nonclustered index on this table carries a full copy of this key in every leaf row.",
+            table.SourcePath,
+            table.SourceLine,
+            FindingConfidence.Medium));
+    }
+
+    private static void CheckRandomClusteredKeyGuidDefault(
+        CatalogTable table, CatalogIndex clusteredIndex, Dictionary<string, string> defaultTextByColumn, List<IndexDesignFinding> findings)
+    {
         var leadingColumnName = clusteredIndex.KeyColumns[0];
         var leadingColumn = table.FindColumn(leadingColumnName);
         if (leadingColumn?.Type?.Category != SqlTypeCategory.UniqueIdentifier)
@@ -259,7 +282,7 @@ public static class IndexDesignScanner
             IndexDesignFindingKind.RandomClusteredKeyGuidDefault,
             table.QualifiedName,
             clusteredIndex.Name,
-            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? "<unnamed>"}' leads on '{leadingColumnName}', a uniqueidentifier column defaulted to NEWID() - genuinely random insert order into a clustered B-tree causes severe page splits and fragmentation. NEWSEQUENTIALID() avoids this and does not fire here.",
+            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? UnnamedIndexPlaceholder}' leads on '{leadingColumnName}', a uniqueidentifier column defaulted to NEWID() - genuinely random insert order into a clustered B-tree causes severe page splits and fragmentation. NEWSEQUENTIALID() avoids this and does not fire here.",
             table.SourcePath,
             table.SourceLine));
     }
@@ -284,45 +307,48 @@ public static class IndexDesignScanner
         {
             for (var j = i + 1; j < candidates.Count; j++)
             {
-                var a = candidates[i];
-                var b = candidates[j];
-                if (a.IsUnique != b.IsUnique || a.Kind != b.Kind)
-                {
-                    continue;
-                }
-
-                if (a.KeyColumns.Count == b.KeyColumns.Count)
-                {
-                    if (KeyColumnsEqual(a.KeyColumns, b.KeyColumns))
-                    {
-                        findings.Add(new IndexDesignFinding(
-                            IndexDesignFindingKind.DuplicateIndex,
-                            table.QualifiedName,
-                            b.Name,
-                            $"'{table.QualifiedName}' indexes '{a.Name ?? "<unnamed>"}' and '{b.Name ?? "<unnamed>"}' share the identical key list ({string.Join(", ", a.KeyColumns)}), the same uniqueness, and the same index kind - exact duplicates. One is pure write amplification and wasted space with zero query benefit over the other.",
-                            table.SourcePath,
-                            table.SourceLine));
-                    }
-
-                    continue;
-                }
-
-                // Whichever of the pair has the SHORTER key list is the candidate for being
-                // subsumed by the longer one - order the comparison so it only fires once per
-                // pair, in the "shorter is subsumed by longer" direction.
-                var (shorter, longer) = a.KeyColumns.Count < b.KeyColumns.Count ? (a, b) : (b, a);
-                if (IsProperPrefix(shorter.KeyColumns, longer.KeyColumns)
-                    && shorter.IncludedColumns.All(c => longer.IncludedColumns.Contains(c, StringComparer.OrdinalIgnoreCase)))
-                {
-                    findings.Add(new IndexDesignFinding(
-                        IndexDesignFindingKind.SubsumedIndex,
-                        table.QualifiedName,
-                        shorter.Name,
-                        $"'{table.QualifiedName}' index '{shorter.Name ?? "<unnamed>"}' ({string.Join(", ", shorter.KeyColumns)}) is a leading-column prefix of '{longer.Name ?? "<unnamed>"}' ({string.Join(", ", longer.KeyColumns)}), with its own INCLUDE columns already covered by '{longer.Name ?? "<unnamed>"}' - '{shorter.Name ?? "<unnamed>"}' is redundant, since '{longer.Name ?? "<unnamed>"}' can serve every seek it could.",
-                        table.SourcePath,
-                        table.SourceLine));
-                }
+                CompareIndexPairForDuplicateOrSubsumed(table, candidates[i], candidates[j], findings);
             }
+        }
+    }
+
+    private static void CompareIndexPairForDuplicateOrSubsumed(CatalogTable table, CatalogIndex a, CatalogIndex b, List<IndexDesignFinding> findings)
+    {
+        if (a.IsUnique != b.IsUnique || a.Kind != b.Kind)
+        {
+            return;
+        }
+
+        if (a.KeyColumns.Count == b.KeyColumns.Count)
+        {
+            if (KeyColumnsEqual(a.KeyColumns, b.KeyColumns))
+            {
+                findings.Add(new IndexDesignFinding(
+                    IndexDesignFindingKind.DuplicateIndex,
+                    table.QualifiedName,
+                    b.Name,
+                    $"'{table.QualifiedName}' indexes '{a.Name ?? UnnamedIndexPlaceholder}' and '{b.Name ?? UnnamedIndexPlaceholder}' share the identical key list ({string.Join(", ", a.KeyColumns)}), the same uniqueness, and the same index kind - exact duplicates. One is pure write amplification and wasted space with zero query benefit over the other.",
+                    table.SourcePath,
+                    table.SourceLine));
+            }
+
+            return;
+        }
+
+        // Whichever of the pair has the SHORTER key list is the candidate for being subsumed
+        // by the longer one - order the comparison so it only fires once per pair, in the
+        // "shorter is subsumed by longer" direction.
+        var (shorter, longer) = a.KeyColumns.Count < b.KeyColumns.Count ? (a, b) : (b, a);
+        if (IsProperPrefix(shorter.KeyColumns, longer.KeyColumns)
+            && shorter.IncludedColumns.All(c => longer.IncludedColumns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+        {
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.SubsumedIndex,
+                table.QualifiedName,
+                shorter.Name,
+                $"'{table.QualifiedName}' index '{shorter.Name ?? UnnamedIndexPlaceholder}' ({string.Join(", ", shorter.KeyColumns)}) is a leading-column prefix of '{longer.Name ?? UnnamedIndexPlaceholder}' ({string.Join(", ", longer.KeyColumns)}), with its own INCLUDE columns already covered by '{longer.Name ?? UnnamedIndexPlaceholder}' - '{shorter.Name ?? UnnamedIndexPlaceholder}' is redundant, since '{longer.Name ?? UnnamedIndexPlaceholder}' can serve every seek it could.",
+                table.SourcePath,
+                table.SourceLine));
         }
     }
 
@@ -365,7 +391,7 @@ public static class IndexDesignScanner
                     IndexDesignFindingKind.HypotheticalIndex,
                     table.QualifiedName,
                     index.Name,
-                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' is hypothetical (sys.indexes.is_hypothetical = 1) - a Database Engine Tuning Advisor/missing-index-wizard artifact with no real data behind it, left over after an analysis session. Safe to drop.",
+                    $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' is hypothetical (sys.indexes.is_hypothetical = 1) - a Database Engine Tuning Advisor/missing-index-wizard artifact with no real data behind it, left over after an analysis session. Safe to drop.",
                     table.SourcePath,
                     table.SourceLine));
             }
@@ -375,7 +401,7 @@ public static class IndexDesignScanner
                     IndexDesignFindingKind.DisabledIndex,
                     table.QualifiedName,
                     index.Name,
-                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' is disabled (ALTER INDEX ... DISABLE) - unusable by the engine until rebuilt, but still occupies catalog metadata and blocks a same-named CREATE INDEX.",
+                    $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' is disabled (ALTER INDEX ... DISABLE) - unusable by the engine until rebuilt, but still occupies catalog metadata and blocks a same-named CREATE INDEX.",
                     table.SourcePath,
                     table.SourceLine));
             }
@@ -410,7 +436,7 @@ public static class IndexDesignScanner
                     IndexDesignFindingKind.ManyKeyColumnsIndex,
                     table.QualifiedName,
                     index.Name,
-                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' has {index.KeyColumns.Count} key columns ({string.Join(", ", index.KeyColumns)}) - every one is carried in every leaf-level lookup and update against this index.",
+                    $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' has {index.KeyColumns.Count} key columns ({string.Join(", ", index.KeyColumns)}) - every one is carried in every leaf-level lookup and update against this index.",
                     table.SourcePath,
                     table.SourceLine,
                     FindingConfidence.Medium));
@@ -595,7 +621,7 @@ public static class IndexDesignScanner
                 IndexDesignFindingKind.FilterColumnNotInIndex,
                 table.QualifiedName,
                 index.Name,
-                $"'{table.QualifiedName}' filtered index '{index.Name ?? "<unnamed>"}' has filter '{filterDefinition}' referencing column(s) not in its own key/INCLUDE list: {string.Join(", ", missing)} - the engine can only substitute this index for a query whose own WHERE clause restates the filter predicate, and it cannot cheaply confirm that without reading those column(s) from the base table.",
+                $"'{table.QualifiedName}' filtered index '{index.Name ?? UnnamedIndexPlaceholder}' has filter '{filterDefinition}' referencing column(s) not in its own key/INCLUDE list: {string.Join(", ", missing)} - the engine can only substitute this index for a query whose own WHERE clause restates the filter predicate, and it cannot cheaply confirm that without reading those column(s) from the base table.",
                 table.SourcePath,
                 table.SourceLine));
         }
@@ -750,7 +776,7 @@ public static class IndexDesignScanner
                 IndexDesignFindingKind.FloatOrRealIndexKeyColumn,
                 table.QualifiedName,
                 index.Name,
-                $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' carries approximate (float/real) key column(s) {string.Join(", ", floatKeyColumns)} - IEEE-754 binary floating-point cannot represent every decimal value exactly, so an equality seek/comparison against it can silently miss a value a person would call 'the same number'.",
+                $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' carries approximate (float/real) key column(s) {string.Join(", ", floatKeyColumns)} - IEEE-754 binary floating-point cannot represent every decimal value exactly, so an equality seek/comparison against it can silently miss a value a person would call 'the same number'.",
                 table.SourcePath,
                 table.SourceLine));
         }
@@ -761,20 +787,15 @@ public static class IndexDesignScanner
     /// <c>NO_RECOMPUTE</c> half - see <see cref="IndexDesignFindingKind.NoRecomputeStatistics"/>'s
     /// own doc comment for why the partitioned-incremental-statistics half is not shipped here.
     /// </summary>
-    private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings)
-    {
-        foreach (var stat in table.EffectiveStatistics.Where(s => s.NoRecompute))
-        {
-            findings.Add(new IndexDesignFinding(
-                IndexDesignFindingKind.NoRecomputeStatistics,
-                table.QualifiedName,
-                stat.Name,
-                $"'{table.QualifiedName}' statistics object '{stat.Name}' is marked NORECOMPUTE - the engine's automatic statistics maintenance never refreshes it, so its cardinality estimate silently drifts stale as the table's data changes.",
-                table.SourcePath,
-                table.SourceLine,
-                Confidence: FindingConfidence.Medium));
-        }
-    }
+    private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings) =>
+        findings.AddRange(table.EffectiveStatistics.Where(s => s.NoRecompute).Select(stat => new IndexDesignFinding(
+            IndexDesignFindingKind.NoRecomputeStatistics,
+            table.QualifiedName,
+            stat.Name,
+            $"'{table.QualifiedName}' statistics object '{stat.Name}' is marked NORECOMPUTE - the engine's automatic statistics maintenance never refreshes it, so its cardinality estimate silently drifts stale as the table's data changes.",
+            table.SourcePath,
+            table.SourceLine,
+            Confidence: FindingConfidence.Medium)));
 
     /// <summary>
     /// Confirmed directly against the standing Docker oracle (2026-08-18): the engine's own printed
@@ -812,27 +833,32 @@ public static class IndexDesignScanner
                 continue;
             }
 
-            var limit = index.IsClustered ? ClusteredKeyLimitBytes : NonclusteredKeyLimitBytes;
+            CheckVariableLengthKeyColumnWidth(table, index, findings);
+        }
+    }
 
-            foreach (var columnName in index.KeyColumns)
+    private static void CheckVariableLengthKeyColumnWidth(CatalogTable table, CatalogIndex index, List<IndexDesignFinding> findings)
+    {
+        var limit = index.IsClustered ? ClusteredKeyLimitBytes : NonclusteredKeyLimitBytes;
+
+        foreach (var columnName in index.KeyColumns)
+        {
+            var column = table.FindColumn(columnName);
+            if (column?.Type is not { IsMax: false } type
+                || type.Category is not (SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.VarBinary)
+                || EstimateColumnKeyBytes(type) is not { } declaredBytes
+                || declaredBytes <= limit)
             {
-                var column = table.FindColumn(columnName);
-                if (column?.Type is not { IsMax: false } type
-                    || type.Category is not (SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.VarBinary)
-                    || EstimateColumnKeyBytes(type) is not { } declaredBytes
-                    || declaredBytes <= limit)
-                {
-                    continue;
-                }
-
-                findings.Add(new IndexDesignFinding(
-                    IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit,
-                    table.QualifiedName,
-                    index.Name,
-                    $"'{table.QualifiedName}' index '{index.Name ?? "<unnamed>"}' key column '{columnName}' is declared {type} - a {declaredBytes}-byte maximum width, over the engine's {limit}-byte {(index.IsClustered ? "clustered" : "nonclustered")} key limit. CREATE INDEX only warns, it does not fail - the first INSERT/UPDATE that actually stores a value long enough to exceed {limit} bytes fails at that moment instead, silently until then.",
-                    table.SourcePath,
-                    table.SourceLine));
+                continue;
             }
+
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.VariableLengthKeyColumnExceedsKeyLimit,
+                table.QualifiedName,
+                index.Name,
+                $"'{table.QualifiedName}' index '{index.Name ?? UnnamedIndexPlaceholder}' key column '{columnName}' is declared {type} - a {declaredBytes}-byte maximum width, over the engine's {limit}-byte {(index.IsClustered ? "clustered" : "nonclustered")} key limit. CREATE INDEX only warns, it does not fail - the first INSERT/UPDATE that actually stores a value long enough to exceed {limit} bytes fails at that moment instead, silently until then.",
+                table.SourcePath,
+                table.SourceLine));
         }
     }
 
@@ -854,40 +880,43 @@ public static class IndexDesignScanner
         {
             for (var j = i + 1; j < candidates.Count; j++)
             {
-                var a = candidates[i];
-                var b = candidates[j];
-                if (a.IsUnique != b.IsUnique || a.Kind != b.Kind || a.KeyColumns.Count != b.KeyColumns.Count)
-                {
-                    continue;
-                }
-
-                if (!KeyColumnsEqual(a.KeyColumns, b.KeyColumns) || !a.KeyColumnIsDescending.SequenceEqual(b.KeyColumnIsDescending))
-                {
-                    continue;
-                }
-
-                var aIncluded = new HashSet<string>(a.IncludedColumns, StringComparer.OrdinalIgnoreCase);
-                var bIncluded = new HashSet<string>(b.IncludedColumns, StringComparer.OrdinalIgnoreCase);
-
-                // Identical INCLUDE sets is DuplicateIndex's own territory, not this kind's - and a
-                // subset relationship either way means one index is already SubsumedIndex-eligible
-                // (same key list counts as a trivial "prefix" of itself) - only a genuine
-                // non-overlapping divergence on BOTH sides belongs here.
-                if (aIncluded.SetEquals(bIncluded) || aIncluded.IsSubsetOf(bIncluded) || bIncluded.IsSubsetOf(aIncluded))
-                {
-                    continue;
-                }
-
-                var union = string.Join(", ", aIncluded.Concat(bIncluded).OrderBy(c => c, StringComparer.OrdinalIgnoreCase).Distinct(StringComparer.OrdinalIgnoreCase));
-                findings.Add(new IndexDesignFinding(
-                    IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly,
-                    table.QualifiedName,
-                    b.Name,
-                    $"'{table.QualifiedName}' indexes '{a.Name ?? "<unnamed>"}' and '{b.Name ?? "<unnamed>"}' share the identical key list ({string.Join(", ", a.KeyColumns)}) and sort direction but carry different, non-overlapping INCLUDE columns ('{a.Name ?? "<unnamed>"}': {string.Join(", ", a.IncludedColumns)}; '{b.Name ?? "<unnamed>"}': {string.Join(", ", b.IncludedColumns)}) - mergeable into one index carrying the union ({union}) at no seek cost to either original query, for less write/storage overhead than carrying both.",
-                    table.SourcePath,
-                    table.SourceLine));
+                CompareIndexPairForMergeableIncludeOnly(table, candidates[i], candidates[j], findings);
             }
         }
+    }
+
+    private static void CompareIndexPairForMergeableIncludeOnly(CatalogTable table, CatalogIndex a, CatalogIndex b, List<IndexDesignFinding> findings)
+    {
+        if (a.IsUnique != b.IsUnique || a.Kind != b.Kind || a.KeyColumns.Count != b.KeyColumns.Count)
+        {
+            return;
+        }
+
+        if (!KeyColumnsEqual(a.KeyColumns, b.KeyColumns) || !a.KeyColumnIsDescending.SequenceEqual(b.KeyColumnIsDescending))
+        {
+            return;
+        }
+
+        var aIncluded = new HashSet<string>(a.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+        var bIncluded = new HashSet<string>(b.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+
+        // Identical INCLUDE sets is DuplicateIndex's own territory, not this kind's - and a
+        // subset relationship either way means one index is already SubsumedIndex-eligible
+        // (same key list counts as a trivial "prefix" of itself) - only a genuine
+        // non-overlapping divergence on BOTH sides belongs here.
+        if (aIncluded.SetEquals(bIncluded) || aIncluded.IsSubsetOf(bIncluded) || bIncluded.IsSubsetOf(aIncluded))
+        {
+            return;
+        }
+
+        var union = string.Join(", ", aIncluded.Concat(bIncluded).OrderBy(c => c, StringComparer.OrdinalIgnoreCase).Distinct(StringComparer.OrdinalIgnoreCase));
+        findings.Add(new IndexDesignFinding(
+            IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly,
+            table.QualifiedName,
+            b.Name,
+            $"'{table.QualifiedName}' indexes '{a.Name ?? UnnamedIndexPlaceholder}' and '{b.Name ?? UnnamedIndexPlaceholder}' share the identical key list ({string.Join(", ", a.KeyColumns)}) and sort direction but carry different, non-overlapping INCLUDE columns ('{a.Name ?? UnnamedIndexPlaceholder}': {string.Join(", ", a.IncludedColumns)}; '{b.Name ?? UnnamedIndexPlaceholder}': {string.Join(", ", b.IncludedColumns)}) - mergeable into one index carrying the union ({union}) at no seek cost to either original query, for less write/storage overhead than carrying both.",
+            table.SourcePath,
+            table.SourceLine));
     }
 
     /// <summary>
@@ -913,7 +942,7 @@ public static class IndexDesignScanner
             IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable,
             table.QualifiedName,
             columnstoreIndex.Name,
-            $"'{table.QualifiedName}' carries a columnstore index ('{columnstoreIndex.Name ?? "<unnamed>"}') and is also a direct INSERT/UPDATE/DELETE/MERGE target elsewhere in this codebase - lock escalation on a columnstore index happens at ROWGROUP granularity, not row granularity, so a single-row write inside an explicit transaction can block unrelated concurrent access to every other row sharing that rowgroup. Structural risk flag only: whether contention actually occurs is workload-dependent (concurrent access pattern, rowgroup size) and out of reach for this static pass.",
+            $"'{table.QualifiedName}' carries a columnstore index ('{columnstoreIndex.Name ?? UnnamedIndexPlaceholder}') and is also a direct INSERT/UPDATE/DELETE/MERGE target elsewhere in this codebase - lock escalation on a columnstore index happens at ROWGROUP granularity, not row granularity, so a single-row write inside an explicit transaction can block unrelated concurrent access to every other row sharing that rowgroup. Structural risk flag only: whether contention actually occurs is workload-dependent (concurrent access pattern, rowgroup size) and out of reach for this static pass.",
             table.SourcePath,
             table.SourceLine,
             FindingConfidence.Medium));
@@ -944,7 +973,7 @@ public static class IndexDesignScanner
             IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization,
             table.QualifiedName,
             clusteredIndex.Name,
-            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? "<unnamed>"}' leads on '{leadingColumn.Name}', an always-ascending IDENTITY column, with OPTIMIZE_FOR_SEQUENTIAL_KEY not enabled - every insert lands on the same trailing page, so concurrent inserts can serialize on that page's latch. Structural risk flag only: whether this actually causes contention depends on concurrent insert rate, which is workload data out of reach for this static pass.",
+            $"'{table.QualifiedName}' clustered index '{clusteredIndex.Name ?? UnnamedIndexPlaceholder}' leads on '{leadingColumn.Name}', an always-ascending IDENTITY column, with OPTIMIZE_FOR_SEQUENTIAL_KEY not enabled - every insert lands on the same trailing page, so concurrent inserts can serialize on that page's latch. Structural risk flag only: whether this actually causes contention depends on concurrent insert rate, which is workload data out of reach for this static pass.",
             table.SourcePath,
             table.SourceLine,
             FindingConfidence.Medium));
@@ -1038,5 +1067,5 @@ public static class IndexDesignScanner
     }
 
     private static string DefaultKey(string tableQualifiedName, string columnName) =>
-        $"{tableQualifiedName}{columnName}";
+        $"{tableQualifiedName}\x01{columnName}";
 }

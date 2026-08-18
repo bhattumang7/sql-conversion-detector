@@ -162,13 +162,6 @@ public static partial class SecurityScanner
             base.ExplicitVisit(node);
         }
 
-        private void AddCredential(string variableName, TSqlFragment site) =>
-            Findings.Add(new SecurityFinding(
-                SecurityFindingKind.HardCodedCredential,
-                sourcePath, site.StartLine, site.StartColumn,
-                $"'{variableName}' looks like it holds a credential and is assigned a literal string directly in source text - keep credentials in a secrets store or external configuration, never embedded in a script.",
-                FindingConfidence.Low));
-
         public override void ExplicitVisit(StringLiteral node)
         {
             if (node.Value is { Length: > 0 } text && TryGetIpAddress(text, out var ip) && !IsBenignIpAddress(ip))
@@ -211,6 +204,13 @@ public static partial class SecurityScanner
 
             base.ExplicitVisit(node);
         }
+
+        private void AddCredential(string variableName, TSqlFragment site) =>
+            Findings.Add(new SecurityFinding(
+                SecurityFindingKind.HardCodedCredential,
+                sourcePath, site.StartLine, site.StartColumn,
+                $"'{variableName}' looks like it holds a credential and is assigned a literal string directly in source text - keep credentials in a secrets store or external configuration, never embedded in a script.",
+                FindingConfidence.Low));
 
         private static bool IsCredentialSuggestiveOperand(ScalarExpression expression) => expression switch
         {

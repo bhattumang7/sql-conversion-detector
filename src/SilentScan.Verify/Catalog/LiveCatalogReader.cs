@@ -907,53 +907,67 @@ public sealed class LiveCatalogReader
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var objectId = reader.GetInt32(0);
-            var indexId = reader.GetInt32(1);
-            var key = (objectId, indexId);
-
-            if (!rowsByIndex.TryGetValue(key, out var row))
-            {
-                var indexName = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
-                var filterDefinition = await reader.IsDBNullAsync(10, cancellationToken) ? null : reader.GetString(10);
-                row = new IndexRow(
-                    Name: indexName,
-                    TypeDesc: reader.GetString(3),
-                    IsUnique: reader.GetBoolean(4),
-                    IsPrimaryKey: reader.GetBoolean(5),
-                    IsUniqueConstraint: reader.GetBoolean(6),
-                    HasFilter: reader.GetBoolean(7),
-                    IsDisabled: reader.GetBoolean(8),
-                    IsHypothetical: reader.GetBoolean(9),
-                    KeyColumns: [],
-                    IncludedColumns: [],
-                    FilterDefinition: filterDefinition,
-                    OptimizeForSequentialKey: reader.GetBoolean(11));
-                rowsByIndex[key] = row;
-            }
-
-            if (await reader.IsDBNullAsync(15, cancellationToken))
-            {
-                // No sys.index_columns row at all (clustered columnstore) - the index row above
-                // was already recorded with empty key/included lists; nothing more to add.
-                continue;
-            }
-
-            var isIncluded = reader.GetBoolean(13);
-            var columnName = reader.GetString(15);
-            if (isIncluded)
-            {
-                row.IncludedColumns.Add(columnName);
-            }
-            else
-            {
-                // is_descending_key is meaningless (but non-null, always false) for an included
-                // column - only read it on the key-column branch, matching the shape KeyColumns
-                // itself already takes.
-                var isDescending = reader.GetBoolean(16);
-                row.KeyColumns.Add((reader.GetByte(12), columnName, isDescending));
-            }
+            await AccumulateIndexRowAsync(reader, rowsByIndex, cancellationToken);
         }
 
+        return BuildIndexesByTable(rowsByIndex);
+    }
+
+    private static async Task AccumulateIndexRowAsync(
+        SqlDataReader reader,
+        Dictionary<(int ObjectId, int IndexId), IndexRow> rowsByIndex,
+        CancellationToken cancellationToken)
+    {
+        var objectId = reader.GetInt32(0);
+        var indexId = reader.GetInt32(1);
+        var key = (objectId, indexId);
+
+        if (!rowsByIndex.TryGetValue(key, out var row))
+        {
+            var indexName = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
+            var filterDefinition = await reader.IsDBNullAsync(10, cancellationToken) ? null : reader.GetString(10);
+            row = new IndexRow(
+                Name: indexName,
+                TypeDesc: reader.GetString(3),
+                IsUnique: reader.GetBoolean(4),
+                IsPrimaryKey: reader.GetBoolean(5),
+                IsUniqueConstraint: reader.GetBoolean(6),
+                HasFilter: reader.GetBoolean(7),
+                IsDisabled: reader.GetBoolean(8),
+                IsHypothetical: reader.GetBoolean(9),
+                KeyColumns: [],
+                IncludedColumns: [],
+                FilterDefinition: filterDefinition,
+                OptimizeForSequentialKey: reader.GetBoolean(11));
+            rowsByIndex[key] = row;
+        }
+
+        if (await reader.IsDBNullAsync(15, cancellationToken))
+        {
+            // No sys.index_columns row at all (clustered columnstore) - the index row above
+            // was already recorded with empty key/included lists; nothing more to add.
+            return;
+        }
+
+        var isIncluded = reader.GetBoolean(13);
+        var columnName = reader.GetString(15);
+        if (isIncluded)
+        {
+            row.IncludedColumns.Add(columnName);
+        }
+        else
+        {
+            // is_descending_key is meaningless (but non-null, always false) for an included
+            // column - only read it on the key-column branch, matching the shape KeyColumns
+            // itself already takes.
+            var isDescending = reader.GetBoolean(16);
+            row.KeyColumns.Add((reader.GetByte(12), columnName, isDescending));
+        }
+    }
+
+    private static Dictionary<int, List<CatalogIndex>> BuildIndexesByTable(
+        Dictionary<(int ObjectId, int IndexId), IndexRow> rowsByIndex)
+    {
         var indexesByTable = new Dictionary<int, List<CatalogIndex>>();
         foreach (var ((objectId, _), row) in rowsByIndex)
         {

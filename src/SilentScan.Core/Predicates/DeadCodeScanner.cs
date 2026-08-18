@@ -23,16 +23,6 @@ public static class DeadCodeScanner
         ];
     }
 
-    private static string QualifiedName(SchemaObjectName name) =>
-        name.SchemaIdentifier is { } schema
-            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-            : name.BaseIdentifier.Value;
-
-    private static IList<TSqlStatement> Unwrap(StatementList statementList) =>
-        statementList.Statements is [BeginEndBlockStatement singleBlock]
-            ? singleBlock.StatementList.Statements
-            : statementList.Statements;
-
     private sealed class RoutineVisitor(string sourcePath) : TSqlFragmentVisitor
     {
         public List<DeadCodeFinding> Findings { get; } = [];
@@ -128,6 +118,16 @@ public static class DeadCodeScanner
                 Findings.AddRange(reachability.Findings);
             }
         }
+
+        private static string QualifiedName(SchemaObjectName name) =>
+            name.SchemaIdentifier is { } schema
+                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+                : name.BaseIdentifier.Value;
+
+        private static IList<TSqlStatement> Unwrap(StatementList statementList) =>
+            statementList.Statements is [BeginEndBlockStatement singleBlock]
+                ? singleBlock.StatementList.Statements
+                : statementList.Statements;
     }
 
     /// <summary>Collects, in one pass over a single routine's own body, every declared local

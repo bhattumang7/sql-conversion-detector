@@ -20,56 +20,7 @@ public static class SecurityPredicateIndexScanner
 
         foreach (var predicate in catalog.SecurityPredicates)
         {
-            if (!predicate.IsPolicyEnabled || !predicate.IsFilterPredicate
-                || string.IsNullOrWhiteSpace(predicate.PredicateDefinitionText))
-            {
-                continue;
-            }
-
-            var table = catalog.Find(predicate.TargetTableQualifiedName);
-            if (table is null)
-            {
-                continue;
-            }
-
-            var call = TryParseFunctionCall(predicate.PredicateDefinitionText);
-            if (call is null)
-            {
-                continue;
-            }
-
-            var boundColumns = call.Parameters
-                .OfType<ColumnReferenceExpression>()
-                .Select(c => c.MultiPartIdentifier?.Identifiers is { Count: > 0 } ids ? ids[^1].Value : null)
-                .Where(name => name is not null)
-                .Select(name => name!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (boundColumns.Count == 0)
-            {
-                // The predicate function was invoked with no resolvable bare-column argument (a
-                // literal, an expression, or a zero-argument call) - nothing this pass can check
-                // against the table's own indexes, so left unanalyzed rather than guessed at.
-                continue;
-            }
-
-            var hasSupportingIndex = table.Indexes.Any(i =>
-                !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0
-                && boundColumns.Contains(i.KeyColumns[0], StringComparer.OrdinalIgnoreCase));
-
-            if (hasSupportingIndex)
-            {
-                continue;
-            }
-
-            findings.Add(new SecurityPredicateIndexFinding(
-                predicate.PolicyQualifiedName,
-                predicate.TargetTableQualifiedName,
-                SchemaObjectNameHelper.QualifyFunctionCall(call),
-                boundColumns,
-                table.SourcePath,
-                table.SourceLine));
+            AnalyzeSecurityPredicate(catalog, predicate, findings);
         }
 
         return
@@ -78,6 +29,61 @@ public static class SecurityPredicateIndexScanner
                 .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.PolicyQualifiedName, StringComparer.Ordinal),
         ];
+    }
+
+    private static void AnalyzeSecurityPredicate(
+        DatabaseCatalog catalog, CatalogSecurityPredicate predicate, List<SecurityPredicateIndexFinding> findings)
+    {
+        if (!predicate.IsPolicyEnabled || !predicate.IsFilterPredicate
+            || string.IsNullOrWhiteSpace(predicate.PredicateDefinitionText))
+        {
+            return;
+        }
+
+        var table = catalog.Find(predicate.TargetTableQualifiedName);
+        if (table is null)
+        {
+            return;
+        }
+
+        var call = TryParseFunctionCall(predicate.PredicateDefinitionText);
+        if (call is null)
+        {
+            return;
+        }
+
+        var boundColumns = call.Parameters
+            .OfType<ColumnReferenceExpression>()
+            .Select(c => c.MultiPartIdentifier?.Identifiers is { Count: > 0 } ids ? ids[^1].Value : null)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (boundColumns.Count == 0)
+        {
+            // The predicate function was invoked with no resolvable bare-column argument (a
+            // literal, an expression, or a zero-argument call) - nothing this pass can check
+            // against the table's own indexes, so left unanalyzed rather than guessed at.
+            return;
+        }
+
+        var hasSupportingIndex = table.Indexes.Any(i =>
+            !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0
+            && boundColumns.Contains(i.KeyColumns[0], StringComparer.OrdinalIgnoreCase));
+
+        if (hasSupportingIndex)
+        {
+            return;
+        }
+
+        findings.Add(new SecurityPredicateIndexFinding(
+            predicate.PolicyQualifiedName,
+            predicate.TargetTableQualifiedName,
+            SchemaObjectNameHelper.QualifyFunctionCall(call),
+            boundColumns,
+            table.SourcePath,
+            table.SourceLine));
     }
 
     /// <summary>

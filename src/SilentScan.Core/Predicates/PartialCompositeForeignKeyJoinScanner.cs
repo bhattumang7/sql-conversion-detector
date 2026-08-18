@@ -323,9 +323,9 @@ public static class PartialCompositeForeignKeyJoinScanner
 
             // Depth == 0 required: a column reached through a view layer is not a direct base-
             // table predicate this scanner's base-table-only scope covers (see the finding's own
-            // doc comment) - ledger is null throughout this pass since NonSargablePredicateScanner/
-            // TypedPredicateExtractor already run full coverage reporting over the same files;
-            // this scanner's own unresolved references would just be duplicate noise.
+            // doc comment). The ledger is null throughout this pass, since NonSargablePredicateScanner
+            // and TypedPredicateExtractor already run full coverage reporting over the same files
+            // and this scanner's own unresolved references would just be duplicate noise.
             var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
             return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
                 ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)

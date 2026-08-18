@@ -47,11 +47,6 @@ public static class DuplicationScanner
         ];
     }
 
-    private static string QualifiedName(SchemaObjectName name) =>
-        name.SchemaIdentifier is { } schema
-            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-            : name.BaseIdentifier.Value;
-
     /// <summary>Walks the raw token stream (bounded to this fragment's own
     /// FirstTokenIndex/LastTokenIndex - see <see cref="CodeMetricScanner"/>'s own doc comment for
     /// the real bug that bounding avoids) for comment tokens whose stripped content reparses as a
@@ -164,6 +159,17 @@ public static class DuplicationScanner
 
         private string _currentModule;
 
+        /// <summary>Tracks every IfStatement reached as a PRIOR IfStatement's own ElseStatement -
+        /// the default top-down traversal will visit these nodes again on its own once we recurse
+        /// into them, and they must not be re-analyzed as a fresh chain start (that would re-walk
+        /// and re-report a strict suffix of the same chain this method already covered in full).
+        /// Populated before <c>base.ExplicitVisit</c> descends into the chain, so the check at the
+        /// top of the next visit always sees an up-to-date set.</summary>
+        private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
+
+        // All ExplicitVisit overloads are kept contiguous here; see each named check method below
+        // (grouped by feature, with its own section comment) for what each one actually does.
+
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
             _currentModule = QualifiedName(node.ProcedureReference.Name);
@@ -227,8 +233,6 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
-        // --- Self-assignment ---
-
         public override void ExplicitVisit(SetVariableStatement node)
         {
             if (node.AssignmentKind == AssignmentKind.Equals
@@ -271,8 +275,6 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
-        // --- Single-iteration loop ---
-
         public override void ExplicitVisit(WhileStatement node)
         {
             var body = node.Statement is BeginEndBlockStatement block ? block.StatementList.Statements : [node.Statement];
@@ -296,24 +298,132 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
+        public override void ExplicitVisit(BooleanComparisonExpression node)
+        {
+            if (BothLiterals(node.FirstExpression, node.SecondExpression))
+            {
+                CheckAlwaysTrueOrFalseLiteralComparison(node);
+            }
+            else if (SameText(node.FirstExpression, node.SecondExpression))
+            {
+                Add(DuplicationFindingKind.IdenticalBinaryOperands, node.ComparisonType.ToString(), node, FindingConfidence.High);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(BooleanBinaryExpression node)
+        {
+            if (node.BinaryExpressionType is BooleanBinaryExpressionType.And or BooleanBinaryExpressionType.Or
+                && SameText(node.FirstExpression, node.SecondExpression))
+            {
+                Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.High);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(BinaryExpression node)
+        {
+            // Subtract/Divide/Modulo are always a fixed degenerate result (0, 1-or-error, 0-or-
+            // error) regardless of the shared operand's own value - Add/Multiply are deliberately
+            // excluded, see DuplicationFinding's own doc comment (x+x doubling, x*x squaring are
+            // both legitimate, commonly-intended patterns).
+            if (node.BinaryExpressionType is BinaryExpressionType.Subtract or BinaryExpressionType.Divide or BinaryExpressionType.Modulo
+                && !BothLiterals(node.FirstExpression, node.SecondExpression)
+                && SameText(node.FirstExpression, node.SecondExpression))
+            {
+                Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.Medium);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(UnaryExpression node)
+        {
+            if (node.Expression is UnaryExpression inner && inner.UnaryExpressionType == node.UnaryExpressionType)
+            {
+                Add(DuplicationFindingKind.RepeatedUnaryOperator, node.UnaryExpressionType.ToString(), node, FindingConfidence.High);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(BooleanNotExpression node)
+        {
+            // `NOT (x)` parses the parenthesized operand as a BooleanParenthesisExpression
+            // wrapping the real inner expression - unwrap it before pattern-matching, or every
+            // parenthesized NOT (the overwhelmingly common way NOT is actually written, since a
+            // bare `NOT x = y` is itself ambiguous/rare) would silently never match either check
+            // below.
+            var inner = Unwrap(node.Expression);
+            if (inner is BooleanNotExpression)
+            {
+                Add(DuplicationFindingKind.RepeatedUnaryOperator, "NOT", node, FindingConfidence.High);
+            }
+            else
+            {
+                CheckNegatedComparison(node, inner);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(IfStatement node)
+        {
+            if (!_ifChainContinuations.Contains(node))
+            {
+                AnalyzeIfChain(node);
+            }
+
+            CheckCollapsibleNestedIf(node);
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(SearchedCaseExpression node)
+        {
+            var whens = node.WhenClauses;
+
+            CheckCaseDuplicateWhenConditions(whens);
+            CheckCaseBranchResultIdentity(node, whens);
+
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>Deliberately scoped to IIF specifically, and only a DIRECT nesting in the
+        /// immediate Then/Else branch - see <see cref="DuplicationFindingKind.NestedConditionalExpression"/>'s
+        /// own doc comment for why CASE-inside-CASE is excluded.</summary>
+        public override void ExplicitVisit(IIfCall node)
+        {
+            if (node.ThenExpression is IIfCall)
+            {
+                Add(DuplicationFindingKind.NestedConditionalExpression, "THEN", node, FindingConfidence.Medium);
+            }
+
+            if (node.ElseExpression is IIfCall)
+            {
+                Add(DuplicationFindingKind.NestedConditionalExpression, "ELSE", node, FindingConfidence.Medium);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private static string QualifiedName(SchemaObjectName name) =>
+            name.SchemaIdentifier is { } schema
+                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+                : name.BaseIdentifier.Value;
+
+        // --- Single-iteration loop ---
+
         /// <summary>True iff every path through this straight-line sequence unconditionally hits
         /// a BREAK/RETURN/THROW before falling off the end - the same terminality-walk shape
         /// <see cref="DeadCodeScanner"/>'s own ReachabilityWalker uses, with BREAK additionally
         /// counted as terminal (it exits the loop, which is exactly the fact this check needs) and
         /// a NESTED WHILE's own BREAK never counting toward the OUTER loop's terminality (it exits
         /// only the inner loop).</summary>
-        private static bool AlwaysExitsLoop(IList<TSqlStatement> statements)
-        {
-            foreach (var statement in statements)
-            {
-                if (StatementAlwaysExits(statement))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>
+            statements.Any(StatementAlwaysExits);
 
         private static bool StatementAlwaysExits(TSqlStatement statement) => statement switch
         {
@@ -342,30 +452,15 @@ public static class DuplicationScanner
 
             public override void ExplicitVisit(LabelStatement node) => Count++;
 
-            // A nested WHILE's own body is a separate loop with its own reachability question -
-            // its GOTOs/labels do not disqualify the OUTER loop's analysis. Do not recurse into it.
             public override void ExplicitVisit(WhileStatement node)
             {
+                // Deliberately empty: a nested WHILE's own body is a separate loop with its own
+                // reachability question - its GOTOs/labels do not disqualify the OUTER loop's
+                // analysis, so we intentionally do not recurse into it.
             }
         }
 
-        // --- Identical binary operands ---
-
-        public override void ExplicitVisit(BooleanComparisonExpression node)
-        {
-            if (BothLiterals(node.FirstExpression, node.SecondExpression))
-            {
-                CheckAlwaysTrueOrFalseLiteralComparison(node);
-            }
-            else if (SameText(node.FirstExpression, node.SecondExpression))
-            {
-                Add(DuplicationFindingKind.IdenticalBinaryOperands, node.ComparisonType.ToString(), node, FindingConfidence.High);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        // --- Always-true/always-false literal-vs-literal comparison ---
+        // --- Identical binary operands / always-true-or-false literal comparison ---
 
         /// <summary>Only asserts a truth value where collation cannot change the answer - see
         /// <see cref="DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison"/>'s own doc
@@ -425,33 +520,6 @@ public static class DuplicationScanner
             _ => null,
         };
 
-        public override void ExplicitVisit(BooleanBinaryExpression node)
-        {
-            if (node.BinaryExpressionType is BooleanBinaryExpressionType.And or BooleanBinaryExpressionType.Or
-                && SameText(node.FirstExpression, node.SecondExpression))
-            {
-                Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.High);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(BinaryExpression node)
-        {
-            // Subtract/Divide/Modulo are always a fixed degenerate result (0, 1-or-error, 0-or-
-            // error) regardless of the shared operand's own value - Add/Multiply are deliberately
-            // excluded, see DuplicationFinding's own doc comment (x+x doubling, x*x squaring are
-            // both legitimate, commonly-intended patterns).
-            if (node.BinaryExpressionType is BinaryExpressionType.Subtract or BinaryExpressionType.Divide or BinaryExpressionType.Modulo
-                && !BothLiterals(node.FirstExpression, node.SecondExpression)
-                && SameText(node.FirstExpression, node.SecondExpression))
-            {
-                Add(DuplicationFindingKind.IdenticalBinaryOperands, node.BinaryExpressionType.ToString(), node, FindingConfidence.Medium);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
         private static bool BothLiterals(ScalarExpression first, ScalarExpression second) =>
             first is Literal && second is Literal;
 
@@ -459,36 +527,6 @@ public static class DuplicationScanner
             string.Equals(FragmentTextRenderer.Render(first), FragmentTextRenderer.Render(second), StringComparison.OrdinalIgnoreCase);
 
         // --- Repeated unary operator ---
-
-        public override void ExplicitVisit(UnaryExpression node)
-        {
-            if (node.Expression is UnaryExpression inner && inner.UnaryExpressionType == node.UnaryExpressionType)
-            {
-                Add(DuplicationFindingKind.RepeatedUnaryOperator, node.UnaryExpressionType.ToString(), node, FindingConfidence.High);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(BooleanNotExpression node)
-        {
-            // `NOT (x)` parses the parenthesized operand as a BooleanParenthesisExpression
-            // wrapping the real inner expression - unwrap it before pattern-matching, or every
-            // parenthesized NOT (the overwhelmingly common way NOT is actually written, since a
-            // bare `NOT x = y` is itself ambiguous/rare) would silently never match either check
-            // below.
-            var inner = Unwrap(node.Expression);
-            if (inner is BooleanNotExpression)
-            {
-                Add(DuplicationFindingKind.RepeatedUnaryOperator, "NOT", node, FindingConfidence.High);
-            }
-            else
-            {
-                CheckNegatedComparison(node, inner);
-            }
-
-            base.ExplicitVisit(node);
-        }
 
         private static BooleanExpression Unwrap(BooleanExpression expression) =>
             expression is BooleanParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
@@ -538,31 +576,26 @@ public static class DuplicationScanner
 
         // --- IF/ELSE IF chain analysis: duplicate conditions, branch-body identity, collapsible nesting ---
 
-        /// <summary>Tracks every IfStatement reached as a PRIOR IfStatement's own ElseStatement -
-        /// the default top-down traversal will visit these nodes again on its own once we recurse
-        /// into them, and they must not be re-analyzed as a fresh chain start (that would re-walk
-        /// and re-report a strict suffix of the same chain this method already covered in full).
-        /// Populated before <c>base.ExplicitVisit</c> descends into the chain, so the check at the
-        /// top of the next visit always sees an up-to-date set.</summary>
-        private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
-
-        public override void ExplicitVisit(IfStatement node)
+        private void AnalyzeIfChain(IfStatement root)
         {
-            if (!_ifChainContinuations.Contains(node))
+            var (branches, finalElseBody) = CollectIfChainBranches(root);
+
+            CheckDuplicateSiblingConditions(branches);
+            CheckIfChainBranchBodyIdentity(root, branches, finalElseBody);
+
+            foreach (var (condition, _) in branches)
             {
-                AnalyzeIfChain(node);
+                CheckAndChainBounds(condition);
             }
-
-            CheckCollapsibleNestedIf(node);
-
-            base.ExplicitVisit(node);
         }
 
-        private void AnalyzeIfChain(IfStatement root)
+        /// <summary>Walks the ELSE-IF chain rooted at <paramref name="root"/>, registering every
+        /// continuation IfStatement in <see cref="_ifChainContinuations"/> so the default traversal
+        /// never re-analyzes a strict suffix of this same chain as a fresh chain start.</summary>
+        private (List<(BooleanExpression Condition, TSqlStatement Body)> Branches, TSqlStatement? FinalElseBody) CollectIfChainBranches(IfStatement root)
         {
             var branches = new List<(BooleanExpression Condition, TSqlStatement Body)>();
             var current = root;
-            TSqlStatement? finalElseBody;
             while (true)
             {
                 branches.Add((current.Predicate, current.ThenStatement));
@@ -573,12 +606,14 @@ public static class DuplicationScanner
                     continue;
                 }
 
-                finalElseBody = current.ElseStatement;
-                break;
+                return (branches, current.ElseStatement);
             }
+        }
 
-            // Duplicate sibling conditions: every later branch's condition compared against every
-            // earlier one in the same chain (full rendered-text structural equality).
+        /// <summary>Every later branch's condition compared against every earlier one in the same
+        /// chain (full rendered-text structural equality).</summary>
+        private void CheckDuplicateSiblingConditions(List<(BooleanExpression Condition, TSqlStatement Body)> branches)
+        {
             for (var i = 1; i < branches.Count; i++)
             {
                 var laterText = FragmentTextRenderer.Render(branches[i].Condition);
@@ -591,46 +626,45 @@ public static class DuplicationScanner
                     }
                 }
             }
+        }
 
-            // Branch-body identity compares every real body, INCLUDING the final ELSE (when
-            // present) as just another branch with no condition of its own - needs at least two
-            // bodies total to compare against each other.
+        /// <summary>Compares every real body, INCLUDING the final ELSE (when present) as just
+        /// another branch with no condition of its own - needs at least two bodies total to
+        /// compare against each other.</summary>
+        private void CheckIfChainBranchBodyIdentity(IfStatement root, List<(BooleanExpression Condition, TSqlStatement Body)> branches, TSqlStatement? finalElseBody)
+        {
             var allBodies = branches.Select(b => b.Body).ToList();
             if (finalElseBody is not null)
             {
                 allBodies.Add(finalElseBody);
             }
 
-            if (allBodies.Count >= 2)
+            if (allBodies.Count < 2)
             {
-                var bodyTexts = allBodies.Select(FragmentTextRenderer.Render).ToList();
-                var allIdentical = finalElseBody is not null
-                    && bodyTexts.All(t => string.Equals(t, bodyTexts[0], StringComparison.OrdinalIgnoreCase));
-
-                if (allIdentical)
-                {
-                    Add(DuplicationFindingKind.AllBranchesIdentical, null, root, FindingConfidence.High);
-                }
-                else
-                {
-                    var reported = new HashSet<int>();
-                    for (var i = 1; i < bodyTexts.Count; i++)
-                    {
-                        for (var j = 0; j < i; j++)
-                        {
-                            if (string.Equals(bodyTexts[i], bodyTexts[j], StringComparison.OrdinalIgnoreCase) && reported.Add(i))
-                            {
-                                Add(DuplicationFindingKind.IdenticalBranchBodies, null, allBodies[i], FindingConfidence.Medium);
-                                break;
-                            }
-                        }
-                    }
-                }
+                return;
             }
 
-            foreach (var (condition, _) in branches)
+            var bodyTexts = allBodies.Select(FragmentTextRenderer.Render).ToList();
+            var allIdentical = finalElseBody is not null
+                && bodyTexts.All(t => string.Equals(t, bodyTexts[0], StringComparison.OrdinalIgnoreCase));
+
+            if (allIdentical)
             {
-                CheckAndChainBounds(condition);
+                Add(DuplicationFindingKind.AllBranchesIdentical, null, root, FindingConfidence.High);
+                return;
+            }
+
+            var reported = new HashSet<int>();
+            for (var i = 1; i < bodyTexts.Count; i++)
+            {
+                for (var j = 0; j < i; j++)
+                {
+                    if (string.Equals(bodyTexts[i], bodyTexts[j], StringComparison.OrdinalIgnoreCase) && reported.Add(i))
+                    {
+                        Add(DuplicationFindingKind.IdenticalBranchBodies, null, allBodies[i], FindingConfidence.Medium);
+                        break;
+                    }
+                }
             }
         }
 
@@ -658,10 +692,8 @@ public static class DuplicationScanner
 
         // --- CASE expression analysis: duplicate WHEN conditions, branch-result identity ---
 
-        public override void ExplicitVisit(SearchedCaseExpression node)
+        private void CheckCaseDuplicateWhenConditions(IList<SearchedWhenClause> whens)
         {
-            var whens = node.WhenClauses;
-
             for (var i = 1; i < whens.Count; i++)
             {
                 var laterText = FragmentTextRenderer.Render(whens[i].WhenExpression);
@@ -674,56 +706,38 @@ public static class DuplicationScanner
                     }
                 }
             }
+        }
 
-            if (whens.Count >= 2)
+        private void CheckCaseBranchResultIdentity(SearchedCaseExpression node, IList<SearchedWhenClause> whens)
+        {
+            if (whens.Count < 2)
             {
-                var resultTexts = whens.Select(w => FragmentTextRenderer.Render(w.ThenExpression)).ToList();
-                var allSameAsFirst = resultTexts.All(t => string.Equals(t, resultTexts[0], StringComparison.OrdinalIgnoreCase));
-                var allIdentical = allSameAsFirst && node.ElseExpression is not null
-                    && string.Equals(FragmentTextRenderer.Render(node.ElseExpression), resultTexts[0], StringComparison.OrdinalIgnoreCase);
+                return;
+            }
 
-                if (allIdentical)
+            var resultTexts = whens.Select(w => FragmentTextRenderer.Render(w.ThenExpression)).ToList();
+            var allSameAsFirst = resultTexts.All(t => string.Equals(t, resultTexts[0], StringComparison.OrdinalIgnoreCase));
+            var allIdentical = allSameAsFirst && node.ElseExpression is not null
+                && string.Equals(FragmentTextRenderer.Render(node.ElseExpression), resultTexts[0], StringComparison.OrdinalIgnoreCase);
+
+            if (allIdentical)
+            {
+                Add(DuplicationFindingKind.AllBranchesIdentical, null, node, FindingConfidence.High);
+                return;
+            }
+
+            var reported = new HashSet<int>();
+            for (var i = 1; i < resultTexts.Count; i++)
+            {
+                for (var j = 0; j < i; j++)
                 {
-                    Add(DuplicationFindingKind.AllBranchesIdentical, null, node, FindingConfidence.High);
-                }
-                else
-                {
-                    var reported = new HashSet<int>();
-                    for (var i = 1; i < resultTexts.Count; i++)
+                    if (string.Equals(resultTexts[i], resultTexts[j], StringComparison.OrdinalIgnoreCase) && reported.Add(i))
                     {
-                        for (var j = 0; j < i; j++)
-                        {
-                            if (string.Equals(resultTexts[i], resultTexts[j], StringComparison.OrdinalIgnoreCase) && reported.Add(i))
-                            {
-                                Add(DuplicationFindingKind.IdenticalBranchBodies, null, whens[i].ThenExpression, FindingConfidence.Medium);
-                                break;
-                            }
-                        }
+                        Add(DuplicationFindingKind.IdenticalBranchBodies, null, whens[i].ThenExpression, FindingConfidence.Medium);
+                        break;
                     }
                 }
             }
-
-            base.ExplicitVisit(node);
-        }
-
-        // --- Nested IIF (T-SQL's ternary equivalent) ---
-
-        /// <summary>Deliberately scoped to IIF specifically, and only a DIRECT nesting in the
-        /// immediate Then/Else branch - see <see cref="DuplicationFindingKind.NestedConditionalExpression"/>'s
-        /// own doc comment for why CASE-inside-CASE is excluded.</summary>
-        public override void ExplicitVisit(IIfCall node)
-        {
-            if (node.ThenExpression is IIfCall)
-            {
-                Add(DuplicationFindingKind.NestedConditionalExpression, "THEN", node, FindingConfidence.Medium);
-            }
-
-            if (node.ElseExpression is IIfCall)
-            {
-                Add(DuplicationFindingKind.NestedConditionalExpression, "ELSE", node, FindingConfidence.Medium);
-            }
-
-            base.ExplicitVisit(node);
         }
 
         // --- Redundant / mutually-exclusive AND-combined numeric bounds ---
@@ -761,26 +775,33 @@ public static class DuplicationScanner
             {
                 for (var j = 0; j < i; j++)
                 {
-                    if (!string.Equals(bounds[i].Operand, bounds[j].Operand, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    if (bounds[i].Interval.IsEmptyIntersectionWith(bounds[j].Interval))
-                    {
-                        Add(DuplicationFindingKind.MutuallyExclusiveAndCondition, bounds[i].Operand, bounds[i].Fragment, FindingConfidence.High);
-                    }
-                    else if (bounds[i].Interval.IsSubsetOf(bounds[j].Interval))
-                    {
-                        // bounds[j] is the looser bound - it adds nothing once ANDed with the
-                        // stricter bounds[i], so the LOOSER condition is the redundant one.
-                        Add(DuplicationFindingKind.RedundantAndCondition, bounds[j].Operand, bounds[j].Fragment, FindingConfidence.Medium);
-                    }
-                    else if (bounds[j].Interval.IsSubsetOf(bounds[i].Interval))
-                    {
-                        Add(DuplicationFindingKind.RedundantAndCondition, bounds[i].Operand, bounds[i].Fragment, FindingConfidence.Medium);
-                    }
+                    CompareAndChainBoundPair(bounds[i], bounds[j]);
                 }
+            }
+        }
+
+        private void CompareAndChainBoundPair(
+            (BooleanExpression Fragment, string Operand, NumericBound Interval) later,
+            (BooleanExpression Fragment, string Operand, NumericBound Interval) earlier)
+        {
+            if (!string.Equals(later.Operand, earlier.Operand, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (later.Interval.IsEmptyIntersectionWith(earlier.Interval))
+            {
+                Add(DuplicationFindingKind.MutuallyExclusiveAndCondition, later.Operand, later.Fragment, FindingConfidence.High);
+            }
+            else if (later.Interval.IsSubsetOf(earlier.Interval))
+            {
+                // earlier is the looser bound - it adds nothing once ANDed with the stricter
+                // later, so the LOOSER condition is the redundant one.
+                Add(DuplicationFindingKind.RedundantAndCondition, earlier.Operand, earlier.Fragment, FindingConfidence.Medium);
+            }
+            else if (earlier.Interval.IsSubsetOf(later.Interval))
+            {
+                Add(DuplicationFindingKind.RedundantAndCondition, later.Operand, later.Fragment, FindingConfidence.Medium);
             }
         }
 

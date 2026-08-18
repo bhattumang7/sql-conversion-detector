@@ -100,12 +100,9 @@ public static class FloatEqualityPredicateScanner
 
             foreach (var reference in tableReferences)
             {
-                foreach (var join in FlattenJoins(reference))
+                foreach (var join in FlattenJoins(reference).Where(j => j.SearchCondition is not null))
                 {
-                    if (join.SearchCondition is not null)
-                    {
-                        Inspect(join.SearchCondition, tables);
-                    }
+                    Inspect(join.SearchCondition!, tables);
                 }
             }
         }

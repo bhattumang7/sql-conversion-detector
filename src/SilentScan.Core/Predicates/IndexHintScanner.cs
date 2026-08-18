@@ -116,37 +116,42 @@ public static class IndexHintScanner
 
             foreach (var hint in indexHints)
             {
-                foreach (var indexValue in hint.IndexValues)
+                InspectHint(hint, table, anyReferencedColumns);
+            }
+        }
+
+        private void InspectHint(IndexTableHint hint, CatalogTable table, HashSet<(string Table, string Column)> anyReferencedColumns)
+        {
+            foreach (var indexValue in hint.IndexValues)
+            {
+                // Ordinal form (INDEX(0)/INDEX(1)) has no Identifier and no catalog name to
+                // validate - deliberately out of v1 scope, see the finding's own doc comment.
+                var hintedName = indexValue.Identifier?.Value;
+                if (hintedName is null)
                 {
-                    // Ordinal form (INDEX(0)/INDEX(1)) has no Identifier and no catalog name to
-                    // validate - deliberately out of v1 scope, see the finding's own doc comment.
-                    var hintedName = indexValue.Identifier?.Value;
-                    if (hintedName is null)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    var matchedIndex = table.Indexes.FirstOrDefault(i => string.Equals(i.Name, hintedName, StringComparison.OrdinalIgnoreCase));
-                    if (matchedIndex is null)
-                    {
-                        Findings.Add(new IndexHintFinding(
-                            IndexHintFindingKind.IndexDoesNotExist, table.QualifiedName, hintedName, LeadingColumnName: null,
-                            sourcePath, hint.StartLine, hint.StartColumn));
-                        continue;
-                    }
+                var matchedIndex = table.Indexes.FirstOrDefault(i => string.Equals(i.Name, hintedName, StringComparison.OrdinalIgnoreCase));
+                if (matchedIndex is null)
+                {
+                    Findings.Add(new IndexHintFinding(
+                        IndexHintFindingKind.IndexDoesNotExist, table.QualifiedName, hintedName, LeadingColumnName: null,
+                        sourcePath, hint.StartLine, hint.StartColumn));
+                    continue;
+                }
 
-                    if (matchedIndex.KeyColumns.Count == 0)
-                    {
-                        continue;
-                    }
+                if (matchedIndex.KeyColumns.Count == 0)
+                {
+                    continue;
+                }
 
-                    var leadingColumn = matchedIndex.KeyColumns[0];
-                    if (!anyReferencedColumns.Contains((table.QualifiedName, leadingColumn)))
-                    {
-                        Findings.Add(new IndexHintFinding(
-                            IndexHintFindingKind.HintedIndexNotSeekable, table.QualifiedName, hintedName, leadingColumn,
-                            sourcePath, hint.StartLine, hint.StartColumn));
-                    }
+                var leadingColumn = matchedIndex.KeyColumns[0];
+                if (!anyReferencedColumns.Contains((table.QualifiedName, leadingColumn)))
+                {
+                    Findings.Add(new IndexHintFinding(
+                        IndexHintFindingKind.HintedIndexNotSeekable, table.QualifiedName, hintedName, leadingColumn,
+                        sourcePath, hint.StartLine, hint.StartColumn));
                 }
             }
         }

@@ -13,6 +13,8 @@ public static class ConvertImplicitDetector
 {
     private static readonly XNamespace ShowPlanNs = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
 
+    private const string TableAttributeName = "Table";
+
     public static IReadOnlyList<ConvertImplicitFinding> FindColumnConversions(string planXml)
     {
         var doc = XDocument.Parse(planXml);
@@ -30,13 +32,13 @@ public static class ConvertImplicitDetector
                 // (the harmless, correct-direction case) was misreported as a column-side
                 // conversion.
                 ColumnRef = convert.Descendants(ShowPlanNs + "ColumnReference")
-                    .FirstOrDefault(c => !string.IsNullOrEmpty((string?)c.Attribute("Table"))),
+                    .FirstOrDefault(c => !string.IsNullOrEmpty((string?)c.Attribute(TableAttributeName))),
             })
             .Where(x => x.ColumnRef is not null)
             .Select(x => new ConvertImplicitFinding(
                 Database: TrimBrackets((string?)x.ColumnRef!.Attribute("Database")),
                 Schema: TrimBrackets((string?)x.ColumnRef.Attribute("Schema")),
-                Table: TrimBrackets((string?)x.ColumnRef.Attribute("Table")),
+                Table: TrimBrackets((string?)x.ColumnRef.Attribute(TableAttributeName)),
                 Column: (string?)x.ColumnRef.Attribute("Column"),
                 ConvertedToDataType: (string?)x.Convert.Attribute("DataType") ?? "unknown",
                 RangeSeekBound: IsRangeSeekBound(x.Convert, x.ColumnRef)))
@@ -68,7 +70,7 @@ public static class ConvertImplicitDetector
 
         var database = (string?)columnRef.Attribute("Database");
         var schema = (string?)columnRef.Attribute("Schema");
-        var table = (string?)columnRef.Attribute("Table");
+        var table = (string?)columnRef.Attribute(TableAttributeName);
         var column = (string?)columnRef.Attribute("Column");
 
         return owningRelOp.Descendants(ShowPlanNs + "SeekPredicates")
@@ -78,7 +80,7 @@ public static class ConvertImplicitDetector
             .Any(rangeColumnRef =>
                 string.Equals((string?)rangeColumnRef.Attribute("Database"), database, StringComparison.Ordinal)
                 && string.Equals((string?)rangeColumnRef.Attribute("Schema"), schema, StringComparison.Ordinal)
-                && string.Equals((string?)rangeColumnRef.Attribute("Table"), table, StringComparison.Ordinal)
+                && string.Equals((string?)rangeColumnRef.Attribute(TableAttributeName), table, StringComparison.Ordinal)
                 && string.Equals((string?)rangeColumnRef.Attribute("Column"), column, StringComparison.Ordinal));
     }
 

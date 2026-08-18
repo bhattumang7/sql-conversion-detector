@@ -20,61 +20,7 @@ public static class CheckConstraintScanner
 
         foreach (var check in catalog.CheckConstraints)
         {
-            if (check.IsDisabled || string.IsNullOrWhiteSpace(check.DefinitionText))
-            {
-                continue;
-            }
-
-            var table = catalog.Find(check.TableQualifiedName);
-            if (table is null)
-            {
-                continue;
-            }
-
-            var searchCondition = TryParse(check.DefinitionText);
-            if (searchCondition is null)
-            {
-                continue;
-            }
-
-            var referencedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var columnRefVisitor = new ColumnNameCollector(referencedColumnNames);
-            searchCondition.Accept(columnRefVisitor);
-
-            // Liberal, OR-branches-included collection - deliberately the inverse use of the
-            // "AND-only-reachable" discipline other scanners in this codebase apply: here the
-            // ABSENCE of a NULL guard is what triggers a finding, so a guard reachable ANYWHERE
-            // (including inside an OR branch, the textbook `Col IS NULL OR Col > 0` fix) must
-            // count as "handled" - see CheckConstraintFinding.NullNotHandled's own doc comment.
-            var nullGuardedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var nullGuardVisitor = new NullGuardCollector(nullGuardedColumnNames);
-            searchCondition.Accept(nullGuardVisitor);
-
-            var sourcePath = table.SourcePath;
-            var line = table.SourceLine;
-
-            foreach (var columnName in referencedColumnNames)
-            {
-                var catalogColumn = table.FindColumn(columnName);
-                if (catalogColumn is null)
-                {
-                    continue;
-                }
-
-                if (catalogColumn.IsNullable && !nullGuardedColumnNames.Contains(columnName))
-                {
-                    findings.Add(new CheckConstraintFinding(
-                        CheckConstraintFindingKind.NullNotHandled, check.ConstraintName, check.TableQualifiedName,
-                        catalogColumn.Name, sourcePath, line));
-                }
-
-                if (catalogColumn.IsIdentity)
-                {
-                    findings.Add(new CheckConstraintFinding(
-                        CheckConstraintFindingKind.ConstraintOnIdentityColumn, check.ConstraintName, check.TableQualifiedName,
-                        catalogColumn.Name, sourcePath, line));
-                }
-            }
+            AnalyzeCheckConstraint(catalog, check, findings);
         }
 
         return
@@ -85,6 +31,66 @@ public static class CheckConstraintScanner
                 .ThenBy(f => f.ConstraintName, StringComparer.Ordinal)
                 .ThenBy(f => f.ColumnName, StringComparer.Ordinal),
         ];
+    }
+
+    private static void AnalyzeCheckConstraint(
+        DatabaseCatalog catalog, CatalogCheckConstraint check, List<CheckConstraintFinding> findings)
+    {
+        if (check.IsDisabled || string.IsNullOrWhiteSpace(check.DefinitionText))
+        {
+            return;
+        }
+
+        var table = catalog.Find(check.TableQualifiedName);
+        if (table is null)
+        {
+            return;
+        }
+
+        var searchCondition = TryParse(check.DefinitionText);
+        if (searchCondition is null)
+        {
+            return;
+        }
+
+        var referencedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var columnRefVisitor = new ColumnNameCollector(referencedColumnNames);
+        searchCondition.Accept(columnRefVisitor);
+
+        // Liberal, OR-branches-included collection - deliberately the inverse use of the
+        // "AND-only-reachable" discipline other scanners in this codebase apply: here the
+        // ABSENCE of a NULL guard is what triggers a finding, so a guard reachable ANYWHERE
+        // (including inside an OR branch, the textbook `Col IS NULL OR Col > 0` fix) must
+        // count as "handled" - see CheckConstraintFinding.NullNotHandled's own doc comment.
+        var nullGuardedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var nullGuardVisitor = new NullGuardCollector(nullGuardedColumnNames);
+        searchCondition.Accept(nullGuardVisitor);
+
+        var sourcePath = table.SourcePath;
+        var line = table.SourceLine;
+
+        foreach (var columnName in referencedColumnNames)
+        {
+            var catalogColumn = table.FindColumn(columnName);
+            if (catalogColumn is null)
+            {
+                continue;
+            }
+
+            if (catalogColumn.IsNullable && !nullGuardedColumnNames.Contains(columnName))
+            {
+                findings.Add(new CheckConstraintFinding(
+                    CheckConstraintFindingKind.NullNotHandled, check.ConstraintName, check.TableQualifiedName,
+                    catalogColumn.Name, sourcePath, line));
+            }
+
+            if (catalogColumn.IsIdentity)
+            {
+                findings.Add(new CheckConstraintFinding(
+                    CheckConstraintFindingKind.ConstraintOnIdentityColumn, check.ConstraintName, check.TableQualifiedName,
+                    catalogColumn.Name, sourcePath, line));
+            }
+        }
     }
 
     /// <summary>A CHECK constraint's definition is a boolean predicate (not valid as a bare SELECT

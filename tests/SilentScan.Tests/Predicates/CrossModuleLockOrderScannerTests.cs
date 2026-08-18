@@ -137,6 +137,45 @@ public sealed class CrossModuleLockOrderScannerTests
     }
 
     [Fact]
+    public void UnbalancedExtraCommit_DoesNotCorruptTransactionDepthForLaterWrites()
+    {
+        // ProcA's COMMIT count exceeds its BEGIN TRANSACTION count (the inner BEGIN/COMMIT pair is
+        // already balanced by the time the dangling extra COMMIT runs) - without the depth guard in
+        // ExplicitVisit(CommitTransactionStatement), that extra COMMIT would drive
+        // _openTransactionDepth negative, desynchronizing it from the real transaction nesting so
+        // that the next BEGIN TRANSACTION would leave the counter at 0 and the writes inside it
+        // would be wrongly treated as outside any explicit transaction.
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "COMMIT TRANSACTION; "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        // ProcA writes T1 then T2 (T1 from the first, already-closed transaction; T2 from the
+        // second one, whose depth only reads correctly if the guard kept the counter from going
+        // negative across the dangling extra COMMIT). ProcB writes T2 then T1 - opposite order -
+        // so this only fires, with ProcA on T1's side, if the depth counter recovered correctly.
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.T1", finding.FirstTableQualifiedName);
+        Assert.Equal("dbo.T2", finding.SecondTableQualifiedName);
+        Assert.Equal("dbo.ProcA", finding.FirstTableFirstOrdering.ProcedureQualifiedName);
+        Assert.Equal("dbo.ProcB", finding.SecondTableFirstOrdering.ProcedureQualifiedName);
+    }
+
+    [Fact]
     public void SingleProcedureWritingBothTables_NeverFiresAgainstItself()
     {
         var findings = Scan(

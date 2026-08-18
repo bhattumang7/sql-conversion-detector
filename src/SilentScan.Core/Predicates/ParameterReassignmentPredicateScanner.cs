@@ -198,15 +198,15 @@ public static class ParameterReassignmentPredicateScanner
             switch (statement)
             {
                 case SelectStatement { QueryExpression: QuerySpecification spec } select when !HasOptionRecompile(select.OptimizerHints):
-                    InspectSearchCondition(spec.WhereClause?.SearchCondition, spec.FromClause, state, spec);
+                    InspectSearchCondition(spec.WhereClause?.SearchCondition, spec.FromClause, state);
                     break;
 
                 case UpdateStatement { UpdateSpecification: { } upd } update when !HasOptionRecompile(update.OptimizerHints):
-                    InspectSearchCondition(upd.WhereClause?.SearchCondition, upd.Target, upd.FromClause, state, statement);
+                    InspectSearchCondition(upd.WhereClause?.SearchCondition, upd.Target, upd.FromClause, state);
                     break;
 
                 case DeleteStatement { DeleteSpecification: { } del } delete when !HasOptionRecompile(delete.OptimizerHints):
-                    InspectSearchCondition(del.WhereClause?.SearchCondition, del.Target, del.FromClause, state, statement);
+                    InspectSearchCondition(del.WhereClause?.SearchCondition, del.Target, del.FromClause, state);
                     break;
 
                 // MERGE's own ON clause needs its own dedicated scope-resolution work - the same
@@ -219,7 +219,7 @@ public static class ParameterReassignmentPredicateScanner
         private static bool HasOptionRecompile(IList<OptimizerHint> hints) =>
             hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
 
-        private void InspectSearchCondition(BooleanExpression? condition, FromClause? fromClause, FlowState state, TSqlFragment anchor)
+        private void InspectSearchCondition(BooleanExpression? condition, FromClause? fromClause, FlowState state)
         {
             if (condition is null || fromClause is null)
             {
@@ -230,7 +230,7 @@ public static class ParameterReassignmentPredicateScanner
             InspectSearchConditionCore(condition, byAlias, ordered, state);
         }
 
-        private void InspectSearchCondition(BooleanExpression? condition, TableReference target, FromClause? extraFromClause, FlowState state, TSqlFragment anchor)
+        private void InspectSearchCondition(BooleanExpression? condition, TableReference target, FromClause? extraFromClause, FlowState state)
         {
             if (condition is null)
             {

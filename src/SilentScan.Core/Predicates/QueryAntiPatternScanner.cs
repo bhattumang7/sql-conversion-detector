@@ -67,6 +67,8 @@ public static class QueryAntiPatternScanner
 
         private readonly HashSet<string> _tableVariableNames = new(StringComparer.OrdinalIgnoreCase);
 
+        private readonly HashSet<BinaryQueryExpression> _consumedUnionChainNodes = [];
+
         public override void ExplicitVisit(DeclareTableVariableStatement node)
         {
             _tableVariableNames.Add(node.Body.VariableName.Value);
@@ -137,6 +139,87 @@ public static class QueryAntiPatternScanner
             InspectSiteIfNamedTable(node.MergeSpecification.Target);
             InspectSiteIfNamedTable(node.MergeSpecification.TableReference);
             InspectMergeHazards(node.MergeSpecification);
+            base.ExplicitVisit(node);
+        }
+
+        // --- Recursive CTE with no MAXRECURSION option (kind 11) --------------------------------
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            InspectRecursiveCteMaxRecursion(node);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(WhileStatement node)
+        {
+            if (catalog.CompatibilityLevel is not { } knownLevel || knownLevel >= 150)
+            {
+                InspectStaleTableVariableInLoop(node);
+            }
+
+            InspectRbarSingleRowLoopDml(node);
+
+            base.ExplicitVisit(node);
+        }
+
+        // --- Cursor declared without LOCAL (kind 4) --------------------------------------------
+
+        public override void ExplicitVisit(DeclareCursorStatement node)
+        {
+            InspectCursorGlobalness(node.CursorDefinition, node.Name.Value, node.StartLine, node.StartColumn);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(SetVariableStatement node)
+        {
+            if (node.CursorDefinition is not null)
+            {
+                InspectCursorGlobalness(node.CursorDefinition, node.Variable.Name, node.StartLine, node.StartColumn);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        // --- COUNT(*) assigned to a variable, then compared only to zero (kind 5) --------------
+
+        public override void ExplicitVisit(StatementList node)
+        {
+            InspectCountStarExistenceSequence(node.Statements);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(TSqlBatch node)
+        {
+            InspectCountStarExistenceSequence(node.Statements);
+            _tableVariableNames.Clear();
+            base.ExplicitVisit(node);
+        }
+
+        // --- Non-aggregate predicate in HAVING that belongs in WHERE (kind 6) ------------------
+
+        public override void ExplicitVisit(QuerySpecification node)
+        {
+            InspectHaving(node);
+            InspectDistinctJoinFanout(node);
+            base.ExplicitVisit(node);
+        }
+
+        // --- UNION of provably disjoint branches (kind 7) --------------------------------------
+
+        public override void ExplicitVisit(BinaryQueryExpression node)
+        {
+            if (node.BinaryQueryExpressionType == BinaryQueryExpressionType.Union && !node.All
+                && !_consumedUnionChainNodes.Contains(node))
+            {
+                // A chain of more than two UNION branches nests as BinaryQueryExpression inside
+                // BinaryQueryExpression - mark every nested union node BEFORE the traversal
+                // reaches them via base.ExplicitVisit below, so the same multi-way union is
+                // inspected exactly once, at its own outermost node, never once per nesting level.
+                MarkNestedUnionChain(node.FirstQueryExpression, _consumedUnionChainNodes);
+                MarkNestedUnionChain(node.SecondQueryExpression, _consumedUnionChainNodes);
+                InspectUnionDisjointness(node);
+            }
+
             base.ExplicitVisit(node);
         }
 
@@ -368,14 +451,6 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        // --- Recursive CTE with no MAXRECURSION option (kind 11) --------------------------------
-
-        public override void ExplicitVisit(SelectStatement node)
-        {
-            InspectRecursiveCteMaxRecursion(node);
-            base.ExplicitVisit(node);
-        }
-
         private void InspectRecursiveCteMaxRecursion(SelectStatement node)
         {
             if (node.WithCtesAndXmlNamespaces is not { CommonTableExpressions: { Count: > 0 } ctes })
@@ -404,18 +479,6 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        public override void ExplicitVisit(WhileStatement node)
-        {
-            if (catalog.CompatibilityLevel is not { } knownLevel || knownLevel >= 150)
-            {
-                InspectStaleTableVariableInLoop(node);
-            }
-
-            InspectRbarSingleRowLoopDml(node);
-
-            base.ExplicitVisit(node);
-        }
-
         private void InspectStaleTableVariableInLoop(WhileStatement node)
         {
             var writtenVariables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -424,16 +487,13 @@ public static class QueryAntiPatternScanner
             var collector = new LoopWriteAndReadCollector(readSites, writtenVariables, _tableVariableNames);
             node.Statement.Accept(collector);
 
-            foreach (var read in readSites)
+            foreach (var read in readSites.Where(read => writtenVariables.Contains(read.Variable.Name)))
             {
-                if (writtenVariables.Contains(read.Variable.Name))
-                {
-                    Findings.Add(new QueryAntiPatternFinding(
-                        QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop, sourcePath,
-                        read.StartLine, read.StartColumn,
-                        $"{read.Variable.Name} read inside a WHILE loop that also writes to it",
-                        FindingConfidence.Medium));
-                }
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop, sourcePath,
+                    read.StartLine, read.StartColumn,
+                    $"{read.Variable.Name} read inside a WHILE loop that also writes to it",
+                    FindingConfidence.Medium));
             }
         }
 
@@ -486,12 +546,10 @@ public static class QueryAntiPatternScanner
             {
                 foreach (var tableReference in node.TableReferences)
                 {
-                    foreach (var variableRef in CollectVariableTableReferences(tableReference))
+                    foreach (var variableRef in CollectVariableTableReferences(tableReference)
+                        .Where(v => knownTableVariables.Contains(v.Variable.Name)))
                     {
-                        if (knownTableVariables.Contains(variableRef.Variable.Name))
-                        {
-                            readSites.Add(variableRef);
-                        }
+                        readSites.Add(variableRef);
                     }
                 }
 
@@ -632,24 +690,6 @@ public static class QueryAntiPatternScanner
             }
         }
 
-        // --- Cursor declared without LOCAL (kind 4) --------------------------------------------
-
-        public override void ExplicitVisit(DeclareCursorStatement node)
-        {
-            InspectCursorGlobalness(node.CursorDefinition, node.Name.Value, node.StartLine, node.StartColumn);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(SetVariableStatement node)
-        {
-            if (node.CursorDefinition is not null)
-            {
-                InspectCursorGlobalness(node.CursorDefinition, node.Variable.Name, node.StartLine, node.StartColumn);
-            }
-
-            base.ExplicitVisit(node);
-        }
-
         private void InspectCursorGlobalness(CursorDefinition definition, string cursorName, int line, int column)
         {
             var kinds = definition.Options.Select(o => o.OptionKind).ToHashSet();
@@ -662,21 +702,6 @@ public static class QueryAntiPatternScanner
                 QueryAntiPatternFindingKind.GlobalCursorDeclaration, sourcePath, line, column,
                 $"{cursorName} ({(kinds.Contains(CursorOptionKind.Global) ? "explicit GLOBAL" : "no LOCAL/GLOBAL keyword, defaults to GLOBAL")})",
                 FindingConfidence.Low));
-        }
-
-        // --- COUNT(*) assigned to a variable, then compared only to zero (kind 5) --------------
-
-        public override void ExplicitVisit(StatementList node)
-        {
-            InspectCountStarExistenceSequence(node.Statements);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(TSqlBatch node)
-        {
-            InspectCountStarExistenceSequence(node.Statements);
-            _tableVariableNames.Clear();
-            base.ExplicitVisit(node);
         }
 
         private void InspectCountStarExistenceSequence(IList<TSqlStatement> statements)
@@ -701,7 +726,7 @@ public static class QueryAntiPatternScanner
 
         private static string? CountStarAssignedVariable(TSqlStatement statement)
         {
-            if (statement is not SelectStatement { QueryExpression: QuerySpecification { SelectElements.Count: 1 } spec } select
+            if (statement is not SelectStatement { QueryExpression: QuerySpecification { SelectElements.Count: 1 } spec }
                 || spec.SelectElements[0] is not SelectSetVariable { AssignmentKind: AssignmentKind.Equals } setVar
                 || setVar.Expression is not FunctionCall call
                 || !CountStarFunctionNames.Contains(call.FunctionName.Value)
@@ -763,15 +788,6 @@ public static class QueryAntiPatternScanner
             BooleanComparisonType.LessThanOrEqualTo => BooleanComparisonType.GreaterThanOrEqualTo,
             _ => type,
         };
-
-        // --- Non-aggregate predicate in HAVING that belongs in WHERE (kind 6) ------------------
-
-        public override void ExplicitVisit(QuerySpecification node)
-        {
-            InspectHaving(node);
-            InspectDistinctJoinFanout(node);
-            base.ExplicitVisit(node);
-        }
 
         private void InspectHaving(QuerySpecification node)
         {
@@ -892,27 +908,6 @@ public static class QueryAntiPatternScanner
                     $"SELECT DISTINCT joins {joinedQualifiedName} on columns not backed by a unique index ({string.Join(", ", joinColumns)})",
                     FindingConfidence.Medium));
             }
-        }
-
-        // --- UNION of provably disjoint branches (kind 7) --------------------------------------
-
-        private readonly HashSet<BinaryQueryExpression> _consumedUnionChainNodes = [];
-
-        public override void ExplicitVisit(BinaryQueryExpression node)
-        {
-            if (node.BinaryQueryExpressionType == BinaryQueryExpressionType.Union && !node.All
-                && !_consumedUnionChainNodes.Contains(node))
-            {
-                // A chain of more than two UNION branches nests as BinaryQueryExpression inside
-                // BinaryQueryExpression - mark every nested union node BEFORE the traversal
-                // reaches them via base.ExplicitVisit below, so the same multi-way union is
-                // inspected exactly once, at its own outermost node, never once per nesting level.
-                MarkNestedUnionChain(node.FirstQueryExpression, _consumedUnionChainNodes);
-                MarkNestedUnionChain(node.SecondQueryExpression, _consumedUnionChainNodes);
-                InspectUnionDisjointness(node);
-            }
-
-            base.ExplicitVisit(node);
         }
 
         private static void MarkNestedUnionChain(QueryExpression expression, HashSet<BinaryQueryExpression> sink)

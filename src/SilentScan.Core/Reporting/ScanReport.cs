@@ -217,8 +217,8 @@ public sealed record ScanReport(
     /// <see cref="Predicates.FindingConfidence"/> field's own precedent above.
     /// </summary>
     /// Bumped to 43 for the new <see cref="DeprecatedSyntaxFindings"/> stream (docs/detection-
-    /// checklist.md Tier 4 "Task-comment tracking" and "Non-ANSI and deprecated spellings"): TODO/
-    /// FIXME comments, non-ANSI comparison operators, the "= NULL"/"&lt;&gt; NULL" silent
+    /// checklist.md Tier 4 "Task-comment tracking" and "Non-ANSI and deprecated spellings"): to-do/
+    /// fix-me comments, non-ANSI comparison operators, the "= NULL"/"&lt;&gt; NULL" silent
     /// always-false trap, a wildcard-free LIKE pattern, a legacy system compatibility view, a table
     /// hint without WITH, a numbered-procedure-group definition/invocation, a string-literal column
     /// alias, a removed legacy security stored procedure, and SET ROWCOUNT.

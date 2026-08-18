@@ -101,11 +101,6 @@ public static class FormattingScanner
         }
     }
 
-    private static string QualifiedName(SchemaObjectName name) =>
-        name.SchemaIdentifier is { } schema
-            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-            : name.BaseIdentifier.Value;
-
     private sealed class Visitor : TSqlFragmentVisitor
     {
         private readonly string sourcePath;
@@ -388,5 +383,10 @@ public static class FormattingScanner
 
             return after.StartLine;
         }
+
+        private static string QualifiedName(SchemaObjectName name) =>
+            name.SchemaIdentifier is { } schema
+                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+                : name.BaseIdentifier.Value;
     }
 }

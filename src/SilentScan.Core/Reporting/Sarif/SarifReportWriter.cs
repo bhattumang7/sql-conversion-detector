@@ -319,18 +319,6 @@ public static class SarifReportWriter
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
-    private static string DescribeTouchedObjectForSetOption(SetOptionFinding finding)
-    {
-        if (finding.TouchedObjectQualifiedName is not { } touched)
-        {
-            return string.Empty;
-        }
-
-        var featureKind = finding.TouchedIsIndexedView ? "indexed view" : "filtered index";
-        var indexSuffix = finding.TouchedIndexName is { } idx ? $".{idx}" : string.Empty;
-        return $" - touches {featureKind} '{touched}'{indexSuffix}";
-    }
-
     private static SarifResult ToResult(UnderLengthParameterFinding finding)
     {
         // Warning, same severity tier as OversizedParameterFinding and WriteLossFinding's own
@@ -561,7 +549,7 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(DeprecatedSyntaxFinding finding)
     {
-        // Note level for the two purely informational, workflow-tracking kinds (TODO/FIXME - not
+        // Note level for the two purely informational, workflow-tracking kinds (to-do/fix-me - not
         // a defect at all); Warning for everything else - a real syntax/behavior risk, but not
         // itself proof of a wrong result the way the EqualsNullComparison/NotEqualsNullComparison
         // kinds' own High confidence already signals through the confidence-based level floor.
@@ -1405,6 +1393,18 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static string DescribeTouchedObjectForSetOption(SetOptionFinding finding)
+    {
+        if (finding.TouchedObjectQualifiedName is not { } touched)
+        {
+            return string.Empty;
+        }
+
+        var featureKind = finding.TouchedIsIndexedView ? "indexed view" : "filtered index";
+        var indexSuffix = finding.TouchedIndexName is { } idx ? $".{idx}" : string.Empty;
+        return $" - touches {featureKind} '{touched}'{indexSuffix}";
     }
 
     /// <summary>

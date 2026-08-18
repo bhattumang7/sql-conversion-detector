@@ -34,6 +34,18 @@ public static class ReadableScanReportWriter
     /// <summary>Shared across every constraint-table header - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string ConstraintHeader = "Constraint";
 
+    /// <summary>Shared across every finding table with a comparison-operator column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string OperatorHeader = "Operator";
+
+    /// <summary>Shared across every finding table with a parameter-name column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string ParameterHeader = "Parameter";
+
+    /// <summary>Shared across every finding table with a table-name column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string TableHeader = "Table";
+
+    /// <summary>Shared across every finding table with an index-name column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string IndexHeader = "Index";
+
     /// <summary>Shared across every "we don't have a name for this" fallback string.</summary>
     private const string UnknownDisplay = "unknown";
 
@@ -115,7 +127,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TruncateSwallowed(report, headingLevel, pathBase));
         blocks.AddRange(UnindexedTempTableUsage(report, headingLevel, pathBase));
         blocks.AddRange(OutputParameter(report, headingLevel, pathBase));
-        blocks.AddRange(DatabaseConfiguration(report, headingLevel, pathBase));
+        blocks.AddRange(DatabaseConfiguration(report, headingLevel));
         blocks.AddRange(ParameterReassignmentPredicate(report, headingLevel, pathBase));
         blocks.AddRange(CodeMetric(report, headingLevel, pathBase));
         blocks.AddRange(Formatting(report, headingLevel, pathBase));
@@ -346,7 +358,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(
             "These comparisons put two explicitly different collations on either side, which SQL Server rejects at compile time (Msg 468) - the query does not run at all. That outranks any seek-versus-scan question, so they are listed first.");
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Left", "Right", "Operator"],
+            [WhereHeader, "Left", "Right", OperatorHeader],
             [.. report.CollationConflictFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
@@ -625,7 +637,7 @@ public static class ReadableScanReportWriter
             "A real EXEC call site's caller-side variable has a declared type that risks silent data loss against the callee's own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate. This also primes the exact mismatched value for any comparison the callee's own body makes against a column using this parameter.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Callee", "Parameter", "Caller variable", "Caller type", "Parameter type", "Risk"],
+            [WhereHeader, "Callee", ParameterHeader, "Caller variable", "Caller type", "Parameter type", "Risk"],
             [.. report.ProcCallArgumentMismatchFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -650,7 +662,7 @@ public static class ReadableScanReportWriter
             "A CORRECTNESS finding, not a sargability one - BETWEEN itself is perfectly sargable here. The upper bound literal has fewer fractional-second digits than the column's own declared TIME/DATETIME2/DATETIMEOFFSET precision, so rows whose value falls in that precision gap are silently excluded - oracle-confirmed directly (a DATETIME2(7) row at 23:59:59.9999999 is dropped by the classic '23:59:59.997' end-of-day literal). Rewrite as >= start AND < (start of the next period) instead, which has no precision gap to fall into.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Column", "Column scale", "Boundary literal", "Literal fractional digits"],
+            [WhereHeader, ColumnHeader, "Column scale", "Boundary literal", "Literal fractional digits"],
             [.. report.TemporalBoundaryFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -737,7 +749,7 @@ public static class ReadableScanReportWriter
             "The mirror of the oversized-parameter section above, but strictly worse: the parameter/variable/expression on the other side is declared SHORTER than the column - or with no explicit length at all (T-SQL defaults a length-less DECLARE/parameter to 1) - so the value is silently truncated before the predicate ever runs. Structural, not a per-instance proof (this pass never traces the variable's actual assigned value): it states the declared-length pairing risks truncation, the same honesty WriteLossFinding already applies to assignment-site truncation. Where the parameter feeds a LIKE pattern or a range bound, truncation changes what the comparison itself means, not just which exact value it excludes - marked in the Effect column.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Column length", "Other operand length", "Operator", "Effect"],
+            [WhereHeader, ColumnHeader, "Column length", "Other operand length", OperatorHeader, "Effect"],
             [.. report.UnderLengthParameterFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -782,7 +794,7 @@ public static class ReadableScanReportWriter
             "The classic '(Col = @p OR @p IS NULL)' optional-filter idiom (Erland Sommarskog, \"Dynamic Search Conditions in T-SQL\") - one cached plan must stay correct for every NULL/non-NULL state of @p, typically forcing a scan regardless of what value a given call actually passes. Not a claim about what a specific already-compiled plan is doing right now - a structural risk report. Suppressed entirely (not merely downgraded) when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, both of which let the optimizer see the real value on each call and fully resolve this risk. Rows on a confirmed-indexed column are listed first.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Parameter", IndexedHeader],
+            [WhereHeader, ColumnHeader, ParameterHeader, IndexedHeader],
             [.. report.CatchAllPredicateFindings
                 .OrderByDescending(f => f.Indexed)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
@@ -808,7 +820,7 @@ public static class ReadableScanReportWriter
             "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value came from a DECLARE'd local variable, not a formal parameter, so it is invisible to the cardinality estimator (Microsoft's own documented behavior - the optimizer falls back to the column's average-density statistic instead of a value-specific estimate). Whether a bad estimate actually matters depends on data-distribution facts this pass cannot see - listed for awareness, not as a proven defect. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, since a per-execution recompile lets the optimizer see the variable's real current value.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Variable", "Operator", IndexedHeader],
+            [WhereHeader, ColumnHeader, "Variable", OperatorHeader, IndexedHeader],
             [.. report.LocalVariablePredicateFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -831,7 +843,7 @@ public static class ReadableScanReportWriter
             "A real access-path defect, oracle-confirmed (SET SHOWPLAN_XML, 2026-08-18): the optimizer can only match a filtered index against a query whose own WHERE clause restates the filter with a LITERAL value - a query filtering the same column via a parameter or local variable can never use that index, even when the runtime value is identical to the index's own filter literal. Not a cardinality-estimate risk like a plain local-variable predicate; the access path itself is unavailable. Not suppressed by OPTION (RECOMPILE)/WITH RECOMPILE - confirmed directly that a recompiled plan still cannot match the index, since the limitation is evaluated against the predicate's compile-time shape, not its runtime value.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Filtered index", "Filter literal", "Variable", "Operator"],
+            [WhereHeader, ColumnHeader, "Filtered index", "Filter literal", "Variable", OperatorHeader],
             [.. report.FilteredIndexParameterMismatchFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -855,7 +867,7 @@ public static class ReadableScanReportWriter
             "Purely informational, not a sargability claim: the predicate is still fully sargable and WILL seek if the column is indexed. The compared value is a formal parameter that is reassigned (SET/SELECT) on every statically reachable path before this predicate runs - the optimizer's compile-time sniffed value (the caller's original argument) is provably stale by the time this comparison executes. Distinct from a predicate against a plain DECLARE'd local variable (never sniffable to begin with) - here a value that WAS sniffable had its sniffed value invalidated by the procedure's own code. Suppressed entirely when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Parameter", "Operator", IndexedHeader, "Reassigned at"],
+            [WhereHeader, ColumnHeader, ParameterHeader, OperatorHeader, IndexedHeader, "Reassigned at"],
             [.. report.ParameterReassignmentPredicateFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -879,7 +891,7 @@ public static class ReadableScanReportWriter
             "Purely a maintainability/readability signal - none of these eight metrics change a query's result or its plan. Every threshold is configurable; the defaults were calibrated against this codebase's own real corpus distribution, not invented arbitrarily.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Measured", "Threshold", "Detail"],
+            [WhereHeader, "Kind", "Measured", "Threshold", DetailHeader],
             [.. report.CodeMetricFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -902,7 +914,7 @@ public static class ReadableScanReportWriter
             "Purely a readability/maintainability signal for most of these - none change a query's result or its plan. Two kinds are a visual-ambiguity risk instead (a statement that looks like it belongs to a conditional/loop but structurally does not): the statement's own behavior is still unaffected, only a future edit relying on the misleading shape is at risk.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.FormattingFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -923,7 +935,7 @@ public static class ReadableScanReportWriter
             "A reserved keyword used as an identifier, a user-defined procedure/function named with the \"sp_\" prefix, a schema-scoped CREATE with no explicit schema qualifier, and a redundant \"dbo.\" qualifier on a type reference.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.NamingFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -944,7 +956,7 @@ public static class ReadableScanReportWriter
             "Unreachable code, an unused label, an unused local variable, an unused non-OUTPUT parameter, or a GOTO whose target is the very next statement. Purely a maintainability signal for every kind - the flagged code's own current behavior is unaffected.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.DeadCodeFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -965,7 +977,7 @@ public static class ReadableScanReportWriter
             "Commented-out code, a duplicated string literal, a WHILE loop that can only run once, a self-assignment, identical operands either side of an operator, a repeated unary operator, a negated comparison written as the negation of its opposite, a duplicated or all-identical conditional branch, a redundant or mutually-exclusive AND-combined numeric bound, a collapsible nested IF, a nested IIF, or an always-true/always-false literal comparison. Purely a maintainability/readability signal for every kind - the flagged code's own current behavior is unaffected.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.DuplicationFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -986,7 +998,7 @@ public static class ReadableScanReportWriter
             "A TODO/FIXME comment, a non-ANSI comparison operator, the \"= NULL\"/\"<> NULL\" silent always-false trap, a wildcard-free LIKE pattern, a legacy system compatibility view, a table hint without WITH, a numbered-procedure-group definition/invocation, a string-literal column alias, a removed legacy security stored procedure, or SET ROWCOUNT. The two NULL-comparison kinds are a real silent correctness trap under the default ANSI_NULLS ON setting; every other kind is a maintainability/forward-compatibility signal.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.DeprecatedSyntaxFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1007,7 +1019,7 @@ public static class ReadableScanReportWriter
             "An INSERT with no explicit column list, an ordinal ORDER BY, a TOP with no ORDER BY, a base table with no PRIMARY KEY, a routine missing SET NOCOUNT ON, or a bare SELECT *. The first three are correctness-adjacent (silently wrong the moment the target's/source's own column shape changes, or genuinely unspecified row selection); the rest are maintainability/cost signals.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.StatementShapeFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1028,7 +1040,7 @@ public static class ReadableScanReportWriter
             "A cursor FETCH whose INTO list doesn't match its own cursor's defining SELECT column count (always fails at runtime, Msg 16924), an empty CATCH block (silently swallows every error), output emitted from a trigger (a SELECT or PRINT sent back to whatever connection fired the DML, not the calling application), a NOLOCK/READUNCOMMITTED dirty-read hint, the same expression passed twice to one call, a reference to @@IDENTITY (session-wide scope, prefer SCOPE_IDENTITY()), a GOTO statement, a simple CASE with no ELSE (silently evaluates to NULL when nothing matches), or a non-deterministic function (NEWID/RAND/CRYPT_GEN_RANDOM) used as a CASE input (oracle-confirmed to be re-evaluated separately per WHEN comparison, making every branch effectively unreachable).");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.ControlFlowRiskFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1049,7 +1061,7 @@ public static class ReadableScanReportWriter
             "A credential-suggestive-named variable assigned a literal string, a hardcoded non-benign IP address, a HASHBYTES call naming a weak/deprecated algorithm (general use and, sharper, a security-sensitive context), and a dynamic SQL call site whose assembled text this tool cannot prove is free of runtime/external influence.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.SecurityFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1070,7 +1082,7 @@ public static class ReadableScanReportWriter
             "Live-mode only. A heap (no clustered index) carrying nonclustered indexes, and the sharper sibling, a heap whose own PRIMARY KEY is declared NONCLUSTERED - both pay an 8-byte RID lookup instead of a clustering-key seek. Clustering-key quality: a non-unique clustered index (hidden 4-byte uniquifier), a wide clustered key (>3 key columns or >16 estimated bytes - every nonclustered index on the table carries a copy of it), and a uniqueidentifier clustered key defaulted to NEWID() (random insert order fragments the B-tree; NEWSEQUENTIALID() does not fire here). Also: duplicate/prefix-subsumed indexes, unindexed foreign keys, disabled/hypothetical indexes, over-indexing (many nonclustered indexes on one table, or a single index with too many key columns), three low-confidence, listed-for-completeness table-shape signals (wide table, high nullable-column ratio, high string-column ratio), a filtered index whose filter columns are absent from its own key/INCLUDE list, deprecated LOB column types (text/ntext/image, and timestamp vs. rowversion as a naming-only note), a float/real column used as an index key, and a statistics object marked NORECOMPUTE.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Index", "Detail"],
+            [WhereHeader, "Kind", IndexHeader, DetailHeader],
             [.. report.IndexDesignFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1108,7 +1120,7 @@ public static class ReadableScanReportWriter
             "Live-mode only. A negative seed or a non-1 increment on an IDENTITY column - schema-decidable, informational, not a proven defect. An IDENTITY column that has consumed most of its declared type's representable range - data-state-decidable, meaningful ONLY against a production-shaped target; never read the absence of this finding as a passing signal on a low-value development database.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Column", "Detail"],
+            [WhereHeader, "Kind", ColumnHeader, DetailHeader],
             [.. report.IdentityRangeFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1130,7 +1142,7 @@ public static class ReadableScanReportWriter
             "A WHERE/ON equality predicate (=) compares a float/real (IEEE-754 approximate) column - a correctness risk, not a performance one: two values a person would call the same number can carry a different bit pattern and compare unequal, silently returning the wrong rows regardless of plan shape or indexing. Direct base-table columns in the immediate statement's own FROM clause only - a predicate reached through a view/CTE/derived table is not analyzed by this v1.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Column", "Type", "Detail"],
+            [WhereHeader, ColumnHeader, "Type", DetailHeader],
             [.. report.FloatEqualityFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1152,7 +1164,7 @@ public static class ReadableScanReportWriter
             "Structurally-provable query shapes from two DBA-script-family sweep batches: a table variable used as a query source under a low compatibility level or a growing WHILE loop (stale/fixed cardinality estimate), a WHILE loop doing single-row DML keyed to its own tracked variable (RBAR), a cursor declared without LOCAL, COUNT(*) assigned to a variable then compared only to zero (a real full-set scan, unlike the inline scalar-subquery form the optimizer already rewrites), a non-aggregate HAVING predicate that belongs in WHERE, a UNION of provably disjoint branches, a SELECT DISTINCT join not backed by a unique index, an unqualified table reference at a real query site, three MERGE hazards (missing HOLDLOCK, a non-unique USING source, an unconditional DELETE branch), a recursive CTE with no MAXRECURSION option, a whole-table UPDATE/DELETE with no WHERE and no TOP, and a linked-server/cross-database table reference.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Kind", "Detail"],
+            [WhereHeader, "Kind", DetailHeader],
             [.. report.QueryAntiPatternFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1173,7 +1185,7 @@ public static class ReadableScanReportWriter
             "A WHERE-equality seek against a base table's own single candidate nonclustered index (never fired when a real alternative index exists too) whose key + INCLUDE columns do not cover every other column the statement references on that table - oracle-confirmed via real plan XML that this shape produces a Key/RID Lookup (Lookup=\"1\") per matched row.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Index", "Uncovered columns"],
+            [WhereHeader, TableHeader, IndexHeader, "Uncovered columns"],
             [.. report.IndexCoverageFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1195,7 +1207,7 @@ public static class ReadableScanReportWriter
             "A variable assigned from a single, unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed to silently bind an arbitrary row's value (and discard the rest) the moment the trigger's own DML affects more than one row - plus the sharper sub-kind where that value then drives a keyed UPDATE/DELETE straight-line in the same trigger body; a trigger with no IF NOT EXISTS/@@ROWCOUNT-style early-out guard (advisory, low confidence); and a trigger that writes directly back to its own target table, only reported when the connected database's own RECURSIVE_TRIGGERS option is live-confirmed on (oracle-confirmed the write genuinely re-fires the trigger rather than silently no-oping in that case).");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Trigger", "Kind", "Detail"],
+            [WhereHeader, "Trigger", "Kind", DetailHeader],
             [.. report.TriggerCorrectnessFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1341,7 +1353,7 @@ public static class ReadableScanReportWriter
             "A constraint the engine itself does not trust - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement (the default there, the opposite of the default on the original ADD CONSTRAINT). The optimizer forfeits join-elimination and other constraint-based rewrites for every query touching it, and the constraint may not actually hold over existing rows. A disabled constraint is not reported - it's openly off, not silently weaker than it looks.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ConstraintHeader, "Table", "Kind"],
+            [WhereHeader, ConstraintHeader, TableHeader, "Kind"],
             [.. report.UntrustedConstraintFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1363,7 +1375,7 @@ public static class ReadableScanReportWriter
             "A CHECK constraint whose own predicate text is wrong, independent of trust state. \"NULL not handled\": a nullable column's predicate has no IS NULL/IS NOT NULL test anywhere against it, so a NULL value silently passes under three-valued logic even though the constraint reads as if it forbids bad data. \"On IDENTITY column\": the predicate directly references an IDENTITY column - the counter advances through every failed insert, so a numeric-threshold CHECK here fails deterministically until the counter catches up, then silently stops mattering forever.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, ConstraintHeader, "Table", "Column", "Kind"],
+            [WhereHeader, ConstraintHeader, TableHeader, ColumnHeader, "Kind"],
             [.. report.CheckConstraintFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1386,7 +1398,7 @@ public static class ReadableScanReportWriter
             "A column carries a DEFAULT constraint but is still nullable. A DEFAULT only ever applies when the column is OMITTED from an INSERT's own column list; any caller that supplies NULL explicitly (a common ORM-generated full-column INSERT shape) bypasses the default entirely, silently, with no error.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Column", "Default"],
+            [WhereHeader, TableHeader, ColumnHeader, "Default"],
             [.. report.DefaultNullableConstraintFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1408,7 +1420,7 @@ public static class ReadableScanReportWriter
             "A non-persisted computed column built on TRY_CAST is referenced inside a real filter-context predicate (WHERE/JOIN ON/HAVING) elsewhere in the corpus. TRY_CAST is session-DATEFORMAT-dependent and therefore classified non-deterministic by the engine, so this column can never be PERSISTED or indexed at all - the predicate can never seek through it no matter what index exists elsewhere on the table.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Column", "Definition", "Definition site"],
+            [WhereHeader, TableHeader, ColumnHeader, "Definition", "Definition site"],
             [.. report.TryCastComputedColumnPredicateFindings.Select(f => new List<string>
             {
                 Where(f.PredicateSourcePath, f.PredicateLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1473,7 +1485,7 @@ public static class ReadableScanReportWriter
             "A + concatenation chain includes a nullable string column with no ISNULL/COALESCE guard. Unlike CONCAT(), which treats a NULL operand as empty string, + propagates a single NULL operand to NULL for the whole expression, silently, with no error.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Column"],
+            [WhereHeader, TableHeader, ColumnHeader],
             [.. report.StringConcatNullFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1494,7 +1506,7 @@ public static class ReadableScanReportWriter
             "An aggregate argument contains a CASE-guarded division by a non-constant divisor, on a table backed by a columnstore index. Historically reported as a class of bug where batch-mode (vectorized) execution does not reliably preserve the same per-row CASE-branch short-circuit elision rowstore scalar execution provides. Shipped as a structural risk flag only, Low confidence, after a genuine but unsuccessful attempt to reproduce a live failure against this tool's own standing engine build - not a proven-current-behavior claim.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Aggregate", "Table"],
+            [WhereHeader, "Aggregate", TableHeader],
             [.. report.AggregateDivisionColumnstoreFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1515,7 +1527,7 @@ public static class ReadableScanReportWriter
             "An enabled Row-Level Security FILTER predicate's own bound column(s) lead no active index on the secured table - the predicate is silently applied to every SELECT/UPDATE/DELETE against this table, so the engine cannot seek and must evaluate it as a residual, per-row filter over a full scan. Oracle-confirmed scan-vs-seek contrast; the checklist's own 'forces single-threaded execution' claim was not reproduced live on this tool's own standing engine build and is deliberately not asserted here.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Policy", "Predicate function", "Filtered column(s)"],
+            [WhereHeader, TableHeader, "Policy", "Predicate function", "Filtered column(s)"],
             [.. report.SecurityPredicateIndexFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1720,7 +1732,7 @@ public static class ReadableScanReportWriter
             "A system-versioned temporal table's CURRENT side carries a nonclustered index with no structurally matching index (same key columns, same order) on its HISTORY side. FOR SYSTEM_TIME AS OF/BETWEEN rewrites to a UNION ALL of the two tables - oracle-confirmed directly (real seeded data, UPDATE STATISTICS ... WITH FULLSCAN on both sides): a predicate that seeks the current-table branch via this index degrades to a full Clustered Index Scan of the whole history table when the gap exists, and seeks both branches once a matching index is added. PRIMARY KEY/UNIQUE-constraint indexes on the current side are never compared - the engine itself refuses either constraint on a temporal history table (Msg 13558/13583), so flagging them would be a guaranteed-always-fire signal with no possible fix.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Current table", "History table", "Index", "Key columns"],
+            [WhereHeader, "Current table", "History table", IndexHeader, "Key columns"],
             [.. report.TemporalTableHistoryIndexGapFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1847,7 +1859,7 @@ public static class ReadableScanReportWriter
             "A real composite index's leading key column is never bound anywhere in this statement, while the query genuinely constrains one of that index's later key columns - the index is a single B-tree keyed first by its leading column, so this specific index cannot be seek-used for this predicate at all. Only fires when no other usable index on the table leads with the same violating column either, so this is not an index-recommendation or an overall-query-is-slow claim - just \"this query cannot seek this index\".");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Index", "Key columns", "Unconstrained leading column", "Violating column"],
+            [WhereHeader, TableHeader, IndexHeader, "Key columns", "Unconstrained leading column", "Violating column"],
             [.. report.CompositeIndexLeadingColumnFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1871,7 +1883,7 @@ public static class ReadableScanReportWriter
             "An INDEX(...) table hint either names an index that no longer exists (oracle-confirmed a hard compile error, Msg 308, every time this statement runs) or forces a real index whose own leading key column is never bound anywhere in the statement (oracle-confirmed to degrade the forced access path to a full index scan, since the hint requires this specific index rather than merely suggesting it).");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Table", "Hinted index", "Problem"],
+            [WhereHeader, TableHeader, "Hinted index", "Problem"],
             [.. report.IndexHintFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1997,7 +2009,7 @@ public static class ReadableScanReportWriter
             "An OUTPUT parameter is not assigned on some statically reachable path - oracle-confirmed a caller's own variable is left completely unchanged by the call on that path (not reset to NULL), so a reused caller variable can silently carry stale data from a previous, unrelated call.");
 
         yield return new ReadableBlock.Table(
-            ["Procedure at", "Parameter", "Unresolved at"],
+            ["Procedure at", ParameterHeader, "Unresolved at"],
             [.. report.OutputParameterFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.ProcedureLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2006,7 +2018,7 @@ public static class ReadableScanReportWriter
             })]);
     }
 
-    private static IEnumerable<ReadableBlock> DatabaseConfiguration(ScanReport report, int level, string? pathBase)
+    private static IEnumerable<ReadableBlock> DatabaseConfiguration(ScanReport report, int level)
     {
         if (report.DatabaseConfigurationFindings.Count == 0)
         {

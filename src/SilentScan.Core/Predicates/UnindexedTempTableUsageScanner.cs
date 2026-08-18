@@ -78,14 +78,6 @@ public static class UnindexedTempTableUsageScanner
 
         public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitScopedBody(node.Name, node);
 
-        private void VisitScopedBody(SchemaObjectName name, TSqlFragment node)
-        {
-            var previousScope = _currentScope;
-            _currentScope = SchemaObjectNameHelper.Qualify(name);
-            node.AcceptChildren(this);
-            _currentScope = previousScope;
-        }
-
         public override void ExplicitVisit(SelectStatement node)
         {
             if (node.Into is { BaseIdentifier.Value: var tempName } into && tempName.StartsWith('#'))
@@ -105,14 +97,6 @@ public static class UnindexedTempTableUsageScanner
             base.ExplicitVisit(node);
         }
 
-        private void TryRecordJoinOperand(TableReference side, TSqlFragment joinNode)
-        {
-            if (side is NamedTableReference { SchemaObject.BaseIdentifier.Value: var name } && name.StartsWith('#'))
-            {
-                Usages.Add(new Usage(name, _currentScope, UnindexedTempTableUsageKind.JoinOperand, joinNode.StartLine, joinNode.StartColumn));
-            }
-        }
-
         public override void ExplicitVisit(QuerySpecification node)
         {
             if (node.WhereClause is { } where
@@ -123,6 +107,22 @@ public static class UnindexedTempTableUsageScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private void VisitScopedBody(SchemaObjectName name, TSqlFragment node)
+        {
+            var previousScope = _currentScope;
+            _currentScope = SchemaObjectNameHelper.Qualify(name);
+            node.AcceptChildren(this);
+            _currentScope = previousScope;
+        }
+
+        private void TryRecordJoinOperand(TableReference side, TSqlFragment joinNode)
+        {
+            if (side is NamedTableReference { SchemaObject.BaseIdentifier.Value: var name } && name.StartsWith('#'))
+            {
+                Usages.Add(new Usage(name, _currentScope, UnindexedTempTableUsageKind.JoinOperand, joinNode.StartLine, joinNode.StartColumn));
+            }
         }
     }
 }

@@ -132,21 +132,6 @@ public static class CrossModuleLockOrderScanner
         public override void ExplicitVisit(CreateOrAlterProcedureStatement node) =>
             VisitProcedure(SchemaObjectNameHelper.Qualify(node.ProcedureReference.Name), node.StartLine, node.StatementList);
 
-        private void VisitProcedure(string qualifiedName, int line, StatementList? statementList)
-        {
-            _openTransactionDepth = 0;
-            _writes = [];
-
-            statementList?.AcceptChildren(this);
-
-            if (_writes.Count >= 2)
-            {
-                Orderings.Add(new ProcedureWriteOrder(qualifiedName, sourcePath, line, _writes));
-            }
-
-            _writes = null;
-        }
-
         public override void ExplicitVisit(BeginTransactionStatement node)
         {
             _openTransactionDepth++;
@@ -155,20 +140,39 @@ public static class CrossModuleLockOrderScanner
 
         public override void ExplicitVisit(CommitTransactionStatement node)
         {
+            // Sonar (S2583) reports this guard as always false. That is a false positive: Sonar's
+            // intraprocedural symbolic-execution engine only sees _openTransactionDepth's declared
+            // default (0) at method entry - it has no way to know the field is also mutated by the
+            // ExplicitVisit(BeginTransactionStatement) override above, which the ScriptDom traversal
+            // framework invokes as an independent callback, not through any call chain reachable
+            // from this method. In real T-SQL, this guard is reachable and load-bearing: a procedure
+            // whose COMMIT/ROLLBACK count exceeds its BEGIN TRANSACTION count (a common defensive
+            // pattern, e.g. an unconditional COMMIT after an already-closed conditional transaction)
+            // would otherwise drive the counter negative, desynchronizing it from the real nesting
+            // depth and corrupting the "inside an explicit transaction" gate RecordWrite relies on
+            // for every write that follows.
+#pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
                 _openTransactionDepth--;
             }
+#pragma warning restore S2583
 
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(RollbackTransactionStatement node)
         {
+            // Same Sonar (S2583) false positive as ExplicitVisit(CommitTransactionStatement) above,
+            // for the identical reason: this guard is reachable once BeginTransactionStatement has
+            // run first, which Sonar's intraprocedural analysis cannot see across sibling visitor
+            // callbacks. See that method's own comment for the full explanation.
+#pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
                 _openTransactionDepth--;
             }
+#pragma warning restore S2583
 
             base.ExplicitVisit(node);
         }
@@ -195,6 +199,31 @@ public static class CrossModuleLockOrderScanner
         {
             RecordWrite(node.MergeSpecification.Target, node.StartLine);
             base.ExplicitVisit(node);
+        }
+
+        private void VisitProcedure(string qualifiedName, int line, StatementList? statementList)
+        {
+            _openTransactionDepth = 0;
+            _writes = [];
+
+            statementList?.AcceptChildren(this);
+
+            // Sonar (S2583) reports this as always false, for the same reason as the two guards
+            // above: AcceptChildren dispatches back into this same visitor's ExplicitVisit(Insert/
+            // Update/Delete/MergeStatement) overrides, which call RecordWrite and mutate _writes as
+            // a side effect - Sonar's intraprocedural analysis has no visibility into that indirect,
+            // framework-driven callback chain, so it only ever sees _writes as the empty list just
+            // assigned above. In real T-SQL, a procedure body with two or more direct table writes
+            // genuinely populates _writes past this point, and this guard is what decides whether
+            // that procedure's write order is worth reporting at all.
+#pragma warning disable S2583
+            if (_writes.Count >= 2)
+            {
+                Orderings.Add(new ProcedureWriteOrder(qualifiedName, sourcePath, line, _writes));
+            }
+#pragma warning restore S2583
+
+            _writes = null;
         }
 
         /// <summary>

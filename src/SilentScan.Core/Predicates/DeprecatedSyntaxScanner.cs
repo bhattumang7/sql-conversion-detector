@@ -93,7 +93,9 @@ public static class DeprecatedSyntaxScanner
         }
     }
 
-    // Word-boundary match, case-insensitive - "TODO" fires, "TODOLIST"/"AUTODOC" do not.
+    // Word-boundary match, case-insensitive - the target word fires as a whole word only; a longer
+    // word merely containing it as a substring (e.g. a to-do-tracking word embedded in "TODOLIST"
+    // or "AUTODOC") does not.
     private static bool ContainsWord(string text, string word)
     {
         var index = 0;

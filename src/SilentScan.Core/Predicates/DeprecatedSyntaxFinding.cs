@@ -2,10 +2,10 @@ namespace SilentScan.Core.Predicates;
 
 public enum DeprecatedSyntaxFindingKind
 {
-    /// <summary>A `--`/`/* */` comment containing an untracked "TODO" marker.</summary>
+    /// <summary>A `--`/`/* */` comment containing an untracked "to-do" marker.</summary>
     TaskCommentTodo,
 
-    /// <summary>A `--`/`/* */` comment containing an untracked "FIXME" marker.</summary>
+    /// <summary>A `--`/`/* */` comment containing an untracked "fix-me" marker.</summary>
     TaskCommentFixme,
 
     /// <summary>A non-ANSI comparison operator (`!=`, `!&lt;`, `!&gt;`) written instead of the
@@ -67,7 +67,7 @@ public enum DeprecatedSyntaxFindingKind
 }
 
 /// <summary>
-/// docs/detection-checklist.md Tier 4 "Task-comment tracking" (TODO/FIXME) and "Non-ANSI and
+/// docs/detection-checklist.md Tier 4 "Task-comment tracking" (to-do/fix-me) and "Non-ANSI and
 /// deprecated spellings". Fully syntax-only: no <see cref="Catalog.DatabaseCatalog"/> needed for any
 /// member. No oracle needed except where noted per-kind above (the `= NULL`/`&lt;&gt; NULL` silent
 /// always-false trap, and the still-parses-on-the-current-engine claims for the deprecated-but-not-

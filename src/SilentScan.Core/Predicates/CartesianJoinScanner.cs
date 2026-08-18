@@ -76,6 +76,26 @@ public static class CartesianJoinScanner
             // false "cartesian" pairs). A union-find over every leaf table, joined by every leaf
             // predicate that spans two or more of them, is the correct check: only a FROM clause
             // whose graph has more than one connected component is a genuine cartesian defect.
+            var unionFind = BuildConnectivity(allNamed, allPredicates);
+
+            // Explicit CROSS JOIN gaps, anywhere in the FROM tree - the author named these two
+            // specific operands, so report using the join's own two immediate sides (only when
+            // both are themselves plain tables, a known v1 scope limit - a nested join/derived
+            // table operand is declined rather than guessed at).
+            ReportExplicitCrossJoinGaps(topLevel, unionFind, sourcePath);
+
+            // Comma-join gap: one witness finding per disconnected top-level pair (not every
+            // pairing - a 5-table FROM with one real gap would otherwise spam several findings
+            // for pairs that are each individually "not directly connected" but share the same
+            // one real defect). Only a top-level entry that is ITSELF a plain table (not a
+            // nested join/derived table) is used as a witness, the same known v1 scope limit as
+            // the CROSS JOIN case above.
+            ReportCommaJoinGap(topLevel, unionFind, sourcePath);
+        }
+
+        private static AliasUnionFind BuildConnectivity(
+            List<NamedTableReference> allNamed, List<BooleanExpression> allPredicates)
+        {
             var unionFind = new AliasUnionFind(allNamed.Select(AliasKey));
             foreach (var leaf in allPredicates.SelectMany(FlattenLeaves))
             {
@@ -86,10 +106,12 @@ public static class CartesianJoinScanner
                 }
             }
 
-            // Explicit CROSS JOIN gaps, anywhere in the FROM tree - the author named these two
-            // specific operands, so report using the join's own two immediate sides (only when
-            // both are themselves plain tables, a known v1 scope limit - a nested join/derived
-            // table operand is declined rather than guessed at).
+            return unionFind;
+        }
+
+        private void ReportExplicitCrossJoinGaps(
+            IList<TableReference> topLevel, AliasUnionFind unionFind, string sourcePath)
+        {
             foreach (var top in topLevel)
             {
                 foreach (var unqualified in FlattenUnqualifiedJoins(top))
@@ -111,13 +133,11 @@ public static class CartesianJoinScanner
                     }
                 }
             }
+        }
 
-            // Comma-join gap: one witness finding per disconnected top-level pair (not every
-            // pairing - a 5-table FROM with one real gap would otherwise spam several findings
-            // for pairs that are each individually "not directly connected" but share the same
-            // one real defect). Only a top-level entry that is ITSELF a plain table (not a
-            // nested join/derived table) is used as a witness, the same known v1 scope limit as
-            // the CROSS JOIN case above.
+        private void ReportCommaJoinGap(
+            IList<TableReference> topLevel, AliasUnionFind unionFind, string sourcePath)
+        {
             for (var i = 0; i < topLevel.Count; i++)
             {
                 if (topLevel[i] is not NamedTableReference firstNamed)

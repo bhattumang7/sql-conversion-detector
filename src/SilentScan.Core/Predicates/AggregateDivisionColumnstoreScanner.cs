@@ -76,15 +76,11 @@ public static class AggregateDivisionColumnstoreScanner
             {
                 var caseCollector = new CaseExpressionCollector();
                 parameter.Accept(caseCollector);
-                foreach (var caseExpression in caseCollector.CaseExpressions)
+                if (caseCollector.CaseExpressions.Any(ContainsErrorProneDivision))
                 {
-                    if (ContainsErrorProneDivision(caseExpression))
-                    {
-                        Findings.Add(new AggregateDivisionColumnstoreFinding(
-                            call.FunctionName.Value.ToUpperInvariant(), columnstoreTable.QualifiedName,
-                            sourcePath, call.StartLine, call.StartColumn));
-                        break;
-                    }
+                    Findings.Add(new AggregateDivisionColumnstoreFinding(
+                        call.FunctionName.Value.ToUpperInvariant(), columnstoreTable.QualifiedName,
+                        sourcePath, call.StartLine, call.StartColumn));
                 }
             }
         }

@@ -109,14 +109,11 @@ public static class CodeMetricScanner
         return text.Split('\n');
     }
 
-    private static string QualifiedName(SchemaObjectName name) =>
-        name.SchemaIdentifier is { } schema
-            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-            : name.BaseIdentifier.Value;
-
     private sealed class Visitor(string sourcePath, CodeMetricThresholds thresholds) : TSqlFragmentVisitor
     {
         public List<CodeMetricFinding> Findings { get; } = [];
+
+        private int _nestingDepth;
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
@@ -154,8 +151,6 @@ public static class CodeMetricScanner
             base.ExplicitVisit(node);
         }
 
-        private int _nestingDepth;
-
         public override void ExplicitVisit(IfStatement node)
         {
             CheckConditionalOperatorCount(node.Predicate, node.StartLine, node.StartColumn);
@@ -169,24 +164,6 @@ public static class CodeMetricScanner
         }
 
         public override void ExplicitVisit(TryCatchStatement node) => VisitNested(node, base.ExplicitVisit);
-
-        private void VisitNested<TNode>(TNode node, Action<TNode> visitChildren)
-            where TNode : TSqlStatement
-        {
-            _nestingDepth++;
-            if (_nestingDepth == thresholds.MaxNestingDepth + 1)
-            {
-                // Fire once, at the exact statement that first breaches the limit - a node nested
-                // 10 levels deep against a threshold of 6 reports one finding at level 7, not four
-                // cascading ones for levels 7 through 10.
-                Findings.Add(new CodeMetricFinding(
-                    CodeMetricFindingKind.NestingTooDeep, sourcePath, sourcePath,
-                    node.StartLine, node.StartColumn, _nestingDepth, thresholds.MaxNestingDepth));
-            }
-
-            visitChildren(node);
-            _nestingDepth--;
-        }
 
         public override void ExplicitVisit(SearchedCaseExpression node)
         {
@@ -209,6 +186,29 @@ public static class CodeMetricScanner
 
             base.ExplicitVisit(node);
         }
+
+        private void VisitNested<TNode>(TNode node, Action<TNode> visitChildren)
+            where TNode : TSqlStatement
+        {
+            _nestingDepth++;
+            if (_nestingDepth == thresholds.MaxNestingDepth + 1)
+            {
+                // Fire once, at the exact statement that first breaches the limit - a node nested
+                // 10 levels deep against a threshold of 6 reports one finding at level 7, not four
+                // cascading ones for levels 7 through 10.
+                Findings.Add(new CodeMetricFinding(
+                    CodeMetricFindingKind.NestingTooDeep, sourcePath, sourcePath,
+                    node.StartLine, node.StartColumn, _nestingDepth, thresholds.MaxNestingDepth));
+            }
+
+            visitChildren(node);
+            _nestingDepth--;
+        }
+
+        private static string QualifiedName(SchemaObjectName name) =>
+            name.SchemaIdentifier is { } schema
+                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+                : name.BaseIdentifier.Value;
 
         private void AnalyzeRoutine(
             string kindLabel, string qualifiedName, SchemaObjectName nameNode, IList<ProcedureParameter> parameters, StatementList? statementList)

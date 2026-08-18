@@ -483,16 +483,18 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
-            // ISNULL(col, x) on a NOT NULL column is a false positive the blanket
-            // function-wrap rule doesn't catch (docs/detection-checklist.md Tier 1
-            // "Type-aware upgrade of the sargability stream" #1): oracle-verified the
-            // optimizer proves ISNULL(NOT-NULL-col, x) = col and simplifies the wrap away
-            // entirely, REGARDLESS of the default argument's own type (even a widening
-            // int-column-vs-bigint-default default still seeks) - so this is a nullability
-            // fact alone, never a type question. COALESCE gets no equivalent suppression:
-            // oracle-verified separately that COALESCE(NOT-NULL-col, x) still scans even
-            // with no type conversion at all - COALESCE is CASE syntax sugar and the
-            // optimizer never folds it the way it folds ISNULL.
+            // Calling ISNULL with a NOT NULL column as the first argument and a default
+            // value as the second is a false positive the blanket function wrap rule
+            // otherwise cannot catch. See the detection checklist, Tier 1, the type aware
+            // upgrade of the sargability stream, item 1, for the full write up. Confirmed
+            // directly against the standing oracle that the optimizer proves that call is
+            // equivalent to the bare column and simplifies the wrap away entirely,
+            // regardless of the default argument's own type. Even a widening default value
+            // still seeks, so this is purely a nullability fact and never a type question.
+            // COALESCE gets no equivalent suppression. Confirmed separately against the
+            // same oracle that the identical call shape written with COALESCE instead still
+            // scans even with no type conversion at all, since COALESCE is CASE syntax
+            // sugar and the optimizer never folds it the way it folds ISNULL.
             if (string.Equals(functionCall.FunctionName.Value, "ISNULL", StringComparison.OrdinalIgnoreCase)
                 && IsKnownNotNullColumn(named.Ref))
             {

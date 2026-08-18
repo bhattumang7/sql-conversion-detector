@@ -24,11 +24,6 @@ public static class ControlFlowRiskScanner
         ];
     }
 
-    private static string QualifiedName(SchemaObjectName name) =>
-        name.SchemaIdentifier is { } schema
-            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-            : name.BaseIdentifier.Value;
-
     private sealed class Visitor(string sourcePath) : TSqlFragmentVisitor
     {
         public List<ControlFlowRiskFinding> Findings { get; } = [];
@@ -46,6 +41,9 @@ public static class ControlFlowRiskScanner
         // (DeclareCursorStatement) below. Reference equality is correct and sufficient here: this
         // is the exact same SelectStatement node instance the visitor will later reach.
         private readonly HashSet<SelectStatement> _cursorDefiningSelects = new(ReferenceEqualityComparer.Instance);
+
+        private static readonly HashSet<string> NonDeterministicFunctionNames =
+            new(StringComparer.OrdinalIgnoreCase) { "NEWID", "RAND", "CRYPT_GEN_RANDOM" };
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
@@ -87,21 +85,6 @@ public static class ControlFlowRiskScanner
             EnterRoutine(QualifiedName(node.Name), isTrigger: true);
             base.ExplicitVisit(node);
             ExitRoutine();
-        }
-
-        private void EnterRoutine(string name, bool isTrigger)
-        {
-            _moduleName = name;
-            _inTrigger = isTrigger;
-            _cursorColumnCounts.Clear();
-            _cursorDefiningSelects.Clear();
-        }
-
-        private void ExitRoutine()
-        {
-            _inTrigger = false;
-            _cursorColumnCounts.Clear();
-            _cursorDefiningSelects.Clear();
         }
 
         public override void ExplicitVisit(DeclareCursorStatement node)
@@ -231,9 +214,6 @@ public static class ControlFlowRiskScanner
             base.ExplicitVisit(node);
         }
 
-        private static readonly HashSet<string> NonDeterministicFunctionNames =
-            new(StringComparer.OrdinalIgnoreCase) { "NEWID", "RAND", "CRYPT_GEN_RANDOM" };
-
         public override void ExplicitVisit(GoToStatement node)
         {
             Findings.Add(new ControlFlowRiskFinding(
@@ -272,6 +252,42 @@ public static class ControlFlowRiskScanner
             base.ExplicitVisit(node);
         }
 
+        public override void ExplicitVisit(ExecutableProcedureReference node)
+        {
+            ReportDuplicatedArguments(node.Parameters?.Select(p => p.ParameterValue) ?? []);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(FunctionCall node)
+        {
+            if (!string.Equals(node.FunctionName?.Value, "FORMATMESSAGE", StringComparison.OrdinalIgnoreCase))
+            {
+                ReportDuplicatedArguments(node.Parameters ?? []);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        private static string QualifiedName(SchemaObjectName name) =>
+            name.SchemaIdentifier is { } schema
+                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+                : name.BaseIdentifier.Value;
+
+        private void EnterRoutine(string name, bool isTrigger)
+        {
+            _moduleName = name;
+            _inTrigger = isTrigger;
+            _cursorColumnCounts.Clear();
+            _cursorDefiningSelects.Clear();
+        }
+
+        private void ExitRoutine()
+        {
+            _inTrigger = false;
+            _cursorColumnCounts.Clear();
+            _cursorDefiningSelects.Clear();
+        }
+
         /// <summary>The first non-deterministic function name (<see
         /// cref="NonDeterministicFunctionNames"/>) found anywhere in the given expression subtree, or
         /// null. A standalone, single-purpose walk over just the CASE input expression - deliberately
@@ -301,22 +317,6 @@ public static class ControlFlowRiskScanner
 
                 base.ExplicitVisit(node);
             }
-        }
-
-        public override void ExplicitVisit(ExecutableProcedureReference node)
-        {
-            ReportDuplicatedArguments(node.Parameters?.Select(p => p.ParameterValue) ?? []);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(FunctionCall node)
-        {
-            if (!string.Equals(node.FunctionName?.Value, "FORMATMESSAGE", StringComparison.OrdinalIgnoreCase))
-            {
-                ReportDuplicatedArguments(node.Parameters ?? []);
-            }
-
-            base.ExplicitVisit(node);
         }
 
         private void ReportDuplicatedArguments(IEnumerable<ScalarExpression?> arguments)

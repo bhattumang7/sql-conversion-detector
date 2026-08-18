@@ -66,28 +66,7 @@ public static class ScanReportBuilder
         // usableParseResults below stays a live QUERY, not a materialized list, specifically so
         // every downstream phase gets its own fresh reparse-and-discard rather than sharing one
         // list of every module's AST held for the whole method.
-        var usableSourcePaths = new HashSet<string>(StringComparer.Ordinal);
-        var usableCount = 0;
-
-        foreach (var result in allParseResults)
-        {
-            var errors = result.Errors
-                .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))
-                .ToList();
-            fileHealth.Add(new FileParseHealth(result.SourcePath, errors, result.BatchCount));
-
-            // A batch containing a syntax error is dropped by ScriptDOM itself, not the whole
-            // file (docs/audit-remediation-plan.md Phase 4.4, audit finding B4) - excluding the
-            // whole file whenever Errors was non-empty threw away every OTHER batch's tables/
-            // views/procs too, even when they parsed perfectly cleanly. A file contributes
-            // whatever batches it has left; one with zero surviving batches contributes nothing
-            // either way.
-            if (result.BatchCount > 0)
-            {
-                usableSourcePaths.Add(result.SourcePath);
-                usableCount++;
-            }
-        }
+        var (usableSourcePaths, usableCount) = CollectUsableSourcePaths(allParseResults, fileHealth);
 
         // A lazy query, not a materialized list: every enumeration below re-walks
         // allParseResults from scratch (a fresh reparse, for live mode) and filters to the
@@ -154,62 +133,8 @@ public static class ScanReportBuilder
         // order, and running until no NEW summary appears (capped, matching this codebase's other
         // bounded-recursion limits) also resolves a short OUTPUT-through-OUTPUT chain, not just
         // one hop. The FINAL pass below is the one whose findings/scripts are actually reported.
-        const int maxOutputSummaryRounds = 5;
-        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>();
-        List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
-        using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
-        {
-            // Every round scans the exact same parsed modules - only outputSummaryIndex differs
-            // between rounds. Materialized ONCE here rather than re-enumerating the lazy
-            // usableParseResults query per round (which would reparse the whole corpus fresh up
-            // to 5 times for no reason, since nothing about the parse itself changes round to
-            // round) - a real, measured regression: on a database whose OUTPUT-summary chains
-            // need several rounds to converge, this stage became the slowest in the scan purely
-            // from redundant reparsing. Scoped to this `using` block and released by
-            // PhaseMemory.ReleaseBetweenPhases() right after, exactly like every other phase's
-            // own bounded materialization (CatalogBuilder's internal one, callgraph's, tier1's,
-            // typed's) - never held simultaneously with another phase's.
-            var forThisPhase = usableParseResults.ToList();
-
-            var rounds = 0;
-            for (var round = 0; round < maxOutputSummaryRounds; round++)
-            {
-                rounds = round + 1;
-
-                // Each round is independent per parse result (the shared outputSummaryIndex is
-                // read-only for the duration of a round and only folded in afterward), so the
-                // round itself parallelizes even though the rounds are inherently sequential.
-                // AsOrdered, unlike the Tier-1/typed passes below: those feed lists that get
-                // sorted deterministically before reporting, but this one folds its results into
-                // outputSummaryIndex, where two modules summarizing the SAME (proc, parameter)
-                // key resolve last-writer-wins. Unordered completion would make which summary
-                // survives depend on thread scheduling - a real determinism break, not a
-                // cosmetic one.
-                dynamicSqlExtractions = forThisPhase
-                    .AsParallel()
-                    .AsOrdered()
-                    .Select(r =>
-                    {
-                        var scanned = DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog, rowValueFetcher: rowValueFetcher);
-                        dynamicStage.Advance();
-                        return scanned;
-                    })
-                    .ToList();
-
-                var discoveredCount = outputSummaryIndex.Count;
-                foreach (var summary in dynamicSqlExtractions.SelectMany(r => r.OutputSummaries))
-                {
-                    outputSummaryIndex[(summary.QualifiedName, summary.ParameterName)] = summary.PossibleValues;
-                }
-
-                if (outputSummaryIndex.Count == discoveredCount)
-                {
-                    break;
-                }
-            }
-
-            dynamicStage.Complete($"{rounds} round{(rounds == 1 ? "" : "s")} over {usableCount:N0} modules");
-        }
+        var dynamicSqlExtractions = ScanDynamicSqlWithOutputSummaries(
+            usableParseResults, procCallGraph, catalog, rowValueFetcher, usableCount, progress);
         PhaseMemory.ReleaseBetweenPhases();
 
         var dynamicSqlFindings = dynamicSqlExtractions.SelectMany(r => r.Findings).ToList();
@@ -1400,10 +1325,11 @@ public static class ScanReportBuilder
             compositeIndexLeadingColumnFindings, indexHintFindings,
             sessionDateSettingFindings, cartesianJoinFindings, undersizedDeclarationFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
             outputParameterFindings,
-            // DatabaseConfigurationFindings needs a live database round trip (sys.databases,
-            // sys.database_query_store_options) this builder never issues - always empty here;
-            // LiveScanRunner merges the real result in afterward, same pattern
-            // TempTableExecShapeFindings already established.
+            // DatabaseConfigurationFindings needs a live database round trip against the
+            // sys.databases and sys.database_query_store_options catalog views, which this
+            // builder never issues, so it is always empty here. LiveScanRunner merges the
+            // real result in afterward, the same pattern already established for
+            // TempTableExecShapeFindings.
             [],
             parameterReassignmentPredicateFindings,
             codeMetricFindings,
@@ -1444,6 +1370,105 @@ public static class ScanReportBuilder
             aggregateDivisionColumnstoreFindings,
             securityPredicateIndexFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
+    }
+
+    private static (HashSet<string> UsableSourcePaths, int UsableCount) CollectUsableSourcePaths(
+        IEnumerable<SqlParseResult> allParseResults, List<FileParseHealth> fileHealth)
+    {
+        var usableSourcePaths = new HashSet<string>(StringComparer.Ordinal);
+        var usableCount = 0;
+
+        foreach (var result in allParseResults)
+        {
+            var errors = result.Errors
+                .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))
+                .ToList();
+            fileHealth.Add(new FileParseHealth(result.SourcePath, errors, result.BatchCount));
+
+            // A batch containing a syntax error is dropped by ScriptDOM itself, not the whole
+            // file (docs/audit-remediation-plan.md Phase 4.4, audit finding B4) - excluding the
+            // whole file whenever Errors was non-empty threw away every OTHER batch's tables/
+            // views/procs too, even when they parsed perfectly cleanly. A file contributes
+            // whatever batches it has left; one with zero surviving batches contributes nothing
+            // either way.
+            if (result.BatchCount > 0)
+            {
+                usableSourcePaths.Add(result.SourcePath);
+                usableCount++;
+            }
+        }
+
+        return (usableSourcePaths, usableCount);
+    }
+
+    // See BuildFromParseResults' own call-site comment for why this runs to a fixed-point over
+    // several rounds rather than once.
+    private static List<DynamicSqlExtractionResult> ScanDynamicSqlWithOutputSummaries(
+        IEnumerable<SqlParseResult> usableParseResults,
+        ProcCallGraph procCallGraph,
+        DatabaseCatalog catalog,
+        ILiveRowValueFetcher? rowValueFetcher,
+        int usableCount,
+        IScanProgress progress)
+    {
+        const int maxOutputSummaryRounds = 5;
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>();
+        List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
+        using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
+        {
+            // Every round scans the exact same parsed modules - only outputSummaryIndex differs
+            // between rounds. Materialized ONCE here rather than re-enumerating the lazy
+            // usableParseResults query per round (which would reparse the whole corpus fresh up
+            // to 5 times for no reason, since nothing about the parse itself changes round to
+            // round) - a real, measured regression: on a database whose OUTPUT-summary chains
+            // need several rounds to converge, this stage became the slowest in the scan purely
+            // from redundant reparsing. Scoped to this `using` block and released by
+            // PhaseMemory.ReleaseBetweenPhases() right after, exactly like every other phase's
+            // own bounded materialization (CatalogBuilder's internal one, callgraph's, tier1's,
+            // typed's) - never held simultaneously with another phase's.
+            var forThisPhase = usableParseResults.ToList();
+
+            var rounds = 0;
+            for (var round = 0; round < maxOutputSummaryRounds; round++)
+            {
+                rounds = round + 1;
+
+                // Each round is independent per parse result (the shared outputSummaryIndex is
+                // read-only for the duration of a round and only folded in afterward), so the
+                // round itself parallelizes even though the rounds are inherently sequential.
+                // AsOrdered, unlike the Tier-1/typed passes below: those feed lists that get
+                // sorted deterministically before reporting, but this one folds its results into
+                // outputSummaryIndex, where two modules summarizing the SAME (proc, parameter)
+                // key resolve last-writer-wins. Unordered completion would make which summary
+                // survives depend on thread scheduling - a real determinism break, not a
+                // cosmetic one.
+                dynamicSqlExtractions = forThisPhase
+                    .AsParallel()
+                    .AsOrdered()
+                    .Select(r =>
+                    {
+                        var scanned = DynamicSqlScannerV2.Scan(r, callGraph: procCallGraph, outputSummaryIndex: outputSummaryIndex, catalog: catalog, rowValueFetcher: rowValueFetcher);
+                        dynamicStage.Advance();
+                        return scanned;
+                    })
+                    .ToList();
+
+                var discoveredCount = outputSummaryIndex.Count;
+                foreach (var summary in dynamicSqlExtractions.SelectMany(r => r.OutputSummaries))
+                {
+                    outputSummaryIndex[(summary.QualifiedName, summary.ParameterName)] = summary.PossibleValues;
+                }
+
+                if (outputSummaryIndex.Count == discoveredCount)
+                {
+                    break;
+                }
+            }
+
+            dynamicStage.Complete($"{rounds} round{(rounds == 1 ? "" : "s")} over {usableCount:N0} modules");
+        }
+
+        return dynamicSqlExtractions;
     }
 
     private static int VerdictRank(Verdict verdict) => verdict switch

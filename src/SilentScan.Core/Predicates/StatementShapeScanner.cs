@@ -122,31 +122,6 @@ public static class StatementShapeScanner
             ExitRoutine();
         }
 
-        private void EnterRoutine(string qualifiedName, int line, int column)
-        {
-            _currentModule = qualifiedName;
-            _currentRoutineHasSetNocountOn = false;
-            _currentRoutineLine = line;
-            _currentRoutineColumn = column;
-        }
-
-        private void ExitRoutine()
-        {
-            if (_currentRoutineHasSetNocountOn == false)
-            {
-                Findings.Add(new StatementShapeFinding(
-                    StatementShapeFindingKind.MissingSetNocountOn,
-                    _currentModule,
-                    sourcePath,
-                    _currentRoutineLine,
-                    _currentRoutineColumn,
-                    $"'{_currentModule}' never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message.",
-                    FindingConfidence.Medium));
-            }
-
-            _currentRoutineHasSetNocountOn = null;
-        }
-
         public override void ExplicitVisit(PredicateSetStatement node)
         {
             if (_currentRoutineHasSetNocountOn == false
@@ -180,19 +155,15 @@ public static class StatementShapeScanner
         {
             if (node.OrderByClause is { OrderByElements.Count: > 0 } orderBy)
             {
-                foreach (var element in orderBy.OrderByElements)
+                if (orderBy.OrderByElements.FirstOrDefault(e => e.Expression is IntegerLiteral) is { } ordinalElement)
                 {
-                    if (element.Expression is IntegerLiteral)
-                    {
-                        Findings.Add(new StatementShapeFinding(
-                            StatementShapeFindingKind.OrdinalOrderBy,
-                            _currentModule,
-                            sourcePath,
-                            element.StartLine,
-                            element.StartColumn,
-                            "ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list's own column order changes."));
-                        break;
-                    }
+                    Findings.Add(new StatementShapeFinding(
+                        StatementShapeFindingKind.OrdinalOrderBy,
+                        _currentModule,
+                        sourcePath,
+                        ordinalElement.StartLine,
+                        ordinalElement.StartColumn,
+                        "ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list's own column order changes."));
                 }
             }
             else if (node.TopRowFilter is not null)
@@ -219,6 +190,31 @@ public static class StatementShapeScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private void EnterRoutine(string qualifiedName, int line, int column)
+        {
+            _currentModule = qualifiedName;
+            _currentRoutineHasSetNocountOn = false;
+            _currentRoutineLine = line;
+            _currentRoutineColumn = column;
+        }
+
+        private void ExitRoutine()
+        {
+            if (_currentRoutineHasSetNocountOn == false)
+            {
+                Findings.Add(new StatementShapeFinding(
+                    StatementShapeFindingKind.MissingSetNocountOn,
+                    _currentModule,
+                    sourcePath,
+                    _currentRoutineLine,
+                    _currentRoutineColumn,
+                    $"'{_currentModule}' never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message.",
+                    FindingConfidence.Medium));
+            }
+
+            _currentRoutineHasSetNocountOn = null;
         }
     }
 }

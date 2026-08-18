@@ -81,14 +81,14 @@ public static class TruncateSwallowedScanner
         {
             public List<T> Nodes { get; } = [];
 
-            public override void Visit(TSqlFragment node)
+            public override void Visit(TSqlFragment fragment)
             {
-                if (node is T match)
+                if (fragment is T match)
                 {
                     Nodes.Add(match);
                 }
 
-                base.Visit(node);
+                base.Visit(fragment);
             }
         }
     }

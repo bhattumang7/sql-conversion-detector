@@ -143,82 +143,96 @@ public static class OutputParameterScanner
         {
             foreach (var statement in statements)
             {
-                if (state.Declined || state.Unassigned!.Count == 0)
+                // Nothing left to prove, or already declined - short-circuit the rest of this
+                // path (matches TransactionHygieneScanner's identical short-circuit shape).
+                if (state.Declined)
                 {
-                    // Nothing left to prove, or already declined - short-circuit the rest of this
-                    // path (matches TransactionHygieneScanner's identical short-circuit shape).
-                    if (state.Declined)
-                    {
-                        return state;
-                    }
+                    return state;
+                }
 
+                if (state.Unassigned!.Count == 0)
+                {
                     continue;
                 }
 
-                switch (statement)
+                var (nextState, terminal) = AnalyzeStatement(statement, state);
+                state = nextState;
+                if (terminal)
                 {
-                    case SetVariableStatement set:
-                        state.Unassigned.Remove(set.Variable.Name);
-                        break;
-
-                    case SelectStatement { QueryExpression: QuerySpecification spec }:
-                        foreach (var element in spec.SelectElements.OfType<SelectSetVariable>())
-                        {
-                            state.Unassigned.Remove(element.Variable.Name);
-                        }
-
-                        break;
-
-                    case ExecuteStatement exec:
-                        RemoveForwardedOutputArguments(exec, state.Unassigned);
-                        break;
-
-                    case ReturnStatement:
-                        foreach (var name in state.Unassigned)
-                        {
-                            Findings.Add(new OutputParameterFinding(
-                                OutputParameterFindingKind.UnassignedOnSomePath,
-                                sourcePath,
-                                name,
-                                _procedureLine,
-                                _procedureColumn,
-                                statement.StartLine,
-                                statement.StartColumn));
-                        }
-
-                        // Terminal: nothing after this executes on this path.
-                        return state with { Unassigned = [] };
-
-                    case ThrowStatement:
-                        // Terminal, but never a finding site - see class doc comment: a THROW is a
-                        // real, loud engine error, not a silent defect.
-                        return state with { Unassigned = [] };
-
-                    case GoToStatement:
-                        return FlowState.Declined_();
-
-                    case BeginEndBlockStatement block:
-                        state = AnalyzeSequential(block.StatementList.Statements, state);
-                        break;
-
-                    case IfStatement ifStatement:
-                        state = AnalyzeIf(ifStatement, state);
-                        break;
-
-                    case WhileStatement whileStatement:
-                        state = AnalyzeWhile(whileStatement, state);
-                        break;
-
-                    case TryCatchStatement tryCatch:
-                        state = AnalyzeTryCatch(tryCatch, state);
-                        break;
-
-                    default:
-                        break;
+                    // Terminal: nothing after this executes on this path.
+                    return state;
                 }
             }
 
             return state;
+        }
+
+        private (FlowState State, bool Terminal) AnalyzeStatement(TSqlStatement statement, FlowState state)
+        {
+            switch (statement)
+            {
+                case SetVariableStatement set:
+                    state.Unassigned!.Remove(set.Variable.Name);
+                    return (state, false);
+
+                case SelectStatement { QueryExpression: QuerySpecification spec }:
+                    RemoveSelectAssignedVariables(spec, state.Unassigned!);
+                    return (state, false);
+
+                case ExecuteStatement exec:
+                    RemoveForwardedOutputArguments(exec, state.Unassigned!);
+                    return (state, false);
+
+                case ReturnStatement:
+                    EmitUnassignedFindings(state.Unassigned!, statement);
+                    return (state with { Unassigned = [] }, true);
+
+                case ThrowStatement:
+                    // Terminal, but never a finding site - see class doc comment: a THROW is a
+                    // real, loud engine error, not a silent defect.
+                    return (state with { Unassigned = [] }, true);
+
+                case GoToStatement:
+                    return (FlowState.Declined_(), true);
+
+                case BeginEndBlockStatement block:
+                    return (AnalyzeSequential(block.StatementList.Statements, state), false);
+
+                case IfStatement ifStatement:
+                    return (AnalyzeIf(ifStatement, state), false);
+
+                case WhileStatement whileStatement:
+                    return (AnalyzeWhile(whileStatement, state), false);
+
+                case TryCatchStatement tryCatch:
+                    return (AnalyzeTryCatch(tryCatch, state), false);
+
+                default:
+                    return (state, false);
+            }
+        }
+
+        private static void RemoveSelectAssignedVariables(QuerySpecification spec, HashSet<string> unassigned)
+        {
+            foreach (var element in spec.SelectElements.OfType<SelectSetVariable>())
+            {
+                unassigned.Remove(element.Variable.Name);
+            }
+        }
+
+        private void EmitUnassignedFindings(HashSet<string> unassigned, TSqlStatement statement)
+        {
+            foreach (var name in unassigned)
+            {
+                Findings.Add(new OutputParameterFinding(
+                    OutputParameterFindingKind.UnassignedOnSomePath,
+                    sourcePath,
+                    name,
+                    _procedureLine,
+                    _procedureColumn,
+                    statement.StartLine,
+                    statement.StartColumn));
+            }
         }
 
         private static void RemoveForwardedOutputArguments(ExecuteStatement exec, HashSet<string> unassigned)

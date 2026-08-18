@@ -50,33 +50,41 @@ public static class TriggerRecursionCycleScanner
         foreach (var startTable in byFromTable.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { startTable };
-            FindCycles(startTable, startTable, byFromTable, [], visited, seenCanonicalKeys, findings, depth: 0);
+            var context = new CycleSearchContext(startTable, byFromTable, seenCanonicalKeys, findings);
+            FindCycles(context, startTable, [], visited, depth: 0);
         }
 
         return findings;
     }
 
+    /// <summary>Groups the parts of a cycle search that stay constant across the whole recursive
+    /// walk from one starting table - only <c>currentTable</c>/<c>path</c>/<c>visited</c>/<c>depth</c>
+    /// change per recursive step, so those stay as directly threaded parameters.</summary>
+    private readonly record struct CycleSearchContext(
+        string StartTable,
+        IReadOnlyDictionary<string, IReadOnlyList<TriggerRecursionCycleHop>> Graph,
+        HashSet<string> SeenCanonicalKeys,
+        List<TriggerRecursionCycleFinding> Findings);
+
     private static void FindCycles(
-        string startTable, string currentTable, IReadOnlyDictionary<string, IReadOnlyList<TriggerRecursionCycleHop>> graph,
-        List<TriggerRecursionCycleHop> path, HashSet<string> visited, HashSet<string> seenCanonicalKeys,
-        List<TriggerRecursionCycleFinding> findings, int depth)
+        CycleSearchContext context, string currentTable, List<TriggerRecursionCycleHop> path, HashSet<string> visited, int depth)
     {
-        if (depth >= MaxCycleDepth || !graph.TryGetValue(currentTable, out var outEdges))
+        if (depth >= MaxCycleDepth || !context.Graph.TryGetValue(currentTable, out var outEdges))
         {
             return;
         }
 
         foreach (var edge in outEdges)
         {
-            if (path.Count == 0 && string.Equals(edge.ToTableQualifiedName, startTable, StringComparison.OrdinalIgnoreCase))
+            if (path.Count == 0 && string.Equals(edge.ToTableQualifiedName, context.StartTable, StringComparison.OrdinalIgnoreCase))
             {
                 // A single-hop self-loop is DirectRecursiveTrigger's own claim, not this stream's.
                 continue;
             }
 
-            if (string.Equals(edge.ToTableQualifiedName, startTable, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(edge.ToTableQualifiedName, context.StartTable, StringComparison.OrdinalIgnoreCase))
             {
-                RecordCycle([.. path, edge], seenCanonicalKeys, findings);
+                RecordCycle([.. path, edge], context.SeenCanonicalKeys, context.Findings);
                 continue;
             }
 
@@ -90,7 +98,7 @@ public static class TriggerRecursionCycleScanner
 
             visited.Add(edge.ToTableQualifiedName);
             path.Add(edge);
-            FindCycles(startTable, edge.ToTableQualifiedName, graph, path, visited, seenCanonicalKeys, findings, depth + 1);
+            FindCycles(context, edge.ToTableQualifiedName, path, visited, depth + 1);
             path.RemoveAt(path.Count - 1);
             visited.Remove(edge.ToTableQualifiedName);
         }

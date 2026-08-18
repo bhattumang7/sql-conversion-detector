@@ -125,28 +125,6 @@ public static class ScalarUdfInlineabilityScanner
             base.ExplicitVisit(node);
         }
 
-        private static bool ReferencesVariable(ScalarExpression expression, string variableName)
-        {
-            var finder = new VariableReferenceFinder(variableName);
-            expression.Accept(finder);
-            return finder.Found;
-        }
-
-        private sealed class VariableReferenceFinder(string variableName) : TSqlFragmentVisitor
-        {
-            public bool Found { get; private set; }
-
-            public override void ExplicitVisit(VariableReference node)
-            {
-                if (string.Equals(node.Name, variableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    Found = true;
-                }
-
-                base.ExplicitVisit(node);
-            }
-        }
-
         public override void ExplicitVisit(FunctionCall node)
         {
             if (node.CallTarget is MultiPartIdentifierCallTarget)
@@ -178,6 +156,28 @@ public static class ScalarUdfInlineabilityScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private static bool ReferencesVariable(ScalarExpression expression, string variableName)
+        {
+            var finder = new VariableReferenceFinder(variableName);
+            expression.Accept(finder);
+            return finder.Found;
+        }
+
+        private sealed class VariableReferenceFinder(string variableName) : TSqlFragmentVisitor
+        {
+            public bool Found { get; private set; }
+
+            public override void ExplicitVisit(VariableReference node)
+            {
+                if (string.Equals(node.Name, variableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    Found = true;
+                }
+
+                base.ExplicitVisit(node);
+            }
         }
 
         private void Report(string reason) => Blocker ??= reason;
