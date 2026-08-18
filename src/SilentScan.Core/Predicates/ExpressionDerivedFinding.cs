@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using SilentScan.Core.Lineage;
 
 namespace SilentScan.Core.Predicates;
@@ -42,9 +43,9 @@ namespace SilentScan.Core.Predicates;
 /// </param>
 public sealed record ExpressionDerivedFinding(
     string ColumnName,
-    string SourcePath,
-    int Line,
-    int ColumnPosition,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int ColumnPosition,
     IReadOnlyList<TransformationSite> TransformationChain,
     IReadOnlyList<UnderlyingBaseColumn> UnderlyingBaseColumns,
     SourceSpan? DynamicSqlCallSite = null,
@@ -53,6 +54,7 @@ public sealed record ExpressionDerivedFinding(
     string? ImmediateRelationAlias = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ExpressionDerivedFinding>
 {
+    public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<ExpressionDerivedFinding>.PositionColumn => ColumnPosition;
 
     ExpressionDerivedFinding IRelocatableFinding<ExpressionDerivedFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>

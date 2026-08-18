@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
+using System.Text.Json.Serialization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -14,12 +15,13 @@ public sealed record WriteLossFinding(
     WriteLossKind Kind,
     SqlType TargetType,
     SqlType SourceType,
-    string SourcePath,
-    int Line,
-    int ColumnPosition,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<WriteLossFinding>
 {
+    public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<WriteLossFinding>.PositionColumn => ColumnPosition;
 
     WriteLossFinding IRelocatableFinding<WriteLossFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -61,6 +63,10 @@ public sealed record StaleSelectStarViewFinding(
     string BaseTableQualifiedName,
     IReadOnlyList<string> ViewCompiledColumns,
     IReadOnlyList<string> BaseTableCurrentColumns,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

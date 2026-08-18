@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -69,6 +71,10 @@ public sealed record TemporalTableHistoryIndexGapFinding(
     string HistoryTableQualifiedName,
     string? CurrentIndexName,
     IReadOnlyList<string> KeyColumns,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

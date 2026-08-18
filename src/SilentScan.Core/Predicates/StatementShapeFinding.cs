@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum StatementShapeFindingKind
@@ -60,8 +62,12 @@ public enum StatementShapeFindingKind
 public sealed record StatementShapeFinding(
     StatementShapeFindingKind Kind,
     string ModuleQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     string DetailText,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    FindingConfidence Confidence = FindingConfidence.Medium)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

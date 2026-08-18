@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum DeadCodeFindingKind
@@ -75,8 +77,12 @@ public enum DeadCodeFindingKind
 public sealed record DeadCodeFinding(
     DeadCodeFindingKind Kind,
     string ModuleQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     string? DetailText = null,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    FindingConfidence Confidence = FindingConfidence.Medium)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

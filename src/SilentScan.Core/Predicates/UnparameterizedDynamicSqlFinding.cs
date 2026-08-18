@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum UnparameterizedDynamicSqlFindingKind
@@ -41,8 +43,12 @@ public enum UnparameterizedDynamicSqlFindingKind
 /// the assembling script's own <see cref="DynamicSqlScript.Confidence"/> at the moment this fires.
 /// </summary>
 public sealed record UnparameterizedDynamicSqlFinding(
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     UnparameterizedDynamicSqlFindingKind Kind,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

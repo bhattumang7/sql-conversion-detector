@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum ViewOrderingFindingKind
@@ -52,7 +54,11 @@ public enum ViewOrderingFindingKind
 public sealed record ViewOrderingFinding(
     ViewOrderingFindingKind Kind,
     string ObjectQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

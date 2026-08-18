@@ -1,5 +1,6 @@
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Rules;
+using System.Text.Json.Serialization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -32,15 +33,16 @@ public sealed record TypedPredicateFinding(
     PredicateOperand.Column Column,
     PredicateOperand OtherOperand,
     string Operator,
-    string SourcePath,
-    int Line,
-    int ColumnPosition,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null,
     string? UnknownReason = null,
     string? PredicateFragmentText = null,
     string? Fingerprint = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TypedPredicateFinding>
 {
+    public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<TypedPredicateFinding>.PositionColumn => ColumnPosition;
 
     TypedPredicateFinding IRelocatableFinding<TypedPredicateFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>

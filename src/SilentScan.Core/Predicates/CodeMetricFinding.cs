@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum CodeMetricFindingKind
@@ -45,10 +47,14 @@ public enum CodeMetricFindingKind
 public sealed record CodeMetricFinding(
     CodeMetricFindingKind Kind,
     string ModuleQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     int MeasuredValue,
     int Threshold,
     string? DetailText = null,
-    FindingConfidence Confidence = FindingConfidence.Low);
+    FindingConfidence Confidence = FindingConfidence.Low)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -176,8 +178,12 @@ public enum TriggerCorrectnessFindingKind
 public sealed record TriggerCorrectnessFinding(
     TriggerCorrectnessFindingKind Kind,
     string TriggerQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     string DetailText,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    FindingConfidence Confidence = FindingConfidence.Medium)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum IndexDesignFindingKind
@@ -467,6 +469,10 @@ public sealed record IndexDesignFinding(
     string TableQualifiedName,
     string? IndexName,
     string DetailText,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

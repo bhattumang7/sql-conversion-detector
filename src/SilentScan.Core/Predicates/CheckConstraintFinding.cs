@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum CheckConstraintFindingKind
@@ -95,6 +97,10 @@ public sealed record CheckConstraintFinding(
     string ConstraintName,
     string TableQualifiedName,
     string ColumnName,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

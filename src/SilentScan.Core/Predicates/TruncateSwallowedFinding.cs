@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -27,7 +29,11 @@ namespace SilentScan.Core.Predicates;
 /// <see cref="CatchAllPredicateFinding"/> already use.
 /// </summary>
 public sealed record TruncateSwallowedFinding(
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

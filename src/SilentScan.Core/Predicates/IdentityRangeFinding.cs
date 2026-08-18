@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum IdentityRangeFindingKind
@@ -76,6 +78,10 @@ public sealed record IdentityRangeFinding(
     string TableQualifiedName,
     string ColumnName,
     string DetailText,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

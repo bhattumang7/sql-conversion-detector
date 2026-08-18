@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum SetOptionFindingKind
@@ -48,10 +50,14 @@ public enum SetOptionFindingKind
 public sealed record SetOptionFinding(
     SetOptionFindingKind Kind,
     string ModuleQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     string? TouchedObjectQualifiedName = null,
     string? TouchedIndexName = null,
     bool TouchedIsIndexedView = false,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

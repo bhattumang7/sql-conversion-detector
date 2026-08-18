@@ -387,5 +387,8 @@ public sealed record ScanReport(
     /// (RTM-CU23) build (a forced full-optimization, cost-based plan parallelized identically with
     /// RLS enabled and disabled) and is deliberately dropped from the shipped finding rather than
     /// asserted unverified.
-    public const int CurrentSchemaVersion = 59;
+    /// Bumped 60: every finding type's flat SourcePath/Line/Column(orColumnPosition) fields are no
+    /// longer serialized directly - each now carries one Location field (a SourceSpan: SourcePath/
+    /// Line/Column) instead. A real breaking change to the JSON output shape, not additive.
+    public const int CurrentSchemaVersion = 60;
 }

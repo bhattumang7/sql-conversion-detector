@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -40,10 +42,13 @@ public sealed record TempTableExecShapeFinding(
     string? DescribedColumnTypeDisplay,
     WriteLossKind? WriteLoss,
     string? CallerScopeQualifiedName,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
 
 /// <summary>
 /// One <c>INSERT INTO #temp EXEC proc</c> site this pass could not resolve to a verdict, plus

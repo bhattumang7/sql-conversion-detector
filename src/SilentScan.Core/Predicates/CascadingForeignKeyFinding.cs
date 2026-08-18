@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using SilentScan.Core.Catalog;
 
 namespace SilentScan.Core.Predicates;
@@ -25,6 +26,10 @@ public sealed record CascadingForeignKeyFinding(
     string ReferencedTableQualifiedName,
     ReferentialAction DeleteAction,
     ReferentialAction UpdateAction,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

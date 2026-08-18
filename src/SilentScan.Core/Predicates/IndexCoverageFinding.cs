@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 public enum IndexCoverageFindingKind
@@ -72,7 +74,11 @@ public sealed record IndexCoverageFinding(
     IReadOnlyList<string> IndexKeyColumns,
     IReadOnlyList<string> IndexIncludedColumns,
     IReadOnlyList<string> UncoveredColumns,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

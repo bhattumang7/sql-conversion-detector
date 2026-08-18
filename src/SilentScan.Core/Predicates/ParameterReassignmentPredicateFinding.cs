@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -31,7 +33,11 @@ public sealed record ParameterReassignmentPredicateFinding(
     string Operator,
     int ReassignmentLine,
     int ReassignmentColumn,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.Low);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.Low)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

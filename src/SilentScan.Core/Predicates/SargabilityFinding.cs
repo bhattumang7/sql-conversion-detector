@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <param name="Kind">Which syntactic non-sargable pattern fired.</param>
@@ -41,15 +43,16 @@ public sealed record SargabilityFinding(
     SargabilityFindingKind Kind,
     string ColumnName,
     string? Detail,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     SourceSpan? DynamicSqlCallSite = null,
     string? TableQualifiedName = null,
     bool? Indexed = null,
     string? PredicateFragmentText = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<SargabilityFinding>
 {
+    public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<SargabilityFinding>.PositionColumn => Column;
 
     SargabilityFinding IRelocatableFinding<SargabilityFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>

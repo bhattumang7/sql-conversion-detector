@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -20,7 +22,11 @@ public sealed record TemporalBoundaryPrecisionFinding(
     int ColumnScale,
     int BoundaryLiteralFractionalDigits,
     string BoundaryLiteralText,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

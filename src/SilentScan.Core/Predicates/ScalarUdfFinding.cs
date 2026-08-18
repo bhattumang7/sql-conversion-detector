@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
+using System.Text.Json.Serialization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -48,9 +49,9 @@ public sealed record ScalarUdfFinding(
     bool? ClrDataAccess,
     ScalarUdfContext Context,
     SchemaDependencyKind? SchemaDependencyKind,
-    string SourcePath,
-    int Line,
-    int Column,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     int Depth = 0,
     string? OriginSourcePath = null,
     int OriginLine = 0,
@@ -58,6 +59,7 @@ public sealed record ScalarUdfFinding(
     SourceSpan? DynamicSqlCallSite = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ScalarUdfFinding>
 {
+    public SourceSpan Location => new(SourcePath, Line, Column);
     int IRelocatableFinding<ScalarUdfFinding>.PositionColumn => Column;
 
     ScalarUdfFinding IRelocatableFinding<ScalarUdfFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>

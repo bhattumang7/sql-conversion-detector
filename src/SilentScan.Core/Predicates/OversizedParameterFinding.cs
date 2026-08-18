@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -24,7 +26,11 @@ public sealed record OversizedParameterFinding(
     string ColumnName,
     int ColumnLength,
     int OtherOperandLength,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.Low);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.Low)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

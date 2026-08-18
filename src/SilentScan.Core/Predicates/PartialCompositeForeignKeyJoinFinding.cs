@@ -1,7 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>One column pair of a composite foreign key, in the same Parent/Referenced naming <see cref="Catalog.ForeignKeyRelationship"/> already uses (Parent = the table that DEFINES the FK columns, Referenced = the table those columns point at).</summary>
 public sealed record ForeignKeyColumnPair(string ParentColumnName, string ReferencedColumnName);
+
 
 /// <summary>
 /// A JOIN's ON clause (or, for a legacy comma join, its WHERE-clause join condition) equates
@@ -31,7 +34,10 @@ public sealed record PartialCompositeForeignKeyJoinFinding(
     IReadOnlyList<ForeignKeyColumnPair> AllColumnPairs,
     IReadOnlyList<ForeignKeyColumnPair> MatchedColumnPairs,
     IReadOnlyList<ForeignKeyColumnPair> MissingColumnPairs,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.Medium)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}

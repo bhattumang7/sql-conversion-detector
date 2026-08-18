@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -20,12 +22,13 @@ public sealed record CollationConflictFinding(
     string SecondColumnName,
     string SecondCollationName,
     string Operator,
-    string SourcePath,
-    int Line,
-    int ColumnPosition,
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null,
     FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<CollationConflictFinding>
 {
+    public SourceSpan Location => new(SourcePath, Line, ColumnPosition);
     int IRelocatableFinding<CollationConflictFinding>.PositionColumn => ColumnPosition;
 
     CollationConflictFinding IRelocatableFinding<CollationConflictFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>

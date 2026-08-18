@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -24,6 +26,10 @@ public sealed record ColumnCollationDriftFinding(
     string ColumnCollationName,
     string BaselineCollationName,
     bool IsTempObject,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.Medium)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+

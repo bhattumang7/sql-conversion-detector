@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>One <c>INDEX(...)</c> table-hint claim (docs/detection-checklist.md "Hint and index-shape catalog checks": "Hint validity against the catalog").</summary>
@@ -55,7 +57,11 @@ public sealed record IndexHintFinding(
     string TableQualifiedName,
     string HintedIndexName,
     string? LeadingColumnName,
-    string SourcePath,
-    int Line,
-    int Column,
-    FindingConfidence Confidence = FindingConfidence.High);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
+    FindingConfidence Confidence = FindingConfidence.High)
+{
+    public SourceSpan Location => new(SourcePath, Line, Column);
+}
+

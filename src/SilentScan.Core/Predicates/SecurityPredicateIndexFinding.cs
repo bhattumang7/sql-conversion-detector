@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
@@ -83,6 +85,10 @@ public sealed record SecurityPredicateIndexFinding(
     string TableQualifiedName,
     string PredicateFunctionQualifiedName,
     IReadOnlyList<string> FilteredColumns,
-    string SourcePath,
-    int Line,
-    FindingConfidence Confidence = FindingConfidence.Medium);
+    [property: JsonIgnore] string SourcePath,
+    [property: JsonIgnore] int Line,
+    FindingConfidence Confidence = FindingConfidence.Medium)
+{
+    public SourceSpan Location => new(SourcePath, Line, 1);
+}
+
