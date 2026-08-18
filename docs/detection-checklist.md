@@ -25,13 +25,6 @@ Competitor tools are referred to generically; real identities are in
       catalog surface (`sys.partition_schemes`, `sys.indexes.data_space_id`,
       `sys.partition_functions`).
 
-### Tooling
-
-- [ ] **Machine-readable rule catalog.** *In progress.* `RuleCatalog` becomes
-      the single source for each rule's id, severity, rationale, fix-guidance
-      and example; `docs/rules.html` and SARIF's `rules` block both generate
-      from it.
-
 ### Engineering debt
 
 Do these when the touched code is being worked on anyway.

@@ -5,6 +5,7 @@ var rootCommand = new RootCommand("silentscan — static analyzer for SQL Server
 {
     ScanCorpusLiveCommand.Create(),
     ScanDbCommand.Create(),
+    RulesDocCommand.Create(),
 };
 
 return await rootCommand.Parse(args).InvokeAsync();
