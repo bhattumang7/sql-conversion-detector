@@ -6673,10 +6673,19 @@ Appendix 7 §7.4.
 Folded in from the wider-product-landscape read — cross-cutting reporting/UX
 ideas, not rule candidates, so they don't belong in a detection tier.
 
-- [ ] **Confidence tiers as a first-class output axis** — one surveyed tool
-      gates findings Proven/Contextual/Advisory with a CI-safe default. Maps
-      onto our `Verdict` + `Unknown` split and the "static-only findings go in
-      an appendix" rule; would make the SARIF export a safer CI gate.
+- [x] **Confidence tiers as a first-class output axis** — shipped 2026-08-19.
+      Every SARIF result already computed a severity `level` through
+      per-finding-kind logic (verdict, indexed status, confidence flooring),
+      all funneling through one `BuildResult` chokepoint - named that same
+      computation `Proven`/`Contextual`/`Advisory` (the surveyed tool's own
+      vocabulary) and exposed it in each result's `properties` bag
+      (`SarifResultProperties`), derived directly from the already-computed
+      `level` so it can never drift from it. A CI consumer can now gate on
+      stable, tool-defined semantics (`properties.tier == "Proven"`) instead
+      of `level` alone, whose blocking meaning every CI platform configures
+      differently. Scoped to the SARIF export only, per CLAUDE.md's own
+      framing of this idea ("would make the SARIF export a safer CI gate") -
+      the JSON/readable reports are untouched, so no schema-version bump.
 - [ ] **Source-context classification** (migration/deployment script vs
       hot-path module) used to filter before reporting — a one-off deployment
       script legitimately does things a proc must not.
