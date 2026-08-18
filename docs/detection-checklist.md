@@ -6675,10 +6675,18 @@ ideas, not rule candidates, so they don't belong in a detection tier.
       SARIF `rules` block — keeps documentation and code from drifting apart.
 
 ## Engineering debt (not detections)
-Codebase-structure work, not rule candidates. Assessed 2026-08-16; do the
-pieces opportunistically, ideally next time the touched code is worked on
-anyway — the existing fire/near-miss/oracle fixtures are the safety net that
-makes each move verifiable.
+Codebase-structure work, not rule candidates. Assessed 2026-08-16;
+re-measured 2026-08-18 after the Tier-4/sweep expansion (Core grew 22k → 46k
+lines, ~12 → 64 scanners): the scope-harness duplication did NOT spread (new
+scanners are mostly syntax/catalog-only), but the `Flatten` table-reference
+walker is now copy-pasted in 15 scanners (was 2) and `DynamicSqlPipeline`'s
+per-type remap methods grew 14 → 20 — those two items moved to the front of
+the priority order. A `SourceSpan` record now exists
+(`DynamicSqlScript.cs`) but is only used for dynamic-SQL call sites; extend
+it rather than inventing a second one. Do the pieces opportunistically,
+ideally next time the touched code is worked on anyway — the existing
+fire/near-miss/oracle fixtures are the safety net that makes each move
+verifiable.
 
 - [ ] **Separate rule decisions from ScriptDom traversal mechanics.** The
       verdict layer is already clean (`VerdictClassifier`, `TypePairMatrix`,
@@ -6714,12 +6722,38 @@ makes each move verifiable.
         nested depth/origin emission in `TvfFenceScanner`/`ScalarUdfScanner`;
         the natural place for `Confidence` to become a real rule output
         (today it's a record default no scanner sets from evidence).
-  - [ ] **`IRelocatableFinding`** — normalize the position field name across
-        finding records (`Column` vs `ColumnPosition` is the blocker), then
-        collapse `DynamicSqlPipeline`'s fourteen near-identical remap methods
-        into one generic.
-  - [ ] Shared `TableReferenceFlattener` and generic `CollectorVisitor<T>`
-        (both copy-pasted per scanner today).
+  - [x] **`IRelocatableFinding`** — shipped 2026-08-18. Rather than renaming
+        `ColumnPosition`/`Column` across seven finding records (blocked on a
+        real collision: `TypedPredicateFinding.Column` is the operand, not a
+        position - renaming risked a much bigger, riskier change),
+        `IRelocatableFinding<TSelf>` exposes a name-agnostic `PositionColumn`
+        + `Relocated(...)`, implemented once per record via an explicit
+        interface member that resolves the naming difference locally.
+        `DynamicSqlPipeline`'s 20 remap methods collapsed to 2 generic ones;
+        each future relocatable finding type now needs one small per-record
+        adapter instead of a new method pair.
+  - [x] **`PredicateTreeWalker`** — shipped 2026-08-18. Consolidated the two
+        byte-identical (or functionally identical) recursions duplicated
+        across `PartialCompositeForeignKeyJoinScanner`, `IndexCoverageScanner`,
+        `CompositeIndexLeadingColumnScanner`, `IndexHintScanner`,
+        `NonUniqueUpdateSourceScanner`, `QueryAntiPatternScanner`, and
+        `NotInNullableSubqueryScanner` (`FlattenJoinNodes`, `FlattenAnd`) into
+        one shared class. Narrower than the full "Flatten" family named
+        below: the remaining `Flatten` variants (`FlattenTableReferences`/
+        the UDF/TVF leaf walkers, `FlattenNamedTables`, `FlattenOr`,
+        `FlattenJoins`, `FlattenUnqualifiedJoins`, `FlattenLeaves`) have
+        divergent signatures (extra bool flags, different target node types)
+        and still need their own design pass — left open below as
+        `CollectorVisitor<T>`.
+  - [ ] Generic `CollectorVisitor<T>` and a shared leaf-table-reference
+        walker for the remaining `Flatten` family (`ScalarUdfScanner`'s and
+        `TvfFenceScanner`'s own `Flatten`, `AggregateDivisionColumnstoreScanner`'s
+        `FlattenTableReferences`, `StringConcatNullScanner`'s/`IndexHintScanner`'s/
+        `CartesianJoinScanner`'s `FlattenNamedTables`, `FloatEqualityPredicateScanner`'s
+        `FlattenJoins`) — each has a genuinely different shape (extra
+        parameters, different leaf node types), so this needs a real design
+        pass rather than a mechanical extraction like `PredicateTreeWalker`
+        above.
   - Deliberately NOT in scope: a generic self-registering rule engine
     (scanners genuinely differ in traversal shape — region stacks, polarity
     tracking, claim sets — and one framework would re-tangle them on a
