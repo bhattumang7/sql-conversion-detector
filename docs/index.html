@@ -278,10 +278,12 @@
   <span class="eyebrow">Static analysis <span class="dot">·</span> SQL Server / T-SQL</span>
   <h1>Finds the bugs that only<br>show up in the query plan.</h1>
   <p class="tagline">
-    SilentScan reads T-SQL and schema — no running database required for the
-    checks that don't need one — resolves lineage through views and
-    table-valued functions down to the base column, and confirms every plan
-    claim against a real plan, never a guess from plan shape.
+    SilentScan connects to a real SQL Server database — a disposable dev
+    copy, never assumed to be production — and reads its catalog straight
+    from engine metadata instead of guessing from parsed DDL text. It
+    resolves lineage through views and table-valued functions down to the
+    base column, and confirms every plan claim against a real plan, never
+    a guess from plan shape.
   </p>
 
   <div class="plandiff" aria-label="Example: direction-aware implicit conversion">
