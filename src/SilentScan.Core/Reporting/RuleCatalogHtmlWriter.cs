@@ -29,7 +29,9 @@ public static class RuleCatalogHtmlWriter
             <title>SilentScan Rules</title>
             <style>
             """);
-        sb.Append(RuleDocStyle.Css).Append("\n</style>\n</head>\n<body>\n<main>\n  <h1>SilentScan rules</h1>\n");
+        sb.Append(RuleDocStyle.Css).Append("\n</style>\n</head>\n<body>\n<main>\n");
+        sb.Append("  <a class=\"back-link\" href=\"index.html\">&larr; SilentScan</a>\n");
+        sb.Append("  <h1>SilentScan rules</h1>\n");
 
         sb.Append("  <p class=\"tagline\">")
           .Append(rules.Count)
