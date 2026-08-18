@@ -34,6 +34,9 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, IReadOnlyList<string>> _viewCompiledColumnsByQualifiedName =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Dictionary<string, bool> _moduleUsesQuotedIdentifierByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -206,6 +209,27 @@ public sealed class DatabaseCatalog
         _indexedViewIndexesByQualifiedName[qualifiedName] = indexes;
 
     public bool IsIndexedView(string qualifiedName) => _indexedViewIndexesByQualifiedName.ContainsKey(qualifiedName);
+
+    /// <summary>
+    /// A view's own <c>sys.columns</c> row set, in column-ordinal order, keyed by the view's
+    /// qualified name (docs/detection-checklist.md "Second full-archive practitioner sweep" §G:
+    /// "View defined with SELECT * whose compiled column list has gone stale against the base
+    /// table's current shape"). This is the engine's real, currently-cached column list for the
+    /// view object - frozen at <c>CREATE</c>/<c>ALTER</c>/<c>sp_refreshview</c> time, exactly the
+    /// same freezing <see cref="Predicates.SelectStarViewFinding"/> already documents - not a
+    /// re-derivation of what the view's <c>SELECT *</c> text would expand to today. Populated
+    /// ONLY by <c>LiveCatalogReader</c> (same live-only reasoning as the indexed-view
+    /// registrations just above): a file-mode reparse of <c>CREATE VIEW ... SELECT *</c> would
+    /// always expand against whatever base-table shape the SAME parse pass just inferred, so
+    /// staleness is structurally impossible to observe from file text alone - this concept only
+    /// exists once there is a real engine-compiled snapshot to compare against a real engine-
+    /// current base table shape. Always empty for a file-mode scan.
+    /// </summary>
+    public void AddViewCompiledColumns(string qualifiedName, IReadOnlyList<string> columnNames) =>
+        _viewCompiledColumnsByQualifiedName[qualifiedName] = columnNames;
+
+    public bool TryGetViewCompiledColumns(string qualifiedName, out IReadOnlyList<string> columnNames) =>
+        _viewCompiledColumnsByQualifiedName.TryGetValue(qualifiedName, out columnNames!);
 
     /// <summary>
     /// A module's own <c>sys.sql_modules.uses_quoted_identifier</c> flag, baked in wholesale at

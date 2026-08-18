@@ -135,6 +135,9 @@ public static class ReadableScanReportWriter
         blocks.AddRange(CrossModuleLockOrder(report, headingLevel, pathBase));
         blocks.AddRange(TriggerRecursionCycle(report, headingLevel, pathBase));
         blocks.AddRange(CheckConstraint(report, headingLevel, pathBase));
+        blocks.AddRange(DefaultNullableConstraint(report, headingLevel, pathBase));
+        blocks.AddRange(TryCastComputedColumnPredicate(report, headingLevel, pathBase));
+        blocks.AddRange(StaleSelectStarView(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -210,6 +213,9 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Cross-module lock ordering", report.CrossModuleLockOrderFindings.Count);
         AddCount(counts, "Multi-hop trigger recursion cycles", report.TriggerRecursionCycleFindings.Count);
         AddCount(counts, "CHECK constraint text correctness (NULL handling, IDENTITY-column placement)", report.CheckConstraintFindings.Count);
+        AddCount(counts, "DEFAULT constraint on a still-nullable column", report.DefaultNullableConstraintFindings.Count);
+        AddCount(counts, "TRY_CAST computed column referenced in a predicate", report.TryCastComputedColumnPredicateFindings.Count);
+        AddCount(counts, "SELECT * view stale against base table's current shape", report.StaleSelectStarViewFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1357,6 +1363,74 @@ public static class ReadableScanReportWriter
                 f.TableQualifiedName,
                 f.ColumnName,
                 f.Kind == CheckConstraintFindingKind.NullNotHandled ? "NULL not handled" : "on IDENTITY column",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> DefaultNullableConstraint(ScanReport report, int level, string? pathBase)
+    {
+        if (report.DefaultNullableConstraintFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"DEFAULT constraint on a still-nullable column ({report.DefaultNullableConstraintFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A column carries a DEFAULT constraint but is still nullable. A DEFAULT only ever applies when the column is OMITTED from an INSERT's own column list; any caller that supplies NULL explicitly (a common ORM-generated full-column INSERT shape) bypasses the default entirely, silently, with no error.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Column", "Default"],
+            [.. report.DefaultNullableConstraintFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
+                f.DefaultDefinitionText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TryCastComputedColumnPredicate(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TryCastComputedColumnPredicateFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"TRY_CAST computed column referenced in a predicate ({report.TryCastComputedColumnPredicateFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A non-persisted computed column built on TRY_CAST is referenced inside a real filter-context predicate (WHERE/JOIN ON/HAVING) elsewhere in the corpus. TRY_CAST is session-DATEFORMAT-dependent and therefore classified non-deterministic by the engine, so this column can never be PERSISTED or indexed at all - the predicate can never seek through it no matter what index exists elsewhere on the table.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Column", "Definition", "Definition site"],
+            [.. report.TryCastComputedColumnPredicateFindings.Select(f => new List<string>
+            {
+                Where(f.PredicateSourcePath, f.PredicateLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
+                f.DefinitionText,
+                Where(f.DefinitionSourcePath, f.DefinitionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> StaleSelectStarView(ScanReport report, int level, string? pathBase)
+    {
+        if (report.StaleSelectStarViewFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"SELECT * view stale against base table's current shape ({report.StaleSelectStarViewFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A view's own outermost SELECT * over a single base table has a compiled column list (frozen at CREATE/ALTER/sp_refreshview time) that no longer matches that base table's current column list - a later ALTER TABLE ADD/DROP COLUMN never propagates to the view. If a drop and a later add shifted column identity, the view may be silently surfacing real data under a stale, wrong column label, not merely missing/adding a column.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "View", "Base table", "View's columns", "Table's current columns"],
+            [.. report.StaleSelectStarViewFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ViewQualifiedName,
+                f.BaseTableQualifiedName,
+                string.Join(", ", f.ViewCompiledColumns),
+                string.Join(", ", f.BaseTableCurrentColumns),
             })]);
     }
 

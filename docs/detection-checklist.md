@@ -4733,15 +4733,61 @@ is carried into this file - only the mechanism and the design implication.
       TypeID = 1)` gates a full checksum recompute with no comparison
       anywhere against `inserted.Blob`/`deleted.Blob`, so re-saving the
       identical `Blob` value still re-triggers the recompute every time.
-- [ ] **`TRY_CAST` in a non-persisted computed column used in a predicate** —
-      `TRY_CAST` is session-`DATEFORMAT`-dependent and therefore
-      non-deterministic, so a computed column built on it can never be
-      `PERSISTED` or indexed (the engine enforces this at DDL time); a query
-      filtering on that computed column can never seek it no matter what
-      index exists elsewhere, and the fix (`TRY_CONVERT` with an explicit
-      style code, which IS deterministic) is a mechanical, safe rewrite.
-      Schema+AST decidable: computed-column definition text uses `TRY_CAST`,
-      the column is referenced in a predicate somewhere in the corpus.
+- [x] **`TRY_CAST` in a non-persisted computed column used in a predicate —
+      shipped** as `TryCastComputedColumnPredicateFinding`/
+      `TryCastComputedColumnPredicateScanner`. Oracle-confirmed directly
+      (Docker instance, disposable scratch database, dropped immediately
+      after), three separate facts: (1) `TRY_CAST('03/04/2024' AS DATE)`
+      genuinely returned 2024-03-04 under `SET DATEFORMAT mdy` and
+      2024-04-03 under `SET DATEFORMAT dmy` - the identical call, two
+      different results, purely from session state; (2) `ALTER TABLE ... ADD
+      ParsedDate AS TRY_CAST(RawDate AS DATE) PERSISTED` failed at DDL time
+      with "Computed column 'ParsedDate' in table '...' cannot be persisted
+      because the column is non-deterministic"; (3) even the NON-persisted
+      form rejected an ordinary `CREATE INDEX` directly against it: "Column
+      '...' cannot be used in an index or statistics or as a partition key
+      because it is non-deterministic." **Scope correction from the original
+      draft**: the real, actionable claim is "can never be indexed at all",
+      PERSISTED or not, not merely "can never be PERSISTED" - fact (3) is
+      strictly wider than what the original bullet assumed. Schema+AST
+      decidable: the computed column's own definition text (`sys.computed_
+      columns.definition` live, the column definition's own AST text in
+      file mode - both populated by the existing `SchemaExpressionReference`/
+      `SchemaExpressionCollector` pipeline, no new catalog read needed) uses
+      `TRY_CAST` (word-boundary regex, case-insensitive), the column's own
+      `CatalogColumn.IsPersisted` is false (defensive re-check, not a scope
+      narrowing - the oracle already proves it can never be true), AND that
+      column is referenced anywhere inside a genuine filter context (WHERE/
+      JOIN ON/HAVING) at a real query site elsewhere in the corpus. Fixed a
+      real, pre-existing, orthogonal file-mode gap while building this:
+      `ExpressionTypeInferencer` had no case for ScriptDom's `TryCastCall`/
+      `TryConvertCall` node types at all (confirmed via direct reflection
+      probe: `TRY_CAST` parses to a distinct node type from `CastCall`, not
+      the same node with a flag) - every TRY_CAST/TRY_CONVERT-typed computed
+      column resolved Unknown (`FromScopeResolver`'s own "column has an
+      unresolved declared type" guard) in file mode, which would have
+      silently suppressed every file-mode finding this stream could ever
+      produce. Fixed by adding both cases to `ExpressionTypeInferencer`
+      (same declared-type resolution `CastCall`/`ConvertCall` already use -
+      TRY_CAST's declared result type is identical to CAST's, only the
+      failure behavior differs, which is orthogonal to this fix). Live mode
+      needed no such fix (`sys.columns` already reports the engine's own
+      resolved type for a computed column directly, no expression
+      re-derivation). Deliberately base-table-only for v1 (mirrors
+      `CatchAllPredicateScanner`'s own documented scope limit): no CTE/view/
+      temp-table/subquery scoping. `FindingConfidence.High` - the non-
+      determinism mechanism is unconditional, oracle-confirmed engine fact
+      with zero workload dependence. SARIF Warning: a real, provably lost
+      seek, but whether it costs anything in practice still depends on the
+      table's own row count - the same tier the rest of the syntactic
+      sargability family already uses, since this stream does not run a
+      per-finding plan-XML probe. **Real coverage against the local test
+      database: 0 findings** - a real, honest zero, independently cross-
+      checked directly against `sys.computed_columns`: of 46 real computed
+      columns in this database, precisely zero have a definition containing
+      `TRY_CAST` at all (`sys.computed_columns.definition LIKE '%TRY_CAST%'`
+      returns 0 rows) - not a detection gap, this codebase's own real corpus
+      simply doesn't use the pattern this rule targets.
 - [ ] **Row-Level Security predicate function with no supporting index on its
       own filtered columns** — an RLS security predicate runs on every access
       to the secured table and forces single-threaded execution; with no
@@ -4847,15 +4893,45 @@ script-family sweep had. No source citation carried into this file.
 
 ### G. New items from the second sweep
 
-- [ ] **Column carries a `DEFAULT` constraint and is still nullable** — a
-      default only applies when the column is OMITTED from an INSERT's
-      column list; any caller (an ORM's generated full-column INSERT is the
-      common case) that supplies `NULL` explicitly bypasses the default
-      entirely, silently, no error. A developer who added the default
-      believing it guarantees a populated column is wrong the moment any
-      caller passes NULL. Schema-decidable: `CatalogColumn.IsNullable` plus
-      a default definition on the same column is a pure catalog fact, no
-      query text needed at all - the finding fires on the schema alone.
+- [x] **Column carries a `DEFAULT` constraint and is still nullable —
+      shipped** as `DefaultNullableConstraintFinding`/
+      `DefaultNullableConstraintScanner`. Oracle-confirmed directly (Docker
+      instance, disposable scratch database, dropped immediately after): a
+      nullable `Status varchar(20) DEFAULT ('Active')` column genuinely
+      populated `'Active'` for `INSERT ... DEFAULT VALUES` (the column
+      omitted) but genuinely stored a real `NULL`, not the default, for
+      `INSERT ... (Status) VALUES (NULL)` (the column supplied explicitly
+      as NULL) - both against the identical constraint, no error either
+      way. Schema-decidable, no query text needed at all: `CatalogColumn.
+      IsNullable` true on a column that also carries a DEFAULT constraint
+      (`SchemaDependencyKind.DefaultConstraint` in `DatabaseCatalog.
+      SchemaExpressions`) is a pure catalog fact - fires in both file mode
+      (`SchemaExpressionCollector`, real DDL text and line) and live mode
+      (`sys.default_constraints`/`sys.columns.is_nullable`), reusing the
+      same `SchemaExpressionReference` pipeline the already-shipped
+      computed-column/CHECK-constraint schema-dependency streams already
+      populate - no new catalog read needed. `FindingConfidence.High` - the
+      "any caller supplying NULL bypasses the default" mechanism is
+      unconditional, oracle-confirmed engine behavior with zero workload
+      dependence, the same certainty tier `CheckConstraintFindingKind.
+      NullNotHandled` uses for an analogous "reads like it protects against
+      NULL but doesn't" mismatch. SARIF Warning, not Error: unlike a CHECK
+      constraint (whose own stated intent - reject bad data - is defeated),
+      a DEFAULT is an insert-convenience feature, not a data-integrity
+      guarantee the schema claims to enforce; whether this ever bites
+      depends on whether any real caller ever sends an explicit NULL, a
+      real but workload-dependent risk rather than a proven-wrong result
+      today. **Real coverage against the local test database: 78
+      findings.** Independently cross-checked with a hand-rolled catalog
+      query (`sys.default_constraints` joined to `sys.columns`/`sys.tables`,
+      `is_nullable = 1 AND is_ms_shipped = 0`): also 78, an exact match. A
+      first, naive version of that same hand-rolled query (dropping the
+      `sys.tables` join) returned 88 - the 10-row gap is entirely `DEFAULT`
+      constraints declared on table TYPES (`sys.table_types`, TVP shapes,
+      `type_desc = 'TYPE_TABLE'`), confirmed by direct inspection of the
+      10 rows - correctly out of scope by the same "a real column, a real
+      persistent table" reasoning `SchemaExpressionCollector`'s own doc
+      comment already states for computed columns.
 - [ ] **Bare `TOP (n)` with no `ORDER BY` anywhere in the query** — the row
       set returned is not guaranteed deterministic (parallelism/plan choice
       can change which rows come back run to run), so code relying on "the
@@ -4928,16 +5004,62 @@ script-family sweep had. No source citation carried into this file.
       (`sys.configurations`'s own `'nested triggers'` value is 1 on this
       instance) rather than assuming the zero means the gate is off: of 51
       real triggers in this database, none forms a cross-table write cycle.
-- [ ] **View defined with `SELECT *` whose compiled column list has gone
-      stale against the base table's current shape** — a view's column list
-      is frozen at `CREATE`/last `sp_refreshview` time; a later
-      `ALTER TABLE ... ADD/DROP COLUMN` on the base table does not
-      propagate, so the view silently keeps exposing (or omitting) columns
-      that no longer match the base table's real shape. Catalog-decidable:
-      compare the view's own compiled column list against the current base
-      table's `sys.columns` - a genuinely different claim from generic
-      "don't SELECT *" style advice, since this is specifically about
-      metadata drift, not query-time cost.
+- [x] **View defined with `SELECT *` whose compiled column list has gone
+      stale against the base table's current shape — shipped** as
+      `StaleSelectStarViewFinding`/`StaleSelectStarViewScanner`. **Stronger
+      than the original draft's "some columns silently missing/extra"
+      framing - oracle-confirmed to also produce silently WRONG data under
+      an unchanged column NAME.** Directly against the standing Docker
+      instance (disposable scratch database, dropped immediately after):
+      `CREATE TABLE Base(Id, A, B)`, `CREATE VIEW V AS SELECT * FROM Base`
+      (view's own compiled columns: Id, A, B), then `ALTER TABLE Base ADD
+      C` followed by `ALTER TABLE Base DROP COLUMN B` (base table's real
+      current columns: Id, A, C). The view's own `sys.columns` row set -
+      AND `sys.dm_exec_describe_first_result_set`'s live, describe-only
+      answer for `SELECT * FROM V` - both still reported Id, A, B: unlike
+      an ordinary view/inline-TVF column TYPE (where this codebase's
+      existing live-parity gate already trusts the describe-only DMV as
+      ground truth over a possibly-stale `sys.columns` cache), describe-
+      only re-probing does NOT force a re-expansion of a view's own frozen
+      `*` - so for THIS specific claim, the view's own current `sys.
+      columns` row set is itself the correct live-only ground truth, not
+      the DMV. Actually executing `SELECT * FROM V` after both ALTERs
+      (with a real inserted row, `A = 1`, the new column `C = 99`) returned
+      a row labeled `Id, A, B` whose third value was `99` - live data
+      physically occupying the third column slot (now really `C`)
+      surfaced under the view's stale, frozen label `B`. Catalog-decidable:
+      the view's own compiled column list (new live-only registry,
+      `DatabaseCatalog.AddViewCompiledColumns`/`TryGetViewCompiledColumns`,
+      populated by a new `LiveCatalogReader` query joining `sys.columns` to
+      `sys.views`) compared, IN ORDER (not merely as a set - the confirmed
+      drop-then-add phantom-data shape above is a same-COUNT, different-
+      identity drift a naive set-equality check would miss), against the
+      base table's CURRENT `CatalogTable.Columns`. Deliberately scoped to
+      v1, mirroring `SelectStarViewFinding`'s own documented limits: only
+      the view's own outermost query specification's bare/qualified `*`,
+      selecting from exactly ONE real named base table (no join, no
+      derived table, no CTE), is inspected. Live-mode only by construction
+      (both catalog inputs are live-only - file mode's own re-derivation
+      always agrees with itself, so staleness is structurally impossible to
+      observe from parsed text alone). `FindingConfidence.High` - the
+      catalog-level list mismatch is a pure, exact fact once both sides are
+      read, and the freezing/no-re-propagation mechanism is oracle-
+      confirmed, unconditional engine behavior. SARIF Warning, not Error:
+      the mismatch is certain, but this stream does not itself prove a
+      real consuming query relies on the drifted/mislabeled column today -
+      the same tier `SelectStarViewFinding` itself already uses. **Real
+      coverage against the local test database: 0 findings.**
+      Independently cross-checked with a standalone program reusing this
+      same catalog+AST machinery directly (not the shipped scanner's own
+      code path) against the real target: 137 real views exist, of which
+      exactly 7 match the AST shape this rule targets (outermost `SELECT
+      *` over a single named table reference) - 2 of the 7 reference
+      another VIEW, not a real base table (correctly excluded, v1 scope),
+      and the remaining 5 all have a real base table AND a real compiled
+      column-list entry, and all 5 currently match their base table's
+      column list exactly, position for position. A real, honest zero -
+      every `SELECT *`-over-a-single-table view in this corpus happens to
+      be current today, not a detection gap.
 - [x] **Indexes sharing an identical key-column list and sort direction but
       with different, non-overlapping `INCLUDE` sets — shipped** as
       `IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly`, exactly

@@ -118,6 +118,11 @@ public sealed class LiveCatalogReader
             catalog.AddIndexedView(qualifiedName, indexes);
         }
 
+        foreach (var (qualifiedName, columnNames) in await ReadViewCompiledColumnsAsync(connection, cancellationToken))
+        {
+            catalog.AddViewCompiledColumns(qualifiedName, columnNames);
+        }
+
         foreach (var pair in await ReadTemporalTablePairsAsync(connection, cancellationToken))
         {
             catalog.AddTemporalTablePair(pair);
@@ -1092,5 +1097,50 @@ public sealed class LiveCatalogReader
         }
 
         return indexesByView;
+    }
+
+    /// <summary>
+    /// Every user view's own <c>sys.columns</c> row set, in <c>column_id</c> order - the engine's
+    /// real, currently-cached column list for the view object (docs/detection-checklist.md
+    /// "Second full-archive practitioner sweep" §G: "View defined with SELECT * whose compiled
+    /// column list has gone stale against the base table's current shape"). A view has its own
+    /// real <c>sys.columns</c> rows exactly like a table does - this is a separate query from
+    /// <see cref="ReadColumnsAsync"/> (which joins <c>sys.tables</c>, not <c>sys.views</c>) rather
+    /// than folding views into that same read, since a view's columns are never attached to a
+    /// <see cref="CatalogTable"/> in this codebase's model (mirrors <see cref="ReadIndexedViewsAsync"/>'s
+    /// own reasoning for keeping an indexed view's index shape as a side-registry rather than a
+    /// <see cref="CatalogTable"/> row).
+    /// </summary>
+    private static async Task<List<(string QualifiedName, List<string> ColumnNames)>> ReadViewCompiledColumnsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, v.name AS view_name, c.name AS column_name
+            FROM sys.columns c
+            JOIN sys.views v ON v.object_id = c.object_id
+            JOIN sys.schemas s ON s.schema_id = v.schema_id
+            WHERE v.is_ms_shipped = 0
+            ORDER BY s.name, v.name, c.column_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var byView = new Dictionary<string, (string QualifiedName, List<string> ColumnNames)>(StringComparer.OrdinalIgnoreCase);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var qualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var columnName = reader.GetString(2);
+
+            if (!byView.TryGetValue(qualifiedName, out var entry))
+            {
+                entry = (qualifiedName, []);
+                byView[qualifiedName] = entry;
+            }
+
+            entry.ColumnNames.Add(columnName);
+        }
+
+        return [.. byView.Values];
     }
 }

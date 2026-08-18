@@ -63,6 +63,20 @@ public static class ExpressionTypeInferencer
 
         ConvertCall convertCall => SqlTypeReferenceResolver.Resolve(convertCall.DataType, columnCollation: null, typeAliases, unsizedStringOrBinaryDefaultLength: 30),
 
+        // TRY_CAST/TRY_CONVERT are distinct ScriptDom node types (TryCastCall/TryConvertCall),
+        // not CastCall/ConvertCall with a flag - confirmed directly by parsing TRY_CAST(x AS
+        // DATE) and inspecting the resulting fragment's own runtime type. The DECLARED result
+        // type is identical to the non-TRY form either way (TRY_CAST returns either that exact
+        // type or NULL, never a different type) - this is purely a type-inference completeness
+        // fix (docs/detection-checklist.md "Second full-archive practitioner sweep" §G's
+        // TRY_CAST computed-column item needs a real resolved type for the column to ever
+        // resolve through FromScopeResolver as a genuine BaseColumn), not a determinism claim -
+        // TryCastComputedColumnPredicateFinding's own non-determinism/non-indexability claim is
+        // unaffected either way.
+        TryCastCall tryCastCall => SqlTypeReferenceResolver.Resolve(tryCastCall.DataType, columnCollation: null, typeAliases, unsizedStringOrBinaryDefaultLength: 30),
+
+        TryConvertCall tryConvertCall => SqlTypeReferenceResolver.Resolve(tryConvertCall.DataType, columnCollation: null, typeAliases, unsizedStringOrBinaryDefaultLength: 30),
+
         BinaryExpression binary => Combine(
             Resolve(binary.FirstExpression, resolveLeaf, typeAliases),
             Resolve(binary.SecondExpression, resolveLeaf, typeAliases)),

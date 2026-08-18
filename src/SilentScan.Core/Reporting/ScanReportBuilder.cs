@@ -356,6 +356,15 @@ public static class ScanReportBuilder
             checkConstraintStage.Complete($"{checkConstraintFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<DefaultNullableConstraintFinding> defaultNullableConstraintFindings;
+        using (var defaultNullableStage = progress.Begin("scanning nullable DEFAULT constraints"))
+        {
+            defaultNullableConstraintFindings = DefaultNullableConstraintScanner.Scan(catalog);
+            defaultNullableStage.Complete($"{defaultNullableConstraintFindings.Count:N0} findings");
+        }
+
+        var tryCastComputedColumnCandidates = TryCastComputedColumnPredicateScanner.BuildCandidates(catalog);
+
         IReadOnlyList<CascadingForeignKeyFinding> cascadingForeignKeyFindings;
         using (var cascadingFkStage = progress.Begin("scanning cascading FK actions"))
         {
@@ -658,6 +667,28 @@ public static class ScanReportBuilder
             catchAllPredicateFindings = unordered
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
                 .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
+        List<TryCastComputedColumnPredicateFinding> tryCastComputedColumnPredicateFindings;
+        using (var tryCastStage = progress.Begin("scanning TRY_CAST computed columns used in predicates", usableCount))
+        {
+            var unordered = tryCastComputedColumnCandidates.Count == 0
+                ? []
+                : usableParseResults
+                    .AsParallel()
+                    .SelectMany(r =>
+                    {
+                        var findings = TryCastComputedColumnPredicateScanner.Scan(r, catalog, tryCastComputedColumnCandidates);
+                        tryCastStage.Advance();
+                        return findings;
+                    })
+                    .ToList();
+            tryCastComputedColumnPredicateFindings = unordered
+                .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal).ThenBy(f => f.ColumnName, StringComparer.Ordinal)
+                .ThenBy(f => f.PredicateSourcePath, StringComparer.Ordinal).ThenBy(f => f.PredicateLine)
+                .ToList();
+            tryCastStage.Complete($"{tryCastComputedColumnPredicateFindings.Count:N0} findings");
         }
         PhaseMemory.ReleaseBetweenPhases();
 
@@ -1281,6 +1312,8 @@ public static class ScanReportBuilder
         triggerCorrectnessFindings = [.. triggerCorrectnessFindings.Where(f => f.Confidence <= minimumConfidence)];
         crossModuleLockOrderFindings = [.. crossModuleLockOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
         triggerRecursionCycleFindings = [.. triggerRecursionCycleFindings.Where(f => f.Confidence <= minimumConfidence)];
+        defaultNullableConstraintFindings = [.. defaultNullableConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
+        tryCastComputedColumnPredicateFindings = [.. tryCastComputedColumnPredicateFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1331,6 +1364,14 @@ public static class ScanReportBuilder
             crossModuleLockOrderFindings,
             triggerRecursionCycleFindings,
             checkConstraintFindings,
+            defaultNullableConstraintFindings,
+            tryCastComputedColumnPredicateFindings,
+            // StaleSelectStarViewFindings needs a live-only catalog registry (a view's own
+            // compiled sys.columns row set, DatabaseCatalog.TryGetViewCompiledColumns) this
+            // builder never populates - always empty here; LiveScanRunner merges the real result
+            // in afterward, same pattern IndexDesignFindings/IdentityRangeFindings already
+            // established.
+            [],
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

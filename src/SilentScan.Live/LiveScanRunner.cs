@@ -241,6 +241,22 @@ public static class LiveScanRunner
             identityRangeStage.Complete($"{identityRangeFindings.Count:N0} findings");
         }
 
+        // docs/detection-checklist.md "Second full-archive practitioner sweep" §G: "View defined
+        // with SELECT * whose compiled column list has gone stale against the base table's
+        // current shape" - needs the live-only DatabaseCatalog.TryGetViewCompiledColumns registry
+        // (already populated by the LiveCatalogReader read above), merged in the same live-only
+        // shape as IndexDesignFindings/IdentityRangeFindings just above. The view-definition list
+        // itself is re-extracted here rather than threaded through from ScanReportBuilder (which
+        // never exposes its own internal list) - the same "re-derive the one AST fact needed"
+        // shape DmlTargetTableScanner's own call above already uses.
+        using (var staleSelectStarViewStage = progress.Begin("checking SELECT * view staleness against base tables"))
+        {
+            var (views, _) = ViewDefinitionExtractor.Extract(parseResultSource(), catalog.DefaultCollation, catalog.TypeAliases, ledger: null);
+            var staleSelectStarViewFindings = StaleSelectStarViewScanner.Scan(views, catalog).Where(f => f.Confidence <= minimumConfidence).ToList();
+            report = report with { StaleSelectStarViewFindings = staleSelectStarViewFindings };
+            staleSelectStarViewStage.Complete($"{staleSelectStarViewFindings.Count:N0} findings");
+        }
+
         PlanCacheEvidenceResult? planCacheEvidence = null;
         IReadOnlyList<RankedFinding> rankedFindings = [];
         IReadOnlyList<WorkloadFinding> workloadFindings = [];

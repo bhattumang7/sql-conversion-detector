@@ -105,6 +105,9 @@ public static class SarifReportWriter
         results.AddRange(report.CrossModuleLockOrderFindings.Select(ToResult));
         results.AddRange(report.TriggerRecursionCycleFindings.Select(ToResult));
         results.AddRange(report.CheckConstraintFindings.Select(ToResult));
+        results.AddRange(report.DefaultNullableConstraintFindings.Select(ToResult));
+        results.AddRange(report.TryCastComputedColumnPredicateFindings.Select(ToResult));
+        results.AddRange(report.StaleSelectStarViewFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -715,6 +718,38 @@ public static class SarifReportWriter
                 $"'{finding.ConstraintName}' (CHECK on '{finding.TableQualifiedName}.{finding.ColumnName}') references the IDENTITY column '{finding.ColumnName}' directly - every insert whose auto-generated identity value doesn't yet satisfy this predicate fails deterministically (Msg 547), consuming the identity counter on each failed attempt, until the counter catches up and failures silently stop forever.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled CheckConstraintFindingKind."),
         };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(DefaultNullableConstraintFinding finding)
+    {
+        // Warning, not error - see DefaultNullableConstraintFinding's own doc comment: a DEFAULT
+        // is an insert-convenience feature, not a data-integrity guarantee the schema claims to
+        // enforce, unlike CheckConstraintFinding.NullNotHandled.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DefaultNullableConstraintRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' carries a DEFAULT constraint ({finding.DefaultDefinitionText}) but is still nullable - a caller supplying NULL explicitly for this column bypasses the default entirely, silently, with no error.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(TryCastComputedColumnPredicateFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TryCastComputedColumnPredicateRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (a non-persisted computed column defined as '{finding.DefinitionText}', {finding.DefinitionSourcePath}:{finding.DefinitionLine}) is referenced in a predicate here - TRY_CAST makes this column non-deterministic, so it can never be PERSISTED or indexed, and this predicate can never seek through it.";
+
+        return BuildResult(ruleId, level, message, finding.PredicateSourcePath, finding.PredicateLine, finding.PredicateColumn);
+    }
+
+    private static SarifResult ToResult(StaleSelectStarViewFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StaleSelectStarViewRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var viewColumns = string.Join(", ", finding.ViewCompiledColumns);
+        var tableColumns = string.Join(", ", finding.BaseTableCurrentColumns);
+        var message = $"'{finding.ViewQualifiedName}' (SELECT * FROM '{finding.BaseTableQualifiedName}') has a compiled column list [{viewColumns}] that no longer matches '{finding.BaseTableQualifiedName}''s current columns [{tableColumns}] - a later ALTER TABLE ADD/DROP COLUMN never propagated to this view; if a drop and a later add shifted column identity, this view may be silently surfacing real data under a stale, wrong column label, not merely missing/adding a column.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }

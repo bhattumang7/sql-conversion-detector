@@ -73,6 +73,9 @@ public sealed record ScanReport(
     IReadOnlyList<CrossModuleLockOrderFinding> CrossModuleLockOrderFindings,
     IReadOnlyList<TriggerRecursionCycleFinding> TriggerRecursionCycleFindings,
     IReadOnlyList<CheckConstraintFinding> CheckConstraintFindings,
+    IReadOnlyList<DefaultNullableConstraintFinding> DefaultNullableConstraintFindings,
+    IReadOnlyList<TryCastComputedColumnPredicateFinding> TryCastComputedColumnPredicateFindings,
+    IReadOnlyList<StaleSelectStarViewFinding> StaleSelectStarViewFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -341,5 +344,17 @@ public sealed record ScanReport(
     /// constraint accidentally placed on an IDENTITY column") - both oracle-confirmed against the
     /// standing Docker instance, catalog-plus-text-decidable from the newly additive
     /// <see cref="Catalog.CatalogCheckConstraint.DefinitionText"/> field.
-    public const int CurrentSchemaVersion = 56;
+    /// Bumped to 57 for three new streams from docs/detection-checklist.md "Second full-archive
+    /// practitioner sweep" §G: <see cref="DefaultNullableConstraintFindings"/> (a DEFAULT
+    /// constraint on a column that is still nullable - a caller supplying an explicit NULL
+    /// silently bypasses the default, oracle-confirmed, no query text needed at all - runs in both
+    /// file and live mode); <see cref="TryCastComputedColumnPredicateFindings"/> (a non-persisted
+    /// computed column built on TRY_CAST, oracle-confirmed non-deterministic and therefore never
+    /// indexable, referenced in a real filter-context predicate elsewhere in the corpus - also runs
+    /// in both file and live mode); and <see cref="StaleSelectStarViewFindings"/> (a SELECT * view
+    /// over a single base table whose own frozen compiled column list has drifted from that base
+    /// table's current shape - oracle-confirmed to silently surface real data under a stale,
+    /// wrong column label, not merely a missing/extra column - live-mode only, needing the new
+    /// <see cref="Catalog.DatabaseCatalog.TryGetViewCompiledColumns"/> registry).
+    public const int CurrentSchemaVersion = 57;
 }
