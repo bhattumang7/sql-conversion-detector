@@ -710,8 +710,11 @@ what is wrong with them, explains each group once, and gives every finding its
 location, base column, indexed flag and the view/TVF layer that introduced
 the defect. `--format markdown` is the same report as a shareable document,
 `--format json` is the complete versioned findings schema, and `--format sarif`
-emits SARIF for CI gating. `--output <file>` writes the report to a file
-instead of standard output.
+emits SARIF for CI gating — each rule's `helpUri` links straight to its own
+page in the generated rule catalog (`docs/rules.html`, one page per rule
+under `docs/rules/`, regenerated from `RuleCatalog` by `silentscan
+rules-doc`, never hand-edited). `--output <file>` writes the report to a
+file instead of standard output.
 
 ## Corpus study pipeline
 
@@ -839,7 +842,9 @@ pwsh ./sonar-scan.ps1 -Verbose     # same, with full scan/build/test output as i
   check constraints/indexed views and more) and live-mode-only scanners
   (e.g. plan-cache evidence, `sys.dm_exec_describe_first_result_set` probes)
   that need a real connected database rather than parsed DDL.
-* `src/SilentScan.Cli` — `scan-db` / `scan-corpus-live` commands.
+* `src/SilentScan.Cli` — `scan-db` / `scan-corpus-live` / `rules-doc`
+  commands (the last regenerates `docs/rules.html` and `docs/rules/*.html`
+  from `RuleCatalog`).
 * `src/SilentScan.Verify` — Docker-backed oracle: DDL deployment,
   `sys.columns` diffing, and plan-XML confirmation for the original three
   streams (`verify-corpus`, `generate-type-matrix`); `LiveReadOnlyGuard`,

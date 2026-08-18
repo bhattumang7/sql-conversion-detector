@@ -4,129 +4,356 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SilentScan</title>
+<meta name="description" content="A static analyzer for SQL Server / T-SQL that finds the bugs only the query plan reveals — implicit conversions, silent data loss, and lineage-aware sargability — verified against real plan XML.">
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #ffffff;
-    --fg: #1a1a1a;
-    --muted: #5c5c5c;
-    --accent: #0a5cff;
-    --border: #e0e0e0;
-    --code-bg: #f5f5f5;
+    --bg: #eef2f6;
+    --panel: #e2e9f0;
+    --fg: #12202e;
+    --muted: #56687b;
+    --border: #c7d2dc;
+    --code-bg: #dde5ed;
+    --seek: #0f7d92;
+    --seek-bg: #dcf1f3;
+    --scan: #b5501a;
+    --scan-bg: #fbe6d8;
+    --rule: #b9c6d2;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0d1117;
-      --fg: #e6edf3;
-      --muted: #9198a1;
-      --accent: #4993ff;
-      --border: #30363d;
-      --code-bg: #161b22;
+      --bg: #0b1420;
+      --panel: #101d2c;
+      --fg: #dbe6f0;
+      --muted: #7e93a8;
+      --border: #223447;
+      --code-bg: #0e1b28;
+      --seek: #63d4e6;
+      --seek-bg: #0e2b30;
+      --scan: #ef9455;
+      --scan-bg: #35210f;
+      --rule: #1c2c3c;
     }
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    line-height: 1.6;
+    line-height: 1.65;
   }
   main {
-    max-width: 720px;
+    max-width: 780px;
     margin: 0 auto;
     padding: 4rem 1.5rem 6rem;
   }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .eyebrow {
+    display: block;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 1.1rem;
+  }
+  .eyebrow .dot {
+    color: var(--scan);
+  }
   h1 {
-    font-size: 2.2rem;
-    margin-bottom: 0.25rem;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-weight: 600;
+    font-size: 2.5rem;
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    margin: 0 0 1.3rem;
   }
   .tagline {
     color: var(--muted);
-    font-size: 1.1rem;
-    margin-top: 0;
-    margin-bottom: 2.5rem;
+    font-size: 1.08rem;
+    max-width: 46ch;
+    margin: 0 0 2.5rem;
   }
+
+  /* --- signature: plan-diff panel --- */
+  .plandiff {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 1.4rem 1.5rem 1.6rem;
+    margin: 0 0 2.75rem;
+  }
+  .plandiff .stmt {
+    font-size: 0.86rem;
+    color: var(--muted);
+    margin-bottom: 1.1rem;
+  }
+  .plandiff .stmt .col { color: var(--fg); }
+  .plandiff .rows {
+    display: grid;
+    gap: 0.6rem;
+  }
+  .plandiff .row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 0.65rem 0.85rem;
+    background: var(--bg);
+  }
+  .plandiff .row .expr { font-size: 0.85rem; }
+  .plandiff .row .expr .hi { color: var(--scan); }
+  .plandiff .row.ok .expr .hi { color: var(--seek); }
+  .plandiff .verdict {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.28rem 0.6rem;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .row.bad .verdict { color: var(--scan); background: var(--scan-bg); }
+  .row.ok .verdict { color: var(--seek); background: var(--seek-bg); }
+  .plandiff .footnote {
+    margin-top: 1rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 3rem;
+  }
+  .stats div {
+    background: var(--panel);
+    padding: 1rem 0.75rem;
+    text-align: center;
+  }
+  .stats .n {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.5rem;
+    font-weight: 600;
+  }
+  .stats .l {
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+    margin-top: 0.15rem;
+  }
+  @media (max-width: 560px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+
   h2 {
-    font-size: 1.3rem;
-    margin-top: 2.5rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 3rem 0 1.1rem;
+    padding-bottom: 0.6rem;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 0.4rem;
   }
+  .families {
+    display: grid;
+    gap: 1.1rem;
+  }
+  .families dt {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.2rem;
+  }
+  .families dd {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  p { margin: 0 0 1rem; }
   code, pre {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: var(--code-bg);
     border-radius: 6px;
   }
-  code {
-    padding: 0.15em 0.4em;
-    font-size: 0.9em;
-  }
+  code { padding: 0.15em 0.4em; font-size: 0.87em; }
   pre {
-    padding: 1rem;
+    padding: 1rem 1.1rem;
     overflow-x: auto;
-    font-size: 0.85em;
+    font-size: 0.84em;
+    border: 1px solid var(--border);
   }
-  ul { padding-left: 1.3rem; }
-  a { color: var(--accent); }
+  a { color: var(--seek); text-decoration-color: var(--border); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--seek);
+    outline-offset: 2px;
+  }
+  .rulelink {
+    display: inline-block;
+    margin-top: 0.3rem;
+    font-size: 0.92rem;
+  }
   footer {
     margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
     color: var(--muted);
     font-size: 0.85rem;
+  }
+  footer a { color: var(--muted); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .plandiff, h1, .tagline, .stats { animation: rise 0.5s ease-out both; }
+    .stats { animation-delay: 0.08s; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
   }
 </style>
 </head>
 <body>
 <main>
-  <h1>SilentScan</h1>
-  <p class="tagline">A static analyser for SQL Server (T-SQL) code.</p>
 
-  <p>
-    SilentScan finds correctness and performance problems that are detectable
-    from SQL code and schema alone &mdash; before the query ever runs in
-    production. It is type-aware, direction-aware, and lineage-aware: findings
-    trace a predicate back through views and table-valued functions to the
-    base table column that actually causes the problem.
+  <span class="eyebrow">Static analysis <span class="dot">·</span> SQL Server / T-SQL</span>
+  <h1>Finds the bugs that only<br>show up in the query plan.</h1>
+  <p class="tagline">
+    SilentScan reads T-SQL and schema — no running database required for the
+    checks that don't need one — resolves lineage through views and
+    table-valued functions down to the base column, and confirms every plan
+    claim against a real plan, never a guess from plan shape.
   </p>
+
+  <div class="plandiff" aria-label="Example: direction-aware implicit conversion">
+    <div class="stmt mono">
+      <span class="col">orders.OrderCode</span> <span style="opacity:.6">varchar(20)</span> compared against a caller's value —
+      same mismatch, opposite direction:
+    </div>
+    <div class="rows">
+      <div class="row bad">
+        <span class="expr mono">WHERE OrderCode = <span class="hi">@code</span> <span style="opacity:.55">-- @code nvarchar(20)</span></span>
+        <span class="verdict">column converted &middot; scan</span>
+      </div>
+      <div class="row ok">
+        <span class="expr mono">WHERE OrderCode = <span class="hi">CAST(@code AS varchar(20))</span></span>
+        <span class="verdict">value converted &middot; seek</span>
+      </div>
+    </div>
+    <p class="footnote">
+      T-SQL always converts the lower-precedence side. When that's the
+      column, the index seek silently becomes a scan — no error, no warning,
+      just a slower plan the next time someone looks. SilentScan only calls
+      the first one a finding, and only after the plan XML shows
+      <code>CONVERT_IMPLICIT</code> sitting on the column side of the predicate.
+    </p>
+  </div>
+
+  <div class="stats">
+    <div><div class="n">234</div><div class="l">rules</div></div>
+    <div><div class="n">11</div><div class="l">detection families</div></div>
+    <div><div class="n">150</div><div class="l">fire / near-miss fixtures</div></div>
+    <div><div class="n">0</div><div class="l">guessed verdicts</div></div>
+  </div>
 
   <h2>What it looks for</h2>
-  <ul>
-    <li>Implicit conversions that silently turn an index seek into a scan</li>
-    <li>Collation mismatches across joined or compared columns</li>
-    <li>Non-sargable predicates (function-wrapped columns, leading-wildcard
-      <code>LIKE</code>, column arithmetic)</li>
-    <li>Dynamic SQL whose text can be proven constant, analyzed the same way
-      as static SQL</li>
-  </ul>
-  <p>
-    Those are examples. The complete catalogue &mdash; every rule, with what it
-    reports and how to fix it &mdash; is in the
-    <a href="rules.html">rule reference</a>.
-  </p>
+  <dl class="families">
+    <div>
+      <dt>Implicit conversions and silent write loss</dt>
+      <dd>Direction- and collation-aware conversion detection — column-side
+        vs. value-side, inherited through views and dynamic SQL — plus DML
+        that truncates or rounds data with no engine error at all.</dd>
+    </div>
+    <div>
+      <dt>Sargability and index shape</dt>
+      <dd>Function-wrapped columns, leading-wildcard <code>LIKE</code>,
+        column arithmetic, and composite-index predicates that constrain a
+        trailing key column while leaving the leading one wide open.</dd>
+    </div>
+    <div>
+      <dt>Lineage-metric findings</dt>
+      <dd>The numbers that need the lineage pass to exist at all: real
+        join width after every view and TVF expands, nested-view depth,
+        and CTEs re-run once per reference instead of materialized once.</dd>
+    </div>
+    <div>
+      <dt>Plan-shape and correctness</dt>
+      <dd>MSTVFs used as row-count fences, scalar UDFs that block plan
+        inlining, forced-serial constructs, and predicates that defeat
+        cached-plan cardinality sniffing.</dd>
+    </div>
+    <div>
+      <dt>Dynamic SQL</dt>
+      <dd>Text that can be <em>proven</em> constant is analyzed exactly
+        like static SQL, with findings remapped to their real source line.
+        Anything not provably constant is counted, never silently skipped.</dd>
+    </div>
+    <div>
+      <dt>Physical schema and index design</dt>
+      <dd>Unindexed foreign keys, duplicate and prefix-subsumed indexes,
+        clustering-key quality, and identity ranges heading toward
+        exhaustion — the catalog-only half of a DBA review.</dd>
+    </div>
+    <div>
+      <dt>Triggers, transactions, and cross-module correctness</dt>
+      <dd>Multi-row-unsafe triggers that collapse <code>inserted</code>/
+        <code>deleted</code> into one scalar, transactions with no guaranteed
+        commit path, and write-ordering that only lineage can see across
+        two separate procedures.</dd>
+    </div>
+    <div>
+      <dt>Code quality and maintainability</dt>
+      <dd>Structural metrics, dead code, duplication, naming, and
+        deprecated syntax — the syntax-only rules, same finding schema as
+        everything else above.</dd>
+    </div>
+  </dl>
+  <a class="rulelink" href="rules.html">Browse the full catalog &rarr;</a>
 
   <h2>How it's verified</h2>
   <p>
-    Every verdict-bearing rule is checked against a plan-XML oracle, not
-    inferred from plan shape or table size &mdash; a finding is confirmed only
-    when the execution plan actually shows the conversion happening on the
-    column side of the predicate.
+    A conversion finding is confirmed only when the execution plan actually
+    shows <code>CONVERT_IMPLICIT</code> on the column side of the predicate
+    — never inferred from whether a small table happened to scan anyway.
+    Every verdict-bearing rule defines its own equally specific plan marker
+    and is checked against a live SQL Server instance, not a published
+    compatibility matrix. Where inference is uncertain, the answer is
+    <code>Unknown</code>, reported honestly, never guessed.
+  </p>
+  <p>
+    Rules also state their engine-version sensitivity — 2017 interleaved
+    execution, 2019 UDF inlining, 2022 cardinality-estimator behavior —
+    instead of assuming one SQL Server version's behavior is every version's.
   </p>
 
   <h2>Usage</h2>
-  <pre><code>silentscan scan-db &lt;connection-string&gt;        # read-only, SELECT-only
+  <pre class="mono"><code>silentscan scan-db &lt;connection-string&gt;        # read-only, SELECT-only
 silentscan scan-corpus-live &lt;manifest.json&gt;</code></pre>
-  <p>Output is versioned JSON, with a SARIF export for CI.</p>
+  <p>
+    Output is versioned JSON, with a SARIF export for CI — each rule's
+    <code>helpUri</code> links straight to its own page in the
+    <a href="rules.html">catalog</a>.
+  </p>
 
   <h2>Project</h2>
   <p>
-    Source, issue tracker, and full documentation live in the GitHub
-    repository:
+    Source, issue tracker, and full documentation:
     <a href="https://github.com/bhattumang7/mssql-silentscan">github.com/bhattumang7/mssql-silentscan</a>.
   </p>
 
   <footer>
-    This page is a placeholder landing page for the project's GitHub Pages
-    site.
+    Parsing via <code>Microsoft.SqlServer.TransactSql.ScriptDom</code> — SQL Server / T-SQL only.
   </footer>
 </main>
 </body>
