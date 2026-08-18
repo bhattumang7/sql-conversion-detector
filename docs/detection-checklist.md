@@ -6718,11 +6718,22 @@ verifiable.
         `NonSargablePredicateScanner`'s `BuildTriggerPseudoTableRelations`
         should start ledgering a DDL/LOGON trigger's missing target table the
         way `TypedPredicateExtractor`'s already does.
-  - [ ] **`ResolvedColumnFacts` + one resolver** — one lineage/catalog query
-        returning type/indexed/nullable/collation/depth/origin;
-        `NonSargablePredicateScanner` currently re-resolves the same column
-        up to three times per finding for type, then nullability, then
-        collation.
+  - [x] **Stop re-resolving a column's type after `ResolveIndexInfo` already
+        has it** — shipped 2026-08-18, in place of a new `ResolvedColumnFacts`
+        abstraction. Turned out narrower than scoped: `ColumnProvenance.
+        BaseColumn`/`Declared` already carry the column's resolved `SqlType`
+        (sourced from the same catalog column `FromScopeResolver` reads), so
+        `TryAddTemporalBoundaryFinding`'s scale check and `AddCaseFold`'s
+        collation lookup were both re-querying the catalog for a value
+        `ResolveIndexInfo` had already computed one line earlier -
+        `ResolveIndexInfo` now returns `Type` alongside `TableQualifiedName`/
+        `Indexed` and both callers dropped their second catalog round trip.
+        `IsKnownNotNullColumn` still makes its own catalog call: nullability
+        lives on the catalog column, not on `SqlType`, so there was nothing
+        redundant to remove there - a full `ResolvedColumnFacts` type wasn't
+        needed once the actual redundancy turned out to be two call sites
+        re-deriving one already-resolved field, not three independent
+        catalog round trips.
   - [ ] **Pure per-rule classifiers** for decisions currently inline in
         visitors: `NonSargablePredicateScanner`'s case-fold/date-function
         sets, ISNULL-on-NOT-NULL suppression, CHARINDEX/LEFT rewrite (incl.
