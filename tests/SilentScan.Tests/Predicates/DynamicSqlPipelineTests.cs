@@ -26,7 +26,11 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         "CREATE TABLE dbo.T (Col VARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, CreatedAt DATETIME NOT NULL); " +
         "CREATE INDEX IX_T_Col ON dbo.T(Col); \n" +
         "GO\n" +
-        "CREATE VIEW dbo.vw_T AS SELECT CAST(Col AS INT) AS ColAsInt FROM dbo.T;";
+        "CREATE VIEW dbo.vw_T AS SELECT CAST(Col AS INT) AS ColAsInt FROM dbo.T;\n" +
+        "GO\n" +
+        "CREATE VIEW dbo.vw_T_L1 AS SELECT Col FROM dbo.T;\n" +
+        "GO\n" +
+        "CREATE VIEW dbo.vw_T_L2 AS SELECT Col FROM dbo.vw_T_L1;";
 
     protected override string DatabaseNameSeed => nameof(DynamicSqlPipelineTests);
 
@@ -621,6 +625,39 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.Equal("dbo.T", typedFinding.Column.TableQualifiedName);
         Assert.Equal("Col", typedFinding.Column.ColumnName);
         Assert.True(typedFinding.Column.Indexed);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task Analyze_LiteralThroughTwoNestedViewLayers_ResolvesToBaseColumnAtDepthTwo_ScanForced_OracleConfirmed()
+    {
+        // Proves the full chain in one shot: normal SQL -> dynamic SQL (a provably-constant
+        // EXEC literal) -> a view (vw_T_L2) -> a second, nested view it's built on (vw_T_L1) ->
+        // the real base table column (dbo.T.Col). The reparsed dynamic-SQL fragment is handed
+        // the SAME LineageCatalog static SQL uses (DynamicSqlPipeline.ProcessScript), and
+        // LineageResolver resolves views transitively regardless of how many layers sit between
+        // - this is the first test that exercises both mechanisms TOGETHER rather than each in
+        // isolation (see DynamicSqlPipelineTests.Analyze_LiteralWithCte_... for dynamic SQL with
+        // no view layer, and ScanReportBuilderSharedLineageTests for nested views with no
+        // dynamic SQL).
+        var (catalog, lineage) = BuildCatalog();
+
+        var parseResult = SqlScriptParser.ParseText(
+            "app.sql",
+            "EXEC('SELECT Col FROM dbo.vw_T_L2 WHERE Col = N''x''');");
+        Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
+
+        var script = Assert.Single(DynamicSqlScannerV2.Scan(parseResult).AnalyzableScripts);
+        var result = DynamicSqlPipeline.Analyze([script], catalog, lineage);
+
+        var typedFinding = Assert.Single(result.TypedFindings);
+        Assert.Equal("dbo.T", typedFinding.Column.TableQualifiedName);
+        Assert.Equal("Col", typedFinding.Column.ColumnName);
+        Assert.True(typedFinding.Column.Indexed);
+        Assert.Equal(2, typedFinding.Column.Depth); // vw_T_L2 -> vw_T_L1 -> dbo.T: two view layers
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
