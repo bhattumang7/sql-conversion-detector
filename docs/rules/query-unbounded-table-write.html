@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unbounded Table Write - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Unbounded Table Write</h1>
+  <p class="rule-key"><code>silentscan/query/unbounded-table-write</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An UPDATE/DELETE has no WHERE clause and no TOP - a whole-table write with no row-limiting mechanism at all. Advisory: a deliberate full-table maintenance statement is a legitimate reason this fires.</p>
+  <p class="rationale">An UPDATE or DELETE statement&#x27;s WHERE clause is the only mechanism that scopes which rows it touches; a TOP clause is the only other mechanism that can bound how many rows it touches. A statement carrying neither has no row-limiting mechanism at all - by construction, it applies to every single row currently in the table, no matter how many that turns out to be.</p>
+  <p class="rationale">The overwhelming majority of UPDATE/DELETE statements written against a specific business entity are meant to touch a bounded subset - a customer&#x27;s orders, rows added today, records matching some status - and a missing WHERE clause is very often exactly that: a clause that was meant to be there and was dropped, whether by an editing mistake, a parameterized WHERE that got stripped along with a debugging step, or a copy-paste that lost the filtering condition on the way. When that&#x27;s what happened, the statement doesn&#x27;t fail or warn - it succeeds, and it succeeds at doing something far larger than intended, silently, with no error to signal that anything is different from what was meant.</p>
+  <p class="rationale">At the same time, a genuinely unbounded UPDATE/DELETE is sometimes exactly the intended operation - a maintenance script clearing a staging table before a reload, an end-of-cycle purge of an entire audit log, a deliberate full-table reset. This finding can&#x27;t distinguish those two cases from the statement&#x27;s shape alone, because they look identical: no WHERE, no TOP, every row affected. That&#x27;s why this is reported as an advisory signal rather than a defect - it&#x27;s flagging &quot;this statement has no row-limiting mechanism at all,&quot; which is worth a second look regardless of which of the two cases it turns out to be.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">If the missing scope was unintentional, add the WHERE clause that should have been there. If the whole-table write is genuinely intentional - a deliberate maintenance or reset operation - no code change is required, but it&#x27;s worth treating that intent as explicit rather than implicit: a defensive comment stating the write is deliberately unbounded, or a guarded confirmation step in whatever deploys the script, turns &quot;looks identical to a mistake&quot; into &quot;documented as intentional.&quot;</p>
+  <h3>A DELETE with no WHERE clause and no TOP</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.OrderLines (OrderLineId INT NOT NULL PRIMARY KEY, OrderId INT NOT NULL, Quantity INT NOT NULL);&#xA;&#xA;DELETE FROM dbo.OrderLines;</code></pre></div>
+  <p class="example-explanation">There is no WHERE clause and no TOP, so every row currently in OrderLines is deleted - correct if this is a deliberate full-table purge, and a serious accidental data loss if a filtering condition was meant to be here and was lost.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

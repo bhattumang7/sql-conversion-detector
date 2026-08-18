@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>In Select Or Expression - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>In Select Or Expression</h1>
+  <p class="rule-key"><code>silentscan/scalar-udf/in-select-or-expression</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A scalar UDF is called outside any predicate (SELECT list, ORDER BY, GROUP BY, SET/variable assignment) - per-row execution and (pre-2019, or non-inlineable) a forced-serial plan, but sargability is unaffected.</p>
+  <p class="rationale">A scalar UDF called outside any predicate - in the SELECT list, an ORDER BY or GROUP BY expression, or a SET/variable assignment - doesn&#x27;t cost the query its sargability, since there&#x27;s no index seek being defeated here in the first place. What it still costs is per-row execution: unless the engine can prove the function meets SQL Server 2019&#x2B;&#x27;s scalar UDF inlining requirements, every row the SELECT list (or ORDER BY/GROUP BY expression) touches triggers a separate invocation of the function as its own routine, with its own execution context switch, rather than being evaluated as part of the row&#x27;s expression tree the way a built-in function or arithmetic operator would be. And exactly as with a predicate invocation, on any engine before 2019 - or on 2019&#x2B; when the function fails an inlining precondition - that per-row invocation forces the entire surrounding plan serial, so a query that would otherwise parallelize across a large table runs single-threaded purely because of one function call in its projection.</p>
+  <p class="rationale">Brent Ozar&#x27;s benchmark of exactly this shape - a scalar UDF concatenating and NULL-coalescing two string columns in a SELECT list, nothing in a WHERE clause at all - is a useful gut check for how far this can go: what looks like a purely cosmetic formatting helper, called only in the output columns of a TOP 100 query, still measurably slows the query down, because &quot;no predicate&quot; doesn&#x27;t mean &quot;no per-row cost&quot; - it only means the cost isn&#x27;t compounding with a lost index seek.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Where the function body is a single expression, check it against SQL Server 2019&#x2B;&#x27;s scalar UDF inlining requirements - a function that already qualifies may resolve this without any rewrite once the target engine is 2019 or later. Where it doesn&#x27;t qualify, or the target engine is fixed below 2019, inline the function&#x27;s expression directly into the SELECT list (or ORDER BY/GROUP BY expression, or assignment) in place of the function call.</p>
+  <h3>A scalar UDF formatting a display column, called only in the SELECT list</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE FUNCTION dbo.FormatUsername(@DisplayName NVARCHAR(40), @Location NVARCHAR(100))&#xA;RETURNS NVARCHAR(200)&#xA;AS&#xA;BEGIN&#xA;    DECLARE @Output NVARCHAR(200);&#xA;    SET @Output = @DisplayName &#x2B; N&#x27; from &#x27; &#x2B; COALESCE(@Location, N&#x27;Earth, probably&#x27;);&#xA;    RETURN @Output;&#xA;END;&#xA;&#xA;SELECT TOP 100 dbo.FormatUsername(DisplayName, Location), Reputation&#xA;FROM dbo.Users&#xA;ORDER BY Reputation DESC;</code></pre></div>
+  <p class="example-explanation">FormatUsername&#x27;s body has a local variable and an intermediate SET, so it doesn&#x27;t qualify for 2019&#x2B; inlining - every one of the 100 output rows triggers a separate routine invocation purely to build a display string, with nothing in the WHERE clause even involved.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT TOP 100 DisplayName &#x2B; N&#x27; from &#x27; &#x2B; COALESCE(Location, N&#x27;Earth, probably&#x27;), Reputation&#xA;FROM dbo.Users&#xA;ORDER BY Reputation DESC;</code></pre></div>
+  <p class="example-explanation">The formatting logic is inlined directly into the SELECT list - it&#x27;s evaluated as an ordinary expression per row, with no separate function invocation and no risk of forcing the plan serial.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/SELECT_LIST_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: Brent Ozar Unlimited, &quot;How Scalar User-Defined Functions Slow Down Queries&quot;&#xA;-- https://www.brentozar.com/archive/2020/11/how-scalar-user-defined-functions-slow-down-queries/&#xA;-- dbo.FormatUsername is the article&#x27;s own example, called against the Stack Overflow database&#x27;s&#xA;-- Users table exactly as shown there - per-row execution and forced-serial cost even though this&#xA;-- particular call site never appears in a predicate.&#xA;CREATE FUNCTION dbo.FormatUsername&#xA;    (@DisplayName NVARCHAR(40), @Location NVARCHAR(100))&#xA;RETURNS NVARCHAR(200) AS&#xA;BEGIN&#xA;    DECLARE @Output NVARCHAR(200);&#xA;    SET @Output = @DisplayName &#x2B; N&#x27; from &#x27; &#x2B; COALESCE(@Location, N&#x27;Earth, probably&#x27;);&#xA;    RETURN @Output;&#xA;END;&#xA;GO&#xA;CREATE TABLE dbo.Users&#xA;(&#xA;    Id INT NOT NULL PRIMARY KEY,&#xA;    DisplayName NVARCHAR(40) NOT NULL,&#xA;    Location NVARCHAR(100) NULL,&#xA;    Reputation INT NOT NULL&#xA;);&#xA;GO&#xA;SELECT TOP 100 dbo.FormatUsername(DisplayName, Location), Reputation, Id&#xA;FROM dbo.Users&#xA;ORDER BY Reputation DESC;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/SELECT_LIST_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for SELECT_LIST_fires.sql: an inline TVF referenced in FROM reads identically to a&#xA;-- scalar UDF call syntactically (schema.name(args)), but it is never in the scalar-UDF catalog&#xA;-- registry (TryGetScalarUdfInfo), so it must never be mistaken for one here - that distinction&#xA;-- belongs entirely to the MSTVF-as-fence stream instead.&#xA;CREATE FUNCTION dbo.itvf_ActiveUsers()&#xA;RETURNS TABLE&#xA;AS&#xA;RETURN (SELECT Id, DisplayName FROM dbo.Users WHERE Reputation &gt; 0);&#xA;GO&#xA;CREATE TABLE dbo.Users&#xA;(&#xA;    Id INT NOT NULL PRIMARY KEY,&#xA;    DisplayName NVARCHAR(40) NOT NULL,&#xA;    Reputation INT NOT NULL&#xA;);&#xA;GO&#xA;SELECT Id, DisplayName FROM dbo.itvf_ActiveUsers();</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nested Under View Or TVF - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Nested Under View Or TVF</h1>
+  <p class="rule-key"><code>silentscan/tvf-fence/nested-under-view-or-tvf</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A view or inline TVF referenced here is itself, transitively, built over a multi-statement/CLR TVF - the fence and its fabricated cardinality estimate are inherited invisibly through however many layers sit between.</p>
+  <p class="rationale">A view or inline TVF is transparent to the optimizer - its defining query is expanded into the calling query&#x27;s text before optimization runs, so referencing a view looks, cost-wise, exactly like writing its definition out by hand. That transparency is exactly what makes it dangerous here: if the view&#x27;s own definition joins or applies a multi-statement table-valued function, the fixed, fabricated cardinality estimate that function produces (1 row legacy CE / 100 rows 2014&#x2B; CE, with the function body itself invisible to the optimizer) is inherited by every query that touches the view, whether or not the caller has any idea the view depends on a TVF at all.</p>
+  <p class="rationale">This is the same mechanism as a direct call to a multi-statement TVF or a MSTVF sitting in a FROM/JOIN clause, but one layer removed, and that removal is what makes it easy to ship: the query that finally trips over the bad estimate reads `SELECT ... FROM dbo.vw_CustomerTier`, with no function name anywhere in sight. A reviewer checking that query for TVF usage finds nothing to flag. The fence has to be traced through the view&#x27;s own definition - and, if that view itself selects from another view, through however many additional layers sit in between - before the actual cause of the bad estimate becomes visible.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Trace the view (or inline TVF) down to whichever underlying object is a multi-statement TVF, a `CROSS`/`OUTER APPLY` against one, or a MSTVF in a FROM/JOIN, and apply the same fix that would apply if the call were written directly: rewrite the multi-statement TVF as a single-statement inline TVF (`RETURN (SELECT ...)`, no `BEGIN...END` block), or inline the underlying logic as a derived table/CTE. Once the nested object no longer hides an opaque, un-costed body, the view built on top of it inherits accurate cardinality estimates the same way it inherited the bad ones.</p>
+  <h3>A view quietly wraps a multi-statement TVF call</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Customers (CustomerId INT NOT NULL PRIMARY KEY, Name VARCHAR(100) NOT NULL);&#xA;&#xA;CREATE FUNCTION dbo.fn_CustomerTier(@CustomerId INT)&#xA;RETURNS @Tier TABLE (TierName VARCHAR(20))&#xA;AS&#xA;BEGIN&#xA;    INSERT INTO @Tier (TierName) SELECT &#x27;Gold&#x27;;&#xA;    RETURN;&#xA;END;&#xA;&#xA;CREATE VIEW dbo.vw_CustomerTier AS&#xA;SELECT c.CustomerId, t.TierName&#xA;FROM dbo.Customers c&#xA;CROSS APPLY dbo.fn_CustomerTier(c.CustomerId) t;&#xA;&#xA;SELECT CustomerId, TierName&#xA;FROM dbo.vw_CustomerTier;</code></pre></div>
+  <p class="example-explanation">Nothing in the final query names fn_CustomerTier, but vw_CustomerTier&#x27;s own definition does - the view&#x27;s expansion carries the same fixed cardinality estimate and per-row re-execution as calling the function directly.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE FUNCTION dbo.fn_CustomerTier(@CustomerId INT)&#xA;RETURNS TABLE&#xA;AS&#xA;RETURN (SELECT &#x27;Gold&#x27; AS TierName);&#xA;&#xA;CREATE VIEW dbo.vw_CustomerTier AS&#xA;SELECT c.CustomerId, t.TierName&#xA;FROM dbo.Customers c&#xA;CROSS APPLY dbo.fn_CustomerTier(c.CustomerId) t;</code></pre></div>
+  <p class="example-explanation">Once fn_CustomerTier is an inline TVF, its RETURN query expands into the view&#x27;s own expansion - the whole chain optimizes as one query with real cardinality estimates, with nothing left opaque for the view to inherit.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tvf_fence/NESTED_UNDER_VIEW_OR_TVF_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: &quot;Query Performance and multi-statement table valued functions&quot; - Microsoft Community&#xA;-- Hub (SQL Server Support blog)&#xA;-- https://techcommunity.microsoft.com/blog/sqlserversupport/query-performance-and-multi-statement-table-valued-functions/316226&#xA;-- Documents the &quot;permissions function wrapped in a view&quot; shape this fixture reproduces: a view&#xA;-- that looks like an ordinary object at its own call sites secretly wraps a multi-statement TVF,&#xA;-- so every consumer of the view inherits the fence invisibly - the call site here&#xA;-- (FROM dbo.vw_CustomerTier) names something that reads exactly like a harmless view.&#xA;CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY,&#xA;    Name       VARCHAR(100) NOT NULL&#xA;);&#xA;GO&#xA;CREATE FUNCTION dbo.fn_CustomerTier(@CustomerId INT)&#xA;RETURNS @Tier TABLE (TierName VARCHAR(20))&#xA;AS&#xA;BEGIN&#xA;    INSERT INTO @Tier (TierName)&#xA;    SELECT &#x27;Gold&#x27;;&#xA;    RETURN;&#xA;END;&#xA;GO&#xA;CREATE VIEW dbo.vw_CustomerTier&#xA;AS&#xA;SELECT c.CustomerId, t.TierName&#xA;FROM dbo.Customers c&#xA;CROSS APPLY dbo.fn_CustomerTier(c.CustomerId) t;&#xA;GO&#xA;&#xA;SELECT CustomerId, TierName&#xA;FROM dbo.vw_CustomerTier;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tvf_fence/NESTED_UNDER_VIEW_OR_TVF_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for NESTED_UNDER_VIEW_OR_TVF_fires.sql: an ordinary view over a real base table,&#xA;-- with no multi-statement/CLR TVF anywhere in its own definition - must not be reported as&#xA;-- inheriting a fence it never had.&#xA;CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY,&#xA;    Name       VARCHAR(100) NOT NULL&#xA;);&#xA;GO&#xA;CREATE VIEW dbo.vw_CustomerNames&#xA;AS&#xA;SELECT c.CustomerId, c.Name&#xA;FROM dbo.Customers c;&#xA;GO&#xA;&#xA;SELECT CustomerId, Name&#xA;FROM dbo.vw_CustomerNames;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

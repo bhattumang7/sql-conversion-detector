@@ -579,6 +579,10 @@ public static class SarifRuleCatalog
     {
         var baseRules = RuleCatalog.BaseRules.Select(rule => Rule(rule.Id, rule.Rationale)).ToArray();
 
+        // A confidence-suffixed variant's HelpUri (via Rule -> RuleDocSite.Url) resolves back to
+        // its base rule's page - RuleDocSite.BaseRuleId strips the suffix before slugging, since
+        // the underlying rule is the same one and there is no separate page per confidence tier.
+
         // Both confidence-suffixed variants are generated for every base rule (except the
         // DynamicSqlOutcome family, which never carries a Confidence field at all) - a rule entry
         // with no possible producer would itself be the kind of silent-until-someone-checks noise
@@ -595,5 +599,5 @@ public static class SarifRuleCatalog
         return [.. baseRules, .. mediumVariants, .. lowVariants];
     }
 
-    private static SarifRule Rule(string id, string description) => new(id, new SarifMessage(description));
+    private static SarifRule Rule(string id, string description) => new(id, new SarifMessage(description), RuleDocSite.Url(id));
 }

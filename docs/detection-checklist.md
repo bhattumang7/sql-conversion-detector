@@ -25,6 +25,44 @@ Competitor tools are referred to generically; real identities are in
       catalog surface (`sys.partition_schemes`, `sys.indexes.data_space_id`,
       `sys.partition_functions`).
 
+### Docs
+
+- [ ] **Per-rule pages: fill the remaining ~161/234 rules.** Shipped:
+      `RuleDocSite` (`helpUri` scheme, wired into SARIF `rules[].helpUri` and
+      `driver.informationUri`, plus `HumanizeTitle` so the index/page never
+      show a raw `silentscan/family/name` id as the display label) with its
+      golden slug test; `docs/rules.html` is a family-grouped index linking to
+      one generated page per rule under `docs/rules/`; each page is
+      Sonar-shaped ("Why is this an issue?" / "How can I fix it?" with
+      noncompliant/compliant SQL, plus a separate "Verified by an automated
+      test" section only when a real checked-in fixture exists) via
+      `RuleDocContent`/`RuleDocExample` (`src/SilentScan.Core/Reporting/
+      RuleDocs/RuleDocContent.cs`) — one hand-authored file per rule under
+      `RuleDocs/<Family>/<RuleName>.cs`, wired into `RuleDocCatalog.ByRuleId`;
+      `rules-doc` prunes orphaned pages; a docs-are-current regeneration test
+      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 73/234 rules
+      have a `RuleDocContent` entry today (tier1, verdict/scan-forced+range-
+      seek, write-loss, tvf-fence, scalar-udf, a chunk of catalog/predicates/
+      call-graph, query-anti-pattern, trigger-correctness, forced-serial,
+      cross-module, correctness/dml/join/query singles) — a rule with no
+      entry still renders (short rationale only, humanized title, no
+      fabricated fix/example section), just thinner. Remaining backlog:
+      index-design (~20), formatting/naming/dead-code/duplication/deprecated-
+      syntax/code-metrics (~50, lower value - mostly self-evident from their
+      name), statement-shape, control-flow-risk, security, database-
+      configuration, hint, session-date-setting, cartesian-join, undersized-
+      declaration, window-frame, view-ordering, module-compile-flag,
+      dynamic-sql, lineage, and the rest of catalog (temporal-table-history-
+      index-gap, cascading-fk, multi-referenced-cte, nested-view-depth,
+      post-expansion-join-width, select-star-view/stale variant, try-cast-
+      computed-column, non-persisted-computed-column, security-predicate-
+      index, aggregate-division-columnstore). Also open: linking the rule
+      page from the readable/console report per finding group; `helpUri` on
+      the JSON findings schema. Do family-by-family, each its own commit (the
+      per-rule-file-in-its-own-class pattern parallelizes well across
+      subagents - each batch just needs the exact `SarifRuleCatalog` constant
+      + current Rationale/FixGuidance text per rule, handed out per family).
+
 ### Engineering debt
 
 Do these when the touched code is being worked on anyway.

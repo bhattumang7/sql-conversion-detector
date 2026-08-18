@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unicode To Non Unicode - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Unicode To Non Unicode</h1>
+  <p class="rule-key"><code>silentscan/write-loss/unicode-to-non-unicode</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An INSERT/UPDATE assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target - any character outside the target collation&#x27;s codepage is silently replaced with &#x27;?&#x27;, with no error.</p>
+  <p class="rationale">Every non-Unicode column - VARCHAR, CHAR, TEXT - stores its characters using a single code page determined by the column&#x27;s collation, one byte (or a handful of bytes for double-byte code pages) per character, and that code page can only represent a subset of Unicode. An NVARCHAR/NCHAR value, by contrast, is UCS-2/UTF-16 and can represent essentially any character in any language. The moment an INSERT or UPDATE assigns a Unicode source value into a non-Unicode target, SQL Server has to narrow every character down to whatever the target&#x27;s code page can hold - and for any character that isn&#x27;t in that code page, the engine does not raise an error, truncate the statement, or warn. It silently substitutes the code page&#x27;s designated replacement character, &#x27;?&#x27; (0x3F), and continues.</p>
+  <p class="rationale">This makes the failure mode uniquely dangerous compared to ordinary length truncation: there is no SET ANSI_WARNINGS, no @@ROWCOUNT anomaly, no exception anywhere in the call stack. The row inserts cleanly, the transaction commits, and the application reports success. The only visible symptom is that some fraction of rows now contain literal question marks in place of names, addresses, or free-text fields that originally held an em-dash, a curly quote from a pasted Word document, a Cyrillic or CJK character, or an emoji - all common in real user input the moment a source column far upstream (or a parameter bound as NVARCHAR by default, which is exactly what ADO.NET and most ORMs do for a plain C# `string`) allowed Unicode through.</p>
+  <p class="rationale">Because this is a data-loss bug rather than a performance one, it compounds silently over time: every write against the mismatched column erodes data a little more, and by the time anyone notices the &#x27;?&#x27; characters in a report, the original values are already gone - there is no log of what was overwritten, since the statement itself reported no error.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Change the target column&#x27;s declared type from VARCHAR/CHAR (or TEXT) to NVARCHAR/NCHAR (or NTEXT), matching whatever range of characters the source data can actually contain. This is a schema change, not a query rewrite - the loss happens at the storage layer, so there is no WHERE-clause or parameter trick that fixes it once the column itself is non-Unicode. If the column is deliberately restricted to a known code page (for example a country/currency code guaranteed ASCII), the finding is a false positive for that specific column and the fix is to leave it as-is; the rule can&#x27;t distinguish &quot;genuinely ASCII-only by contract&quot; from &quot;happens to be ASCII-only so far&quot; from static analysis alone.</p>
+  <h3>An NVARCHAR parameter written into a VARCHAR column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT          NOT NULL PRIMARY KEY,&#xA;    FullName   VARCHAR(100) NOT NULL&#xA;);&#xA;&#xA;CREATE PROCEDURE dbo.AddCustomer (@fullName NVARCHAR(100))&#xA;AS&#xA;INSERT INTO dbo.Customers (CustomerId, FullName)&#xA;VALUES (1, @fullName);</code></pre></div>
+  <p class="example-explanation">If @fullName arrives as N&#x27;Jos&#xE9; Alan&#xED;s&#x27; or contains any character outside the database&#x27;s default code page, every unrepresentable character silently becomes &#x27;?&#x27; - the INSERT still succeeds with no error.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT           NOT NULL PRIMARY KEY,&#xA;    FullName   NVARCHAR(100) NOT NULL&#xA;);&#xA;&#xA;CREATE PROCEDURE dbo.AddCustomer (@fullName NVARCHAR(100))&#xA;AS&#xA;INSERT INTO dbo.Customers (CustomerId, FullName)&#xA;VALUES (1, @fullName);</code></pre></div>
+  <p class="example-explanation">FullName is now NVARCHAR, so it can store any character the parameter carries - there is no narrowing conversion left to lose data.</p>
+  <h3>A Unicode literal assigned by UPDATE</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId   INT          NOT NULL PRIMARY KEY,&#xA;    DisplayName VARCHAR(50)  NOT NULL&#xA;);&#xA;&#xA;UPDATE dbo.Products&#xA;SET DisplayName = N&#x27;Caf&#xE9; Noir &#x2014; Deluxe&#x27;&#xA;WHERE ProductId = 42;</code></pre></div>
+  <p class="example-explanation">The N&#x27;...&#x27; literal is Unicode text containing an em dash and an accented character; writing it into the VARCHAR DisplayName column replaces whichever characters the default code page can&#x27;t represent with &#x27;?&#x27;.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId   INT           NOT NULL PRIMARY KEY,&#xA;    DisplayName NVARCHAR(50)  NOT NULL&#xA;);&#xA;&#xA;UPDATE dbo.Products&#xA;SET DisplayName = N&#x27;Caf&#xE9; Noir &#x2014; Deluxe&#x27;&#xA;WHERE ProductId = 42;</code></pre></div>
+  <p class="example-explanation">DisplayName is Unicode, so the literal&#x27;s full character set - accents, em dashes, anything else - is stored exactly as written.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

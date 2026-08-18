@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leading Wildcard LIKE - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Leading Wildcard LIKE</h1>
+  <p class="rule-key"><code>silentscan/tier1/leading-wildcard-like</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A LIKE predicate on a column starts with a wildcard, forcing a full scan.</p>
+  <p class="rationale">A B-tree index on a string column is sorted by the column&#x27;s value read left to right, character by character - exactly like a phone book sorted by last name. That structure lets the engine seek efficiently to any prefix: &#x27;Smith%&#x27; can jump straight to where entries starting with &quot;Smith&quot; begin and scan forward only until they stop. But a pattern that starts with a wildcard - &#x27;%smith&#x27;, &#x27;%son%&#x27; - gives the engine nothing to seek on, because there&#x27;s no starting character to descend the B-tree toward. Every entry could potentially end in &quot;smith&quot; or contain &quot;son&quot; somewhere in the middle, regardless of what it starts with, so the engine has no choice but to scan every row and test the pattern against each one.</p>
+  <p class="rationale">This is a common and reasonable thing to want - &quot;find every customer whose name contains &#x27;son&#x27;&quot; is a legitimate business question - but a plain LIKE with a leading wildcard can never answer it with an index seek, no matter what index exists on the column. The cost scales with table size exactly like a table scan, because that&#x27;s functionally what it is.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">There is no rewrite of a genuine leading-wildcard search that restores a seek on a standard B-tree index - the fix is a different indexing technology, not a different predicate. SQL Server&#x27;s full-text index is built for exactly this: CONTAINS/FREETEXT predicates against a full-text index can answer substring and word-boundary searches without a full scan. If the search is really only ever a suffix match (find values ENDING in a known string), and the column&#x27;s content is short and bounded, a computed, indexed REVERSE(column) column can turn it back into a prefix search (REVERSE(column) LIKE REVERSE(&#x27;%suffix&#x27;) becomes a prefix match on the reversed data). For a genuine &quot;contains anywhere&quot; search at scale, full-text search is the supported path.</p>
+  <h3>A leading wildcard forces a full scan</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT          NOT NULL PRIMARY KEY,&#xA;    Name       NVARCHAR(100) NOT NULL&#xA;);&#xA;CREATE INDEX IX_Customers_Name ON dbo.Customers(Name);&#xA;&#xA;SELECT CustomerId&#xA;FROM dbo.Customers&#xA;WHERE Name LIKE &#x27;%son&#x27;;</code></pre></div>
+  <p class="example-explanation">With no known starting character, the engine can&#x27;t descend IX_Customers_Name&#x27;s B-tree toward a useful starting point - every row is scanned and tested against the pattern.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/LEADING_WILDCARD_LIKE_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: &quot;How to Make Leading Wildcard Searches Fast&quot; - Brent Ozar&#xA;-- https://www.brentozar.com/archive/2025/08/how-to-make-leading-wildcard-searches-fast/&#xA;-- Matching rows for &#x27;%Ozar&#x27; are scattered throughout the whole B-tree, so&#xA;-- SQL Server can&#x27;t seek to a starting point - full index scan required.&#xA;CREATE TABLE dbo.Users&#xA;(&#xA;    UserId      INT           NOT NULL PRIMARY KEY,&#xA;    DisplayName NVARCHAR(40)  NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Users_DisplayName ON dbo.Users(DisplayName);&#xA;GO&#xA;&#xA;SELECT UserId&#xA;FROM dbo.Users&#xA;WHERE DisplayName LIKE &#x27;%Ozar&#x27;;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/LEADING_WILDCARD_LIKE_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for LEADING_WILDCARD_LIKE: a trailing-wildcard search over the&#xA;-- same column/article this rule is sourced from&#xA;-- (https://www.brentozar.com/archive/2025/08/how-to-make-leading-wildcard-searches-fast/).&#xA;-- A trailing wildcard keeps the prefix fixed, so the engine can seek to&#xA;-- &#x27;Ozar&#x27; and scan forward - must NOT fire.&#xA;CREATE TABLE dbo.Users&#xA;(&#xA;    UserId      INT           NOT NULL PRIMARY KEY,&#xA;    DisplayName NVARCHAR(40)  NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Users_DisplayName ON dbo.Users(DisplayName);&#xA;GO&#xA;&#xA;SELECT UserId&#xA;FROM dbo.Users&#xA;WHERE DisplayName LIKE &#x27;Ozar%&#x27;;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

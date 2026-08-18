@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Check Constraint Null Not Handled - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Check Constraint Null Not Handled</h1>
+  <p class="rule-key"><code>silentscan/catalog/check-constraint-null-not-handled</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A nullable column&#x27;s own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate - SQL Server&#x27;s three-valued logic means a comparison against NULL evaluates to UNKNOWN, never FALSE, and a CHECK constraint only rejects a row when its predicate is FALSE, so a NULL value silently passes a constraint that reads as if it forbids bad data.</p>
+  <p class="rationale">SQL Server predicate evaluation is three-valued, not two-valued: any comparison involving NULL evaluates to UNKNOWN, not FALSE. A CHECK constraint only rejects a row when its predicate evaluates to FALSE for that row - UNKNOWN is treated the same as TRUE for the purpose of accepting or rejecting the row, exactly like a WHERE clause treats UNKNOWN rows as &quot;don&#x27;t include&quot; rather than &quot;actively excluded&quot;, except here the polarity works in the row&#x27;s favor: an UNKNOWN CHECK result lets the row through.</p>
+  <p class="rationale">That means a CHECK constraint on a nullable column that never explicitly tests that column for NULL doesn&#x27;t do what its own text suggests. CHECK (Age &gt; 0) on a nullable Age column reads as &quot;Age must be positive&quot; - but a row with Age = NULL evaluates NULL &gt; 0 to UNKNOWN, not FALSE, so the constraint doesn&#x27;t reject it. The constraint silently permits exactly the value a reader would assume it forbids, and there&#x27;s no error, no warning, nothing in the DDL that flags the gap - only working through the three-valued-logic truth table for a NULL input reveals it.</p>
+  <p class="rationale">This matters most for constraints that read as gatekeeping rules (&quot;must be positive&quot;, &quot;must be one of these codes&quot;, &quot;must be after this date&quot;) - the author&#x27;s intent is almost always to forbid bad data, and NULL sailing through untested is very rarely the intended behavior, which is exactly what makes this a routine, unnoticed data-quality hole rather than a deliberate design choice.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Add an explicit IS NULL or IS NOT NULL test for the column in the CHECK constraint&#x27;s own predicate, so a NULL value isn&#x27;t silently accepted through three-valued logic. If NULL is meant to be an allowed state for the column (e.g. &quot;positive, or not yet known&quot;), write that intent directly: CHECK (Age &gt; 0 OR Age IS NULL). If NULL should genuinely be forbidden alongside non-positive values, make that explicit too: CHECK (Age IS NOT NULL AND Age &gt; 0). Either version makes the constraint&#x27;s actual behavior match its own wording, instead of leaving the NULL case to fall out of three-valued logic by accident.</p>
+  <h3>CHECK (Age &gt; 0) silently admits NULL</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL,&#xA;    CONSTRAINT CK_Users_Age CHECK (Age &gt; 0)&#xA;);&#xA;&#xA;INSERT INTO dbo.Users (UserId, Age) VALUES (1, NULL);</code></pre></div>
+  <p class="example-explanation">NULL &gt; 0 evaluates to UNKNOWN, not FALSE, so the CHECK doesn&#x27;t reject the row - the INSERT succeeds even though the constraint reads as forbidding non-positive ages.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL,&#xA;    CONSTRAINT CK_Users_Age CHECK (Age IS NOT NULL AND Age &gt; 0)&#xA;);</code></pre></div>
+  <p class="example-explanation">NULL is now tested explicitly, so an INSERT with Age = NULL evaluates the AND to FALSE and is rejected - matching what the constraint&#x27;s wording already implied.</p>
+  <h3>Making NULL an intentionally allowed state instead</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL,&#xA;    CONSTRAINT CK_Users_Age CHECK (Age &gt; 0)&#xA;);</code></pre></div>
+  <p class="example-explanation">The constraint&#x27;s own text gives no indication that NULL is meant to be allowed - the fact that it currently is comes only from three-valued logic, not from an explicit choice.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL,&#xA;    CONSTRAINT CK_Users_Age CHECK (Age &gt; 0 OR Age IS NULL)&#xA;);</code></pre></div>
+  <p class="example-explanation">Behaves identically to the original at runtime, but now the predicate itself documents that NULL (&#x27;age not yet known&#x27;) is a deliberately permitted state, not an accident of NULL comparison semantics.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

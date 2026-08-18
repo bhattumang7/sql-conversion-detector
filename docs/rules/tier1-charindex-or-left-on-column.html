@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Charindex Or Left On Column - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Charindex Or Left On Column</h1>
+  <p class="rule-key"><code>silentscan/tier1/charindex-or-left-on-column</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">CHARINDEX(x, col) or LEFT(col, n) wraps a column inside a predicate - a prefix-match shape (CHARINDEX(...) = 1, or LEFT(col, n) = &#x27;x&#x27; with LEN(&#x27;x&#x27;) = n) is exactly rewritable to col LIKE &#x27;x%&#x27;; any other shape is a genuine substring search with no sargable rewrite.</p>
+  <p class="rationale">CHARINDEX(x, col) and LEFT(col, n) are both function wraps around the column, so both defeat an index seek exactly like any other wrapped-column pattern - but this rule treats them specially because, unlike a genuine substring search, some uses of these two functions are actually asking a prefix question in disguise, and a prefix question has an exact sargable rewrite available.</p>
+  <p class="rationale">CHARINDEX(x, col) = 1 asks &quot;does col start with x&quot; - CHARINDEX returns the 1-based position of the first match, and requiring that position to be exactly 1 means the match has to be at the very start of the string. That&#x27;s precisely what col LIKE &#x27;x%&#x27; asks too, with the difference that LIKE with a trailing (not leading) wildcard IS seekable, per the LeadingWildcardLike rule&#x27;s own logic in reverse. Similarly, LEFT(col, n) = &#x27;x&#x27; where LEN(&#x27;x&#x27;) = n is asking &quot;do the first n characters of col equal x&quot; - again exactly a prefix question, again rewritable as col LIKE &#x27;x%&#x27;.</p>
+  <p class="rationale">Any other use of CHARINDEX or LEFT against a column - CHARINDEX(x, col) &gt; 0 (does col contain x anywhere), CHARINDEX(x, col) = 5 (does the match start at position 5 specifically), LEFT(col, n) = &#x27;x&#x27; where LEN(&#x27;x&#x27;) != n - is a genuine substring or fixed-position search with no equivalent LIKE rewrite, and needs full-text search or a computed/indexed column to become sargable, the same as any other genuine substring search.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">For the prefix-match shape specifically - CHARINDEX(x, col) = 1, or LEFT(col, n) = &#x27;x&#x27; where LEN(&#x27;x&#x27;) = n - rewrite as col LIKE &#x27;x%&#x27;. The rewrite is exact, not an approximation: both forms match exactly the rows whose column value starts with x, and the LIKE form is fully seekable. For any other shape (a genuine substring search, or a fixed non-1 starting position), there is no equivalent LIKE rewrite - the same full-text-search or computed-column approach LeadingWildcardLike&#x27;s own fix guidance describes applies here too.</p>
+  <h3>CHARINDEX(...) = 1 is really a prefix match</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId INT          NOT NULL PRIMARY KEY,&#xA;    Code      NVARCHAR(50) NOT NULL&#xA;);&#xA;CREATE INDEX IX_Products_Code ON dbo.Products(Code);&#xA;&#xA;SELECT ProductId&#xA;FROM dbo.Products&#xA;WHERE CHARINDEX(&#x27;AB-&#x27;, Code) = 1;</code></pre></div>
+  <p class="example-explanation">CHARINDEX(...) is computed per row before the comparison, so IX_Products_Code can&#x27;t be seeked, even though the question being asked is really just a prefix match.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT ProductId&#xA;FROM dbo.Products&#xA;WHERE Code LIKE &#x27;AB-%&#x27;;</code></pre></div>
+  <p class="example-explanation">The exact same rows, expressed as a prefix LIKE pattern - Code is now bare, and the optimizer can seek IX_Products_Code.</p>
+  <h3>A genuine substring search has no sargable rewrite</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>SELECT ProductId&#xA;FROM dbo.Products&#xA;WHERE CHARINDEX(&#x27;AB&#x27;, Code) &gt; 0;</code></pre></div>
+  <p class="example-explanation">Asking whether &#x27;AB&#x27; appears ANYWHERE in Code (not necessarily at the start) is a genuine substring search - there is no LIKE-prefix rewrite that means the same thing, so this stays a full scan under a standard B-tree index. A full-text index (CONTAINS/FREETEXT) is the supported way to make this kind of search seekable at scale.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/CHARINDEX_PREFIX_MATCH_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: Microsoft Learn Q&amp;A forum, &quot;Charindex very bad performance&quot; - a real user reporting&#xA;-- CHARINDEX(x, col) in a WHERE clause causing a full scan on a large table. This fixture uses&#xA;-- the specific = 1 prefix-match shape (rewritable to LIKE &#x27;x%&#x27;), the differentiator this rule&#xA;-- exists to surface.&#xA;CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY,&#xA;    Code       VARCHAR(50) NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Customers_Code ON dbo.Customers(Code);&#xA;GO&#xA;&#xA;SELECT CustomerId&#xA;FROM dbo.Customers&#xA;WHERE CHARINDEX(&#x27;AB&#x27;, Code) = 1;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/CHARINDEX_SUBSTRING_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Near-miss sibling of CHARINDEX_PREFIX_MATCH_fires.sql, same real-world source (MS Learn forum&#xA;-- &quot;Charindex very bad performance&quot;): CHARINDEX(x, col) &gt; 0 is a genuine substring search - it&#xA;-- still fires (still wraps the column, still non-sargable), but unlike the = 1 prefix-match&#xA;-- case, no sargable rewrite exists for it. Both must fire; only the Detail/remediation differs.&#xA;CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY,&#xA;    Code       VARCHAR(50) NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Customers_Code ON dbo.Customers(Code);&#xA;GO&#xA;&#xA;SELECT CustomerId&#xA;FROM dbo.Customers&#xA;WHERE CHARINDEX(&#x27;AB&#x27;, Code) &gt; 0;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/LEFT_PREFIX_MATCH_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- No confirmed distinct real-world bug report found for this exact shape (only opinion pieces&#xA;-- illustrating the general &quot;LEFT(col, n) is not sargable&quot; pattern, no independent user-reported&#xA;-- repro) - explicitly authored per CLAUDE.md&#x27;s rare-exception allowance. The pattern itself&#xA;-- (LEFT(col, n) = &#x27;x&#x27; with LEN(&#x27;x&#x27;) = n, exactly equivalent to col LIKE &#x27;x%&#x27;) is textbook,&#xA;-- well-documented T-SQL.&#xA;CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId INT NOT NULL PRIMARY KEY,&#xA;    Sku       VARCHAR(20) NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Products_Sku ON dbo.Products(Sku);&#xA;GO&#xA;&#xA;SELECT ProductId&#xA;FROM dbo.Products&#xA;WHERE LEFT(Sku, 3) = &#x27;ABC&#x27;;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

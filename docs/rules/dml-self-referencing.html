@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self Referencing - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Self Referencing</h1>
+  <p class="rule-key"><code>silentscan/dml/self-referencing</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An INSERT/UPDATE/DELETE/MERGE whose own read side (a self-join, a WHERE/SET subquery, or a view over the same base table) also names the exact table it writes to - oracle-confirmed to force extra defensive plan work (an Eager Spool for INSERT/DELETE, an extra Sort for UPDATE ... FROM/MERGE) that an otherwise-identical statement reading a different table never pays.</p>
+  <p class="rationale">When a single statement both reads and writes the same table - a DELETE whose WHERE clause subqueries the table it&#x27;s deleting from, an INSERT ... SELECT that reads from the very table it inserts into, an UPDATE ... FROM that joins the target table back to itself, or any of these reached indirectly through a view built over the same base table - SQL Server can no longer assume the read side sees a stable snapshot of rows that the write side hasn&#x27;t touched yet. As the statement proceeds, rows it has already modified could, in principle, be revisited by its own read side, producing a row that&#x27;s read once, written, then read again in its new state and written again - the Halloween-problem family of anomalies, so named because it was first characterized on a statement that kept giving already-raised employees another raise as it repeatedly re-encountered their updated rows.</p>
+  <p class="rationale">The engine&#x27;s defense against this is architectural, not optional, and it costs real plan work: for a self-referencing INSERT or DELETE, the plan gets an Eager Spool that fully materializes the read side into a worktable before a single write happens, so the write side can never see its own in-flight changes. For a self-referencing UPDATE ... FROM or MERGE, the plan instead gets an extra Sort forcing the same full-materialize- before-write ordering. Both are pure overhead relative to an otherwise identical statement whose read side names a different table - there&#x27;s nothing to defensively spool or sort when the rows being read can never be the rows being written, so that version of the plan skips the extra operator entirely. This is oracle-confirmed by comparing the two plans directly: same row counts, same indexes, same statement shape, differing only in whether the read side names the write target - and the self- referencing version consistently carries the extra spool or sort.</p>
+  <p class="rationale">The performance cost is easy to miss because nothing about it shows up in the source text - the statement reads like ordinary DML, and the extra plan work only becomes visible in an actual execution plan, not in the query itself. It also scales with the table, not with how much data logically needs re-checking: a self-join DELETE against a large table pays for materializing its full read side even when, semantically, no row was ever going to overlap between what&#x27;s read and what&#x27;s deleted.</p>
+  <h2>How can I fix it?</h2>
+  <h3>A DELETE whose subquery reads the table it deletes from</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT NOT NULL PRIMARY KEY,&#xA;    CustomerId INT NOT NULL,&#xA;    CreatedAt  DATETIME2(0) NOT NULL&#xA;);&#xA;&#xA;DELETE o&#xA;FROM dbo.Orders AS o&#xA;WHERE o.CreatedAt &lt; DATEADD(YEAR, -1, SYSDATETIME())&#xA;  AND o.OrderId NOT IN (&#xA;      SELECT TOP (1) o2.OrderId&#xA;      FROM dbo.Orders AS o2&#xA;      WHERE o2.CustomerId = o.CustomerId&#xA;      ORDER BY o2.CreatedAt DESC&#xA;  );</code></pre></div>
+  <p class="example-explanation">The correlated subquery reads dbo.Orders - the exact table the DELETE writes to - to find each customer&#x27;s most recent order and keep it. SQL Server must materialize the read side (an Eager Spool) before deleting any row, so the subquery can never see rows this same statement has already removed.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

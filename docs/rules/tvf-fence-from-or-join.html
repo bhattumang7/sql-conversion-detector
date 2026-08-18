@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>From Or Join - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>From Or Join</h1>
+  <p class="rule-key"><code>silentscan/tvf-fence/from-or-join</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A FROM/JOIN references a multi-statement/CLR table-valued function directly - the optimizer cannot see into its body, so the reference carries a fixed cardinality estimate (1 row legacy CE / 100 rows 2014&#x2B; CE) that propagates into the surrounding plan.</p>
+  <p class="rationale">A multi-statement table-valued function referenced directly in a `FROM` or `JOIN` clause - not via APPLY, just an ordinary join to its result set - hits the same optimizer blind spot as any other MSTVF call: the engine can&#x27;t see the statements inside the function body, so it substitutes a fixed, fabricated cardinality estimate for the function&#x27;s output (1 row legacy CE / 100 rows 2014&#x2B; CE) instead of a real one derived from statistics.</p>
+  <p class="rationale">What makes the FROM/JOIN shape distinct from a correlated APPLY is where the damage lands: there&#x27;s no per-row re-execution here, because the function isn&#x27;t being driven by a correlated parameter from another table - it runs once. The cost instead is that the bad estimate poisons the *surrounding join&#x27;s* plan choice. The optimizer picks a join algorithm (nested loops, hash, merge) and a join order based on the estimated row counts on each side, and a function estimated at 1 or 100 rows when it actually returns tens of thousands sends the optimizer looking for a nested-loops join against what it believes is a tiny input - the worst-case algorithm for what turns out to be a large one, with no spill protection and no re-costing once the true size is known.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Rewrite the multi-statement TVF as a single-statement inline TVF (`RETURN (SELECT ...)`, no `BEGIN...END` block, no table variable) so its defining query expands into the join before optimization and the optimizer can derive a real estimate for it, the same way it would for a table or view reference. Where the function&#x27;s logic genuinely needs multiple statements, inline that logic as a derived table or CTE in the calling query instead of calling out to a function at all.</p>
+  <h3>A multi-statement TVF joined directly in FROM</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CustomerId INT NOT NULL);&#xA;&#xA;CREATE FUNCTION dbo.fn_OrderLines(@OrderId INT)&#xA;RETURNS @Lines TABLE (LineId INT, Qty INT)&#xA;AS&#xA;BEGIN&#xA;    INSERT INTO @Lines (LineId, Qty) SELECT 1, 1;&#xA;    RETURN;&#xA;END;&#xA;&#xA;SELECT o.OrderId, l.LineId&#xA;FROM dbo.Orders o&#xA;JOIN dbo.fn_OrderLines(1) l ON l.LineId = o.OrderId;</code></pre></div>
+  <p class="example-explanation">The optimizer estimates fn_OrderLines&#x27; output at a fixed row count regardless of how many rows the function body actually inserts into @Lines - if the real count is much larger, the join algorithm chosen for the surrounding query is picked for the wrong input size.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE FUNCTION dbo.fn_OrderLines(@OrderId INT)&#xA;RETURNS TABLE&#xA;AS&#xA;RETURN (SELECT LineId, Qty FROM dbo.OrderLineStaging WHERE OrderId = @OrderId);&#xA;&#xA;SELECT o.OrderId, l.LineId&#xA;FROM dbo.Orders o&#xA;JOIN dbo.fn_OrderLines(1) l ON l.LineId = o.OrderId;</code></pre></div>
+  <p class="example-explanation">As an inline TVF, the function&#x27;s query expands into the join before optimization - the optimizer derives a real cardinality estimate from OrderLineStaging&#x27;s own statistics instead of guessing.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tvf_fence/FROM_OR_JOIN_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: &quot;Table Valued Function causing performance issue&quot; - SQLServerCentral Forums&#xA;-- https://www.sqlservercentral.com/forums/topic/table-valued-function-causing-performance-issue&#xA;-- A real-world report of a multi-statement TVF referenced directly in FROM/JOIN poisoning the&#xA;-- surrounding plan - the thread&#x27;s own root cause is exactly the fixed-cardinality-estimate&#xA;-- fence this fixture reproduces in miniature: a real base table joined against an MSTVF, whose&#xA;-- body the optimizer cannot see into.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT NOT NULL PRIMARY KEY,&#xA;    CustomerId INT NOT NULL&#xA;);&#xA;GO&#xA;CREATE FUNCTION dbo.fn_OrderLines(@OrderId INT)&#xA;RETURNS @Lines TABLE (LineId INT, Qty INT)&#xA;AS&#xA;BEGIN&#xA;    INSERT INTO @Lines (LineId, Qty)&#xA;    SELECT 1, 1;&#xA;    RETURN;&#xA;END;&#xA;GO&#xA;&#xA;SELECT o.OrderId, l.LineId&#xA;FROM dbo.Orders o&#xA;JOIN dbo.fn_OrderLines(1) l ON l.LineId = o.OrderId;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tvf_fence/FROM_OR_JOIN_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for FROM_OR_JOIN_fires.sql: textually identical call site&#xA;-- (FROM dbo.fn_OrderLines(1) l), but fn_OrderLines is an INLINE TVF here - RETURNS TABLE AS&#xA;-- RETURN (SELECT ...), expanded into the calling query exactly like a view, no fence. The point&#xA;-- of this pair: only the catalog (sys.objects.type IF vs TF), not the call site, can tell them&#xA;-- apart, which is exactly what MUST NOT fire here.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT NOT NULL PRIMARY KEY,&#xA;    CustomerId INT NOT NULL&#xA;);&#xA;GO&#xA;CREATE FUNCTION dbo.fn_OrderLines(@OrderId INT)&#xA;RETURNS TABLE&#xA;AS&#xA;RETURN (SELECT 1 AS LineId, 1 AS Qty);&#xA;GO&#xA;&#xA;SELECT o.OrderId, l.LineId&#xA;FROM dbo.Orders o&#xA;JOIN dbo.fn_OrderLines(1) l ON l.LineId = o.OrderId;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

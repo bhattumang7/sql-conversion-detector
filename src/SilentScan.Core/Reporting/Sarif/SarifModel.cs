@@ -16,7 +16,7 @@ public sealed record SarifTool(SarifDriver Driver);
 
 public sealed record SarifDriver(string Name, string Version, string? InformationUri, IReadOnlyList<SarifRule> Rules);
 
-public sealed record SarifRule(string Id, SarifMessage ShortDescription);
+public sealed record SarifRule(string Id, SarifMessage ShortDescription, string? HelpUri = null);
 
 public sealed record SarifResult(
     string RuleId, string Level, SarifMessage Message, IReadOnlyList<SarifLocation> Locations, SarifResultProperties? Properties = null);

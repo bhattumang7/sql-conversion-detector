@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Numeric Scale Narrowing - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Numeric Scale Narrowing</h1>
+  <p class="rule-key"><code>silentscan/write-loss/numeric-scale-narrowing</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An INSERT/UPDATE assigns a DECIMAL/NUMERIC value to a target with a smaller scale - digits past the target&#x27;s scale are silently rounded away, with no error.</p>
+  <p class="rationale">DECIMAL/NUMERIC is defined by two numbers: precision (total significant digits) and scale (digits to the right of the decimal point). Scale is fixed at the column&#x27;s own definition - a DECIMAL(10,2) column can never hold more than two digits after the point, no matter what value is assigned to it. When an INSERT or UPDATE assigns a DECIMAL/NUMERIC source value whose own scale is larger than the target column&#x27;s scale - for example a DECIMAL(18,6) computation written into a DECIMAL(10,2) column - SQL Server does not reject the assignment or raise a truncation error. It silently rounds the value to the target&#x27;s scale and stores the rounded result.</p>
+  <p class="rationale">This is easy to miss precisely because DECIMAL-to-DECIMAL narrowing looks like it &quot;should&quot; be safe - both sides are exact numeric types, unlike the approximate-to-exact case, so there&#x27;s no obvious representational mismatch to raise suspicion. But scale narrowing still discards real digits: a computation that intentionally carries extra scale through several steps to preserve precision (a currency conversion, a unit price times a fractional quantity, an accumulated interest calculation) loses that extra precision the instant it&#x27;s persisted into a narrower column, and every digit past the target&#x27;s scale is gone with no error and no log of what was rounded away.</p>
+  <p class="rationale">The engine&#x27;s rounding here is a genuine round-half-away-from-zero, not a truncation - which means the loss can be small per row, but it compounds across aggregations: summing a column of rounded values after the fact does not reproduce what summing the unrounded values would have given, and reconciliation against an external system that kept the extra scale can drift by fractions of a cent per row, invisible until totals are compared line by line.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Widen the target column&#x27;s DECIMAL/NUMERIC scale to match (or exceed) the scale of the values being written into it, if the extra precision is actually meaningful downstream. If the extra digits genuinely don&#x27;t matter for this column - for example a display price that&#x27;s always meant to be two-decimal currency - round the value explicitly with ROUND() to the target&#x27;s own scale before assigning it, so the rounding is a decision visible in the query text rather than an invisible side effect of the column&#x27;s definition.</p>
+  <h3>A six-decimal calculation written into a two-decimal column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.InvoiceLines&#xA;(&#xA;    InvoiceLineId INT           NOT NULL PRIMARY KEY,&#xA;    LineTotal     DECIMAL(10,2) NOT NULL&#xA;);&#xA;&#xA;DECLARE @unitPrice DECIMAL(18,6) = 19.995000;&#xA;DECLARE @quantity  DECIMAL(18,6) = 3.333333;&#xA;&#xA;UPDATE dbo.InvoiceLines&#xA;SET LineTotal = @unitPrice * @quantity&#xA;WHERE InvoiceLineId = 1;</code></pre></div>
+  <p class="example-explanation">@unitPrice * @quantity evaluates at a scale far beyond 2 digits; assigning it into LineTotal DECIMAL(10,2) silently rounds it to two decimal places with no error, discarding the extra precision the calculation carried.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.InvoiceLines&#xA;(&#xA;    InvoiceLineId INT           NOT NULL PRIMARY KEY,&#xA;    LineTotal     DECIMAL(18,6) NOT NULL&#xA;);&#xA;&#xA;DECLARE @unitPrice DECIMAL(18,6) = 19.995000;&#xA;DECLARE @quantity  DECIMAL(18,6) = 3.333333;&#xA;&#xA;UPDATE dbo.InvoiceLines&#xA;SET LineTotal = @unitPrice * @quantity&#xA;WHERE InvoiceLineId = 1;</code></pre></div>
+  <p class="example-explanation">LineTotal now carries the same scale as the calculation, so no digits are silently rounded away on write.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

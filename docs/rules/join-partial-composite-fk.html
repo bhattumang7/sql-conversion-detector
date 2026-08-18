@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Partial Composite FK - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Partial Composite FK</h1>
+  <p class="rule-key"><code>silentscan/join/partial-composite-fk</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A JOIN equates some but not all of a real composite foreign key&#x27;s column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek.</p>
+  <p class="rationale">A composite foreign key exists specifically because no single column of the child table uniquely identifies its parent - the relationship is only meaningful when every column pair in the key is honored together. A classic example is an order-line table keyed to its order by (OrderId, LineNumber) referencing a header table&#x27;s (OrderId, SomeLineTypeId) composite key, or a multi-tenant schema where every foreign key also carries TenantId alongside the &quot;real&quot; id column specifically so a query can&#x27;t accidentally join across tenants. The database engine enforces the composite key as a unit at write time - a child row must match the parent on all of its columns together, or the FK rejects the insert. But nothing at read time forces a query&#x27;s JOIN to honor all of those columns too. SQL Server will happily execute a JOIN that equates only one column of a two-or-more-column foreign key relationship; ScriptDom parses it, the optimizer plans it, and it returns rows.</p>
+  <p class="rationale">The columns left out of the JOIN condition are exactly the columns that were supposed to narrow the match down to the single correct parent row. Omitting them means the join predicate is weaker than the actual relationship the schema encodes, so one parent row can now match every child row that merely happens to share the one column that is still being compared - even rows that belong to a completely different order, tenant, or type under the full key. The result is silent row multiplication: a report that should show one line per order-line instead shows a cross-product blowup wherever the partial match fans out, and downstream aggregates (SUM, COUNT) are inflated by exactly the degree of that fan-out. Nothing in the query&#x27;s own execution signals a problem - it runs, it returns a plausible-looking row shape, and the numbers are simply wrong.</p>
+  <p class="rationale">This is a correctness defect, not a missed-index performance one: the join predicate itself describes a broader relationship than the schema&#x27;s own foreign key promises, so even a perfectly-indexed version of the same partial join still returns the wrong rows.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Add the missing column pair(s) to the JOIN&#x27;s ON clause so every column of the composite foreign key is equated, matching the relationship the schema itself declares. If the query genuinely intends a broader match than the full key - for example deliberately joining across TenantId for an administrative cross-tenant report - that intent should be explicit in review and ideally documented at the call site, since it&#x27;s indistinguishable from an accidental omission otherwise.</p>
+  <h3>A tenant-scoped composite foreign key joined on only one column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    TenantId INT NOT NULL,&#xA;    OrderId  INT NOT NULL,&#xA;    CONSTRAINT PK_Orders PRIMARY KEY (TenantId, OrderId)&#xA;);&#xA;CREATE TABLE dbo.OrderLines&#xA;(&#xA;    TenantId  INT NOT NULL,&#xA;    OrderId   INT NOT NULL,&#xA;    LineId    INT NOT NULL,&#xA;    Quantity  INT NOT NULL,&#xA;    CONSTRAINT PK_OrderLines PRIMARY KEY (TenantId, LineId),&#xA;    CONSTRAINT FK_OrderLines_Orders FOREIGN KEY (TenantId, OrderId)&#xA;        REFERENCES dbo.Orders (TenantId, OrderId)&#xA;);&#xA;&#xA;SELECT o.OrderId, SUM(ol.Quantity) AS TotalQuantity&#xA;FROM dbo.Orders AS o&#xA;JOIN dbo.OrderLines AS ol ON ol.OrderId = o.OrderId&#xA;GROUP BY o.OrderId;</code></pre></div>
+  <p class="example-explanation">The FK is (TenantId, OrderId), but the JOIN equates only OrderId - an OrderId that recurs across different tenants (a common pattern when OrderId is per-tenant sequential, not globally unique) matches every tenant&#x27;s rows with that OrderId, silently inflating TotalQuantity.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT o.OrderId, SUM(ol.Quantity) AS TotalQuantity&#xA;FROM dbo.Orders AS o&#xA;JOIN dbo.OrderLines AS ol&#xA;    ON ol.TenantId = o.TenantId AND ol.OrderId = o.OrderId&#xA;GROUP BY o.TenantId, o.OrderId;</code></pre></div>
+  <p class="example-explanation">Both columns of the composite foreign key are now equated, so each order&#x27;s lines are matched only within the same tenant - exactly the relationship the FK declares.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

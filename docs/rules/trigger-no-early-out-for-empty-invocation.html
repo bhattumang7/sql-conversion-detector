@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>No Early Out For Empty Invocation - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>No Early Out For Empty Invocation</h1>
+  <p class="rule-key"><code>silentscan/trigger/no-early-out-for-empty-invocation</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A trigger body has no IF NOT EXISTS(SELECT * FROM inserted/deleted)/IF @@ROWCOUNT = 0 RETURN-style guard - a well-documented convention to skip unnecessary work on an empty invocation, advisory only.</p>
+  <p class="rationale">A DML trigger fires once per triggering statement, but that doesn&#x27;t mean inserted or deleted is guaranteed to hold any rows. An UPDATE or DELETE whose WHERE clause matches zero rows still counts as a statement that ran against the trigger&#x27;s table, and SQL Server still fires AFTER triggers for it - inserted/deleted are simply empty in that invocation. The same is true for a MERGE whose matched/not-matched branches happen to touch zero rows for a particular clause, and for certain replication and change-data-capture-driven paths that can invoke a trigger against an empty row set as part of their own bookkeeping. None of this is exotic - &quot;UPDATE ... WHERE some condition that matches nothing today&quot; is an ordinary, common statement shape.</p>
+  <p class="rationale">A trigger body with no guard at its top runs its full logic regardless - every join against inserted/deleted, every subquery, every side-effecting write it contains - even when there is provably nothing to do. Joins against an empty pseudo-table still cost a plan compilation and execution; a trigger that writes to an audit table, calls other procedures, or does non-trivial computation pays that full cost on every empty invocation just as it would on a real one, silently multiplying overhead on any workload heavy with no-op UPDATE/DELETE statements.</p>
+  <p class="rationale">This is an advisory, not a correctness bug: a well-guarded trigger and an unguarded one both produce correct results on an empty invocation, since every operation against an empty inserted/deleted is naturally a no-op. The cost is purely wasted work - extra plan execution for logic that was never going to touch a row - which is why this is a widely followed convention rather than something the engine itself requires.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Add a cheap early-out guard at the very top of the trigger body, before any other logic runs: IF NOT EXISTS (SELECT 1 FROM inserted) AND NOT EXISTS (SELECT 1 FROM deleted) RETURN; (adjusted to whichever pseudo-table(s) the trigger actually reads), or equivalently IF @@ROWCOUNT = 0 RETURN; as the very first statement, before @@ROWCOUNT is reset by anything else. Either form lets the trigger skip its entire body on an empty invocation for the cost of one cheap existence check.</p>
+  <h3>A trigger with no guard runs its full body on a zero-row UPDATE</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Accounts&#xA;(&#xA;    AccountId INT           NOT NULL PRIMARY KEY,&#xA;    Balance   DECIMAL(12,2) NOT NULL,&#xA;    Status    VARCHAR(20)   NOT NULL&#xA;);&#xA;&#xA;CREATE TABLE dbo.AccountAudit&#xA;(&#xA;    AccountId  INT           NOT NULL,&#xA;    OldBalance DECIMAL(12,2) NOT NULL,&#xA;    NewBalance DECIMAL(12,2) NOT NULL,&#xA;    ChangedAt  DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()&#xA;);&#xA;&#xA;CREATE TRIGGER dbo.trg_Accounts_Update ON dbo.Accounts&#xA;AFTER UPDATE&#xA;AS&#xA;BEGIN&#xA;    INSERT INTO dbo.AccountAudit (AccountId, OldBalance, NewBalance)&#xA;    SELECT i.AccountId, d.Balance, i.Balance&#xA;    FROM inserted AS i&#xA;    JOIN deleted AS d ON d.AccountId = i.AccountId;&#xA;END;</code></pre></div>
+  <p class="example-explanation">UPDATE dbo.Accounts SET Balance = Balance WHERE Status = &#x27;Closed&#x27; still fires this trigger even when zero rows have Status = &#x27;Closed&#x27; - the INSERT ... SELECT still compiles and executes a join against an empty inserted/deleted every time, for no result.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TRIGGER dbo.trg_Accounts_Update ON dbo.Accounts&#xA;AFTER UPDATE&#xA;AS&#xA;BEGIN&#xA;    IF @@ROWCOUNT = 0 RETURN;&#xA;&#xA;    INSERT INTO dbo.AccountAudit (AccountId, OldBalance, NewBalance)&#xA;    SELECT i.AccountId, d.Balance, i.Balance&#xA;    FROM inserted AS i&#xA;    JOIN deleted AS d ON d.AccountId = i.AccountId;&#xA;END;</code></pre></div>
+  <p class="example-explanation">The @@ROWCOUNT check as the very first statement skips the audit join entirely on an empty invocation, at the cost of one cheap check instead of a full join execution.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

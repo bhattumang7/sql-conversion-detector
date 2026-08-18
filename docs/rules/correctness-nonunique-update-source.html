@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nonunique Update Source - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Nonunique Update Source</h1>
+  <p class="rule-key"><code>silentscan/correctness/nonunique-update-source</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">UPDATE ... FROM ... JOIN where the joined source&#x27;s own join columns carry no unique index/constraint - if a target row matches more than one source row, SQL Server silently picks a value from an unspecified one of them (plan-dependent, not guaranteed stable across executions). MERGE raises a hard error in this exact situation instead of picking silently. Never fires when the source&#x27;s join columns are covered by a genuine unique index/constraint, or when the SET clause never reads from the non-unique source.</p>
+  <p class="rationale">The `UPDATE target SET ... FROM target JOIN source ON ...` form is a T-SQL extension, not standard SQL, and its documented contract is narrower than it looks: it&#x27;s only well-defined when each row of `target` matches at most one row of `source`. When a target row matches more than one source row - because the source&#x27;s own join columns aren&#x27;t backed by a unique index or constraint - the ANSI standard has nothing to say about which matching source row supplies the value, and SQL Server doesn&#x27;t pick consistently either. It resolves the join to some physical row order determined by the chosen execution plan, and updates the target from whichever source row that plan happens to visit for that target row. No error, no warning: the statement completes, @@ROWCOUNT looks correct, and the values written are simply whichever source row&#x27;s data the plan visited - not necessarily the first, last, or most recent one by any column the author cares about.</p>
+  <p class="rationale">The dangerous part is that which source row &quot;wins&quot; is plan-dependent, not data-dependent - the exact same statement against the exact same data can pick a different source row on a different day, after a statistics update, an index rebuild, or a plan cache eviction changes which physical order the join happens to run in. A report that looked stable for months can silently start picking different values with no code change and no data change, purely because the optimizer chose a different plan shape. This is precisely the kind of nondeterminism that&#x27;s invisible in code review - the SET clause reads like ordinary single-value assignment - and invisible in testing too, since a small or well-ordered test dataset often happens to produce the same result across runs even though the underlying behavior was never actually guaranteed.</p>
+  <p class="rationale">MERGE, by contrast, treats the equivalent situation - a target row matched by more than one source row in the WHEN MATCHED clause - as a hard error at execution time (&quot;The MERGE statement attempted to UPDATE or DELETE the same row more than once&quot;). That&#x27;s a deliberate design difference: MERGE refuses to guess, while UPDATE...FROM silently guesses and moves on.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Add a unique index or unique constraint covering the source&#x27;s own join columns, so the join is guaranteed to match at most one source row per target row and there&#x27;s no ambiguity left for the plan to resolve arbitrarily. If a genuine one-to-many relationship is intended and only one source row&#x27;s values should really apply, make that selection explicit - pick it with TOP (1) plus an ORDER BY inside a derived table or CTE, or aggregate the source rows down to one value per key - rather than relying on whichever row the plan happens to visit. Where the intent really is &quot;update from exactly one matching row, and fail loudly if that&#x27;s not true,&quot; MERGE is the safer primitive: it raises a hard error instead of picking silently.</p>
+  <h3>UPDATE...FROM against a source with no unique key on the join column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId INT           NOT NULL PRIMARY KEY,&#xA;    Price     DECIMAL(10,2) NOT NULL&#xA;);&#xA;CREATE TABLE dbo.PendingPriceUpdates&#xA;(&#xA;    UpdateId  INT           NOT NULL PRIMARY KEY,&#xA;    ProductId INT           NOT NULL,&#xA;    NewPrice  DECIMAL(10,2) NOT NULL&#xA;);&#xA;-- No unique index/constraint on PendingPriceUpdates.ProductId: the same&#xA;-- ProductId can legitimately appear on more than one pending row.&#xA;&#xA;UPDATE p&#xA;SET p.Price = u.NewPrice&#xA;FROM dbo.Products AS p&#xA;JOIN dbo.PendingPriceUpdates AS u ON u.ProductId = p.ProductId;</code></pre></div>
+  <p class="example-explanation">If a ProductId has two pending rows with different NewPrice values, SQL Server picks one of them based on plan-dependent physical join order, not on any explicit tiebreak - the same statement can pick a different row on a different execution.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>UPDATE p&#xA;SET p.Price = latest.NewPrice&#xA;FROM dbo.Products AS p&#xA;CROSS APPLY (&#xA;    SELECT TOP (1) u.NewPrice&#xA;    FROM dbo.PendingPriceUpdates AS u&#xA;    WHERE u.ProductId = p.ProductId&#xA;    ORDER BY u.UpdateId DESC&#xA;) AS latest;</code></pre></div>
+  <p class="example-explanation">The CROSS APPLY explicitly picks the most recent pending update (highest UpdateId) per product, so which row wins is a deliberate, deterministic choice instead of whatever the plan happens to visit first.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

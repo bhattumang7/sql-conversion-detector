@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Function Wrapped Column - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Function Wrapped Column</h1>
+  <p class="rule-key"><code>silentscan/tier1/function-wrapped-column</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A column is wrapped in a function call inside a predicate, preventing an index seek.</p>
+  <p class="rationale">SQL Server&#x27;s optimizer can only use a B-tree index to seek directly to matching rows when it can compare the index key&#x27;s own stored bytes against a value without first transforming them. A nonclustered index on a column stores that column&#x27;s values in sorted order; the engine walks the B-tree by comparing the search value against the stored key, descending toward the match. That comparison only works if the stored key itself is what&#x27;s being compared. The moment a predicate wraps the column in a function - YEAR(SomeDate), ISNULL(Age, 0), UPPER(Name), any of it - the expression the predicate actually evaluates is the function&#x27;s OUTPUT, not the column&#x27;s stored value. The index has no entries sorted by that output; it only has entries sorted by the raw column. So the optimizer can&#x27;t seek through it at all for this predicate, and falls back to a full index or table scan, evaluating the function once per row to find matches.</p>
+  <p class="rationale">This is easy to miss because the code still looks like it&#x27;s using an indexed column - the WHERE clause names the column directly. But the instant it&#x27;s inside a function call, from the engine&#x27;s point of view the predicate is against a computed value with no supporting index, and the query pays for a full scan on every execution regardless of table size. On a small table this is invisible; on a table with millions of rows it is the single most common cause of an unexplained slow query in production. The fix is almost always the same shape: move the transformation off the column and onto the comparison side instead, so the column itself is compared directly against something an index can seek to.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">The general technique is called sargability (from &quot;Search ARGument ABLE&quot;): rewrite the predicate so the column appears bare on one side of the comparison, with any transformation pushed onto the constant/parameter side instead, which the optimizer can evaluate once at compile time rather than once per row.</p>
+  <p class="rationale">For a date-part function like YEAR(SomeDate) = 2018, the fix is a literal date range: SomeDate &gt;= &#x27;20180101&#x27; AND SomeDate &lt; &#x27;20190101&#x27;. Both bounds are plain comparisons against the raw column, so the optimizer can seek to the first matching row and scan forward only through the matching range.</p>
+  <p class="rationale">For ISNULL(Age, 0) = 0, rewrite as Age = 0 OR Age IS NULL - logically identical (a NULL Age or an Age of 0 both match), but now Age appears unwrapped on both branches, so each branch can seek independently.</p>
+  <p class="rationale">For CASE/COALESCE/IIF wrapping the column, the same principle applies: work out what set of raw-column conditions the wrapped expression is equivalent to, and write that directly instead of relying on the engine to evaluate the function per row.</p>
+  <h3>A date-part function forces a scan</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId  INT      NOT NULL PRIMARY KEY,&#xA;    OrderDate DATETIME NOT NULL&#xA;);&#xA;CREATE INDEX IX_Orders_OrderDate ON dbo.Orders(OrderDate);&#xA;&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE YEAR(OrderDate) = 2018;</code></pre></div>
+  <p class="example-explanation">YEAR(OrderDate) must be evaluated per row before it can be compared to 2018 - the index on OrderDate is never consulted, and the engine scans every row in the table.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE OrderDate &gt;= &#x27;20180101&#x27; AND OrderDate &lt; &#x27;20190101&#x27;;</code></pre></div>
+  <p class="example-explanation">OrderDate now appears bare on both sides of the range - the optimizer can seek IX_Orders_OrderDate directly to 2018-01-01 and scan forward only through matching rows.</p>
+  <h3>ISNULL wrapping the column</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL&#xA;);&#xA;CREATE INDEX IX_Users_Age ON dbo.Users(Age);&#xA;&#xA;SELECT UserId&#xA;FROM dbo.Users&#xA;WHERE ISNULL(Age, 0) = 0;</code></pre></div>
+  <p class="example-explanation">ISNULL(Age, 0) produces a new value per row before the comparison runs, so IX_Users_Age can&#x27;t be seeked.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT UserId&#xA;FROM dbo.Users&#xA;WHERE Age = 0 OR Age IS NULL;</code></pre></div>
+  <p class="example-explanation">Logically identical, but Age is now bare in both branches, so the optimizer can seek IX_Users_Age for each.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: &quot;If You Can&#x27;t Index It, It&#x27;s Probably Not SARGable&quot; - Brent Ozar&#xA;-- https://www.brentozar.com/archive/2018/03/cant-index-probably-not-sargable/&#xA;-- You can&#x27;t build an index on YEAR(SomeDate); the engine must evaluate YEAR()&#xA;-- per row, so a predicate like this can&#x27;t seek even with an index on SomeDate.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId   INT      NOT NULL PRIMARY KEY,&#xA;    SomeDate  DATETIME NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Orders_SomeDate ON dbo.Orders(SomeDate);&#xA;GO&#xA;&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE YEAR(SomeDate) = 2018;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for FUNCTION_WRAPPED_COLUMN: the sargable rewrite of the same&#xA;-- predicate from the Brent Ozar article this rule is sourced from&#xA;-- (https://www.brentozar.com/archive/2018/03/cant-index-probably-not-sargable/).&#xA;-- The date range form lets the engine seek on SomeDate directly - no function&#xA;-- wraps the column, so this must NOT fire.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId   INT      NOT NULL PRIMARY KEY,&#xA;    SomeDate  DATETIME NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Orders_SomeDate ON dbo.Orders(SomeDate);&#xA;GO&#xA;&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE SomeDate &gt;= &#x27;20180101&#x27; AND SomeDate &lt; &#x27;20190101&#x27;;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_isnull_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: &quot;Can Non-SARGable Predicates Ever Seek?&quot; - Brent Ozar&#xA;-- https://www.brentozar.com/archive/2018/06/can-non-sargable-predicates-ever-seek/&#xA;-- ISNULL(Age, 0) = 0 forces a scan; the sargable rewrite is&#xA;-- &quot;WHERE Age = 0 OR Age IS NULL&quot;, which restores two index seeks.&#xA;CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Users_Age ON dbo.Users(Age);&#xA;GO&#xA;&#xA;SELECT UserId&#xA;FROM dbo.Users AS u&#xA;WHERE ISNULL(u.Age, 0) = 0;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_isnull_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss sibling of FUNCTION_WRAPPED_COLUMN_isnull_fires.sql: the sargable rewrite from&#xA;-- the same Brent Ozar article this rule is sourced from&#xA;-- (https://www.brentozar.com/archive/2018/06/can-non-sargable-predicates-ever-seek/).&#xA;-- &quot;Age = 0 OR Age IS NULL&quot; is logically equivalent to ISNULL(Age, 0) = 0 but leaves Age&#xA;-- unwrapped on both branches, so the engine can seek. Must NOT fire.&#xA;CREATE TABLE dbo.Users&#xA;(&#xA;    UserId INT NOT NULL PRIMARY KEY,&#xA;    Age    INT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Users_Age ON dbo.Users(Age);&#xA;GO&#xA;&#xA;SELECT UserId&#xA;FROM dbo.Users AS u&#xA;WHERE u.Age = 0 OR u.Age IS NULL;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_case_when_test_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: &quot;Is CASE..WHEN..THEN sargable ?&quot; - Microsoft Q&amp;A (answered by Erland Sommarskog,&#xA;-- SQL Server MVP: &quot;Correct. CASE expressions are not sargable. Very few expressions where an&#xA;-- indexed column is entangled in an expression of any sort can lead to Index Seek.&quot;)&#xA;-- https://learn.microsoft.com/en-us/answers/questions/960508/is-case-when-then-sargable&#xA;-- The thread&#x27;s own measured repro:&#xA;--   SELECT * FROM [dbo].[Mobile] WHERE ((CASE WHEN ([MobileNumber] = &#x27;123456789&#x27;)&#xA;--     THEN CAST(1 AS BIT) END) = 1)&#xA;-- ran as an index scan (199 logical reads) vs. a plain `WHERE MobileNumber = &#x27;123456789&#x27;`&#xA;-- seek (122 logical reads). MobileNumber is wrapped in the CASE&#x27;s own WHEN test, not its THEN&#xA;-- value - the shape this fixture is named for and the one Tier-1 must search for specifically&#xA;-- (a naive &quot;only check THEN/ELSE&quot; implementation would miss this exact, documented repro).&#xA;CREATE TABLE dbo.Mobile&#xA;(&#xA;    Id           INT NOT NULL PRIMARY KEY,&#xA;    MobileNumber VARCHAR(20) NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Mobile_MobileNumber ON dbo.Mobile(MobileNumber);&#xA;GO&#xA;&#xA;SELECT *&#xA;FROM dbo.Mobile&#xA;WHERE (CASE WHEN (MobileNumber = &#x27;123456789&#x27;) THEN CAST(1 AS BIT) END) = 1;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_case_when_test_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss sibling of FUNCTION_WRAPPED_COLUMN_case_when_test_fires.sql: the sargable rewrite&#xA;-- the same Microsoft Q&amp;A thread measures as an index seek (122 logical reads) -&#xA;-- https://learn.microsoft.com/en-us/answers/questions/960508/is-case-when-then-sargable -&#xA;-- the plain, unwrapped comparison with no CASE at all. Must NOT fire.&#xA;CREATE TABLE dbo.Mobile&#xA;(&#xA;    Id           INT NOT NULL PRIMARY KEY,&#xA;    MobileNumber VARCHAR(20) NOT NULL&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Mobile_MobileNumber ON dbo.Mobile(MobileNumber);&#xA;GO&#xA;&#xA;SELECT *&#xA;FROM dbo.Mobile&#xA;WHERE MobileNumber = &#x27;123456789&#x27;;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_json_value_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Corrections-to-shipped-work: JSON_VALUE(col, &#x27;$.path&#x27;) false-positives the blanket&#xA;-- function-wrapped-column rule when no matching indexed computed column exists to seek on.&#xA;-- No computed column here at all, so this really is non-sargable - must fire.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId INT NOT NULL PRIMARY KEY,&#xA;    Payload NVARCHAR(MAX) NOT NULL&#xA;);&#xA;GO&#xA;&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE JSON_VALUE(Payload, &#x27;$.status&#x27;) = &#x27;ACTIVE&#x27;;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_json_value_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss sibling of FUNCTION_WRAPPED_COLUMN_json_value_fires.sql: an indexed computed&#xA;-- column defined as the EXACT SAME JSON_VALUE(Payload, &#x27;$.status&#x27;) expression lets the engine&#xA;-- substitute the call and seek on it (SQL Server 2016&#x2B;). Must NOT fire.&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId INT NOT NULL PRIMARY KEY,&#xA;    Payload NVARCHAR(MAX) NOT NULL,&#xA;    StatusVal AS JSON_VALUE(Payload, &#x27;$.status&#x27;)&#xA;);&#xA;GO&#xA;CREATE INDEX IX_Orders_StatusVal ON dbo.Orders(StatusVal);&#xA;GO&#xA;&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE JSON_VALUE(Payload, &#x27;$.status&#x27;) = &#x27;ACTIVE&#x27;;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

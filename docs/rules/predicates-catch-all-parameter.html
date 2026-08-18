@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catch All Parameter - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Catch All Parameter</h1>
+  <p class="rule-key"><code>silentscan/predicates/catch-all-parameter</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A predicate of the shape (Col = @p OR @p IS NULL) - the &#x27;catch-all&#x27;/&#x27;kitchen-sink&#x27; optional-filter idiom. One cached plan must stay correct for every possible NULL/non-NULL state of @p, which typically forces a scan regardless of what value is actually passed. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, both of which let the optimizer see the real value on each call.</p>
+  <p class="rationale">The shape (Column = @p OR @p IS NULL) is one of the most common idioms in hand-written search procedures, because it reads as exactly what the author wants: &quot;if the caller supplied a filter value, apply it; otherwise return every row.&quot; It&#x27;s a natural way to build one procedure that serves both a filtered and an unfiltered search without branching into separate statements. The problem is that SQL Server compiles and caches one execution plan for the statement, and that single plan has to remain correct no matter which branch actually applies at runtime - the optimizer can&#x27;t compile a different plan for the &quot;@p is NULL, return everything&quot; case versus the &quot;@p has a value, filter tightly&quot; case, because it only gets to choose a plan once, at compile time, before it knows what any future caller will pass.</p>
+  <p class="rationale">Because one plan must stay correct across both possibilities, the optimizer is forced toward a plan that works acceptably (never optimally) for both extremes at once, which in practice usually means a full scan regardless of what value is actually supplied on a given call - even a call that provides a highly selective value gets the same scan a NULL call would need. This is made worse by parameter sniffing: whichever value @p happens to hold on the very first call that compiles the plan gets baked in, and every subsequent call - regardless of its own @p value - reuses that same cached plan until it&#x27;s evicted or the statement is recompiled.</p>
+  <p class="rationale">This finding is suppressed when the statement carries OPTION (RECOMPILE) or the enclosing procedure is created WITH RECOMPILE, because both force the optimizer to compile a fresh plan against the real, current value of @p on every single execution - at which point it can correctly choose &quot;seek&quot; when a value is supplied and &quot;scan&quot; when it isn&#x27;t, instead of committing to one compromise plan up front.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Add OPTION (RECOMPILE) to the statement, or WITH RECOMPILE to the procedure, so the optimizer builds a plan against the actual runtime value of @p on every call instead of one plan that has to stay valid for every possible NULL/non-NULL state at once. This trades a small per-execution compilation cost for a plan shaped correctly to each call - usually a clear win for a procedure that&#x27;s called with a real filter value far more often than with NULL. If recompiling every call is too costly for a very hot procedure, the alternative is splitting the optional-filter logic into separate statements (an IF branch per filter combination, or dynamic SQL built per call) so each gets its own plan, but that&#x27;s a larger rewrite than adding RECOMPILE.</p>
+  <h3>An optional-filter search procedure with one cached plan</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT NOT NULL PRIMARY KEY,&#xA;    CustomerId INT NOT NULL&#xA;);&#xA;CREATE INDEX IX_Orders_CustomerId ON dbo.Orders(CustomerId);&#xA;&#xA;CREATE PROCEDURE dbo.FindOrders (@customerId INT = NULL)&#xA;AS&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE CustomerId = @customerId OR @customerId IS NULL;</code></pre></div>
+  <p class="example-explanation">One plan is compiled and cached from whichever @customerId value first triggers compilation, then reused for every later call regardless of whether that call passes a selective CustomerId or NULL - the plan can&#x27;t adapt per call.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE PROCEDURE dbo.FindOrders (@customerId INT = NULL)&#xA;AS&#xA;SELECT OrderId&#xA;FROM dbo.Orders&#xA;WHERE CustomerId = @customerId OR @customerId IS NULL&#xA;OPTION (RECOMPILE);</code></pre></div>
+  <p class="example-explanation">OPTION (RECOMPILE) forces a fresh plan on every execution, built against that call&#x27;s actual @customerId value - a seek when a real value is passed, a scan only when it&#x27;s genuinely NULL.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

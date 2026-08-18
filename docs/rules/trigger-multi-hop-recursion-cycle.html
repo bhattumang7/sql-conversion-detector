@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi Hop Recursion Cycle - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Multi Hop Recursion Cycle</h1>
+  <p class="rule-key"><code>silentscan/trigger/multi-hop-recursion-cycle</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A directed cycle of triggers across two or more distinct tables (table A&#x27;s trigger writes to table B, whose own trigger writes back toward A) - oracle-confirmed reachable while the server&#x27;s own &#x27;nested triggers&#x27; option is on, and confirmed to hit a real Msg 217 nesting-level-exceeded error once the cascade runs unbounded.</p>
+  <p class="rationale">This is the indirect counterpart to a trigger recursing directly into its own table: here the cycle spans two or more distinct tables, each with its own trigger, forming a directed loop rather than a single self-reference. Table A&#x27;s trigger writes to table B; table B&#x27;s own trigger, in turn, writes back toward table A (either directly, or through a further chain of tables C, D, and so on before eventually reaching back to A). No single trigger in the chain is recursive on its own - each one only writes to some other table - but the chain as a whole closes a loop.</p>
+  <p class="rationale">Whether this cycle is reachable at all depends on the server-level &quot;nested triggers&quot; option (sp_configure &#x27;nested triggers&#x27;), which is ON by default and governs cross-table trigger chaining specifically - distinct from the database-level RECURSIVE_TRIGGERS option, which only governs a trigger firing directly on its own table. With nested triggers on (the common case), a write inside table A&#x27;s trigger to table B genuinely fires table B&#x27;s trigger, and if that trigger&#x27;s own write eventually reaches back to table A, table A&#x27;s trigger fires again - and if the cycle has no condition that stops matching rows on a subsequent pass, it keeps closing the loop.</p>
+  <p class="rationale">An uncontrolled cycle doesn&#x27;t run forever: each hop through the chain is a nested trigger invocation, and SQL Server enforces a hard limit of 32 levels of nesting across stored procedures, functions, and triggers combined. The moment the cycle&#x27;s depth crosses that limit, error 217 (&quot;Maximum stored procedure, function, trigger, or view nesting level exceeded&quot;) aborts the statement that ultimately started the chain and rolls back its effects - a failure that can be several hops and several tables removed from wherever the application&#x27;s original write actually happened, making it hard to trace back to its cause without already knowing to look for a cross-table trigger cycle.</p>
+  <h2>How can I fix it?</h2>
+  <h3>Table A&#x27;s trigger writes to table B, whose trigger writes back to table A</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders  (OrderId INT NOT NULL PRIMARY KEY, Status VARCHAR(20) NOT NULL);&#xA;CREATE TABLE dbo.Shipments (ShipmentId INT NOT NULL PRIMARY KEY, OrderId INT NOT NULL, Status VARCHAR(20) NOT NULL);&#xA;&#xA;CREATE TRIGGER dbo.trg_Orders_StatusPropagate ON dbo.Orders&#xA;AFTER UPDATE&#xA;AS&#xA;BEGIN&#xA;    IF @@ROWCOUNT = 0 RETURN;&#xA;&#xA;    UPDATE s&#xA;    SET s.Status = i.Status&#xA;    FROM dbo.Shipments AS s&#xA;    JOIN inserted AS i ON i.OrderId = s.OrderId;&#xA;END;&#xA;GO&#xA;&#xA;CREATE TRIGGER dbo.trg_Shipments_StatusPropagate ON dbo.Shipments&#xA;AFTER UPDATE&#xA;AS&#xA;BEGIN&#xA;    IF @@ROWCOUNT = 0 RETURN;&#xA;&#xA;    UPDATE o&#xA;    SET o.Status = i.Status&#xA;    FROM dbo.Orders AS o&#xA;    JOIN inserted AS i ON i.OrderId = o.OrderId;&#xA;END;</code></pre></div>
+  <p class="example-explanation">An UPDATE on dbo.Orders fires trg_Orders_StatusPropagate, which writes to dbo.Shipments and fires trg_Shipments_StatusPropagate, which writes back to dbo.Orders and re-fires trg_Orders_StatusPropagate - with nested triggers on and no condition that eventually stops the Status values from differing, the cycle keeps closing until it crosses the 32-level nesting limit and error 217 aborts the original UPDATE.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

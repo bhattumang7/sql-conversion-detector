@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plus Operator Null Propagation - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Plus Operator Null Propagation</h1>
+  <p class="rule-key"><code>silentscan/predicate/plus-operator-null-propagation</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A &#x2B; concatenation chain between string-typed operands where at least one operand is a nullable column with no ISNULL/COALESCE guard - unlike CONCAT(), which treats a NULL operand as empty string, &#x2B; propagates a single NULL operand to NULL for the WHOLE expression with no error raised, oracle-confirmed directly against CONCAT()&#x27;s own different behavior for the identical NULL input.</p>
+  <p class="rationale">Under SQL Server&#x27;s default session settings (CONCAT_NULL_YIELDS_NULL ON, the ANSI standard and default behavior since SQL Server 2005, and the only behavior at all in recent compatibility levels), the `&#x2B;` operator between string-typed operands propagates NULL: if any single operand in a `&#x2B;` chain is NULL, the entire expression evaluates to NULL, not to the concatenation of whatever the non-NULL operands were. `&#x27;Mr. &#x27; &#x2B; NULL &#x2B; &#x27; Smith&#x27;` is NULL in its entirety - not `&#x27;Mr.  Smith&#x27;` with a gap where the middle operand would have been. This is standard, documented behavior, not a bug in the engine - but it&#x27;s routinely not what the author of a display-string or full-name- building expression actually wants, and there&#x27;s no error, warning, or type mismatch to flag the mismatch between intent and behavior; the expression simply evaluates to NULL and whatever consumes it - a report column, an email subject line, a WHERE clause - silently receives nothing.</p>
+  <p class="rationale">CONCAT(), added in SQL Server 2012, was specifically designed to behave differently: it treats a NULL argument as an empty string rather than propagating it, so `CONCAT(&#x27;Mr. &#x27;, NULL, &#x27; Smith&#x27;)` evaluates to `&#x27;Mr.  Smith&#x27;`. The two functions are easy to conflate because they look interchangeable for concatenating fixed literals, and the difference only becomes observable the moment a genuinely NULL-capable column enters the expression - exactly the case that&#x27;s hardest to catch in code review, since a reviewer has to separately know, for every operand, whether the underlying column allows NULL, rather than being able to see the bug in the `&#x2B;` expression itself.</p>
+  <p class="rationale">The failure mode compounds in exactly the columns most likely to carry NULL in real data - an optional middle name, an unset suffix, a not-yet-filled-in address line 2 - so the rows most likely to trigger it are also the rows an author is least likely to have tested against, since a happy-path test with all fields populated never exercises the NULL-propagation branch at all.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Either wrap the nullable operand in ISNULL(column, &#x27;&#x27;) or COALESCE(column, &#x27;&#x27;) so a NULL contributes an empty string to the chain instead of nulling the whole expression, or replace the `&#x2B;` chain with CONCAT(), which applies exactly that NULL-to-empty-string treatment to every argument automatically, without needing a guard on each one individually.</p>
+  <h3>A NULL middle name nulls out the entire display name</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.People&#xA;(&#xA;    PersonId   INT          NOT NULL PRIMARY KEY,&#xA;    FirstName  VARCHAR(50)  NOT NULL,&#xA;    MiddleName VARCHAR(50)  NULL,&#xA;    LastName   VARCHAR(50)  NOT NULL&#xA;);&#xA;&#xA;SELECT PersonId,&#xA;       FirstName &#x2B; &#x27; &#x27; &#x2B; MiddleName &#x2B; &#x27; &#x27; &#x2B; LastName AS DisplayName&#xA;FROM dbo.People;</code></pre></div>
+  <p class="example-explanation">For any row where MiddleName is NULL - the common case for most people - the entire DisplayName expression evaluates to NULL, not &#x27;FirstName LastName&#x27; with the middle name simply omitted.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT PersonId,&#xA;       CONCAT(FirstName, &#x27; &#x27;, MiddleName, &#x27; &#x27;, LastName) AS DisplayName&#xA;FROM dbo.People;</code></pre></div>
+  <p class="example-explanation">CONCAT() treats a NULL MiddleName as an empty string, so DisplayName still resolves to &#x27;FirstName  LastName&#x27; instead of collapsing to NULL.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

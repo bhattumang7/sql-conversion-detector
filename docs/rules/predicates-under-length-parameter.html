@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Under Length Parameter - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Under Length Parameter</h1>
+  <p class="rule-key"><code>silentscan/predicates/under-length-parameter</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding&#x27;s identical class of concern.</p>
+  <p class="rationale">When a variable, parameter, or expression is declared with a length shorter than the value assigned to it, T-SQL doesn&#x27;t raise an error or truncate at assignment loudly - it silently truncates the value to fit the declared length, and execution continues as if nothing happened. A predicate that compares a column against such a truncated value is not comparing against the value the author intended at all; it&#x27;s comparing against whatever prefix survived the truncation, which changes which rows match, or causes none to match, with no error raised anywhere in the process. This is a correctness bug, not a performance one - the query returns a wrong answer that looks like a right one.</p>
+  <p class="rationale">The single most notorious trigger is DECLARE @code VARCHAR with no length specified at all. Outside a CAST/CONVERT context, T-SQL&#x27;s default length for VARCHAR/NVARCHAR/CHAR with no explicit length is 1, not some larger sensible default - a mismatch between how the type behaves as a column default (where it&#x27;s more forgiving in some contexts) and how it behaves as a variable declaration, and one of the most common surprises in T-SQL for anyone coming from a language where omitting a size means &quot;whatever fits.&quot; DECLARE @code VARCHAR = &#x27;ABCDEFG&#x27; silently stores just &#x27;A&#x27; - not an error, not a warning, just a single character - and every subsequent use of @code operates on that one character.</p>
+  <p class="rationale">The same silent truncation happens with any variable, parameter, or expression declared meaningfully shorter than the column it&#x27;s compared against, even with an explicit length: DECLARE @code VARCHAR(5) assigned &#x27;ABCDEFG&#x27; silently becomes &#x27;ABCDE&#x27;. A predicate WHERE Code = @code then searches for &#x27;ABCDE&#x27; when the caller&#x27;s actual intent was &#x27;ABCDEFG&#x27; - matching a completely different row if one happens to start with &#x27;ABCDE&#x27;, or matching nothing at all, with the query returning a plausible-looking empty or wrong result set instead of any indication that the comparison value was silently cut short before it ever reached the predicate.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Declare the parameter, variable, or expression with a length at least as long as the column it&#x27;s compared against - ideally matching it exactly - so the value being compared is never silently shortened before the predicate runs. For VARCHAR/NVARCHAR/CHAR specifically, always give an explicit length; never rely on the bare type name&#x27;s implicit length-1 default, which is almost never the intended behavior.</p>
+  <h3>DECLARE VARCHAR with no length silently becomes length 1</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId INT         NOT NULL PRIMARY KEY,&#xA;    Code      VARCHAR(20) NOT NULL&#xA;);&#xA;&#xA;DECLARE @code VARCHAR = &#x27;ABCDEFG&#x27;;&#xA;&#xA;SELECT ProductId&#xA;FROM dbo.Products&#xA;WHERE Code = @code;</code></pre></div>
+  <p class="example-explanation">VARCHAR with no explicit length defaults to VARCHAR(1), so @code silently holds just &#x27;A&#x27; instead of &#x27;ABCDEFG&#x27; - the predicate searches for &#x27;A&#x27;, matching wrong rows or none, with no error raised at the assignment or the comparison.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>DECLARE @code VARCHAR(20) = &#x27;ABCDEFG&#x27;;&#xA;&#xA;SELECT ProductId&#xA;FROM dbo.Products&#xA;WHERE Code = @code;</code></pre></div>
+  <p class="example-explanation">@code is declared long enough to hold the full intended value, so the predicate compares against &#x27;ABCDEFG&#x27; in full rather than a silently truncated prefix.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Union Of Provably Disjoint Branches - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Union Of Provably Disjoint Branches</h1>
+  <p class="rule-key"><code>silentscan/query/union-of-provably-disjoint-branches</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A UNION combines branches that each filter the same table/column to a distinct literal - the branches are provably mutually exclusive, so UNION&#x27;s duplicate-elimination pass can never remove a row and UNION ALL is equivalent.</p>
+  <p class="rationale">UNION and UNION ALL both concatenate the row sets returned by their branches, but plain UNION additionally guarantees the combined result contains no duplicate rows - and it earns that guarantee by running a distinct-elimination step (implemented as a sort or a hash operation) over the entire combined row set after concatenation, comparing every row against every other row across all branches to find and remove duplicates. That work is real, engine-level cost: an extra operator in the plan, extra CPU, and for a sort-based implementation, an extra memory grant sized to the combined row count.</p>
+  <p class="rationale">That work exists to solve one specific problem: the same row appearing in more than one branch. When each branch already filters the same table or column to a distinct literal value - one branch is WHERE Status = &#x27;Open&#x27;, another is WHERE Status = &#x27;Closed&#x27; - no row that satisfies one branch&#x27;s filter can also satisfy another&#x27;s, because Status can&#x27;t simultaneously equal two different literals. The branches are provably mutually exclusive by construction, so no row from one branch can ever duplicate a row from another, and the distinct-elimination pass UNION performs is guaranteed to remove zero rows on every single run - it&#x27;s paid for and never needed.</p>
+  <p class="rationale">UNION ALL performs the exact same concatenation without the distinct-elimination step: when the branches are provably disjoint, UNION ALL produces byte-for-byte the same result UNION would have, just without ever running the machinery that exists solely to catch duplicates that this particular shape can never produce.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Replace UNION with UNION ALL. This is safe specifically because the branches are provably disjoint on their filtering predicate - if a code change later loosens one branch&#x27;s filter such that the branches could overlap, UNION ALL would then need to be revisited, but as written, no distinct-elimination pass is ever going to change the output.</p>
+  <h3>UNION of branches filtered to distinct literal values</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Tickets (TicketId INT NOT NULL PRIMARY KEY, Status VARCHAR(20) NOT NULL);&#xA;&#xA;SELECT TicketId, Status FROM dbo.Tickets WHERE Status = &#x27;Open&#x27;&#xA;UNION&#xA;SELECT TicketId, Status FROM dbo.Tickets WHERE Status = &#x27;Closed&#x27;;</code></pre></div>
+  <p class="example-explanation">No row can have Status equal to both &#x27;Open&#x27; and &#x27;Closed&#x27; at once, so the two branches can never produce an overlapping row - UNION still runs a full distinct-elimination pass over the combined result that can never actually remove anything.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT TicketId, Status FROM dbo.Tickets WHERE Status = &#x27;Open&#x27;&#xA;UNION ALL&#xA;SELECT TicketId, Status FROM dbo.Tickets WHERE Status = &#x27;Closed&#x27;;</code></pre></div>
+  <p class="example-explanation">Same result, because the branches were already guaranteed disjoint - UNION ALL skips the distinct-elimination pass that UNION paid for without needing.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

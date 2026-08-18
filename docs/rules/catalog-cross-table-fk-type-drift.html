@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cross Table FK Type Drift - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Cross Table FK Type Drift</h1>
+  <p class="rule-key"><code>silentscan/catalog/cross-table-fk-type-drift</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ - a conversion seed on every JOIN that follows this relationship, detected from the catalog alone (sys.foreign_key_columns), independent of whether any scanned query actually joins on it.</p>
+  <p class="rationale">A foreign key relationship declares, by definition, that the referencing column(s) hold values drawn from the referenced column(s) - the two are meant to be the same kind of value. SQL Server doesn&#x27;t require the declared types (or, for string types, the collations) on the two sides of a foreign key to actually match for the constraint to be created; it only requires that the referencing column&#x27;s type be implicitly convertible to the referenced column&#x27;s type. That&#x27;s a much weaker guarantee than &quot;the types are the same,&quot; and it means a foreign key can sit in the schema, fully enforced and passing every insert/update, while its two sides carry genuinely different declared types - an INT primary key referenced by a BIGINT foreign key column, say, or a VARCHAR primary key referenced by an NVARCHAR one.</p>
+  <p class="rationale">That mismatch is a conversion seed on every join that follows the relationship: whenever a query joins the two tables on this foreign key - which is, definitionally, the relationship&#x27;s whole purpose - one side&#x27;s values have to be implicitly converted to match the other&#x27;s type before the comparison runs, and whichever side is the one being converted loses the ability to seek an index on it. This is detected from the catalog alone (`sys.foreign_key_columns` joined back to `sys.columns` on both the parent and child tables), independent of whether any query in the scanned corpus actually performs the join yet - the seed is real the moment the foreign key and the type drift both exist, whether or not it&#x27;s been triggered by a query yet.</p>
+  <h2>How can I fix it?</h2>
+  <h3>A foreign key column with a wider type than its referenced primary key</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY&#xA;);&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT    NOT NULL PRIMARY KEY,&#xA;    CustomerId BIGINT NOT NULL&#xA;        REFERENCES dbo.Customers(CustomerId)&#xA;);</code></pre></div>
+  <p class="example-explanation">Orders.CustomerId is BIGINT while Customers.CustomerId is INT - the foreign key is still valid (INT converts implicitly to BIGINT), but BIGINT outranks INT in SQL Server&#x27;s type precedence, so every join on this relationship implicitly converts Customers.CustomerId to BIGINT before comparing, and the primary key&#x27;s own index can&#x27;t be seeked through that conversion.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Customers&#xA;(&#xA;    CustomerId INT NOT NULL PRIMARY KEY&#xA;);&#xA;CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT NOT NULL PRIMARY KEY,&#xA;    CustomerId INT NOT NULL&#xA;        REFERENCES dbo.Customers(CustomerId)&#xA;);</code></pre></div>
+  <p class="example-explanation">Both sides of the relationship declare the same type - a join on CustomerId needs no conversion on either side, and an index on either column can be seeked directly.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>In Predicate - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>In Predicate</h1>
+  <p class="rule-key"><code>silentscan/scalar-udf/in-predicate</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A scalar UDF is called in a WHERE/JOIN ON/HAVING/MERGE ON predicate - per-row execution, non-sargable, and (pre-2019, or on any engine when the UDF proves non-inlineable) forces the whole plan serial. Distinct from a syntactic function-wrapped-column finding on the same predicate: this claim is catalog-proven per-row/serial cost, not sargability loss, and the two are reported independently by design.</p>
+  <p class="rationale">A scalar UDF called inside a `WHERE`, `JOIN ... ON`, `HAVING`, or `MERGE ... ON` predicate carries two separate costs, and it&#x27;s worth keeping them apart. The first is sargability: like any function wrapped around a column, the predicate now evaluates a computed value rather than the column&#x27;s raw stored bytes, so an index on that column can&#x27;t be seeked. The second, and the one this rule is specifically catalog-proving, is per-row execution cost: unless the engine can prove the function is safe to inline (T-SQL scalar UDF inlining, available since SQL Server 2019, requires the function body to meet a specific list of conditions - a single RETURN, no side effects, no reference to non-deterministic built-ins, and more), the function executes as its own separately invoked routine once per row the predicate is evaluated against, with its own execution context switch each time. On any version before 2019, or on 2019&#x2B; when the function fails an inlining precondition, that per-row invocation additionally forces the entire surrounding query plan serial - SQL Server cannot parallelize a plan that contains a non-inlined scalar UDF call, so a query that would otherwise get a parallel plan on a large table runs single-threaded end to end because of one function call in a predicate.</p>
+  <p class="rationale">This is deliberately reported independently from a syntactic function-wrapped-column finding on the same predicate: the two are different claims backed by different evidence. The sargability rule fires from parse-level pattern matching against any function; this rule fires from the engine&#x27;s own catalog-recorded inlining status for this specific function, and the claim it&#x27;s making - per-row cost and, conditionally, forced-serial execution - is a distinct, stronger claim that a syntactically-similar but genuinely inlineable function wouldn&#x27;t earn.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Where the function body is a single expression (`RETURN &lt;expr&gt;` with no branching, temp state, or non-deterministic calls), verify it against SQL Server 2019&#x2B;&#x27;s scalar UDF inlining requirements - if it already qualifies, upgrading the target engine to 2019&#x2B; may resolve this without a rewrite. Where it doesn&#x27;t qualify, or the engine version is fixed below 2019, inline the function&#x27;s logic directly into the predicate as an ordinary expression, or rewrite it as an inline TVF joined via `CROSS APPLY` so its logic is expanded into the query plan instead of invoked as a separate per-row routine.</p>
+  <h3>A scalar UDF driving a WHERE predicate</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE FUNCTION dbo.discount_price(@price DECIMAL(12,2), @discount DECIMAL(12,2))&#xA;RETURNS DECIMAL(12,2)&#xA;AS&#xA;BEGIN&#xA;    RETURN @price * (1 - @discount);&#xA;END;&#xA;&#xA;CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId    INT           NOT NULL PRIMARY KEY,&#xA;    ExtendedPrice DECIMAL(12,2) NOT NULL,&#xA;    Discount      DECIMAL(12,2) NOT NULL&#xA;);&#xA;&#xA;SELECT LineItemId&#xA;FROM dbo.LineItem&#xA;WHERE dbo.discount_price(ExtendedPrice, Discount) &gt; 100.00;</code></pre></div>
+  <p class="example-explanation">On an engine/catalog state where discount_price isn&#x27;t inlined, every row&#x27;s predicate evaluation is a separate routine invocation, and the whole plan is forced serial - on a 10GB TPC-H-scale LineItem table, Microsoft&#x27;s own measurement of this exact function went from 29 minutes down to 1.6 seconds once it inlined.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT LineItemId&#xA;FROM dbo.LineItem&#xA;WHERE ExtendedPrice * (1 - Discount) &gt; 100.00;</code></pre></div>
+  <p class="example-explanation">The expression is inlined directly into the predicate - no per-row function invocation, no forced-serial plan, and the predicate is sargable against ExtendedPrice/Discount directly.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/PREDICATE_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: Microsoft Learn, &quot;Scalar UDF Inlining - SQL Server&quot;&#xA;-- https://learn.microsoft.com/en-us/sql/relational-databases/user-defined-functions/scalar-udf-inlining&#xA;-- The dbo.discount_price function is documented there verbatim (the article&#x27;s own &quot;single&#xA;-- statement scalar UDF&quot; example, measured at 29 minutes vs 1.6 seconds without the UDF on a&#xA;-- 10-GB TPC-H database). Placed here in a WHERE clause - the article calls it from a SELECT&#xA;-- list instead, but the same per-row/non-sargable cost the article documents applies identically&#xA;-- to a predicate use, which is exactly what this fixture&#x27;s PredicateInvocation kind claims.&#xA;CREATE FUNCTION dbo.discount_price&#xA;(&#xA;    @price DECIMAL (12, 2),&#xA;    @discount DECIMAL (12, 2)&#xA;)&#xA;RETURNS DECIMAL (12, 2)&#xA;AS&#xA;BEGIN&#xA;    RETURN @price * (1 - @discount);&#xA;END;&#xA;GO&#xA;CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId INT NOT NULL PRIMARY KEY,&#xA;    ExtendedPrice DECIMAL(12, 2) NOT NULL,&#xA;    Discount DECIMAL(12, 2) NOT NULL&#xA;);&#xA;GO&#xA;SELECT LineItemId&#xA;FROM dbo.LineItem&#xA;WHERE dbo.discount_price(ExtendedPrice, Discount) &gt; 100.00;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/PREDICATE_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for PREDICATE_fires.sql: a built-in function (UPPER) and an unregistered 2-part&#xA;-- name in the exact same WHERE position - the &quot;never guess&quot; rule this stream shares with&#xA;-- TvfFenceScanner (docs/detection-checklist.md: &quot;an unresolved call never produces a finding&#xA;-- here, rather than guessing either way&quot;).&#xA;CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId INT NOT NULL PRIMARY KEY,&#xA;    Notes VARCHAR(50) NOT NULL&#xA;);&#xA;GO&#xA;SELECT LineItemId&#xA;FROM dbo.LineItem&#xA;WHERE UPPER(Notes) = &#x27;X&#x27;&#xA;  AND dbo.fn_NeverDeclaredAnywhere(LineItemId) = 1;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

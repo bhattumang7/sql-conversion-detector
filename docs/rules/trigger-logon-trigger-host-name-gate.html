@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logon Trigger Host Name Gate - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Logon Trigger Host Name Gate</h1>
+  <p class="rule-key"><code>silentscan/trigger/logon-trigger-host-name-gate</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A logon trigger gates an allow/deny decision on HOST_NAME() - oracle-confirmed this value is client-supplied via the connection string and trivially spoofable, so the access control does not actually control anything.</p>
+  <p class="rationale">HOST_NAME() returns the workstation name the client supplied when it opened the connection - literally the value of the Workstation ID connection-string property in ADO.NET/ODBC/OLE DB (or the equivalent -H flag for sqlcmd/bcp, or whatever the driver&#x27;s default is when the caller doesn&#x27;t set it explicitly). It is not derived from anything the server independently observes about the machine at the other end of the socket; it is a free-text field the client process chooses and sends as part of the login packet, exactly like the application name. There is nothing in the TDS protocol that authenticates or verifies it.</p>
+  <p class="rationale">That means any client capable of setting a connection-string property - which is every client - can set Workstation ID to whatever string it wants, including the exact hostname a logon trigger&#x27;s allow-list expects. A logon trigger that does something like IF HOST_NAME() NOT IN (&#x27;APPSERVER01&#x27;, &#x27;APPSERVER02&#x27;) ROLLBACK is not actually verifying that the connection originated from those machines; it&#x27;s verifying that the connecting client claimed to be one of those machines, a claim it can make from anywhere - a developer&#x27;s laptop, a compromised host, an entirely different network - by setting one property in a connection string. The trigger&#x27;s ROLLBACK gives every appearance of enforcing an access boundary, including in a security review of the trigger&#x27;s own logic, while actually enforcing nothing beyond &quot;the client said the right words.&quot;</p>
+  <p class="rationale">This matters specifically because logon triggers are commonly reached for as a lightweight way to implement network- or host-based access restrictions without standing up firewall rules or certificate infrastructure - and HOST_NAME() looks, from the trigger author&#x27;s perspective, exactly like the kind of value that should carry that information. The bug is not in the trigger&#x27;s logic; it&#x27;s in the premise that HOST_NAME() is a trustworthy signal at all.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Do not gate an access control decision on HOST_NAME() - it is client-supplied over the connection string and trivially spoofable by anything capable of setting a connection property, which is every client. For a real gate, use something the client cannot unilaterally choose: EVENTDATA() inside the logon trigger exposes the actual client net address (still spoofable at the IP level to a degree, but that requires network-level control rather than a one-line connection-string change, and it can be correlated against firewall/NSG rules that constrain it further), or - stronger still - rely on the login/authentication identity itself (Windows-authenticated login, or a certificate/ Azure AD-backed login) rather than any claim about the origin machine.</p>
+  <h3>A logon trigger trusts a client-supplied workstation name</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TRIGGER trg_RestrictByHost&#xA;ON ALL SERVER&#xA;FOR LOGON&#xA;AS&#xA;BEGIN&#xA;    IF HOST_NAME() NOT IN (&#x27;APPSERVER01&#x27;, &#x27;APPSERVER02&#x27;)&#xA;    BEGIN&#xA;        ROLLBACK;&#xA;    END;&#xA;END;</code></pre></div>
+  <p class="example-explanation">HOST_NAME() returns the client-supplied Workstation ID connection-string property - any client can set Workstation ID=APPSERVER01 and pass this check regardless of where it is actually connecting from, so the trigger enforces nothing beyond what the client chooses to claim.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TRIGGER trg_RestrictByNetAddress&#xA;ON ALL SERVER&#xA;FOR LOGON&#xA;AS&#xA;BEGIN&#xA;    DECLARE @EventData XML = EVENTDATA();&#xA;    DECLARE @ClientHost VARCHAR(64) = @EventData.value(&#x27;(/EVENT_INSTANCE/ClientHost)[1]&#x27;, &#x27;VARCHAR(64)&#x27;);&#xA;&#xA;    IF @ClientHost NOT IN (&#x27;10.0.1.10&#x27;, &#x27;10.0.1.11&#x27;)&#xA;    BEGIN&#xA;        ROLLBACK;&#xA;    END;&#xA;END;</code></pre></div>
+  <p class="example-explanation">EVENTDATA() reports the actual connecting client address the server observed, not a value the client freely chose - it still requires network-level control to spoof, unlike a connection-string property.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

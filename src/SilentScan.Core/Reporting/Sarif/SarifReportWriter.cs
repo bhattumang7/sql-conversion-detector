@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Reporting.Sarif;
@@ -118,7 +119,7 @@ public static class SarifReportWriter
         var log = new SarifLog(
             "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
             "2.1.0",
-            [new SarifRun(new SarifTool(new SarifDriver(ToolName, ToolVersion, InformationUri: null, SarifRuleCatalog.AllRules)), results)]);
+            [new SarifRun(new SarifTool(new SarifDriver(ToolName, ToolVersion, InformationUri: RuleDocSite.IndexUrl, SarifRuleCatalog.AllRules)), results)]);
 
         return JsonSerializer.Serialize(log, JsonOptions);
     }

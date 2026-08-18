@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bare TOP No Order By - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Bare TOP No Order By</h1>
+  <p class="rule-key"><code>silentscan/query/bare-top-no-order-by</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A bare TOP (n) with no ORDER BY anywhere in the same query - SQL Server documents that without ORDER BY, both which rows satisfy TOP and their return order are unguaranteed, so code relying on &#x27;the first N rows&#x27; is trusting undefined behavior that can change with plan choice, parallelism, or statistics drift, not merely a stylistic complaint. TOP (100) PERCENT is excluded - 100 percent of a result set is every row regardless of TOP&#x27;s own row-selection nondeterminism.</p>
+  <p class="rationale">TOP (n) without an ORDER BY doesn&#x27;t mean &quot;the first n rows&quot; in any meaningful sense - SQL Server&#x27;s own documentation is explicit that the rows a TOP clause returns, and the order those rows are returned in, are both undefined when there&#x27;s no ORDER BY governing the query. TOP simply stops the query after it has produced n rows from whatever order the chosen execution plan happens to produce them in, and that order is an artifact of the plan - which index the optimizer chose to scan, whether it read forward or backward through that index, whether the query went parallel and which worker thread&#x27;s rows got interleaved first. None of those are things the query text specifies or the engine promises to keep stable.</p>
+  <p class="rationale">This is easy to miss because a given TOP query, run against a given database on a given day, usually does look stable - the same plan tends to get chosen repeatedly, and a small table scanned via its clustered index in physical row order often does happen to return rows in something close to insertion order. That apparent stability is coincidental, not guaranteed, and it breaks precisely when something about the environment changes rather than something about the code: a statistics update or index rebuild that flips the optimizer&#x27;s chosen access path, a plan that goes parallel once the table crosses a row-count threshold it didn&#x27;t used to cross, a forced index change, or simply moving the same query to a different server or a restored copy of the database. Code that silently depended on &quot;TOP always gives me the most recent N rows&quot; or &quot;the same N rows every time&quot; can start returning a different N rows with no error, no schema change, and no code change at all - exactly the kind of environment-dependent behavior that&#x27;s nearly impossible to reproduce once reported, because it isn&#x27;t tied to anything in source control.</p>
+  <p class="rationale">TOP (100) PERCENT is deliberately excluded from this rule: 100 percent of the result set is every row the query would otherwise produce regardless of what order TOP itself picks them in, so there&#x27;s no row-selection nondeterminism left for a missing ORDER BY to expose - TOP&#x27;s own selection behavior is moot when the percentage is the whole set.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Add an explicit ORDER BY to the query that TOP applies to, specifying exactly which column(s) determine &quot;the first N&quot; - most recent by a timestamp column, highest by a score column, whatever the query&#x27;s actual intent is. This makes both which rows TOP returns and their order a guarantee of the query itself, not an accident of whichever plan the optimizer happens to choose on a given execution.</p>
+  <h3>TOP with no ORDER BY assumed to mean &quot;most recent&quot;</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.AuditLog&#xA;(&#xA;    AuditId   INT IDENTITY(1,1) NOT NULL PRIMARY KEY,&#xA;    EventTime DATETIME2(3)       NOT NULL,&#xA;    Message   VARCHAR(200)        NOT NULL&#xA;);&#xA;&#xA;SELECT TOP (10) AuditId, EventTime, Message&#xA;FROM dbo.AuditLog;</code></pre></div>
+  <p class="example-explanation">With no ORDER BY, SQL Server is free to return any 10 rows in any order - the code likely intends &quot;the 10 most recent events,&quot; but nothing in the query guarantees that, and the actual rows returned can change if the optimizer picks a different plan.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT TOP (10) AuditId, EventTime, Message&#xA;FROM dbo.AuditLog&#xA;ORDER BY EventTime DESC;</code></pre></div>
+  <p class="example-explanation">ORDER BY EventTime DESC makes &quot;most recent 10&quot; an explicit, guaranteed contract of the query instead of an accident of plan choice.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fast Forward Cursor - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Fast Forward Cursor</h1>
+  <p class="rule-key"><code>silentscan/forced-serial/fast-forward-cursor</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A cursor declared FAST_FORWARD (or the equivalent bare FORWARD_ONLY READ_ONLY without an explicit STATIC/KEYSET/DYNAMIC) forces the cursor&#x27;s own defining query plan serial, confirmed as NonParallelPlanReason=&quot;NoParallelFastForwardCursor&quot;. This is the opposite of the common &#x27;always use LOCAL FAST_FORWARD&#x27; fetch-overhead advice - that advice is still correct for row-by-row fetch cost, but it is specifically what defeats a parallel plan for the cursor&#x27;s defining SELECT.</p>
+  <p class="rationale">A cursor declared FAST_FORWARD - or, equivalently, one declared FORWARD_ONLY READ_ONLY without an explicit STATIC/KEYSET/DYNAMIC (which SQL Server also optimizes as a fast-forward cursor) - asks the engine for a forward-only, read-only cursor optimized for the cheapest possible per-row FETCH. To deliver that guarantee, the engine forces the cursor&#x27;s own defining SELECT to run with a serial plan; a real executed plan for such a query shows NonParallelPlanReason = &quot;NoParallelFastForwardCursor&quot; on the plan root. The restriction is specifically about being able to fetch rows one at a time, in order, with minimal overhead per fetch - a guarantee a parallel plan&#x27;s multi-threaded, buffered row production can&#x27;t provide as cheaply.</p>
+  <p class="rationale">This runs directly against the most common cursor-related advice in T-SQL: &quot;if you must use a cursor, always declare it LOCAL FAST_FORWARD&quot; is correct and remains correct for what it&#x27;s optimizing - the per-row FETCH cost inside the cursor loop, which FAST_FORWARD genuinely minimizes better than any other cursor type. What that advice doesn&#x27;t cover is the defining SELECT itself: the query that determines what the cursor&#x27;s rows are in the first place. That query pays the FAST_FORWARD tax up front, once, as a forced-serial compile and execution, before the first row is ever fetched. FAST_FORWARD makes the cursor&#x27;s row-by-row loop cheap; it does not make the cursor&#x27;s underlying query cheap, and can make that underlying query&#x27;s own execution slower than the same query run as a plain SELECT with a parallel plan available.</p>
+  <p class="rationale">This tension is invisible in the DECLARE CURSOR statement itself - nothing about the syntax signals which of the two costs is going to dominate for a given query. A cursor over a small, cheap lookup pays a negligible serial-plan cost either way; a cursor whose defining SELECT does a large scan, join, or aggregation is where the forced-serial restriction on that one query can genuinely matter.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">There&#x27;s no cursor-type substitution that resolves this - forcing the defining query serial is inherent to what FAST_FORWARD is. If the cursor&#x27;s defining SELECT is itself expensive enough that its own parallelism loss is a measured problem, the real fix is almost always to avoid the cursor altogether and rewrite the row-by-row logic as a set-based statement (a single UPDATE/INSERT joined to the source set, a windowed query, or a MERGE), which removes both the cursor&#x27;s per-row FETCH overhead and the defining query&#x27;s forced-serial restriction at once. Switching to a different cursor type only trades one cost for another - it does not remove the forced-serial restriction from a FAST_FORWARD-shaped declaration, since the restriction follows from the read-only forward-only guarantee itself.</p>
+  <h3>A FAST_FORWARD cursor&#x27;s defining query loses parallelism</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT           NOT NULL PRIMARY KEY,&#xA;    CustomerId INT           NOT NULL,&#xA;    Total      DECIMAL(10,2) NOT NULL,&#xA;    Region     VARCHAR(20)   NOT NULL&#xA;);&#xA;&#xA;DECLARE @OrderId INT, @Total DECIMAL(10,2);&#xA;&#xA;DECLARE order_cursor CURSOR LOCAL FAST_FORWARD FOR&#xA;    SELECT OrderId, Total&#xA;    FROM dbo.Orders&#xA;    WHERE Region = &#x27;EMEA&#x27;;&#xA;&#xA;OPEN order_cursor;&#xA;FETCH NEXT FROM order_cursor INTO @OrderId, @Total;&#xA;&#xA;WHILE @@FETCH_STATUS = 0&#xA;BEGIN&#xA;    -- per-row processing&#xA;    FETCH NEXT FROM order_cursor INTO @OrderId, @Total;&#xA;END;&#xA;&#xA;CLOSE order_cursor;&#xA;DEALLOCATE order_cursor;</code></pre></div>
+  <p class="example-explanation">The SELECT ... WHERE Region = &#x27;EMEA&#x27; defining this cursor is forced onto a serial plan by the FAST_FORWARD declaration - on a large dbo.Orders table this defining scan can be slower than the same SELECT run standalone with a parallel plan available, independent of how cheap the row-by-row FETCH loop itself is.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>UPDATE o&#xA;SET o.Total = o.Total -- per-row logic expressed set-based&#xA;FROM dbo.Orders AS o&#xA;WHERE o.Region = &#x27;EMEA&#x27;;</code></pre></div>
+  <p class="example-explanation">Rewriting the row-by-row loop as a single set-based statement removes the cursor - and with it both the per-row FETCH overhead and the forced-serial restriction on the underlying query - letting the optimizer parallelize the whole operation if it judges that worthwhile.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

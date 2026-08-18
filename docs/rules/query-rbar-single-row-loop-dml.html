@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rbar Single Row Loop DML - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Rbar Single Row Loop DML</h1>
+  <p class="rule-key"><code>silentscan/query/rbar-single-row-loop-dml</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A WHILE loop issues a single-row UPDATE/DELETE keyed to a variable the same loop advances per iteration (row-by-row processing) - a set-based statement over the whole matching set would do the same work without the per-iteration overhead.</p>
+  <p class="rationale">SQL Server&#x27;s engine is built around set-based execution: a single UPDATE or DELETE statement, given a predicate that matches many rows, plans one pass over an index or table and applies the change to every matching row in that one pass, sharing plan compilation, lock acquisition, log record generation, and trigger firing across the whole set. RBAR - row-by-agonizing-row - defeats every one of those efficiencies by wrapping the same statement shape in a WHILE loop that advances a key variable one row at a time and issues a fresh single-row UPDATE/DELETE keyed to that variable on every iteration.</p>
+  <p class="rationale">Each iteration pays its own fixed overhead independent of how small the actual row is: a new statement execution (even if the plan is cached and reused, there&#x27;s still per-call overhead), its own lock acquisition and release, its own transaction log record, its own trigger firing if the table has one. None of that overhead exists in the set-based equivalent, where it&#x27;s paid once for the whole batch rather than once per row. On a loop touching a few dozen rows this is invisible; on a loop touching tens of thousands the constant-per-row overhead dominates and the operation can be an order of magnitude slower than the equivalent single statement, purely from iteration overhead that does no useful work.</p>
+  <p class="rationale">This pattern usually arrives by two roads: code translated fairly directly from a procedural/imperative mental model (a for-loop in application code, ported into T-SQL as a WHILE loop), or a well-intentioned attempt to &quot;chunk&quot; a large operation that ends up chunking all the way down to a single row instead of a reasonably sized batch.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Replace the loop with a single UPDATE or DELETE whose WHERE clause expresses the same matching condition the loop was iterating over, so the engine applies the change to the whole matching set in one statement instead of one row per iteration. Where the original loop body&#x27;s per-row logic genuinely differs row to row (not just the key it&#x27;s keyed on), that logic usually still expresses as a CASE expression in the SET clause or as a join to a derived table carrying the per-row values, rather than requiring the loop to survive.</p>
+  <h3>A WHILE loop updating one row per iteration</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Invoices&#xA;(&#xA;    InvoiceId INT          NOT NULL PRIMARY KEY,&#xA;    Status    VARCHAR(20)  NOT NULL&#xA;);&#xA;&#xA;DECLARE @InvoiceId INT;&#xA;&#xA;DECLARE cur CURSOR LOCAL FAST_FORWARD FOR&#xA;    SELECT InvoiceId FROM dbo.Invoices WHERE Status = &#x27;Pending&#x27;;&#xA;&#xA;OPEN cur;&#xA;FETCH NEXT FROM cur INTO @InvoiceId;&#xA;&#xA;WHILE @@FETCH_STATUS = 0&#xA;BEGIN&#xA;    UPDATE dbo.Invoices&#xA;    SET Status = &#x27;Overdue&#x27;&#xA;    WHERE InvoiceId = @InvoiceId;&#xA;&#xA;    FETCH NEXT FROM cur INTO @InvoiceId;&#xA;END;&#xA;&#xA;CLOSE cur;&#xA;DEALLOCATE cur;</code></pre></div>
+  <p class="example-explanation">Every pending invoice gets its own UPDATE statement, its own lock acquisition, and its own log record, even though every iteration applies the exact same change (Status = &#x27;Overdue&#x27;) to a different row of the same set.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>UPDATE dbo.Invoices&#xA;SET Status = &#x27;Overdue&#x27;&#xA;WHERE Status = &#x27;Pending&#x27;;</code></pre></div>
+  <p class="example-explanation">One statement applies the change to every matching row in a single pass over the table - no per-row iteration overhead, and the same net result.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

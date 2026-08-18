@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Max Typed Column - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Max Typed Column</h1>
+  <p class="rule-key"><code>silentscan/catalog/max-typed-column</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A string/binary column is declared MAX-typed - it can never be an index key column at all, so any predicate/join on it can never seek regardless of how it&#x27;s used. Catalog-only structural fact.</p>
+  <p class="rationale">`VARCHAR(MAX)`, `NVARCHAR(MAX)`, and `VARBINARY(MAX)` aren&#x27;t just &quot;a very large length&quot; - they&#x27;re a structurally different storage class from their bounded counterparts, and that difference has a hard consequence the optimizer can&#x27;t work around: a MAX-typed column can never be a key column in any index at all. SQL Server&#x27;s index key is limited to 900 bytes for a nonclustered index (1,700 bytes if the index is unique and includes only bounded columns) - a limit rooted in the B-tree page size - and a MAX type&#x27;s actual data is typically stored off-row once it exceeds the in-row threshold, which makes it structurally ineligible to serve as a key regardless of how short the values stored in it happen to be in practice. A column declared VARCHAR(MAX) that in every row actually holds a 12-character code is still permanently barred from being an index key, because the engine goes by the declared type, not the observed data.</p>
+  <p class="rationale">The practical consequence is that any predicate or join on a MAX-typed column can never seek, full stop - not &quot;can seek if the right index exists,&quot; but structurally cannot, because no index can exist with this column as a key. This is a purely catalog-derived structural fact (the column&#x27;s declared type, read straight from `sys.columns`), true the moment the column is declared this way, independent of any query - the finding exists to flag that ceiling before someone spends time trying to index their way out of a slow predicate against a column that was never eligible to be seekable in the first place.</p>
+  <h2>How can I fix it?</h2>
+  <h3>A short, frequently-filtered code column declared MAX-typed</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId  INT             NOT NULL PRIMARY KEY,&#xA;    SkuCode    VARCHAR(MAX)    NOT NULL&#xA;);&#xA;-- Every SkuCode value is actually 8-12 characters, but no index can ever be&#xA;-- built with SkuCode as a key column - MAX types can&#x27;t be index keys at all.&#xA;&#xA;SELECT ProductId FROM dbo.Products WHERE SkuCode = &#x27;SKU-001234&#x27;;</code></pre></div>
+  <p class="example-explanation">SkuCode&#x27;s actual content is short, but its declared type is VARCHAR(MAX) - the engine goes by the declared type, so no index can ever have SkuCode as a key column, and this predicate can never seek regardless of how it&#x27;s written.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Products&#xA;(&#xA;    ProductId  INT           NOT NULL PRIMARY KEY,&#xA;    SkuCode    VARCHAR(20)    NOT NULL&#xA;);&#xA;CREATE INDEX IX_Products_SkuCode ON dbo.Products(SkuCode);&#xA;&#xA;SELECT ProductId FROM dbo.Products WHERE SkuCode = &#x27;SKU-001234&#x27;;</code></pre></div>
+  <p class="example-explanation">With a bounded length that actually reflects the real data, SkuCode is eligible to be an index key, and IX_Products_SkuCode makes this predicate seekable. Genuinely unbounded content that&#x27;s never filtered or joined on directly - a document body, say - is correctly left MAX-typed; this finding is purely informational in that case.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi Row Unsafe Single Row Assignment - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Multi Row Unsafe Single Row Assignment</h1>
+  <p class="rule-key"><code>silentscan/trigger/multi-row-unsafe-single-row-assignment</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A variable is assigned from a single, unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed the engine silently binds one arbitrary row&#x27;s value and discards the rest whenever the trigger&#x27;s own multi-row DML fires it more than once.</p>
+  <p class="rationale">A DML trigger in SQL Server fires once per statement, not once per row. Every INSERT, UPDATE, or DELETE that touches the trigger&#x27;s table populates the inserted and/or deleted pseudo-tables with one row for every row the statement actually affected - a single-row INSERT gives you one row in inserted, but a multi-row INSERT (a VALUES list with several tuples, an INSERT ... SELECT pulling in a batch, a bulk load) gives you just as many rows in inserted as the statement touched. Nothing about the trigger body changes based on how many rows fired it; the same code runs either way.</p>
+  <p class="rationale">A statement like SELECT @Id = Id FROM inserted has no WHERE clause narrowing it to one row, no TOP, no aggregate - it is a bare scalar assignment against a table-shaped result set. When inserted holds exactly one row this behaves exactly as the author expects. When inserted holds more than one row, SQL Server does not raise an error: a scalar variable assignment from a multi-row SELECT silently executes once per row in an unspecified order determined by the engine&#x27;s own access path, and the variable is left holding whichever row&#x27;s value happened to be assigned last. There&#x27;s no guarantee it&#x27;s the first row, the last row by any business-meaningful ordering, or even the same row from one execution to the next - it depends on plan shape, which can itself change with statistics or an index rebuild.</p>
+  <p class="rationale">This is one of the most common production bugs in T-SQL specifically because it is invisible in testing: single-row INSERT/UPDATE statements (the shape most manual testing and most ORM default behavior uses) never expose the bug, since there&#x27;s only ever one row to pick. The failure mode only appears the first time a genuine multi-row batch - a bulk import, a multi-row application INSERT, an UPDATE with a WHERE clause matching several rows - fires the trigger, at which point (n-1) rows&#x27; worth of data silently never reaches whatever the variable was driving, with no error and no warning row-count mismatch to notice.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Replace the single-row variable assignment with set-based logic that processes every row of inserted/deleted, not just whichever one the engine happened to assign last. Where the goal is to do something per affected row, join inserted (and/or deleted) to the target table, or to another table, so the statement operates on the whole row set at once. Where truly row-by-row procedural logic is unavoidable, use an explicit cursor over inserted so every row is visited in a controlled, understood order rather than relying on an unspecified assignment order.</p>
+  <h3>A single scalar variable captures one arbitrary row out of a multi-row insert</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Orders&#xA;(&#xA;    OrderId    INT           NOT NULL PRIMARY KEY,&#xA;    CustomerId INT           NOT NULL,&#xA;    Total      DECIMAL(10,2) NOT NULL&#xA;);&#xA;&#xA;CREATE TABLE dbo.OrderAudit&#xA;(&#xA;    OrderId    INT           NOT NULL,&#xA;    LoggedAt   DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()&#xA;);&#xA;&#xA;CREATE TRIGGER dbo.trg_Orders_Insert ON dbo.Orders&#xA;AFTER INSERT&#xA;AS&#xA;BEGIN&#xA;    DECLARE @OrderId INT;&#xA;    SELECT @OrderId = OrderId FROM inserted;&#xA;&#xA;    INSERT INTO dbo.OrderAudit (OrderId)&#xA;    VALUES (@OrderId);&#xA;END;</code></pre></div>
+  <p class="example-explanation">When the caller&#x27;s INSERT supplies more than one row in a single statement (a multi-row VALUES list, or an INSERT ... SELECT), @OrderId is assigned once per row of inserted in an unspecified order and ends up holding only the last-assigned row&#x27;s id - the other rows are never audited, with no error raised.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TRIGGER dbo.trg_Orders_Insert ON dbo.Orders&#xA;AFTER INSERT&#xA;AS&#xA;BEGIN&#xA;    INSERT INTO dbo.OrderAudit (OrderId)&#xA;    SELECT OrderId FROM inserted;&#xA;END;</code></pre></div>
+  <p class="example-explanation">The INSERT ... SELECT is set-based over the whole of inserted, so every row the firing statement affected - one or a thousand - is audited in the same execution.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

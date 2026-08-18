@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>In Computed Column Or Constraint - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>In Computed Column Or Constraint</h1>
+  <p class="rule-key"><code>silentscan/scalar-udf/in-computed-column-or-constraint</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A computed column, DEFAULT, or CHECK constraint definition calls a scalar UDF - this poisons every query that touches the table with per-row/serial cost, even one that never names the column, and is detected from the catalog alone.</p>
+  <p class="rationale">A scalar UDF called inside a computed column&#x27;s definition, a `DEFAULT` constraint, or a `CHECK` constraint is fundamentally different from every other scalar-UDF finding on this page, because it isn&#x27;t a property of any one query - it&#x27;s a property of the table itself, baked into the schema. Every statement that touches the table pays the cost, including ones that never name the column at all: a computed column is (re)evaluated for every row an INSERT, UPDATE, or (for a non-persisted computed column) SELECT touches unless the specific query explicitly excludes it, a DEFAULT fires on every INSERT that doesn&#x27;t supply the column, and a CHECK constraint&#x27;s function call runs on every INSERT and every UPDATE that could affect the constrained column, whether or not the function is provably inlineable at that engine version.</p>
+  <p class="rationale">This is also a genuinely different detection stream from the other scalar-UDF rules on this page: those are found by walking a query&#x27;s predicate, SELECT list, or dependency chain through views and TVFs. This one is found by walking the catalog alone - a computed column&#x27;s definition, a default constraint&#x27;s definition, and a check constraint&#x27;s definition are all recorded as text in `sys.computed_columns`, `sys.default_constraints`, and `sys.check_constraints` respectively - so it fires purely from the schema, independent of whether any scanned query in the corpus ever references the affected table at all. A table can carry this finding on day one, before a single query has been written against it.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">For a computed column, replace the function call with the equivalent inline expression in the column&#x27;s own definition, the same rewrite as any other scalar-UDF-in-expression finding - and if the column is genuinely expensive to recompute per read, consider marking it `PERSISTED` once it no longer depends on a function call, so it&#x27;s computed once at write time instead of at every read. For a DEFAULT or CHECK constraint, the same principle applies: express the default value or the validation condition as a plain expression in the constraint definition rather than delegating to a function call, so the cost paid on every insert/update is an ordinary expression evaluation rather than a separate routine invocation.</p>
+  <h3>A computed column defined via a scalar UDF call</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE FUNCTION dbo.discount_price(@price DECIMAL(12,2), @discount DECIMAL(12,2))&#xA;RETURNS DECIMAL(12,2)&#xA;AS&#xA;BEGIN&#xA;    RETURN @price * (1 - @discount);&#xA;END;&#xA;&#xA;CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId      INT           NOT NULL PRIMARY KEY,&#xA;    ExtendedPrice   DECIMAL(12,2) NOT NULL,&#xA;    Discount        DECIMAL(12,2) NOT NULL,&#xA;    DiscountedPrice AS dbo.discount_price(ExtendedPrice, Discount)&#xA;);</code></pre></div>
+  <p class="example-explanation">Every INSERT/UPDATE against LineItem - and, since DiscountedPrice isn&#x27;t PERSISTED, every SELECT that reads it - re-invokes discount_price as a separate routine call unless the engine can prove it&#x27;s inlineable, purely because of how the column is declared.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId      INT           NOT NULL PRIMARY KEY,&#xA;    ExtendedPrice   DECIMAL(12,2) NOT NULL,&#xA;    Discount        DECIMAL(12,2) NOT NULL,&#xA;    DiscountedPrice AS (ExtendedPrice * (1 - Discount)) PERSISTED&#xA;);</code></pre></div>
+  <p class="example-explanation">The computed column expression is inlined directly, so there&#x27;s no function call at all - and marking it PERSISTED means the value is computed once at write time instead of on every read.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/COMPUTED_COLUMN_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: Microsoft Learn, &quot;Scalar UDF Inlining - SQL Server&quot; (dbo.discount_price, the same real,&#xA;-- documented function used throughout this fixture set)&#xA;-- https://learn.microsoft.com/en-us/sql/relational-databases/user-defined-functions/scalar-udf-inlining&#xA;-- A computed column referencing a scalar UDF is itself one of the documented 2019&#x2B; inlining&#xA;-- blockers (&quot;You don&#x27;t use the UDF in a computed column or a check constraint definition&quot;) -&#xA;-- every query touching the table pays the per-row cost, even one that never selects the column.&#xA;CREATE FUNCTION dbo.discount_price&#xA;(&#xA;    @price DECIMAL (12, 2),&#xA;    @discount DECIMAL (12, 2)&#xA;)&#xA;RETURNS DECIMAL (12, 2)&#xA;AS&#xA;BEGIN&#xA;    RETURN @price * (1 - @discount);&#xA;END;&#xA;GO&#xA;CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId INT NOT NULL PRIMARY KEY,&#xA;    ExtendedPrice DECIMAL(12, 2) NOT NULL,&#xA;    Discount DECIMAL(12, 2) NOT NULL,&#xA;    DiscountedPrice AS dbo.discount_price(ExtendedPrice, Discount)&#xA;);</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/COMPUTED_COLUMN_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for COMPUTED_COLUMN_fires.sql: a computed column with an ordinary arithmetic&#xA;-- expression and no scalar UDF call anywhere - must never fire.&#xA;CREATE TABLE dbo.LineItem&#xA;(&#xA;    LineItemId INT NOT NULL PRIMARY KEY,&#xA;    ExtendedPrice DECIMAL(12, 2) NOT NULL,&#xA;    DoubledPrice AS ExtendedPrice * 2&#xA;);</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/DEFAULT_CONSTRAINT_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: Erik Darling / Darling Data, &quot;SQL Server 2019: What Kind Of Scalar Functions Can&#x27;t Be&#xA;-- Inlined?&quot; (dbo.YearDiff, the same real, cited function used in NOT_INLINEABLE_fires.sql)&#xA;-- https://erikdarling.com/sql-server-2019-what-kind-of-functions-cant-be-inlined/&#xA;-- A DEFAULT constraint referencing a scalar UDF runs the function on every row-level INSERT that&#xA;-- omits the column - real corpus shape (docs/detection-checklist.md: &quot;37 defaults&quot; in the local&#xA;-- production copy reference a UDF).&#xA;CREATE OR ALTER FUNCTION dbo.YearDiff(@d DATETIME)&#xA;RETURNS INT&#xA;WITH SCHEMABINDING,&#xA;     RETURNS NULL ON NULL INPUT&#xA;AS&#xA;BEGIN&#xA;DECLARE @YearDiff INT;&#xA;&#xA;SET @YearDiff = DATEDIFF(HOUR, @d, GETDATE())&#xA;&#xA;RETURN @YearDiff&#xA;END;&#xA;GO&#xA;CREATE TABLE dbo.Events&#xA;(&#xA;    EventId INT NOT NULL PRIMARY KEY,&#xA;    OccurredAt DATETIME NOT NULL,&#xA;    HoursSinceOccurred INT NOT NULL DEFAULT (dbo.YearDiff(GETDATE()))&#xA;);</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/DEFAULT_CONSTRAINT_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for DEFAULT_CONSTRAINT_fires.sql: a plain constant DEFAULT with no scalar UDF call -&#xA;-- must never fire.&#xA;CREATE TABLE dbo.Events&#xA;(&#xA;    EventId INT NOT NULL PRIMARY KEY,&#xA;    HoursSinceOccurred INT NOT NULL DEFAULT (0)&#xA;);</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/CHECK_CONSTRAINT_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Source: SQLShack, &quot;Improvements of Scalar User-defined function performance in SQL Server 2019&quot;&#xA;-- (Sales.SalesQuantity, the article&#x27;s own WideWorldImporters-schema worked example)&#xA;-- https://www.sqlshack.com/improvements-of-scalar-user-defined-function-performance-in-sql-server-2019/&#xA;-- A CHECK constraint referencing a scalar UDF is documented as its own 2019&#x2B; inlining blocker&#xA;-- (Microsoft Learn: &quot;You don&#x27;t use the UDF in a computed column or a check constraint&#xA;-- definition&quot;) and forces serialized validation on every INSERT/UPDATE to the table.&#xA;CREATE FUNCTION Sales.SalesQuantity&#xA;    (@Description NVARCHAR(100))&#xA;RETURNS SMALLINT&#xA;AS&#xA;BEGIN&#xA;    DECLARE @Count SMALLINT&#xA;    SELECT @Count = Quantity&#xA;    FROM Sales.OrderLines&#xA;    WHERE Description = @Description;&#xA;    RETURN(@Count)&#xA;END;&#xA;GO&#xA;CREATE TABLE Sales.OrderLines&#xA;(&#xA;    OrderLineId INT NOT NULL PRIMARY KEY,&#xA;    Description NVARCHAR(100) NOT NULL,&#xA;    Quantity SMALLINT NOT NULL,&#xA;    CONSTRAINT CK_OrderLines_MinQuantity CHECK (Sales.SalesQuantity(Description) &gt; 0)&#xA;);</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/scalar_udf/CHECK_CONSTRAINT_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss for CHECK_CONSTRAINT_fires.sql: an ordinary CHECK with no scalar UDF call - must&#xA;-- never fire.&#xA;CREATE TABLE Sales.OrderLines&#xA;(&#xA;    OrderLineId INT NOT NULL PRIMARY KEY,&#xA;    Quantity SMALLINT NOT NULL,&#xA;    CONSTRAINT CK_OrderLines_MinQuantity CHECK (Quantity &gt; 0)&#xA;);</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>
