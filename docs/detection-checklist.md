@@ -3985,7 +3985,13 @@ makes them the cleanest findings in this entire file.
       target corpus, which is a worse outcome than an honest "not built yet"
       — closing this explicitly rather than shipping code nothing here can
       confirm actually works. Left open for whenever a partitioned-table
-      corpus becomes available to validate against.
+      corpus becomes available to validate against. **Re-checked 2026-08-19,
+      unchanged**: `sys.partition_schemes`/`sys.partition_functions`/a join of
+      `sys.partitions`/`sys.indexes` against the live local test database
+      each still return zero rows. Deliberately left deferred rather than
+      built against self-authored synthetic fixtures — the concern is real-
+      schema generalization, which a synthetic fixture can't demonstrate any
+      more than the prior check could.
 - [x] Lower-precision, listed for completeness rather than as priorities: wide
       tables (35+ columns or >2000 non-LOB bytes), high nullable-column ratio,
       high string-column ratio. Shipped as three new `IndexDesignFindingKind`
