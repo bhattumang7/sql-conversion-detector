@@ -6686,9 +6686,11 @@ ideas, not rule candidates, so they don't belong in a detection tier.
       differently. Scoped to the SARIF export only, per CLAUDE.md's own
       framing of this idea ("would make the SARIF export a safer CI gate") -
       the JSON/readable reports are untouched, so no schema-version bump.
-- [ ] **Source-context classification** (migration/deployment script vs
-      hot-path module) used to filter before reporting — a one-off deployment
-      script legitimately does things a proc must not.
+- Source-context classification (migration/deployment script vs hot-path
+  module) - considered and dropped, not deferred: no signal was found precise
+  enough to tell the two apart without real risk of silently suppressing a
+  genuine finding in production code that happens to live in a folder that
+  merely looks like a migration path.
 - [ ] **Machine-readable rule catalog generated from the rule types**, carrying
       id/severity/rationale/examples/fix-guidance, feeding both docs and the
       SARIF `rules` block — keeps documentation and code from drifting apart.
@@ -6797,14 +6799,30 @@ verifiable.
         explicit decision on which of those two (cosmetic call-site helper vs.
         real breaking schema migration) before any code, not a default
         "just do it."
-  - [ ] **`Confidence` as a real, evidence-based rule output** instead of a
-        record default no scanner sets. This is a per-rule content/judgment
-        task across 150+ rule kinds (what evidence quality justifies
-        High/Medium/Low for *this specific* rule), the same shape and scale
-        as the machine-readable rule catalog's content problem below - not a
-        mechanical refactor, and a partial pass (a few rules done, the rest
-        left at the High default) would misrepresent confidence as
-        evidence-based when it mostly still isn't.
+  - **Re-investigated - the earlier framing here was wrong; kept, not
+        deleted.** This item previously claimed "no scanner sets [Confidence]
+        from evidence" - checked directly: of 76 finding record types with a
+        `Confidence` field, 24 already default to `Medium`/`Low` with a real,
+        written per-rule reason (e.g. `SessionDateSettingFinding`: `Low`
+        because "this pass cannot see what value the caller's session already
+        had, so it cannot claim the module's SET actually changes anything";
+        `UndersizedDeclarationFinding`: `Low` because "this is a code-smell
+        judgment call, not a provable fact"). `Confidence` is also genuinely
+        load-bearing in three places: the `--confidence` CLI filter, the
+        SARIF tier feature above (a `Low`-confidence finding can never report
+        as a CI-blocking `error`), and `DynamicSqlPipeline`'s downgrade of a
+        finding resting on an assumption about reparsed dynamic SQL text.
+        Considered deleting the whole concept and decided against it - it is
+        doing real work, not vestigial.
+  - [ ] What's actually left, now scoped correctly: the remaining 52 rule
+        types still default to `High` - some may deserve a second look, but
+        there is no evidence today that any specific one is wrong, so this is
+        a "review sometime," not urgent work. Separately, `Confidence` today
+        is fixed per rule *type*; two findings of the same rule always get
+        the same value even when one rests on more resolved evidence than the
+        other - varying it per finding *instance* for the handful of rules
+        where that distinction matters is real but narrow, nothing like a
+        150-rule sweep.
   - [x] **`IRelocatableFinding`** — shipped 2026-08-18. Rather than renaming
         `ColumnPosition`/`Column` across seven finding records (blocked on a
         real collision: `TypedPredicateFinding.Column` is the operand, not a
