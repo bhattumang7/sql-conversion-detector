@@ -6918,6 +6918,25 @@ verifiable.
         "obscures more than it saves" outcome the `OrderBy`/nested-emission
         pieces above already hit. Left as-is; each scanner's own recursion
         is genuinely a different traversal, not copy-paste drift.
+  - [x] **Real duplication SonarQube's CPD flagged that the Flatten-family
+        design pass above didn't cover** — found via direct file comparison
+        (Sonar MCP was disconnected mid-investigation), fixed in two commits.
+        `BaseColumnResolver` (`ResolveBaseColumn`/`ResolveBothSides`/
+        `ColumnReferenceCollector` — depth-0 base-column resolution against a
+        scope chain) unified `IndexCoverageScanner`, `CompositeIndexLeadingColumnScanner`,
+        `IndexHintScanner`, and `PartialCompositeForeignKeyJoinScanner`;
+        `IndexHintScanner`'s own doc comment already named the duplication
+        without anyone extracting it. `DirectBaseTableResolver`
+        (`ResolveDirectBaseTable(s)`/`ResolveDirectBaseTableName`/
+        `ColumnNameIfQualifiedByAlias`/`RawColumnReferenceCollector` — the
+        alias-keyed, scope-chain-free resolution these scanners use instead,
+        a known v1 scope limit) unified `FloatEqualityPredicateScanner`,
+        `AggregateDivisionColumnstoreScanner`, `StringConcatNullScanner`,
+        `NonUniqueUpdateSourceScanner`, `QueryAntiPatternScanner`, and
+        `CartesianJoinScanner` — several pairs of these already cross-cited
+        each other as precedent in their own doc comments without anyone
+        merging them. Full build + 3,664-test suite passed clean after each
+        commit.
   - Deliberately NOT in scope: a generic self-registering rule engine
     (scanners genuinely differ in traversal shape — region stacks, polarity
     tracking, claim sets — and one framework would re-tangle them on a
