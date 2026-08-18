@@ -70,10 +70,13 @@ Grouped by theme:
   changes how a date literal or `DATEPART`-relative comparison is parsed for
   the rest of that module's own execution.
 * **Dynamic SQL** — proven-constant `EXEC`/`sp_executesql` text re-run
-  through the full pipeline with findings remapped to their true source;
-  concatenated values that should have been parameterized; `EXEC(string)`
-  where `sp_executesql` was available and unused; temp-table shape mismatch
-  across an `INSERT ... EXEC` proc-call boundary
+  through the full pipeline with findings remapped to their true source,
+  chained through the same lineage resolver static SQL uses (a predicate
+  inside `EXEC(@sql)` against a view built on another view still resolves
+  to the real base column — oracle-confirmed, not just proven possible in
+  isolation); concatenated values that should have been parameterized;
+  `EXEC(string)` where `sp_executesql` was available and unused;
+  temp-table shape mismatch across an `INSERT ... EXEC` proc-call boundary
   (`sys.dm_exec_describe_first_result_set`-backed, live-mode only).
 * **Code quality and maintainability** — eight configurable-threshold
   structural metrics (line/module/routine length, parameter count, nesting
@@ -357,7 +360,11 @@ because they require resolving views/TVFs through the lineage pass first)
   concatenation, `sp_executesql`'s own typed `@params`, or straight-line
   reaching-definitions tracing of `DECLARE`/`SET`/`SELECT` chains) is
   re-run through the entire pipeline above, with every finding remapped
-  back to its true source line and the call site kept as provenance.
+  back to its true source line and the call site kept as provenance —
+  including the same lineage resolution static SQL gets, so a predicate
+  inside the dynamic SQL against a view built on another view still
+  resolves to the real base table column, not just to the view it's
+  written against.
 * A value (as opposed to an identifier) spliced into otherwise-constant
   dynamic SQL text via string concatenation instead of a real
   `sp_executesql` parameter — measured to pollute the plan cache with one
