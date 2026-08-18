@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SilentScan Rules</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5c5c5c;
+    --accent: #0a5cff;
+    --border: #e0e0e0;
+    --code-bg: #f5f5f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --accent: #4993ff;
+      --border: #30363d;
+      --code-bg: #161b22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+  }
+  h1 {
+    font-size: 2.2rem;
+    margin-bottom: 0.25rem;
+  }
+  .tagline {
+    color: var(--muted);
+    font-size: 1.1rem;
+    margin-top: 0;
+    margin-bottom: 2.5rem;
+  }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    border-radius: 6px;
+  }
+  code {
+    padding: 0.15em 0.4em;
+    font-size: 0.9em;
+  }
+  a { color: var(--accent); }
+  .rule {
+    border-top: 1px solid var(--border);
+    padding: 1.5rem 0;
+  }
+  .rule:first-of-type { border-top: none; }
+  .rule-id {
+    font-size: 1rem;
+    margin: 0 0 0.5rem;
+  }
+  .rationale { margin: 0.5rem 0; }
+  .fix {
+    margin: 0.5rem 0;
+    padding-left: 1rem;
+    border-left: 3px solid var(--accent);
+  }
+  .fix-label {
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+  footer {
+    margin-top: 4rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>SilentScan rules</h1>  <p class="tagline">234 rules. 141 carry fix guidance; 18 link a real fixture. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/call-graph/argument-type-mismatch</code></h3>
+    <p class="rationale">A real EXEC call site passes a caller-side variable whose declared type risks silent data loss against the callee&#x27;s own declared parameter type - an assignment-shaped conversion at parameter marshalling, not a predicate, classified the same way an INSERT/UPDATE assignment&#x27;s silent data loss is.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/cascading-foreign-key</code></h3>
+    <p class="rationale">A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action - a single DML statement against the referenced table silently cascades to every dependent row in the child table too, with no visible predicate change at the call site.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/check-constraint-null-not-handled</code></h3>
+    <p class="rationale">A nullable column&#x27;s own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate - SQL Server&#x27;s three-valued logic means a comparison against NULL evaluates to UNKNOWN, never FALSE, and a CHECK constraint only rejects a row when its predicate is FALSE, so a NULL value silently passes a constraint that reads as if it forbids bad data.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit IS NULL/IS NOT NULL test for the column in the CHECK constraint predicate, so a NULL value isn&#x27;t silently accepted through three-valued logic.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/check-constraint-on-identity-column</code></h3>
+    <p class="rationale">A CHECK constraint&#x27;s own definition directly references an IDENTITY column - the identity counter advances even through a failed insert, so a numeric-threshold CHECK here rejects every insert deterministically until the counter happens to satisfy it, then silently stops mattering forever with no code change.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Do not enforce a numeric-threshold CHECK directly on an IDENTITY column - the counter advances even on failed inserts, so the constraint stops meaningfully applying once it happens to be satisfied.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/column-collation-drift</code></h3>
+    <p class="rationale">A string-family column&#x27;s own collation differs from the database&#x27;s default collation (or, for a temp table/table variable, from tempdb&#x27;s effective collation) - a conversion seed: any future comparison against a column/literal carrying the baseline collation risks a collation-conflict compile error or a forced-scan implicit conversion. Catalog-only, detected before any query reaches the column.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/cross-table-fk-type-drift</code></h3>
+    <p class="rationale">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ - a conversion seed on every JOIN that follows this relationship, detected from the catalog alone (sys.foreign_key_columns), independent of whether any scanned query actually joins on it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/default-constraint-on-nullable-column</code></h3>
+    <p class="rationale">A column carries a DEFAULT constraint but is still nullable - a DEFAULT only ever applies when the column is OMITTED from an INSERT&#x27;s own column list; any caller that supplies NULL explicitly (a common ORM-generated full-column INSERT shape) bypasses the default entirely, silently, with no error.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Make the column NOT NULL, or otherwise stop relying on the DEFAULT for callers that supply NULL explicitly - a DEFAULT only applies when the column is omitted from the INSERT&#x27;s own column list.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/max-typed-column</code></h3>
+    <p class="rationale">A string/binary column is declared MAX-typed - it can never be an index key column at all, so any predicate/join on it can never seek regardless of how it&#x27;s used. Catalog-only structural fact.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/non-persisted-computed-column</code></h3>
+    <p class="rationale">A computed column with is_persisted = 0 (sys.computed_columns) - its definition is recomputed from the base row on every read that touches it, independent of whether that definition calls a UDF at all. Catalog-only structural fact, never fires on a PERSISTED computed column regardless of whether it&#x27;s also indexed.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Mark the computed column PERSISTED so its definition isn&#x27;t recomputed from the base row on every read that touches it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/rls-predicate-unindexed-column</code></h3>
+    <p class="rationale">An enabled Row-Level Security FILTER predicate&#x27;s own bound column(s) lead no active index on the secured table - the predicate is silently applied to every SELECT/UPDATE/DELETE against this table (not just queries whose own WHERE clause happens to filter the same way), so the engine cannot seek and must evaluate it as a residual, per-row filter over a full scan on every access. Oracle-confirmed scan-vs-seek contrast; the checklist&#x27;s own &#x27;forces single-threaded execution&#x27; claim was not reproduced live on this tool&#x27;s own standing engine build and is deliberately not asserted here.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an index (or extend an existing one) covering the Row-Level Security FILTER predicate&#x27;s own bound column(s), so it can be seek-evaluated instead of scanned on every access.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/stale-select-star-view</code></h3>
+    <p class="rationale">A view&#x27;s own outermost SELECT * over a single base table has a compiled column list (frozen at CREATE/ALTER/sp_refreshview time) that no longer matches that base table&#x27;s current column list - a later ALTER TABLE ADD/DROP COLUMN never propagates to the view. Confirmed to silently surface real data under a stale, wrong column label when a drop and a later add shift column identity, not merely a missing/extra column.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/temporal-history-index-gap</code></h3>
+    <p class="rationale">A system-versioned temporal table&#x27;s CURRENT side carries a nonclustered index with no structurally matching index (same key columns, same order) on its HISTORY side - oracle-confirmed that FOR SYSTEM_TIME AS OF/BETWEEN rewrites to a UNION ALL of the two tables, so a predicate that seeks the current-table branch via this index degrades to a full scan of the history-table branch. PRIMARY KEY/UNIQUE-constraint indexes are never compared - the engine itself forbids either constraint on a temporal history table.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Create a structurally matching nonclustered index (same key columns, same order) on the HISTORY table to mirror the one on the CURRENT table.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/tvf-return-database-collation</code></h3>
+    <p class="rationale">A non-schema-bound table-valued function&#x27;s own RETURNS @t TABLE(...) declares a character-typed column with no explicit COLLATE clause, so its collation was implicitly resolved against the CURRENT database&#x27;s default collation at CREATE/ALTER time and baked in (sys.sql_modules.uses_database_collation) - a later ALTER DATABASE ... COLLATE silently leaves the function&#x27;s already-compiled return shape disagreeing with the database&#x27;s new default. Schema-bound modules are excluded from this finding: oracle-confirmed that schema-binding sets this flag unconditionally regardless of whether the module touches string data at all, so it carries no differentiating signal there.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit COLLATE clause to the table-valued function&#x27;s own RETURNS TABLE column declaration instead of relying on the database&#x27;s default collation at CREATE/ALTER time.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/untrusted-check-constraint</code></h3>
+    <p class="rationale">A CHECK constraint the engine itself does not trust (sys.check_constraints.is_not_trusted) - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement. The constraint may not actually hold over existing rows, and the optimizer forfeits constraint-based rewrites that assume it does.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/untrusted-foreign-key</code></h3>
+    <p class="rationale">A foreign key the engine itself does not trust (sys.foreign_keys.is_not_trusted) - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement. Forfeits join-elimination and other constraint-based query rewrites for every query that touches it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/catalog/with-recompile</code></h3>
+    <p class="rationale">The module was authored WITH RECOMPILE (sys.sql_modules.is_recompiled) - every execution compiles a fresh plan and discards it immediately rather than caching it, so the module&#x27;s own cost never accumulates in the plan cache at all, invisible to any monitoring that reads sys.dm_exec_cached_plans/sys.dm_exec_query_stats.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/case-expression-missing-else</code></h3>
+    <p class="rationale">A simple CASE expression has no ELSE - an input value matching none of the WHEN values silently evaluates to NULL, no error raised.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit ELSE branch to the CASE expression.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/cursor-fetch-column-count-mismatch</code></h3>
+    <p class="rationale">A cursor FETCH INTO variable count doesn&#x27;t match its own cursor&#x27;s defining SELECT column count - always fails at runtime.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Match the FETCH INTO variable list&#x27;s count to the cursor&#x27;s own defining SELECT column count.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/dirty-read-isolation-hint</code></h3>
+    <p class="rationale">NOLOCK/READUNCOMMITTED allows dirty reads and can miss or double-count rows during a concurrent page split.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Avoid NOLOCK/READUNCOMMITTED where dirty reads or missed/double-counted rows during a concurrent page split are not acceptable.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/duplicated-call-argument</code></h3>
+    <p class="rationale">The same non-literal expression is passed as two different arguments to the same call.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/empty-catch-block</code></h3>
+    <p class="rationale">A CATCH block has no statements - every error reaching it is silently swallowed.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add real error handling (at minimum a THROW or logging) inside the CATCH block instead of leaving it empty.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/goto-usage</code></h3>
+    <p class="rationale">A GOTO statement - unrestricted jumps make control flow harder to follow, and this tool&#x27;s own dead-code analysis declines entirely for a routine that contains one.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Restructure the control flow to avoid GOTO - unrestricted jumps also disable this tool&#x27;s own dead-code analysis for the routine.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/legacy-identity-intrinsic</code></h3>
+    <p class="rationale">@@IDENTITY returns the last identity value inserted in this session across any table/scope - prefer SCOPE_IDENTITY().</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use SCOPE_IDENTITY() instead of @@IDENTITY.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/non-deterministic-case-input</code></h3>
+    <p class="rationale">A non-deterministic function (NEWID/RAND/CRYPT_GEN_RANDOM) is used as a simple CASE expression&#x27;s input - oracle-confirmed to be re-evaluated separately per WHEN comparison, not once, making every WHEN branch effectively unreachable.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Assign the non-deterministic function&#x27;s result to a variable first, then use the variable as the CASE input, instead of calling the function directly as the CASE input.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/trigger-emits-output</code></h3>
+    <p class="rationale">A trigger emits a result set or message back to whatever connection fired the DML, not the calling application.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove the result set or message the trigger emits - it reaches whatever connection fired the DML, not the calling application.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/truncate-swallowed-by-catch</code></h3>
+    <p class="rationale">TRUNCATE TABLE sits inside a TRY block whose CATCH block never THROWs/RAISERRORs anywhere in its own statement tree - oracle-confirmed a real TRUNCATE failure (e.g. an enforced FK reference, Msg 4712) is silently swallowed here, with execution continuing as if the TRUNCATE had succeeded and no error reaching the caller. TRY with no matching CATCH at all is a hard parse error (Msg 102) and can never occur in valid T-SQL, correcting this item&#x27;s own original framing.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a THROW or RAISERROR inside the CATCH block so a real TRUNCATE failure doesn&#x27;t get silently swallowed.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/unassigned-output-parameter</code></h3>
+    <p class="rationale">A procedure&#x27;s own OUTPUT parameter is not assigned on some statically reachable path (a RETURN, or the natural end of the body) - oracle-confirmed a caller&#x27;s own variable is left completely unchanged by the call on that path (not reset to NULL), so a reused caller variable can silently carry stale data from a previous, unrelated call.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Assign the OUTPUT parameter on every statically reachable path, including RETURN and the natural end of the body.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/unresolved-transaction</code></h3>
+    <p class="rationale">A BEGIN TRANSACTION reaches a RETURN/THROW, or the natural end of the module body, on some statically reachable path with no intervening COMMIT/ROLLBACK - oracle-confirmed directly: SQL Server itself raises Msg 266 (&quot;Transaction count after EXECUTE indicates a mismatching number of BEGIN and COMMIT statements&quot;) and leaves the calling session&#x27;s @@TRANCOUNT elevated by one the instant such a procedure returns, holding that transaction&#x27;s locks indefinitely.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Ensure every RETURN/THROW path, and the natural end of the module body, is preceded by a matching COMMIT or ROLLBACK for every BEGIN TRANSACTION.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/control-flow/waitfor</code></h3>
+    <p class="rationale">WAITFOR DELAY/WAITFOR TIME holds the calling worker thread idle for the full delay/until-time - a documented, unconditional cost contributing to worker-pool exhaustion under load, and (inside an open transaction) extended lock hold duration.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/correctness/between-end-of-period-boundary</code></h3>
+    <p class="rationale">A BETWEEN predicate&#x27;s upper bound literal has fewer fractional-second digits than the TIME/DATETIME2/DATETIMEOFFSET column&#x27;s own declared precision - a correctness bug, not a sargability one: rows in the precision gap are silently excluded, oracle-confirmed. Rewrite as &gt;= start AND &lt; (start of the next period) instead.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rewrite the BETWEEN predicate as &gt;= start AND &lt; (start of the next period) instead, so no value in the precision gap is silently excluded.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/TEMPORAL_BOUNDARY_PRECISION_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/correctness/nonunique-update-source</code></h3>
+    <p class="rationale">UPDATE ... FROM ... JOIN where the joined source&#x27;s own join columns carry no unique index/constraint - if a target row matches more than one source row, SQL Server silently picks a value from an unspecified one of them (plan-dependent, not guaranteed stable across executions). MERGE raises a hard error in this exact situation instead of picking silently. Never fires when the source&#x27;s join columns are covered by a genuine unique index/constraint, or when the SET clause never reads from the non-unique source.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a unique index/constraint covering the source&#x27;s join columns, or switch to MERGE, which raises a hard error instead of silently picking an unspecified row.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/correctness/not-in-nullable-subquery</code></h3>
+    <p class="rationale">WHERE x NOT IN (SELECT y FROM t) where y is a nullable column - a three-valued-logic correctness trap. The instant the subquery produces one NULL row, the whole NOT IN evaluates to UNKNOWN for every outer row, so the query silently returns zero rows instead of the expected anti-join result. Never fires when the subquery column is NOT NULL, or when the subquery already filters it with an unconditional WHERE y IS NOT NULL.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a WHERE y IS NOT NULL filter to the subquery (or rewrite the NOT IN as a NOT EXISTS), so a NULL row can&#x27;t collapse the whole predicate to UNKNOWN.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/cross-module/inconsistent-lock-order</code></h3>
+    <p class="rationale">Two top-level procedures&#x27; own direct explicit-transaction write orders disagree on the relative lock order of the same two base tables - the textbook cross-session deadlock shape.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Make both procedures acquire locks on the two tables in the same relative order.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/auto-close-on</code></h3>
+    <p class="rationale">AUTO_CLOSE is ON - the database&#x27;s connection/buffer-pool state is torn down after the last connection closes and rebuilt from scratch on the next one.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Turn AUTO_CLOSE OFF.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/auto-create-statistics-off</code></h3>
+    <p class="rationale">AUTO_CREATE_STATISTICS is OFF - the optimizer can no longer create a missing single-column statistics object on demand, so a predicate against an unstatted column compiles against a guessed cardinality instead of a real histogram.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Turn AUTO_CREATE_STATISTICS ON so the optimizer can create a missing single-column statistics object on demand.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/auto-shrink-on</code></h3>
+    <p class="rationale">AUTO_SHRINK is ON - a well-known, severe anti-pattern: constant fragmentation churn as the engine shrinks the file and the workload immediately re-grows it.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Turn AUTO_SHRINK OFF.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/auto-update-statistics-off</code></h3>
+    <p class="rationale">AUTO_UPDATE_STATISTICS is OFF - statistics never refresh as the underlying data changes, so every plan compiled against them drifts further from reality the longer the database runs.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Turn AUTO_UPDATE_STATISTICS ON so statistics keep refreshing as the underlying data changes.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/compatibility-level-behind-engine-default</code></h3>
+    <p class="rationale">The database&#x27;s compatibility level is behind the connected engine instance&#x27;s own current default (read live from the model system database, not a hardcoded version-number mapping) - it is silently kept on an older cardinality estimator and query-optimizer behavior nobody chose on purpose.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Raise the database&#x27;s compatibility level to the connected engine instance&#x27;s own current default.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/page-verify-not-checksum</code></h3>
+    <p class="rationale">PAGE_VERIFY is not CHECKSUM - silent storage-level page corruption can go undetected until a much later, harder-to-diagnose failure.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Set PAGE_VERIFY to CHECKSUM.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/query-store-capture-mode-not-auto</code></h3>
+    <p class="rationale">Query Store is running with a capture mode other than AUTO - informational: ALL is a deliberate, real choice some teams prefer for active troubleshooting.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/query-store-not-read-write</code></h3>
+    <p class="rationale">Query Store is not actively running (actual state is not READ_WRITE) - informational: a real operational choice, not a universal anti-pattern.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/database/target-recovery-time-unset</code></h3>
+    <p class="rationale">TARGET_RECOVERY_TIME is 0 (disabled) - indirect checkpoint is off; confirmed directly against a freshly created database on the same engine that the modern default is 60 seconds, not 0.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Set TARGET_RECOVERY_TIME explicitly instead of leaving it at 0 (disabled).</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dead-code/redundant-jump</code></h3>
+    <p class="rationale">A GOTO whose target label is the very next statement in the same straight-line sequence - jumping to exactly where control flow would already go.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the GOTO - control flow already reaches the same place without it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dead-code/unreachable-code</code></h3>
+    <p class="rationale">A statement structurally can never execute - it follows a statement that always ends the enclosing routine on every path (RETURN/THROW, or an IF/TRY-CATCH whose every branch itself always ends it).</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the unreachable statement, or fix the preceding logic if reaching it was actually intended.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dead-code/unused-label</code></h3>
+    <p class="rationale">A label target that no GOTO anywhere in the same routine ever jumps to.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the unused label, or add the GOTO that was meant to jump to it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dead-code/unused-local-variable</code></h3>
+    <p class="rationale">A DECLARE&#x27;d local variable is never read anywhere after being declared - only ever assigned, or never referenced at all.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the unused local variable, or add the read that was meant to use it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dead-code/unused-parameter</code></h3>
+    <p class="rationale">A non-OUTPUT formal parameter is never referenced anywhere in the routine body.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the unused parameter, or add the reference that was meant to use it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/declaration/undersized-column</code></h3>
+    <p class="rationale">A real table column is declared with a string/binary length of 1 or 2 - almost always a truncated-from-a-larger-source mistake or a leftover single-character-flag placeholder that later grew real string content. Advisory only, no compared column needed - distinct from the under-length-vs-compared-column stream.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/declaration/undersized-variable-or-parameter</code></h3>
+    <p class="rationale">A DECLARE&#x27;d local variable or a procedure/function formal parameter is declared with a string/binary length of 1 or 2 - the same advisory-only, no-compared-column-needed claim as the table-column sibling.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/deprecated-set-rowcount</code></h3>
+    <p class="rationale">SET ROWCOUNT is deprecated - use TOP (n) instead; Microsoft documents it as not honored by INSERT/UPDATE/DELETE in a future release.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use TOP (n) instead of SET ROWCOUNT.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/equals-null-comparison</code></h3>
+    <p class="rationale">&quot;= NULL&quot; never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value - use &quot;IS NULL&quot; instead.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use IS NULL instead of = NULL.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/legacy-system-compatibility-view</code></h3>
+    <p class="rationale">A reference to a pre-SQL-Server-2005 system compatibility view, retained only for backward compatibility and missing columns/rows the real sys.* catalog view exposes.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Reference the real sys.* catalog view instead of the legacy compatibility view.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/like-with-no-wildcard</code></h3>
+    <p class="rationale">A LIKE pattern contains no wildcard character - behaviorally equivalent to a plain &quot;=&quot; comparison.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use a plain = comparison instead of LIKE when the pattern has no wildcard.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/non-ansi-comparison-operator</code></h3>
+    <p class="rationale">A non-ANSI comparison operator (!=, !&lt;, !&gt;) is used instead of the ANSI-standard spelling.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use the ANSI-standard comparison operator (e.g. &lt;&gt; instead of !=) instead of the non-ANSI spelling.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/not-equals-null-comparison</code></h3>
+    <p class="rationale">&quot;&lt;&gt; NULL&quot;/&quot;!= NULL&quot; never matches any row under the default ANSI_NULLS ON session setting - use &quot;IS NOT NULL&quot; instead.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use IS NOT NULL instead of &lt;&gt; NULL / != NULL.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/numbered-procedure-definition</code></h3>
+    <p class="rationale">A procedure is defined as a numbered-procedure-group member - a deprecated T-SQL feature still accepted by the parser and engine.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Define separate, individually named procedures instead of a numbered-procedure-group member.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/numbered-procedure-execution</code></h3>
+    <p class="rationale">A procedure is invoked by its numbered-procedure-group number.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Invoke the procedure by its real name instead of its numbered-group number.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/removed-security-stored-procedure</code></h3>
+    <p class="rationale">A legacy security-administration system stored procedure is invoked, superseded by CREATE LOGIN/CREATE USER/ALTER ROLE - some names in this family are already fully removed from current SQL Server versions.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use CREATE LOGIN/CREATE USER/ALTER ROLE instead of the legacy security-administration stored procedure.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/string-literal-column-alias</code></h3>
+    <p class="rationale">A column alias is written as a string literal instead of a real identifier - a deprecated aliasing form still accepted by the parser and engine.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Alias the column with a real identifier instead of a string literal.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/table-hint-without-with</code></h3>
+    <p class="rationale">A table hint is written without the WITH keyword - a deprecated syntax form still accepted by the parser and engine.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add the WITH keyword before the table hint.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/task-comment-fixme</code></h3>
+    <p class="rationale">A comment contains an untracked &quot;FIXME&quot; marker.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/deprecated-syntax/task-comment-todo</code></h3>
+    <p class="rationale">A comment contains an untracked &quot;TODO&quot; marker.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dml/self-referencing</code></h3>
+    <p class="rationale">An INSERT/UPDATE/DELETE/MERGE whose own read side (a self-join, a WHERE/SET subquery, or a view over the same base table) also names the exact table it writes to - oracle-confirmed to force extra defensive plan work (an Eager Spool for INSERT/DELETE, an extra Sort for UPDATE ... FROM/MERGE) that an otherwise-identical statement reading a different table never pays.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/all-branches-identical</code></h3>
+    <p class="rationale">Every branch of a conditional structure, including its ELSE, has an identical body or result - the structure produces the same outcome no matter which branch is taken.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove the conditional structure - it produces the same outcome no matter which branch is taken.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/always-true-or-false-literal-comparison</code></h3>
+    <p class="rationale">A comparison between two literal values (never a column or variable) is provable at parse time regardless of any row&#x27;s real data - the predicate is dead weight or can never match.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/collapsible-nested-if</code></h3>
+    <p class="rationale">An IF with no ELSE whose entire body is a single nested IF, also with no ELSE - semantically identical to one IF combining both conditions with AND.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Combine the two conditions with AND into a single IF, replacing the nested pair.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/commented-out-code</code></h3>
+    <p class="rationale">A comment&#x27;s own stripped content reparses cleanly as a plausible T-SQL statement or batch - not prose that merely mentions SQL keywords.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the commented-out code - version control already preserves its history.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/duplicate-sibling-condition</code></h3>
+    <p class="rationale">A later branch in an IF/ELSE IF chain or CASE expression repeats an earlier sibling&#x27;s own condition verbatim - the later branch can never be reached.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove the later branch - it can never be reached - or fix its condition if a different check was intended.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/duplicated-string-literal</code></h3>
+    <p class="rationale">The same non-trivial string literal appears three or more times within one module - a magic value that should be a variable or constant instead.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Extract the repeated string literal into a variable or constant instead of repeating it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/identical-binary-operands</code></h3>
+    <p class="rationale">The identical expression appears on both sides of a comparison, AND/OR, or a self-referential arithmetic operator - always the same value, a tautology, or a fixed degenerate result.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/identical-branch-bodies</code></h3>
+    <p class="rationale">Two (but not all) branches of a conditional structure have an identical body or result - either the conditional is partly pointless, or a copy-paste mistake left one branch matching another.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/mutually-exclusive-and-condition</code></h3>
+    <p class="rationale">Two conjuncts of one AND-combined condition compare the same operand against numeric bounds whose ranges cannot both hold at once - the condition can never be true.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/negated-comparison-as-opposite</code></h3>
+    <p class="rationale">A negated comparison is written instead of its provably equivalent opposite operator - a readability suggestion, not a correctness claim.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rewrite the negated comparison using its provably equivalent opposite operator.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/nested-conditional-expression</code></h3>
+    <p class="rationale">An IIF call is nested inside another IIF call&#x27;s own THEN or ELSE branch - T-SQL&#x27;s equivalent of a nested ternary expression.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/redundant-and-condition</code></h3>
+    <p class="rationale">Two conjuncts of one AND-combined condition compare the same operand against numeric bounds where one bound&#x27;s range is already a subset of the other&#x27;s - the looser bound adds nothing.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Drop the looser numeric bound - it adds nothing since the other conjunct&#x27;s range is already a subset.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/repeated-unary-operator</code></h3>
+    <p class="rationale">The same unary operator (NOT, unary minus, bitwise NOT) is applied twice in a row - always simplifiable to a single application or none.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Simplify to a single application of the operator (or remove it entirely if the double application cancels out).</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/self-assignment</code></h3>
+    <p class="rationale">A pure no-op assignment: a variable or UPDATE column assigned to itself.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Delete the no-op self-assignment.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/duplication/single-iteration-loop</code></h3>
+    <p class="rationale">A WHILE loop&#x27;s own body unconditionally reaches a BREAK/RETURN/THROW on every path through the first iteration - it can never loop a second time.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Replace the loop with plain straight-line code (or an IF), since it can never execute a second iteration.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/analyzed</code></h3>
+    <p class="rationale">A dynamic SQL call site with a provably-constant argument; its contents were reparsed and analyzed like static SQL.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/concatenated-value-in-constant-sql</code></h3>
+    <p class="rationale">A proven-constant value was spliced into an EXEC/sp_executesql dynamic SQL string via concatenation rather than authored as one whole literal or passed through sp_executesql&#x27;s own parameter mechanism - every distinct concatenated value compiles its own cached plan, oracle-confirmed against sys.dm_exec_cached_plans.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Pass the value through sp_executesql&#x27;s own @params mechanism instead of concatenating it into the SQL text, so one cached plan can be reused across every distinct value.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/exec-string-concatenates-parameterizable-value</code></h3>
+    <p class="rationale">An EXEC(string)/EXEC(@sql) call site concatenates a proven-constant value into its SQL text - sp_executesql&#x27;s own @params mechanism was available and unused, and would have let this call site reuse one cached plan across every distinct value instead of compiling a new one each time.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use sp_executesql with its own @params mechanism instead of EXEC(string)/EXEC(@sql) string concatenation, so one cached plan is reused across every distinct value.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/inner-parse-failed</code></h3>
+    <p class="rationale">A dynamic SQL call site&#x27;s argument was provably constant but its reassembled text did not parse as T-SQL.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/insert-exec-temp-table-column-count-mismatch</code></h3>
+    <p class="rationale">INSERT INTO #temp EXEC proc, where the executed proc&#x27;s real, engine-described result-set column count differs from #temp&#x27;s own declared column count - INSERT ... EXEC binds purely by position, so this always raises a hard runtime error (Msg 213/8164) every time the statement executes, live-verified against sys.dm_exec_describe_first_result_set (compile-only).</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Make #temp&#x27;s declared column list match the executed procedure&#x27;s real result-set column count exactly - INSERT ... EXEC binds purely by position.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/insert-exec-temp-table-column-type-mismatch</code></h3>
+    <p class="rationale">INSERT INTO #temp EXEC proc, where column counts match but at least one position&#x27;s type risks silent data loss between the executed proc&#x27;s real, engine-described column type and #temp&#x27;s own declared column type - a per-column WriteLossKind classification, live-verified against sys.dm_exec_describe_first_result_set (compile-only).</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Match #temp&#x27;s declared column types to the executed procedure&#x27;s real result-set column types at each position.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/partially-analyzed</code></h3>
+    <p class="rationale">A dynamic SQL call site&#x27;s argument contained a value standing for a whole optional clause/fragment, not a single scalar; the surrounding, unaffected query structure was analyzed, but the elided fragment&#x27;s own content was never examined.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/dynamic-sql/unanalyzable</code></h3>
+    <p class="rationale">A dynamic SQL call site whose argument depends on a variable, parameter, or expression and could not be statically analyzed.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/forced-serial/fast-forward-cursor</code></h3>
+    <p class="rationale">A cursor declared FAST_FORWARD (or the equivalent bare FORWARD_ONLY READ_ONLY without an explicit STATIC/KEYSET/DYNAMIC) forces the cursor&#x27;s own defining query plan serial, confirmed as NonParallelPlanReason=&quot;NoParallelFastForwardCursor&quot;. This is the opposite of the common &#x27;always use LOCAL FAST_FORWARD&#x27; fetch-overhead advice - that advice is still correct for row-by-row fetch cost, but it is specifically what defeats a parallel plan for the cursor&#x27;s defining SELECT.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/forced-serial/nonparallelizable-intrinsic</code></h3>
+    <p class="rationale">One of a finite, oracle-confirmed list of intrinsic functions/globals (OBJECT_ID, IDENT_CURRENT, ERROR_NUMBER, ERROR_MESSAGE, ERROR_LINE, ERROR_SEVERITY, ERROR_STATE, ERROR_PROCEDURE, @@TRANCOUNT) referenced inside a query with a real FROM clause forces that query&#x27;s plan serial, confirmed as NonParallelPlanReason=&quot;NonParallelizableIntrinsicFunction&quot;.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/forced-serial/table-variable-modification</code></h3>
+    <p class="rationale">A DECLARE&#x27;d table variable is the write target of an INSERT/UPDATE/DELETE/MERGE, or the INTO target of an OUTPUT clause - the engine forces that one statement&#x27;s own plan serial (effective MAXDOP 1), confirmed as NonParallelPlanReason=&quot;TableVariableTransactionsDoNotSupportParallelNestedTransaction&quot; in a real executed plan. A read-only reference to the same table variable is unaffected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/dangling-statement-after-unbraced-body</code></h3>
+    <p class="rationale">A statement immediately follows an unbraced IF/WHILE&#x27;s single-statement body, visually appearing to still be inside the conditional/loop when it is not. The statement&#x27;s own behavior is unaffected - only a future edit relying on the misleading visual shape is at risk.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/if-following-prior-block-end</code></h3>
+    <p class="rationale">An IF immediately follows the closing END of a prior braced IF on the same line - easy to misread as an ELSE IF continuation when it is really a separate, unconditional statement. The statement&#x27;s own behavior is unaffected - only a future edit relying on the misleading visual shape is at risk.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/missing-begin-end</code></h3>
+    <p class="rationale">An IF/WHILE/ELSE body is a single statement with no BEGIN...END - a later statement added here without braces silently falls outside the conditional. Purely a maintainability risk - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/missing-file-header-comment</code></h3>
+    <p class="rationale">A module&#x27;s own definition does not begin with a comment before its first real statement. Purely advisory - T-SQL modules carry no universal file-header convention the way application source files do.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/multiple-declarations-per-line</code></h3>
+    <p class="rationale">Two or more variables in the same DECLARE are declared on the same physical source line. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/multiple-statements-per-line</code></h3>
+    <p class="rationale">Two or more statements in the same block start on the same physical source line. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/redundant-parentheses</code></h3>
+    <p class="rationale">A parenthesized expression whose parentheses do not change grouping or precedence at all. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/single-line-conditional-body</code></h3>
+    <p class="rationale">An IF/WHILE/ELSE body is a single unbraced statement sharing its own keyword&#x27;s line - visually easy to misread. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/formatting/tab-character</code></h3>
+    <p class="rationale">A literal tab character appears in the source text. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/hint/index-does-not-exist</code></h3>
+    <p class="rationale">An INDEX(...) table hint names an index that does not exist in the catalog for this table - oracle-confirmed a hard compile error (Msg 308) every time this statement runs, not a silently-ignored hint.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Correct the INDEX(...) hint to name a real index that exists in the catalog, or remove the hint.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/hint/index-not-seekable</code></h3>
+    <p class="rationale">An INDEX(...) table hint names a real index whose own leading key column is never bound anywhere in the statement - the hint forces the engine to use this specific index (not merely suggest it), and with no bound on the leading key the engine cannot descend its B-tree to a useful starting point, oracle-confirmed to degrade the forced access path to a full index scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Bind the hinted index&#x27;s own leading key column in the statement, or hint a different index whose leading column is actually usable.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/identity/range-near-exhaustion</code></h3>
+    <p class="rationale">An IDENTITY column has consumed most of its declared type&#x27;s representable range - once exhausted, every subsequent INSERT raises a hard arithmetic-overflow error. Data-state-decidable: meaningful only against a production-shaped target, never a dev database.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Widen the IDENTITY column&#x27;s declared type before its range is exhausted.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/identity/seed-or-increment-anomaly</code></h3>
+    <p class="rationale">An IDENTITY column carries a negative seed or a non-1 increment - an unusual, informational data-modeling signal, not a proven defect (schema-decidable: identical on a dev and a production copy of the same schema).</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/columnstore-index-on-dml-target-table</code></h3>
+    <p class="rationale">A table carries a columnstore index and is also a direct DML target elsewhere in this codebase - lock escalation on a columnstore index happens at rowgroup granularity, not row granularity, so a single-row write inside an explicit transaction can block unrelated concurrent access to the rest of that rowgroup. Structural risk flag only; actual contention is workload-dependent.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/deprecated-lob-column-type</code></h3>
+    <p class="rationale">A column is declared text/ntext/image - formally deprecated by Microsoft since SQL Server 2005 in favor of the MAX-length equivalent, and a future engine version may remove it entirely.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use the MAX-length equivalent (varchar(max)/nvarchar(max)/varbinary(max)) instead of text/ntext/image.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/disabled-index</code></h3>
+    <p class="rationale">ALTER INDEX ... DISABLE was left in place - unusable by the engine until rebuilt, but still occupies catalog metadata and blocks a same-named CREATE INDEX.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rebuild the disabled index to make it usable again, or drop it if it&#x27;s no longer needed.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/duplicate-index</code></h3>
+    <p class="rationale">Two active indexes on the same table share an identical key list, uniqueness, and index kind - exact duplicates; one is pure write amplification and wasted space with no query benefit.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Drop one of the two exact-duplicate indexes.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/filter-column-not-in-index</code></h3>
+    <p class="rationale">A filtered index&#x27;s own filter predicate references a column not in its own key/INCLUDE list - the engine cannot cheaply confirm the filter still holds for a query that doesn&#x27;t already carry that column, defeating the covering benefit a filtered index exists for.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add the filtered index&#x27;s own filter column(s) to its key or INCLUDE list.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/float-or-real-index-key-column</code></h3>
+    <p class="rationale">An index&#x27;s key carries a float/real (approximate) column - IEEE-754 representation error means an equality seek/comparison against it can silently miss a value a person would call the same number.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Avoid float/real columns as index keys, or avoid equality comparisons/seeks against them, given IEEE-754 representation error.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/heap-with-nonclustered-indexes</code></h3>
+    <p class="rationale">A table has no clustered index anywhere but carries one or more nonclustered indexes - each one points back to its base row with an 8-byte RID instead of the clustering key, and that RID can change under heap maintenance (forwarded-row pointers).</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a clustered index to the table instead of leaving it a heap.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/heap-with-nonclustered-primary-key</code></h3>
+    <p class="rationale">A table has no clustered index anywhere because its own PRIMARY KEY constraint is declared NONCLUSTERED - the sharper sibling of the general heap-with-nonclustered-indexes finding.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Declare the PRIMARY KEY constraint CLUSTERED instead of NONCLUSTERED.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/high-nullable-column-ratio</code></h3>
+    <p class="rationale">A table&#x27;s columns are mostly nullable - often a sign of several optional sub-entities crammed into one table.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/high-string-column-ratio</code></h3>
+    <p class="rationale">A table&#x27;s columns are mostly string-typed - often correlates with under-typed data.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/hypothetical-index</code></h3>
+    <p class="rationale">A Database Engine Tuning Advisor/missing-index-wizard hypothetical index (sys.indexes.is_hypothetical = 1) was left behind - no real data behind it, safe to drop.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Drop the hypothetical index - it has no real data behind it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/many-key-columns-index</code></h3>
+    <p class="rationale">A single index carries an unusually high number of key columns - every one is carried in every leaf-level lookup and update against this index.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Reduce the number of key columns in the index to only those actually needed for seeking/ordering.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/many-nonclustered-indexes</code></h3>
+    <p class="rationale">A table carries an unusually high number of active nonclustered indexes - each one is paid for on every write; this does not identify which index is safe to drop.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/mergeable-indexes-differing-include-only</code></h3>
+    <p class="rationale">Two active indexes share an identical key list and sort direction but carry different, non-overlapping INCLUDE columns - mergeable into one index carrying the union at no seek cost to either original query, for less write/storage overhead than carrying both.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Merge the two indexes into one carrying the union of their INCLUDE columns.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/monotonic-clustered-key-missing-sequential-optimization</code></h3>
+    <p class="rationale">A clustered index leads on an always-ascending IDENTITY column with OPTIMIZE_FOR_SEQUENTIAL_KEY not enabled - every insert lands on the same trailing page, so concurrent inserts can serialize on that page&#x27;s latch. Structural risk flag only; actual contention depends on concurrent insert rate.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Enable OPTIMIZE_FOR_SEQUENTIAL_KEY on the clustered index.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/no-recompute-statistics</code></h3>
+    <p class="rationale">A statistics object is marked NORECOMPUTE - the engine&#x27;s automatic statistics maintenance never refreshes it, so its cardinality estimate silently drifts stale as the table&#x27;s data changes.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove the NORECOMPUTE option so the engine&#x27;s automatic statistics maintenance keeps this object refreshed.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/non-unique-clustered-index</code></h3>
+    <p class="rationale">A CLUSTERED index is not unique - the engine adds a hidden 4-byte uniquifier to every duplicate-keyed row, widening the key every nonclustered index on the table also carries in its own leaf rows.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Make the clustered index&#x27;s key unique (or add a uniquifying column) so the engine doesn&#x27;t add its own hidden 4-byte uniquifier.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/random-clustered-key-guid-default</code></h3>
+    <p class="rationale">A CLUSTERED index leads on a uniqueidentifier column defaulted to NEWID() - genuinely random insert order into a clustered B-tree causes severe page splits and fragmentation; NEWSEQUENTIALID() avoids this.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Default the uniqueidentifier column to NEWSEQUENTIALID() instead of NEWID().</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/subsumed-index</code></h3>
+    <p class="rationale">An active index&#x27;s key list is a leading-column prefix of another index&#x27;s own key list, with its INCLUDE columns already covered by the wider index - the narrower index is redundant.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Drop the narrower, redundant index - the wider index already covers it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/timestamp-column-naming</code></h3>
+    <p class="rationale">A column is declared timestamp - since SQL Server 2005, rowversion is a synonym for the identical underlying type; a naming-only recommendation, not a functional deprecation.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use rowversion instead of timestamp - they&#x27;re the identical type, but rowversion is the non-deprecated name.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/unindexed-foreign-key</code></h3>
+    <p class="rationale">A real FOREIGN KEY constraint&#x27;s own parent-side column set has no active index leading on it - every parent-side DELETE/UPDATE forces a referential-integrity scan of the child table, and every join along the relationship has no seek path.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an index leading on the foreign key&#x27;s parent-side column set.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/variable-length-key-column-exceeds-key-limit</code></h3>
+    <p class="rationale">A varchar/nvarchar/varbinary index key column&#x27;s declared max byte width exceeds the engine&#x27;s key-length ceiling (900 bytes clustered, 1700 bytes nonclustered) - CREATE INDEX only warns, so the first INSERT/UPDATE that actually stores a long-enough value fails at that moment instead, silently until then.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Shorten the column&#x27;s declared max length so the index key stays under the engine&#x27;s limit (900 bytes clustered, 1700 nonclustered).</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/wide-clustered-key</code></h3>
+    <p class="rationale">A CLUSTERED index&#x27;s key is wide (more than 3 key columns, or more than 16 estimated bytes) - every nonclustered index on the table carries a full copy of this key in every leaf row.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Narrow the clustered index&#x27;s key to fewer/smaller columns - every nonclustered index carries a full copy of it.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-design/wide-table</code></h3>
+    <p class="rationale">A table has an unusually large column count or estimated non-LOB row width - a data-modeling signal, not a specific proven defect.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index-shape/composite-leading-column-unconstrained</code></h3>
+    <p class="rationale">A real composite index&#x27;s leading key column is never bound anywhere in the statement while the query genuinely constrains one of its NON-leading key columns - a composite index is a single B-tree keyed first by its leading column, so with no bound on that column this specific index cannot be seek-used for this predicate at all. Only fires when no OTHER usable index on the table leads with the same violating column either, so a table with a real alternative seek path is never flagged.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/index/key-lookup-prone</code></h3>
+    <p class="rationale">A WHERE-equality seek against a table&#x27;s own single candidate nonclustered index does not cover every other column the statement references on that table - oracle-confirmed via real plan XML that this shape produces a Key/RID Lookup (Lookup=&quot;1&quot;) per matched row, and that widening the index to cover those columns removes it.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Widen the nonclustered index to cover (via key columns or INCLUDE) every column the statement references on that table, removing the Key/RID Lookup.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/join/cartesian-comma-join</code></h3>
+    <p class="rationale">A legacy comma-join (FROM A, B) with no predicate anywhere in the statement - no ON clause, no WHERE clause - connecting the two tables at all: a true cartesian product, the classic &#x27;forgot the join condition&#x27; defect.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit join predicate (ON clause or WHERE condition) connecting the two tables.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/join/cartesian-cross-join</code></h3>
+    <p class="rationale">An explicit CROSS JOIN with no predicate anywhere in the statement connecting the two tables - the author wrote CROSS JOIN, self-documenting a deliberate cartesian product, but this is still worth surfacing since an accidentally-left CROSS JOIN is a real, if less common, mistake.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Confirm the CROSS JOIN is deliberate; if not, add an explicit join predicate connecting the two tables.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/join/partial-composite-fk</code></h3>
+    <p class="rationale">A JOIN equates some but not all of a real composite foreign key&#x27;s column pairs - the omitted column(s) let one parent row match more than one child row than the declared relationship allows, silently multiplying rows through the join. A correctness and plan defect, not a lost seek.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Equate every column pair of the composite foreign key in the JOIN, not just some of them.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/lineage/expression-derived-column</code></h3>
+    <p class="rationale">A predicate compares a column that is a CAST/CONVERT or other computed expression by the time it reaches this statement (introduced in this statement&#x27;s own derived table, or upstream in a view/TVF&#x27;s SELECT list) - no index seek is possible regardless of the comparison&#x27;s types.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/lineage/multi-referenced-cte</code></h3>
+    <p class="rationale">A CTE referenced 2&#x2B; times downstream of its own WITH clause - SQL Server does not materialize a plain CTE once and reuse it, so each reference independently re-runs the CTE&#x27;s own defining query. A self-reference inside a recursive CTE&#x27;s own body is never counted - that is the structurally mandated recursion mechanism, not optional re-invocation.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Materialize the CTE&#x27;s result into a #temp table or table variable if it&#x27;s referenced more than once, so the defining query runs once instead of once per reference.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/lineage/nested-view-depth</code></h3>
+    <p class="rationale">A view/inline TVF nested 2&#x2B; view/TVF layers deep before reaching a base table - a change to a base table now has to be traced through 2&#x2B; independent view layers before its blast radius is understood, and each layer is a place a SELECT */column-list mismatch or silent type widening can hide.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/lineage/post-expansion-join-width</code></h3>
+    <p class="rationale">A query whose written FROM/JOIN table count meaningfully understates how many base tables it actually touches once every view/inline-TVF reference is expanded transitively - a query that looks like a 3-table join can expand to 20.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/lineage/select-star-view</code></h3>
+    <p class="rationale">A view/inline TVF nested 1&#x2B; view/TVF layers deep whose own outermost SELECT is a bare or qualified * - its column list is frozen at CREATE/ALTER time and silently disagrees with the base table after any change, confirmed to survive even a live describe-only probe and real execution until sp_refreshview runs. Only fires when a real consuming query elsewhere explicitly selects a strict, named subset of the view&#x27;s full column set - a consumer that itself does SELECT * never narrows anything and is never matched.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Run sp_refreshview (or ALTER/CREATE the view) to resync its column metadata with the base table - avoid a bare SELECT * in a view definition to prevent this recurring.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/case-branch-too-long</code></h3>
+    <p class="rationale">A single CASE WHEN branch&#x27;s result expression spans more lines than the configured maximum. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/line-too-long</code></h3>
+    <p class="rationale">A physical source line exceeds the configured maximum character length. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/module-too-long</code></h3>
+    <p class="rationale">A module (or, in file-mode, a source file) exceeds the configured maximum line count. Purely a maintainability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/nesting-too-deep</code></h3>
+    <p class="rationale">An IF/WHILE/TRY nests more than the configured maximum depth inside a routine. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/routine-too-long</code></h3>
+    <p class="rationale">A procedure/function/trigger body exceeds the configured maximum line count. Purely a maintainability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/too-many-case-branches</code></h3>
+    <p class="rationale">A single CASE expression has more WHEN branches than the configured maximum. Purely a maintainability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/too-many-conditional-operators</code></h3>
+    <p class="rationale">A single IF/WHILE condition chains more AND/OR operators than the configured maximum. Purely a readability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/metrics/too-many-parameters</code></h3>
+    <p class="rationale">A procedure/function declares more formal parameters than the configured maximum. Purely a maintainability signal - no query result or plan is affected.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/naming/redundant-type-qualifier</code></h3>
+    <p class="rationale">A data type reference carries a redundant &quot;dbo.&quot; schema qualifier that adds nothing and couples the declaration to a schema it does not need to name.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Drop the redundant &quot;dbo.&quot; schema qualifier from the data type reference.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/naming/reserved-keyword-as-identifier</code></h3>
+    <p class="rationale">A declared identifier is spelled identically to a reserved T-SQL keyword, forcing every future reference to remember to bracket- or quote-delimit it.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rename the identifier to avoid a reserved T-SQL keyword, or accept that it must always be bracket/quote-delimited.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/naming/sp-prefix-on-user-routine</code></h3>
+    <p class="rationale">A user-defined procedure or function is named with the &quot;sp_&quot; prefix, reserved by convention for system-shipped procedures - SQL Server searches the master database first for any unqualified call, adding lookup overhead and risking a silent collision with a real system procedure of the same name.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rename the routine to drop the sp_ prefix, reserved for system-shipped procedures.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/naming/unqualified-create</code></h3>
+    <p class="rationale">A CREATE/ALTER for a schema-scoped procedure/function/view names it with no explicit schema qualifier - the object&#x27;s real owning schema then depends on the connecting principal&#x27;s own default schema at deployment time.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Qualify the CREATE/ALTER statement with the object&#x27;s real intended schema explicitly.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicate/aggregate-division-columnstore-batch-mode</code></h3>
+    <p class="rationale">An aggregate argument contains a CASE-guarded division by a non-constant divisor, on a table backed by a columnstore index - historically reported as a class of bug where batch-mode (vectorized) execution does not reliably preserve the same per-row CASE-branch short-circuit elision rowstore scalar execution provides, so a query that has run safely under rowstore can start raising a divide-by-zero error once its plan runs in batch mode. Shipped as a structural risk flag only after a genuine but unsuccessful attempt to reproduce a live failure against this tool&#x27;s own standing engine build - not a proven-current-behavior claim.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicate/plus-operator-null-propagation</code></h3>
+    <p class="rationale">A &#x2B; concatenation chain between string-typed operands where at least one operand is a nullable column with no ISNULL/COALESCE guard - unlike CONCAT(), which treats a NULL operand as empty string, &#x2B; propagates a single NULL operand to NULL for the WHOLE expression with no error raised, oracle-confirmed directly against CONCAT()&#x27;s own different behavior for the identical NULL input.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an ISNULL/COALESCE guard around the nullable operand, or use CONCAT() instead of &#x2B;, which treats a NULL operand as empty string rather than propagating NULL to the whole expression.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicate/try-cast-computed-column</code></h3>
+    <p class="rationale">A non-persisted computed column built on TRY_CAST is referenced inside a real filter-context predicate (WHERE/JOIN ON/HAVING) elsewhere in the corpus - TRY_CAST is session-DATEFORMAT-dependent and therefore classified non-deterministic by the engine, so this column can never be PERSISTED or indexed at all, and the predicate can never seek through it no matter what index exists elsewhere on the table.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/ansi-padding-mismatch</code></h3>
+    <p class="rationale">A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace - the column can never store a value ending in whitespace at all (stripped at INSERT time under ANSI_PADDING OFF), so the pattern can never match anything the column could ever contain. Data-semantics finding, not a plan-shape one.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/catch-all-parameter</code></h3>
+    <p class="rationale">A predicate of the shape (Col = @p OR @p IS NULL) - the &#x27;catch-all&#x27;/&#x27;kitchen-sink&#x27; optional-filter idiom. One cached plan must stay correct for every possible NULL/non-NULL state of @p, which typically forces a scan regardless of what value is actually passed. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE, both of which let the optimizer see the real value on each call.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add OPTION (RECOMPILE) to the statement, or WITH RECOMPILE to the procedure, so the optimizer compiles against the real parameter value on each call instead of one plan that must suit every NULL/non-NULL state.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/filtered-index-parameter-mismatch</code></h3>
+    <p class="rationale">A predicate compares a column against a parameter or local variable, but that same column carries a filtered index whose own filter is a literal-equality restatement of this exact comparison - the optimizer can only match a filtered index against a query that restates its filter with a LITERAL, never a parameter/variable, so this query can never use that index regardless of the runtime value. Not suppressed by OPTION (RECOMPILE) - a compile-time limitation, not a cardinality-estimate one.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/float-equality</code></h3>
+    <p class="rationale">A WHERE/ON equality predicate (=) compares a float/real (approximate, IEEE-754) column - two values a person would call the same number can carry a different bit pattern and compare unequal, so the predicate can silently return the wrong rows regardless of plan shape or indexing.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/local-variable-predicate</code></h3>
+    <p class="rationale">A predicate compares a column against a DECLARE&#x27;d local variable&#x27;s value, never a formal parameter - the value is invisible to the cardinality estimator, which falls back to the column&#x27;s average-density statistic instead of a value-specific estimate. The predicate is still fully sargable; only the row-count ESTIMATE is at risk, not the access path. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add OPTION (RECOMPILE) to the statement, or WITH RECOMPILE to the procedure, so the cardinality estimate is built from the real value instead of the column&#x27;s average density.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/oversized-parameter</code></h3>
+    <p class="rationale">A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself - risks memory-grant inflation once the value feeds a sort/hash operator. Structural report, not a plan-shape claim for this specific predicate.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Declare the parameter/variable/expression with a length matching the column&#x27;s, rather than meaningfully longer, to avoid inflating the memory grant.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/reassigned-parameter</code></h3>
+    <p class="rationale">A formal parameter is reassigned (SET/SELECT) on every statically reachable path before a later predicate use of the same name - the optimizer&#x27;s compile-time SNIFFED value (from the caller&#x27;s original argument) is provably stale by the time this predicate executes, unlike a plain DECLARE&#x27;d local (which was never sniffable at all). The predicate is still fully sargable; only the row-count ESTIMATE built from the sniffed value is at risk. Suppressed when the statement carries OPTION (RECOMPILE) or the procedure is WITH RECOMPILE.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add OPTION (RECOMPILE) to the statement, or WITH RECOMPILE to the procedure, so the estimate isn&#x27;t built from a compile-time-stale sniffed value.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/predicates/under-length-parameter</code></h3>
+    <p class="rationale">A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1) - the value is silently truncated before the predicate ever runs, changing which rows match or matching none. Structural report, same severity tier as WriteLossFinding&#x27;s identical class of concern.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Declare the parameter/variable/expression with a length at least as long as the column&#x27;s, so the value isn&#x27;t silently truncated before the predicate runs.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/bare-top-no-order-by</code></h3>
+    <p class="rationale">A bare TOP (n) with no ORDER BY anywhere in the same query - SQL Server documents that without ORDER BY, both which rows satisfy TOP and their return order are unguaranteed, so code relying on &#x27;the first N rows&#x27; is trusting undefined behavior that can change with plan choice, parallelism, or statistics drift, not merely a stylistic complaint. TOP (100) PERCENT is excluded - 100 percent of a result set is every row regardless of TOP&#x27;s own row-selection nondeterminism.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit ORDER BY to the query so which rows TOP returns (and their order) is guaranteed, not left to plan choice.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/count-star-variable-existence-check</code></h3>
+    <p class="rationale">COUNT(*) is assigned to a variable and the very next statement compares that variable only to zero - oracle-confirmed this shape forces a real full-set aggregation, unlike the inline scalar-subquery form (IF (SELECT COUNT(*) ...) &gt; 0), which the optimizer already rewrites into an EXISTS-equivalent short-circuiting plan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use IF EXISTS(SELECT 1 ...) or the inline scalar-subquery form (IF (SELECT COUNT(*) ...) &gt; 0) instead of assigning COUNT(*) to a variable before comparing it to zero.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/distinct-masking-join-fanout</code></h3>
+    <p class="rationale">A SELECT DISTINCT joins a table whose own join columns are not backed by a unique index - DISTINCT may be silently papering over row duplication the join itself introduces.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/global-cursor-declaration</code></h3>
+    <p class="rationale">A cursor is declared without LOCAL, defaulting to GLOBAL - it stays alive and visible for the whole connection/batch, not just the declaring scope, a resource-leak and naming-collision risk.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Declare the cursor LOCAL explicitly instead of relying on the GLOBAL default.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/linked-server-or-cross-database-reference</code></h3>
+    <p class="rationale">A table reference names a remote linked server (4-part name) or a different database than the one this scan connected to (3-part name) - remote/cross-database statistics are usually unavailable to the optimizer, so any cardinality estimate involving one is close to a guess.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/merge-missing-holdlock</code></h3>
+    <p class="rationale">A MERGE target carries no WITH (HOLDLOCK)/SERIALIZABLE hint - the documented MERGE race where two concurrent sessions can both take the WHEN NOT MATCHED branch under READ COMMITTED and hit a primary-key violation.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a WITH (HOLDLOCK) or SERIALIZABLE hint to the MERGE target to close the race.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/merge-non-unique-using-source</code></h3>
+    <p class="rationale">A MERGE USING source is not backed by a unique index covering its own ON-clause join columns - the engine raises a hard error the moment a target row matches more than one source row.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a unique index/constraint covering the MERGE USING source&#x27;s own ON-clause join columns.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/merge-unconditional-delete</code></h3>
+    <p class="rationale">A MERGE WHEN MATCHED/WHEN NOT MATCHED BY SOURCE THEN DELETE branch carries no additional AND condition of its own - a badly-scoped USING source can turn an intended incremental sync into a mass delete.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit AND condition to the MERGE DELETE branch to scope which rows it can remove.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/non-aggregate-having-predicate</code></h3>
+    <p class="rationale">A HAVING condition references only GROUP BY key columns/literals and no aggregate result - moving it to WHERE produces an identical result while filtering before, not after, aggregation.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Move the condition from HAVING to WHERE so filtering happens before aggregation instead of after.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/rbar-single-row-loop-dml</code></h3>
+    <p class="rationale">A WHILE loop issues a single-row UPDATE/DELETE keyed to a variable the same loop advances per iteration (row-by-row processing) - a set-based statement over the whole matching set would do the same work without the per-iteration overhead.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rewrite the loop as a single set-based UPDATE/DELETE over the whole matching set instead of looping row by row.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/recursive-cte-missing-maxrecursion</code></h3>
+    <p class="rationale">A recursive CTE&#x27;s containing statement has no OPTION (MAXRECURSION n) - oracle-confirmed the engine&#x27;s own default 100-level limit fails the statement outright (Msg 530) once exceeded.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit OPTION (MAXRECURSION n) to the statement instead of relying on the engine&#x27;s default 100-level limit.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/table-variable-low-compat-estimate</code></h3>
+    <p class="rationale">A table variable is used as a query source while the connected database&#x27;s compatibility level is below 150 - oracle-confirmed the optimizer&#x27;s cardinality estimate is fixed at exactly 1 row regardless of how many rows were actually loaded, below that level.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/table-variable-stale-estimate-in-loop</code></h3>
+    <p class="rationale">A table variable is read as a query source inside a WHILE loop that also writes to it - oracle-confirmed the cardinality estimate freezes at the row count from the first iteration that executed the read and never re-adjusts as the loop keeps growing the table variable.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/unbounded-table-write</code></h3>
+    <p class="rationale">An UPDATE/DELETE has no WHERE clause and no TOP - a whole-table write with no row-limiting mechanism at all. Advisory: a deliberate full-table maintenance statement is a legitimate reason this fires.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/union-of-provably-disjoint-branches</code></h3>
+    <p class="rationale">A UNION combines branches that each filter the same table/column to a distinct literal - the branches are provably mutually exclusive, so UNION&#x27;s duplicate-elimination pass can never remove a row and UNION ALL is equivalent.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use UNION ALL instead of UNION - the branches are provably disjoint, so no duplicate-elimination pass is ever needed.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/query/unqualified-table-reference</code></h3>
+    <p class="rationale">A table reference at a real query site carries no explicit schema qualifier - the plan cache holds a separate entry per schema-resolution context and compilation takes an extra schema-stability lock.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Qualify the table reference with its schema explicitly instead of relying on schema resolution at compile time.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/scalar-udf/in-computed-column-or-constraint</code></h3>
+    <p class="rationale">A computed column, DEFAULT, or CHECK constraint definition calls a scalar UDF - this poisons every query that touches the table with per-row/serial cost, even one that never names the column, and is detected from the catalog alone.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/scalar_udf/COMPUTED_COLUMN_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/scalar-udf/in-predicate</code></h3>
+    <p class="rationale">A scalar UDF is called in a WHERE/JOIN ON/HAVING/MERGE ON predicate - per-row execution, non-sargable, and (pre-2019, or on any engine when the UDF proves non-inlineable) forces the whole plan serial. Distinct from a syntactic function-wrapped-column finding on the same predicate: this claim is catalog-proven per-row/serial cost, not sargability loss, and the two are reported independently by design.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/scalar_udf/PREDICATE_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/scalar-udf/in-select-or-expression</code></h3>
+    <p class="rationale">A scalar UDF is called outside any predicate (SELECT list, ORDER BY, GROUP BY, SET/variable assignment) - per-row execution and (pre-2019, or non-inlineable) a forced-serial plan, but sargability is unaffected.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/scalar_udf/SELECT_LIST_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/scalar-udf/nested-under-view-or-tvf</code></h3>
+    <p class="rationale">A view or inline TVF referenced here calls a scalar UDF, transitively, somewhere in its own definition - the per-row cost (and, pre-2019, forced-serial plan) is inherited invisibly through however many layers sit between. Pre-2019 an inline TVF&#x27;s expansion spreads the UDF into every caller; 2019&#x2B; a scalar-UDF call inside an iTVF is itself a FROID inlining-blocker interaction.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/scalar_udf/NESTED_UNDER_VIEW_OR_TVF_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/security/hard-coded-credential</code></h3>
+    <p class="rationale">A credential-suggestive-named variable/parameter is assigned a literal string value directly in source text - keep credentials in a secrets store or external configuration.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Keep the credential in a secrets store or external configuration instead of hard-coding it in source text.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/security/hard-coded-ip-address</code></h3>
+    <p class="rationale">A string literal contains a hardcoded, non-benign IPv4 address - an environment-specific detail embedded in code.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Move the IP address into configuration instead of hard-coding it in source text.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/security/unprovable-dynamic-sql-text</code></h3>
+    <p class="rationale">A dynamic SQL call site&#x27;s assembled text depends on a variable/parameter/expression this tool cannot trace - it cannot be shown, from the code alone, to be free of runtime/external influence.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/security/weak-hash-algorithm</code></h3>
+    <p class="rationale">A HASHBYTES call names a cryptographically broken/deprecated algorithm (MD2/MD4/MD5/SHA/SHA1) - prefer SHA2_256/SHA2_512.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use HASHBYTES with SHA2_256 or SHA2_512 instead of a broken/deprecated algorithm.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/security/weak-hash-algorithm-sensitive-context</code></h3>
+    <p class="rationale">A HASHBYTES call names a weak/deprecated algorithm in what looks like a security-sensitive context (a credential-named operand, or a direct comparison).</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use HASHBYTES with SHA2_256 or SHA2_512 instead of a weak/deprecated algorithm, especially in a security-sensitive context.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/session-date/set-datefirst</code></h3>
+    <p class="rationale">SET DATEFIRST appears in this module&#x27;s own body - oracle-confirmed DATEPART(weekday, ...) for a fixed real date returns a different ordinal depending purely on which DATEFIRST value was set first in the session.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Avoid relying on the session&#x27;s own SET DATEFIRST value for weekday math - use a DATEFIRST-independent computation instead.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/session-date/set-dateformat</code></h3>
+    <p class="rationale">SET DATEFORMAT appears in this module&#x27;s own body - oracle-confirmed the identical ambiguous string date literal (&#x27;03/04/2026&#x27;) resolves to a different real date (March 4 vs. April 3) depending purely on which DATEFORMAT value was set first in the session, independent of the caller&#x27;s own settings.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use an unambiguous ISO date literal format (YYYYMMDD) instead of relying on SET DATEFORMAT to resolve an ambiguous string date.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/set-option/ansi-nulls-off</code></h3>
+    <p class="rationale">The module was compiled under ANSI_NULLS OFF (sys.sql_modules.uses_ansi_nulls) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Compile the module under ANSI_NULLS ON so the optimizer can use the filtered index or indexed view.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/set-option/ansi-warnings-off</code></h3>
+    <p class="rationale">An explicit SET ANSI_WARNINGS OFF in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove or turn off SET ANSI_WARNINGS OFF so the optimizer can use the filtered index or indexed view.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/set-option/concat-null-yields-null-off</code></h3>
+    <p class="rationale">An explicit SET CONCAT_NULL_YIELDS_NULL OFF in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove or turn off SET CONCAT_NULL_YIELDS_NULL OFF so the optimizer can use the filtered index or indexed view.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/set-option/numeric-roundabort-on</code></h3>
+    <p class="rationale">An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Remove or turn off SET NUMERIC_ROUNDABORT ON so the optimizer can use the filtered index or indexed view.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/set-option/quoted-identifier-off</code></h3>
+    <p class="rationale">The module was compiled under QUOTED_IDENTIFIER OFF (sys.sql_modules.uses_quoted_identifier) while its own body touches a filtered index or an indexed view - the optimizer cannot use either under this setting, so it silently falls back to a base-table/heap scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Compile the module under QUOTED_IDENTIFIER ON so the optimizer can use the filtered index or indexed view.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/statement-shape/bare-select-star</code></h3>
+    <p class="rationale">A bare SELECT * couples the query to the target&#x27;s current column set.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Name the columns explicitly instead of using SELECT *.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/statement-shape/insert-without-column-list</code></h3>
+    <p class="rationale">An INSERT with no explicit column list silently breaks if the target table&#x27;s column order/count ever changes.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit column list to the INSERT.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/statement-shape/missing-set-nocount-on</code></h3>
+    <p class="rationale">A procedure or trigger never sets NOCOUNT ON - every DML statement it runs sends a client-visible rowcount message.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add SET NOCOUNT ON at the top of the procedure or trigger.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/statement-shape/ordinal-order-by</code></h3>
+    <p class="rationale">An ORDER BY references a SELECT-list position by ordinal number - silently wrong if the SELECT list&#x27;s own column order changes.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Reference the ORDER BY column by name instead of its SELECT-list ordinal position.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/statement-shape/table-with-no-primary-key</code></h3>
+    <p class="rationale">A base table has no PRIMARY KEY constraint - no engine-enforced row uniqueness.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a PRIMARY KEY constraint to the table.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/statement-shape/top-without-order-by</code></h3>
+    <p class="rationale">A TOP row-limiting clause has no ORDER BY anywhere in the query - Microsoft&#x27;s own documentation states which rows come back is not guaranteed in this shape.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit ORDER BY to the query.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/temp-table/unindexed-join-operand</code></h3>
+    <p class="rationale">A SELECT...INTO #temp table is later used as a JOIN operand in the same batch/procedure scope, but no index was ever created on it - oracle-confirmed this forces a full scan/Hash Match of the entire temp table, with no seek alternative possible at all without an index.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Create an index on the #temp table before using it as a JOIN operand.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/temp-table/unindexed-where-filter</code></h3>
+    <p class="rationale">A SELECT...INTO #temp table is later filtered by a WHERE predicate in the same batch/procedure scope, but no index was ever created on it - the same no-seek-possible cost as the JOIN-operand sibling.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Create an index on the #temp table covering the WHERE-filtered column(s).</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/case-fold-on-column</code></h3>
+    <p class="rationale">UPPER/LOWER wraps a column inside a predicate, forcing a scan under any collation - remediation differs by whether the column&#x27;s real collation is case-sensitive.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>If the column&#x27;s collation is already case-insensitive, delete the UPPER/LOWER wrap entirely - it changes nothing about which rows match. If the collation is case-sensitive, rewrite via an indexed computed column or apply a case-insensitive COLLATE to the literal instead of wrapping the column.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/CASE_FOLD_ON_COLUMN_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/cast-or-convert-on-column</code></h3>
+    <p class="rationale">A column has CAST/CONVERT applied to it inside a predicate.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/CAST_CONVERT_ON_COLUMN_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/charindex-or-left-on-column</code></h3>
+    <p class="rationale">CHARINDEX(x, col) or LEFT(col, n) wraps a column inside a predicate - a prefix-match shape (CHARINDEX(...) = 1, or LEFT(col, n) = &#x27;x&#x27; with LEN(&#x27;x&#x27;) = n) is exactly rewritable to col LIKE &#x27;x%&#x27;; any other shape is a genuine substring search with no sargable rewrite.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>For a prefix-match shape (CHARINDEX(x, col) = 1, or LEFT(col, n) = &#x27;x&#x27; with LEN(&#x27;x&#x27;) = n), rewrite as col LIKE &#x27;x%&#x27; to restore the seek; a genuine substring search has no sargable rewrite.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/CHARINDEX_PREFIX_MATCH_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/column-arithmetic</code></h3>
+    <p class="rationale">A column has arithmetic applied to it inside a predicate.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/COLUMN_ARITHMETIC_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/date-function-on-column</code></h3>
+    <p class="rationale">A date-part function (YEAR/MONTH/DAY/DATEPART/DATEDIFF/DATEADD/DATENAME) wraps a column inside a predicate, forcing a scan - a sargable rewrite (a literal date range instead) usually restores the seek.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Rewrite the predicate as a literal date-range comparison instead of wrapping the column in a date-part function.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/DATE_YEAR_ON_COLUMN_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/function-wrapped-column</code></h3>
+    <p class="rationale">A column is wrapped in a function call inside a predicate, preventing an index seek.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/FUNCTION_WRAPPED_COLUMN_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/leading-wildcard-like</code></h3>
+    <p class="rationale">A LIKE predicate on a column starts with a wildcard, forcing a full scan.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/LEADING_WILDCARD_LIKE_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tier1/like-pattern-not-literal</code></h3>
+    <p class="rationale">A LIKE predicate&#x27;s pattern is not a literal, so a leading wildcard can&#x27;t be ruled out statically.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tier1/LIKE_PATTERN_NOT_LITERAL_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/direct-recursive-trigger</code></h3>
+    <p class="rationale">A trigger writes directly back to its own target table while the connected database&#x27;s own RECURSIVE_TRIGGERS option is live-confirmed ON - oracle-confirmed this actually re-fires the trigger rather than silently no-oping.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/instead-of-insert-filtered-no-reject-path</code></h3>
+    <p class="rationale">An INSTEAD OF INSERT trigger re-inserts a WHERE/JOIN-filtered subset of inserted with no companion branch handling the excluded rows - oracle-confirmed the caller&#x27;s own INSERT reports success while the filtered-out rows are silently dropped, no error, no row-count signal without inspecting @@ROWCOUNT against the input batch size.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add a companion branch that explicitly handles the rows the WHERE/JOIN filter excludes, instead of silently dropping them.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/logon-trigger-host-name-gate</code></h3>
+    <p class="rationale">A logon trigger gates an allow/deny decision on HOST_NAME() - oracle-confirmed this value is client-supplied via the connection string and trivially spoofable, so the access control does not actually control anything.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Do not gate an access control decision on HOST_NAME() - it is client-supplied over the connection string and trivially spoofable.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/multi-hop-recursion-cycle</code></h3>
+    <p class="rationale">A directed cycle of triggers across two or more distinct tables (table A&#x27;s trigger writes to table B, whose own trigger writes back toward A) - oracle-confirmed reachable while the server&#x27;s own &#x27;nested triggers&#x27; option is on, and confirmed to hit a real Msg 217 nesting-level-exceeded error once the cascade runs unbounded.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/multi-row-unsafe-keyed-dml</code></h3>
+    <p class="rationale">The same unsafe single-row inserted/deleted assignment, where the resulting variable then drives a keyed UPDATE/DELETE straight-line in the same trigger body - the arbitrary single value ends up actually written back instead of every affected row.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Replace the single-row variable-driven UPDATE/DELETE with a set-based statement joined to inserted/deleted so every affected row is written, not just one.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/multi-row-unsafe-single-row-assignment</code></h3>
+    <p class="rationale">A variable is assigned from a single, unspecified row of inserted/deleted with no WHERE/TOP/aggregate - oracle-confirmed the engine silently binds one arbitrary row&#x27;s value and discards the rest whenever the trigger&#x27;s own multi-row DML fires it more than once.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Replace the single-row assignment with set-based logic (a join, aggregate, or cursor) that processes every row of inserted/deleted, not just one.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/no-early-out-for-empty-invocation</code></h3>
+    <p class="rationale">A trigger body has no IF NOT EXISTS(SELECT * FROM inserted/deleted)/IF @@ROWCOUNT = 0 RETURN-style guard - a well-documented convention to skip unnecessary work on an empty invocation, advisory only.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an IF NOT EXISTS(SELECT * FROM inserted/deleted)/IF @@ROWCOUNT = 0 RETURN guard at the top of the trigger body.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/trigger/update-function-without-value-comparison</code></h3>
+    <p class="rationale">A trigger gates its logic on UPDATE(column) alone with no comparison between inserted.column and deleted.column - oracle-confirmed UPDATE() reports whether a column was named in the SET list, not whether its value actually changed, so a full-column UPDATE from an ORM trips the branch on genuine no-op saves as often as real changes.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Compare inserted.column against deleted.column directly instead of relying on UPDATE(column) alone, which only reports whether the column was named in the SET list.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tvf-fence/correlated-apply</code></h3>
+    <p class="rationale">A CROSS/OUTER APPLY calls a multi-statement or CLR table-valued function with an argument correlated to an outer row - the whole function body re-executes once per outer row, and interleaved execution (2017&#x2B;) does not rescue this.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tvf_fence/CORRELATED_APPLY_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tvf-fence/from-or-join</code></h3>
+    <p class="rationale">A FROM/JOIN references a multi-statement/CLR table-valued function directly - the optimizer cannot see into its body, so the reference carries a fixed cardinality estimate (1 row legacy CE / 100 rows 2014&#x2B; CE) that propagates into the surrounding plan.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tvf_fence/FROM_OR_JOIN_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tvf-fence/insert-exec</code></h3>
+    <p class="rationale">An INSERT ... EXEC forces the executed procedure&#x27;s entire result set to be spooled to a worktable before insertion - the same fence family, reached from a procedure call rather than a function reference.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tvf_fence/INSERT_EXEC_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tvf-fence/nested-under-view-or-tvf</code></h3>
+    <p class="rationale">A view or inline TVF referenced here is itself, transitively, built over a multi-statement/CLR TVF - the fence and its fabricated cardinality estimate are inherited invisibly through however many layers sit between.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tvf_fence/NESTED_UNDER_VIEW_OR_TVF_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/tvf-fence/standalone</code></h3>
+    <p class="rationale">A standalone SELECT references a multi-statement/CLR table-valued function with nothing else in the FROM clause - the fence and its fixed estimate are real, but there is no surrounding plan for the estimate to poison.</p>
+    <p class="example">Example: <code>tests/SilentScan.Tests/fixtures/tvf_fence/STANDALONE_fires.sql</code></p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/verdict/collation-conflict</code></h3>
+    <p class="rationale">Two columns with genuinely different, incompatible collations are compared directly - this does not compile (SQL Server error 468, &quot;Cannot resolve the collation conflict&quot;), not a seek/scan question.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/verdict/operand-clash</code></h3>
+    <p class="rationale">The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all - a definitive fact, not an absence of probe data.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/verdict/range-seek</code></h3>
+    <p class="rationale">An implicit type conversion on the column side permits only a dynamic range seek, not a direct seek.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Match the literal/parameter&#x27;s type (and collation) to the column&#x27;s declared type so the conversion applies to the value side instead of the column.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/verdict/scan-forced</code></h3>
+    <p class="rationale">An implicit type conversion on the column side forces a full scan.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Match the literal/parameter&#x27;s type (and collation) to the column&#x27;s declared type so the conversion applies to the value side instead of the column.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/verdict/seek-preserved</code></h3>
+    <p class="rationale">A predicate compares types where the seek is preserved (reported for completeness; not filtered into ScanReportBuilder&#x27;s actionable findings).</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/verdict/unknown</code></h3>
+    <p class="rationale">A predicate&#x27;s sargability could not be determined (e.g. unresolved collation) - never guessed.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/view/order-by-not-guaranteed</code></h3>
+    <p class="rationale">A view/inline TVF&#x27;s own outermost query uses a genuinely row-limiting TOP (N) or OFFSET ... FETCH together with ORDER BY - the ORDER BY does decide which rows survive, but the FINAL output order is still not guaranteed to a consumer that doesn&#x27;t apply its own ORDER BY, oracle-observed to sometimes still appear ordered purely as a plan-shape coincidence.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Apply an explicit ORDER BY in the consuming query - the view/inline TVF&#x27;s own ORDER BY decides which rows survive TOP/OFFSET-FETCH but doesn&#x27;t guarantee the final output order to a consumer that doesn&#x27;t order it itself.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/view/top-percent-order-by-no-op</code></h3>
+    <p class="rationale">A view/inline TVF&#x27;s own outermost query uses TOP (100) PERCENT ... ORDER BY - oracle-confirmed provably meaningless: 100 PERCENT never excludes a row, so the ORDER BY exists purely to satisfy T-SQL&#x27;s own view-ordering grammar rule (Msg 1033) and is not guaranteed to any consumer that doesn&#x27;t apply its own ORDER BY.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/window-frame/explicit-range</code></h3>
+    <p class="rationale">A window function&#x27;s OVER clause uses an explicit RANGE frame - oracle-confirmed to cost materially more CPU at the Window Spool operator than the equivalent ROWS frame (peer-group value comparison vs. plain physical-offset counting), though both compile to the same Window Spool physical operator, not an on-disk-vs-not distinction.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Use an explicit ROWS frame instead of RANGE where peer-group semantics aren&#x27;t actually needed - it costs materially less CPU at the Window Spool operator.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/window-frame/implicit-default-range</code></h3>
+    <p class="rationale">A window function&#x27;s OVER clause has an ORDER BY but no explicit frame clause at all - T-SQL silently defaults this to RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, oracle-confirmed to carry the identical measured cost as an explicit RANGE frame, invisible in the source text.</p>
+    <p class="fix"><span class="fix-label">Fix</span><br>Add an explicit ROWS frame instead of relying on the implicit default RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/write-loss/approximate-to-exact-truncation</code></h3>
+    <p class="rationale">An INSERT/UPDATE assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target - the fractional part is silently dropped, with no error.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/write-loss/numeric-scale-narrowing</code></h3>
+    <p class="rationale">An INSERT/UPDATE assigns a DECIMAL/NUMERIC value to a target with a smaller scale - digits past the target&#x27;s scale are silently rounded away, with no error.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/write-loss/temporal-precision-loss</code></h3>
+    <p class="rationale">An INSERT/UPDATE assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target - the time-of-day component is silently dropped, with no error.</p>
+  </section>
+
+  <section class="rule">
+    <h3 class="rule-id"><code>silentscan/write-loss/unicode-to-non-unicode</code></h3>
+    <p class="rationale">An INSERT/UPDATE assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target - any character outside the target collation&#x27;s codepage is silently replaced with &#x27;?&#x27;, with no error.</p>
+  </section>
+
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>
