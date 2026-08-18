@@ -4010,6 +4010,30 @@ makes them the cleanest findings in this entire file.
       9/835 (1.1%), all cross-checked directly against `sys.tables`/
       `sys.columns` before trusting the scanner. All three kept as genuine,
       if low-confidence, signals rather than dropped.
+- [ ] **CHECK constraint that doesn't account for NULL** (source: a real
+      practitioner post read directly, not a tool survey — Brent Ozar's "Keep
+      it Constrained") — SQL Server's three-valued logic means a `CHECK`
+      whose predicate has no `IS NULL`/`IS NOT NULL` branch silently PASSES
+      any row where the checked column is `NULL`, even though the constraint
+      reads as if it forbids bad data (`CHECK (Price > 0)` does not reject
+      `Price = NULL`). Schema-decidable: `CatalogCheckConstraint`'s definition
+      text already carries the predicate, and the referenced column's own
+      nullability is already on `CatalogColumn` — this is a parse of text we
+      already have plus one AST walk for a bare `IS NULL` test on each
+      referenced column, no new catalog read required. Fires only when the
+      checked column is itself nullable (a `NOT NULL` column makes the
+      concern moot) and the predicate has no NULL-handling branch anywhere
+      reachable — same "AND-only-reachable" discipline the composite-index
+      scanner already uses, so a NULL guard hidden in an OR branch still
+      counts as handled. Distinct from the shipped
+      `UntrustedConstraintScanner` stream (that one is about `NOCHECK`
+      re-enablement losing the optimizer's trust in an otherwise-correct
+      constraint; this one is about the constraint's own text being wrong).
+      The companion half of the same post — "only one `NULL` is allowed per
+      column in a unique constraint" — is not a defect to detect, it's
+      correct, documented engine behavior a developer might not know; better
+      served by fix-guidance text on a future filtered-unique-index rule than
+      by a finding of its own.
 
 ### B. Query anti-patterns still unbuilt
 Cross-referenced against a widely-read practitioner code-review post: of its
@@ -4490,6 +4514,277 @@ workload-decidable.
 
 **Real coverage, measured 2026-08-18 via `scan-db` against the local test
 database**: [PLACEHOLDER - filled in from the real scan-db run below].
+
+---
+
+## Full-archive practitioner sweep (2026-08-18)
+
+A prior pass only sampled a handful of well-known posts. This one is real
+archive coverage: crawled the full sitemap tree of a major SQL Server
+practitioner site down to individual posts (~2,455 posts spanning the full
+history of the site), filtered to the ~275 whose slug names a schema/design
+topic (index, key, constraint, trigger, datatype, partition, etc — the query-
+anti-pattern ground was already covered in the earlier sweep and was excluded
+here), and read every one of those 275, not a sample. Below is what came out
+of it that isn't already queued or shipped, deduplicated. No source citation
+is carried into this file - only the mechanism and the design implication.
+
+### E. New items from the full-archive sweep
+
+- [ ] **Filtered index whose predicate compares against a variable/parameter,
+      not a literal** — the optimizer can only match a filtered index's own
+      `WHERE` clause against a query filtering the SAME column with a literal
+      of the matching value; a query that filters via `@param`/a local
+      variable can never match it, so the index is silently, permanently
+      unused for that access path even though it looks like exactly the
+      right index. Schema+AST decidable: the filtered index's own predicate
+      text is already read; comparing its shape (column, operator, literal)
+      against the query's own predicate operand kind (literal vs.
+      parameter/variable) is the same operand-classification machinery the
+      conversion stream already has. High-value, nothing like it queued
+      before this sweep.
+- [ ] **Column too wide to ever be an index key** — a `varchar`/`nvarchar`
+      column whose declared max byte width exceeds the engine's fixed
+      900-byte index key-length ceiling can never be a key column as
+      declared; `CREATE INDEX` on it hard-fails. Pure column-type arithmetic
+      against the catalog, the same computation the shipped `WideClusteredKey`
+      byte-estimate already does — this is the single-column ceiling case of
+      the same arithmetic, worth its own finding since it explains a
+      structurally-forced full-scan on a column a developer might reasonably
+      expect to index.
+- [ ] **`INSTEAD OF INSERT` trigger with a filtered re-insert and no reject
+      path** — a body shaped `INSERT INTO target SELECT * FROM inserted
+      WHERE <predicate>` with nothing that signals or logs the filtered-out
+      rows. The caller's `INSERT` returns success; rows matching the negated
+      predicate are silently dropped, no error, no row count mismatch
+      visible without inspecting `@@ROWCOUNT` against the input batch size.
+      Same "silent data loss, no engine error" family as the shipped
+      write-loss stream and the already-queued multi-row-unsafe trigger rule
+      — a second, structurally distinct trigger defect, not a duplicate of
+      it. AST-decidable: `INSTEAD OF INSERT` trigger body, an `INSERT`
+      sourced from `inserted` with a `WHERE`/`JOIN`-filtered subset, no
+      companion branch handling the excluded rows.
+- [ ] **Trigger branching on `UPDATE(column)` alone** — `UPDATE()` in a
+      trigger reports whether a column was named in the statement's SET
+      list, not whether its value actually changed; a full-column UPDATE
+      issued by an ORM (common) sets every column every time, so
+      `IF UPDATE(Col) BEGIN ... END` fires on genuine no-op saves as often as
+      real changes. AST-decidable: a trigger body gating its logic on
+      `UPDATE(col)` with no corresponding value comparison between
+      `inserted.col`/`deleted.col`. Distinct mechanism from the multi-row bug
+      — a single-row UPDATE trips it just as easily.
+- [ ] **`TRY_CAST` in a non-persisted computed column used in a predicate** —
+      `TRY_CAST` is session-`DATEFORMAT`-dependent and therefore
+      non-deterministic, so a computed column built on it can never be
+      `PERSISTED` or indexed (the engine enforces this at DDL time); a query
+      filtering on that computed column can never seek it no matter what
+      index exists elsewhere, and the fix (`TRY_CONVERT` with an explicit
+      style code, which IS deterministic) is a mechanical, safe rewrite.
+      Schema+AST decidable: computed-column definition text uses `TRY_CAST`,
+      the column is referenced in a predicate somewhere in the corpus.
+- [ ] **Row-Level Security predicate function with no supporting index on its
+      own filtered columns** — an RLS security predicate runs on every access
+      to the secured table and forces single-threaded execution; with no
+      index on the columns the predicate function itself filters by, that
+      forced-serial cost compounds with a forced scan. Catalog+AST decidable:
+      `sys.security_policies`/`sys.security_predicates` name the secured
+      table and predicate function; parsing the function body for its own
+      filtered columns and checking them against the table's indexes is the
+      same shape as any other predicate-vs-index check already in this
+      project. New catalog read needed (security policies aren't read today).
+- [ ] **Columnstore index present on a table that is also a live DML target of
+      transactional code** — lock escalation on a columnstore index happens
+      at the rowgroup granularity, not the row granularity, so a single-row
+      DELETE inside an explicit transaction can block unrelated concurrent
+      access to every other row sharing that rowgroup — a correctness/
+      contention risk that doesn't exist on a rowstore index. Ship as a
+      structural risk flag only, never a proven-cost claim: catalog-decidable
+      that the table carries a columnstore index and is a DML target
+      somewhere in the call graph; whether contention actually occurs is
+      workload-dependent and out of reach. State that scope limit in the
+      finding text itself.
+- [ ] **Aggregate argument containing a division (or other error-prone scalar
+      expression) that relies on short-circuit elimination, on a table with a
+      columnstore or batch-mode-eligible index** — a `COUNT`/aggregate
+      argument shaped like `SomeExpr / 0`-guarded-by-a-CASE that the rowstore
+      optimizer silently elides evaluating on rows where it would error no
+      longer gets the same elision under batch-mode execution, so a query
+      that has run safely for years starts throwing the day someone adds a
+      columnstore/batch-mode-eligible index to the table — genuinely
+      correctness-class, not a performance claim, and cheap: a syntactic
+      pattern (division/error-prone expression inside an aggregate argument)
+      cross-checked against the table's own columnstore/batch-mode
+      eligibility in the catalog.
+
+### F. Corrections and confirmations from the sweep (no new items)
+
+- **Unindexed-FK precision already correct, re-verified against a real field
+  objection.** The field's own current guidance on FK indexing is "index for
+  your queries, not your keys" — a single-column index that exists ONLY to
+  cover an FK is frequently redundant once a wider, query-driven composite
+  index already leads with that same column. Checked directly against the
+  shipped `IndexDesignFindingKind.UnindexedForeignKey` implementation before
+  concluding anything: it already suppresses whenever ANY active,
+  unfiltered, non-columnstore index on the child table has the FK's own
+  column set as its leading key-column prefix — composite or single-column,
+  doesn't matter, matching exactly the guard this objection calls for. No
+  code change needed; this is confirmation, not a correction.
+- **Scalar UDF inside a `CHECK` constraint is already covered.** Already
+  shipped under the schema-level-dependency case of the `ScalarUdfFindingKind`
+  stream (computed column/DEFAULT/CHECK constraint, catalog-only via
+  `SchemaDependencyScanner`) — the sweep's "UDF referenced from a CHECK
+  constraint forces the same serialization as a computed column" finding is
+  a distinct catalog object from the already-shipped computed-column case,
+  but the same scanner already walks `sys.check_constraints`, so this is
+  confirmation, not new scope.
+- **The multi-row-unsafe trigger item (already queued) gets a second,
+  independent confirmation** with the identical code shape
+  (`SELECT @var = col FROM inserted`/`deleted`, no `@@ROWCOUNT` guard),
+  described as the single most common trigger bug encountered in real
+  code review — strengthens the case for building it first among the
+  trigger items, doesn't change its scope.
+- **Two items surfaced repeatedly across the sweep were already correctly
+  excluded and stay excluded**: whether an index is actually unused (needs
+  weeks of usage-stats history plus knowledge of business cycle timing — a
+  stronger version of the caveat already on record) and whether table
+  partitioning is the right call for a given table (needs data volume,
+  growth trajectory, and real query-pattern frequency — workload-decidable,
+  not schema-decidable, confirming the "not built" disposition already
+  standing for that whole area beyond the structural alignment check).
+- **One item is flagged and deliberately NOT queued**: whether a column
+  should be sized/typed for compression-aware storage rather than raw byte
+  count is real, current field guidance, but it's a judgment call dependent
+  on workload compressibility, not a static defect with a provable failure
+  shape — stays out on the same precision-beats-recall basis as other
+  advisory-only items already excluded from this list.
+
+## Second full-archive practitioner sweep (2026-08-18)
+
+Same method, a second, independent practitioner archive: crawled its real
+sitemap tree (~5,840 posts total, a larger archive than the first site's),
+filtered to ~540 whose slug names a schema/design topic (excluding known
+noise categories - interview-question posts, pure error-message-fix posts,
+pure "how do I query sys.* views for X" reference posts, which this
+particular archive carries a lot of), and read all of them across nine
+parallel passes. Lower signal density than the first sweep - this archive
+skews toward short reference/tutorial content - but real coverage, not a
+sample, and it surfaced several items neither the first sweep nor the DBA-
+script-family sweep had. No source citation carried into this file.
+
+### G. New items from the second sweep
+
+- [ ] **Column carries a `DEFAULT` constraint and is still nullable** — a
+      default only applies when the column is OMITTED from an INSERT's
+      column list; any caller (an ORM's generated full-column INSERT is the
+      common case) that supplies `NULL` explicitly bypasses the default
+      entirely, silently, no error. A developer who added the default
+      believing it guarantees a populated column is wrong the moment any
+      caller passes NULL. Schema-decidable: `CatalogColumn.IsNullable` plus
+      a default definition on the same column is a pure catalog fact, no
+      query text needed at all - the finding fires on the schema alone.
+- [ ] **Bare `TOP (n)` with no `ORDER BY` anywhere in the query** — the row
+      set returned is not guaranteed deterministic (parallelism/plan choice
+      can change which rows come back run to run), so code relying on "the
+      first N rows" without an explicit order is trusting undefined
+      behavior. AST-decidable: `TopRowFilter` present, no `OrderByClause` in
+      the same query. Distinct from the already-shipped `TOP(100) PERCENT`
+      and TOP+ORDER-BY row-goal findings - this is the no-ORDER-BY-at-all
+      case, a correctness claim, not a performance one.
+- [ ] **Multi-hop trigger recursion cycle across tables** (trigger on table A
+      writes to table B, whose own trigger writes back to table A) — checked
+      directly against the shipped `DirectRecursiveTrigger` implementation
+      before queuing this: it only catches a trigger writing to its OWN
+      target table (a direct self-loop via `SelfRecursionCollector`), not a
+      cycle mediated through a second trigger. A genuine, unbuilt extension:
+      needs the same call-graph machinery already built for procs
+      (`ProcCallGraph`/`ProcCallGraphBuilder`), applied to trigger DML
+      targets instead of proc calls, walking for a cycle back to the
+      starting table. Real engine consequence: exceeding the 32-level
+      nesting ceiling is a hard runtime error, so this is a "provably fails
+      past a certain depth" claim, not just a style concern.
+- [ ] **View defined with `SELECT *` whose compiled column list has gone
+      stale against the base table's current shape** — a view's column list
+      is frozen at `CREATE`/last `sp_refreshview` time; a later
+      `ALTER TABLE ... ADD/DROP COLUMN` on the base table does not
+      propagate, so the view silently keeps exposing (or omitting) columns
+      that no longer match the base table's real shape. Catalog-decidable:
+      compare the view's own compiled column list against the current base
+      table's `sys.columns` - a genuinely different claim from generic
+      "don't SELECT *" style advice, since this is specifically about
+      metadata drift, not query-time cost.
+- [ ] **Indexes sharing an identical key-column list and sort direction but
+      with different, non-overlapping `INCLUDE` sets** — each looks
+      individually legitimate (built for different queries), but they're
+      mergeable into one index carrying the union of both `INCLUDE` lists at
+      no cost to either original query, for less write/storage overhead than
+      carrying both. Distinct from the shipped exact-duplicate and
+      prefix-subsumption kinds - the divergence here is only in `INCLUDE`,
+      and the fix is a merge, not a drop. Catalog-decidable: pure
+      `CatalogIndex.KeyColumns`/sort-direction equality plus an
+      `IncludedColumns` set-difference.
+- [ ] **String concatenation via the `+` operator silently nulls the entire
+      result when any operand is NULL** — unlike `CONCAT()`, which treats
+      NULL operands as empty string, `+` propagates a single NULL operand to
+      NULL for the whole expression. Code building a display string or a
+      composite key from nullable columns with `+` and no `ISNULL`/
+      `COALESCE` guard silently produces NULL instead of a partial string,
+      no error raised - a real semantic-preservation gotcha, not a style
+      complaint. AST-decidable: `+` binary operator between string-typed
+      operands where at least one is a nullable column reference, with no
+      wrapping `ISNULL`/`COALESCE`.
+- [ ] **Logon trigger gating access on `HOST_NAME()`** — this value is
+      client-supplied via the connection string and trivially spoofable, so
+      a trigger using it in an allow/deny branch is a security control that
+      does not actually control anything. Genuinely correctness/security-
+      class, not performance, and fits the scope rule's security axis.
+      AST-decidable: logon-trigger body, `HOST_NAME()` feeding a conditional
+      that reaches a `ROLLBACK`/deny path.
+- [ ] **`CHECK` constraint accidentally placed on an `IDENTITY` column** — a
+      numeric-threshold `CHECK` on the identity column itself (e.g.
+      `CHECK (Id > 5)`) blocks every insert until the auto-generated counter
+      happens to satisfy it, then silently starts working once it does -
+      genuinely a "fails deterministically in dev, exactly the catch-before-
+      prod case" finding, sharper than most items in this file.
+      Schema-decidable: `CatalogColumn.IsIdentity` plus a `CHECK`
+      constraint's definition text referencing that same column, cheap
+      catalog+text check.
+- [ ] **Monotonically increasing clustered key (an `IDENTITY` column, or any
+      other always-ascending key) with no `OPTIMIZE_FOR_SEQUENTIAL_KEY`** —
+      every insert lands on the same trailing page, so concurrent inserts
+      can serialize on that page's latch. The precise mirror image of the
+      already-shipped random-GUID-clustered-key fragmentation rule: one
+      direction (random) fragments the whole tree, the other (monotonic)
+      hotspots a single page. Ship as a structural risk flag only, same
+      discipline as the columnstore-lock-escalation item already queued -
+      the structural precondition (monotonic clustered key, no sequential-
+      key optimization) is catalog-decidable; whether it actually causes
+      contention depends on concurrent insert rate, which is workload data
+      and out of reach. State that scope limit in the finding text itself.
+
+### H. Confirmations from the second sweep (no new items)
+
+- The multi-row-unsafe trigger item gets a third independent confirmation,
+  this time from a real author's own defensive code
+  (`IF (SELECT COUNT(*) FROM inserted) > 1 ROLLBACK`) rather than fixing the
+  underlying single-row assumption - stronger evidence this is the single
+  most common trigger bug in the wild, doesn't change scope.
+- Consistent table-access ordering across procs/triggers as a deadlock
+  countermeasure is stated directly in this source as coding-standard
+  guidance, independently confirming the already-queued cross-module
+  lock-ordering item's premise from a second, unrelated angle.
+- Two items were checked as possible new rules and explicitly rejected on
+  precision grounds, not queued: a `CHECK` constraint's exact
+  NULL-passes-silently mechanism restated with different example text (the
+  general item is already queued, this is the same mechanism not a new
+  one), and unique-index-permits-multiple-NULLs (correct, documented engine
+  behavior, not a defect - better served as fix-guidance text on a future
+  rule than as a finding of its own, matching a disposition already on
+  record for a materially identical case).
+- Several items surfaced were confirmed to be hard DDL-time engine errors
+  rather than silent defects (indexed-view construct restrictions, the
+  32-column-per-index ceiling, single-IDENTITY-per-table) - correctly left
+  unqueued, since flagging something the engine already refuses to compile
+  adds no value beyond the engine's own error message.
 
 ---
 

@@ -303,6 +303,16 @@ own "compliant" example is invalid T-SQL.
 
 ## G. Schema/catalog-side seeds (no query text involved)
 
+**Disposition note (2026-08-17).** Every `Skip (index-advisor space)` /
+`Skip (design advice)` / `Skip (lint)` verdict in this table predates
+CLAUDE.md's current scope rule and was written when "an index advisor is a
+different tool" still counted as an exclusion. It doesn't any more: all of
+them are derivable from the catalog this project already reads, so they are
+**queued, not skipped** — see `detection-checklist.md`, "DBA-script family
+sweep (2026-08-17)", which supersedes the Disposition column for every row
+here marked Skip. The rows are left unedited so the original reasoning stays
+readable.
+
 | Pattern | Why it hurts | Static? | Disposition |
 |---|---|---|---|
 | Same column name, different types across tables | Every future join on the pair converts one side | High | T1-3 |
@@ -1106,6 +1116,72 @@ or until the vendor publishes a non-JS-rendered rules reference. Recorded here
 so the next attempt does not have to rediscover that the site itself, not the
 search process, is what blocks this — and so a false "confirmed symmetric"
 claim is never made on the strength of a documentation snippet alone.
+
+### 7.11 The DBA-script family — surveyed 2026-08-17 (a family, not a tool, and the first one surveyed that isn't a linter)
+
+Every tool in §7.1–7.10 is a *static analyzer* — it reads code. The most
+widely used SQL Server diagnostic tooling in the field is not: it is a family
+of open-source T-SQL scripts run **against a live server**, reading system
+catalog views and DMVs. They were never surveyed here because they analyze no
+code at all, which turns out to be exactly why the survey missed a whole class
+of finding. Source read directly from the projects' own published check
+tables, not from blog summaries.
+
+The canonical member ships two relevant scripts: an instance/database health
+script (~200 checks) and an index-sanity script (**67 checks**, published as a
+priority-ordered table). Splitting the index script's checks by what they
+actually read:
+
+* **~29 checks are pure catalog** — index key/include column lists, clustered
+  vs. heap, uniqueness, filter definitions, disabled/hypothetical flags, fill
+  factor, FK columns vs. index columns, identity seed/increment/current value,
+  column collation vs. database collation, computed-column and check-constraint
+  scalar-UDF dependencies, statistics flags (`NO_RECOMPUTE`, filtered,
+  incremental), partition alignment, column counts and row width. **All of
+  these are reachable from `LiveCatalogReader` — several from fields it
+  already reads and never reports on** (`CatalogIndex.IsDisabled`,
+  `IsUnique`, `KeyColumns`, `ForeignKeyRelationship`).
+* **~38 checks are DMV/runtime** — index usage and operational stats
+  (unused indexes, missing-index requests, blocking minutes per index,
+  forwarded fetches, scan counts, "recently modified"). These are Tier 3
+  by construction, correctly and permanently out of scope for a compile-only
+  tool. Worth stating plainly in the study: this family's *headline* value
+  (which indexes are unused, which are missing) is the runtime half, and no
+  static tool of any kind can reach it.
+
+Two structural observations that matter more than the check counts:
+
+1. **Nobody occupies the overlap.** The linter family (§7.1–7.10) reads code
+   and never opens the catalog; this family reads the catalog and never parses
+   a module body. A rule needing both — "this composite index cannot serve
+   this predicate", "this FK column is unindexed *and* three procs join on
+   it", "this trigger is multi-row-unsafe *and* fires on a cascade path" — has
+   no incumbent at all. That is a larger unclaimed space than the conversion
+   rule this project started from.
+2. **Design-time vs. incident-time.** This family is run by a DBA on a server
+   that is already in production and already hurting. Every check it makes
+   that is catalog-only could have been made on the developer's own database
+   weeks earlier. The reframing is worth keeping: same finding, moved left.
+
+Also read in the same sweep, and closed out: **the vendor's own assessment
+API** (a JSON rule set of 455 rules, shipped as a NuGet package). Rule targets
+break down as 346 Server, 75 Database, 34 untargeted — i.e. it is an
+*instance/database configuration* rule set (memory, trace flags, backup,
+patch level, database options), not schema or code analysis. It overlaps this
+project only at the six-kind `DatabaseConfigurationFindingKind` stream and
+opens no query- or schema-level gap. No further survey needed.
+
+The widely-read practitioner blogs in this space (the same authors' code-review
+and query-tuning posts) were checked against the shipped rule list as a
+cross-reference rather than surveyed as tools. Of one such post's nine
+code-review red flags, six already fire in this tool today — TVF joins, CTE
+referenced multiple times, kitchen-sink `OR` predicates, unindexed temp
+tables, `CROSS JOIN`, and `BEGIN TRAN` without error handling — and the three
+that do not are `NOLOCK`, table variables used as a query source, and
+`SELECT ... INTO #temp`. That ratio is the useful measurement: the gap is not
+in the query-anti-pattern space, which is well covered, but in the
+schema/index design space and in a small number of famous-but-unbuilt query
+rules. Queued in `detection-checklist.md` under the 2026-08-17 sweep.
 
 ---
 
