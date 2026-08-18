@@ -6764,15 +6764,29 @@ verifiable.
         re-deriving one already-resolved field, not three independent
         catalog round trips.
   - [ ] **Pure per-rule classifiers** for decisions currently inline in
-        visitors: `NonSargablePredicateScanner`'s case-fold/date-function
-        sets, ISNULL-on-NOT-NULL suppression, CHARINDEX/LEFT rewrite (incl.
-        remediation prose), temporal-boundary digit counting;
-        `TypedPredicateExtractor`'s `TryAddOversizedParameterFinding` and
-        `TryRecordCollationConflict`; `TvfFenceScanner`/`ScalarUdfScanner`
-        kind decisions. Also: `CrossTableTypeDriftScanner` hand-rolls the
-        collation-mismatch test its own doc comment cites
-        `VerdictClassifier` for — route it through the real one. Best done
-        one scanner at a time when that rule is next touched.
+        visitors — no longer waiting for each rule to be opportunistically
+        touched; working through this list directly, one item at a time:
+    - [ ] `CrossTableTypeDriftScanner` hand-rolls the collation-mismatch test
+          its own doc comment cites `VerdictClassifier` for — route it
+          through the real one.
+    - [ ] `NonSargablePredicateScanner`'s case-fold function set (inline
+          `HashSet<string>`) — extract to a pure classifier.
+    - [ ] `NonSargablePredicateScanner`'s date-function set — extract to a
+          pure classifier.
+    - [ ] `NonSargablePredicateScanner`'s ISNULL-on-NOT-NULL suppression
+          logic — extract to a pure classifier.
+    - [ ] `NonSargablePredicateScanner`'s CHARINDEX/LEFT rewrite decision,
+          including its remediation prose — extract to a pure classifier.
+    - [ ] `NonSargablePredicateScanner`'s temporal-boundary fractional-digit
+          counting (`CountFractionalDigits`) — extract to a pure classifier.
+    - [ ] `TypedPredicateExtractor`'s `TryAddOversizedParameterFinding` —
+          extract the decision from the visitor method.
+    - [ ] `TypedPredicateExtractor`'s `TryRecordCollationConflict` — extract
+          the decision from the visitor method.
+    - [ ] `TvfFenceScanner`'s fence-kind decision — extract to a pure
+          classifier.
+    - [ ] `ScalarUdfScanner`'s call-kind decision — extract to a pure
+          classifier.
   - [x] **Investigated — two of the four claimed pieces here aren't real
         duplication.** The `OrderBy` "tails" in `MaxTypedColumnScanner`/
         `ColumnCollationDriftScanner`/`CrossTableTypeDriftScanner`/
