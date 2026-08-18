@@ -6763,32 +6763,31 @@ verifiable.
         needed once the actual redundancy turned out to be two call sites
         re-deriving one already-resolved field, not three independent
         catalog round trips.
-  - [ ] **Pure per-rule classifiers** for decisions currently inline in
-        visitors — no longer waiting for each rule to be opportunistically
-        touched; working through this list directly, one item at a time:
+  - [x] **Pure per-rule classifiers** for decisions currently inline in
+        visitors — shipped in full, one item at a time, no longer waiting
+        for opportunistic touches. All verified with a clean build after
+        each step and the full test suite (3,664 passing) at the end:
     - [x] `CrossTableTypeDriftScanner` hand-rolls the collation-mismatch test
           its own doc comment cites `VerdictClassifier` for — route it
           through the real one. Shipped: extracted `HasGenuineCollationMismatch`
           out of `VerdictClassifier.ClassifyWithReason` into its own named,
           reusable method; both callers now share one implementation.
-    - [ ] `NonSargablePredicateScanner`'s case-fold function set (inline
-          `HashSet<string>`) — extract to a pure classifier.
-    - [ ] `NonSargablePredicateScanner`'s date-function set — extract to a
-          pure classifier.
-    - [ ] `NonSargablePredicateScanner`'s ISNULL-on-NOT-NULL suppression
-          logic — extract to a pure classifier.
-    - [ ] `NonSargablePredicateScanner`'s CHARINDEX/LEFT rewrite decision,
-          including its remediation prose — extract to a pure classifier.
-    - [ ] `NonSargablePredicateScanner`'s temporal-boundary fractional-digit
-          counting (`CountFractionalDigits`) — extract to a pure classifier.
-    - [ ] `TypedPredicateExtractor`'s `TryAddOversizedParameterFinding` —
-          extract the decision from the visitor method.
-    - [ ] `TypedPredicateExtractor`'s `TryRecordCollationConflict` — extract
-          the decision from the visitor method.
-    - [ ] `TvfFenceScanner`'s fence-kind decision — extract to a pure
-          classifier.
-    - [ ] `ScalarUdfScanner`'s call-kind decision — extract to a pure
-          classifier.
+    - [x] `NonSargablePredicateScanner`'s case-fold function set, date-
+          function set, ISNULL-on-NOT-NULL suppression, and CHARINDEX/LEFT
+          rewrite decision (incl. remediation prose) — all five moved to a
+          new `SargabilityClassifier`; the temporal-boundary fractional-digit
+          comparison moved to a new `TemporalBoundaryClassifier`.
+    - [x] `TypedPredicateExtractor`'s `TryAddOversizedParameterFinding` and
+          `TryRecordCollationConflict` — the length-comparison decision moved
+          to a new `ParameterLengthClassifier` (extracted together with its
+          exact structural mirror, `TryAddUnderLengthParameterFinding`, found
+          adjacent while doing this one); the collation check turned out to
+          be a SECOND independent hand-rolled copy of the same rule
+          `CrossTableTypeDriftScanner` had — now also routed through
+          `VerdictClassifier.HasGenuineCollationMismatch`.
+    - [x] `TvfFenceScanner`'s fence-kind decision and `ScalarUdfScanner`'s
+          call-kind decision — moved to new `TvfFenceClassifier`/
+          `ScalarUdfClassifier` types.
   - [x] **Investigated — two of the four claimed pieces here aren't real
         duplication.** The `OrderBy` "tails" in `MaxTypedColumnScanner`/
         `ColumnCollationDriftScanner`/`CrossTableTypeDriftScanner`/
