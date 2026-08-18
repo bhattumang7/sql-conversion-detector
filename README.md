@@ -3,10 +3,22 @@
 Static analyzer for SQL Server code. If a defect is detectable from the code
 and schema — via an engine-authoritative catalog, a lineage pass, a plan-XML
 oracle, or plain syntax — it's in scope; if it only shows up once the app is
-running in production, it's out. 65 finding streams as of this writing,
-ranging from type-aware, direction-aware, collation-aware implicit-conversion
-detection (the tool's original differentiator, still the template for how
-oracle-backed rules ship) down to cheap, high-precision syntactic checks.
+running in production, it's out.
+
+234 rules across 11 families, all reporting into one versioned finding
+schema: type/collation-aware conversion and silent write loss, sargability
+and index shape, lineage metrics, catalog and constraint state, plan-shape
+and correctness, control flow and transactions, dynamic SQL, code quality and
+security, physical schema and index design, query anti-patterns, and trigger
+and cross-module correctness. Implicit-conversion detection was the original
+differentiator and is still the template for how an oracle-backed rule ships,
+but it is now one family of eleven, not the product.
+
+It runs against a live database — normally a disposable dev copy — on the
+machine where the code is being written, and every finding it produces is
+machine-readable. See [Where it runs](#where-it-runs) for why that matters
+when the SQL is being drafted by an AI assistant.
+
 Grouped by theme:
 
 * **Type/collation-aware conversion and write-loss family** — implicit
@@ -165,6 +177,42 @@ from plan shape; a purely structural/catalog fact needs no oracle. Full
 detail, scope decisions, and precision guards for every stream are in
 `docs/detection-checklist.md` (working backlog) and `CLAUDE.md` (project
 contract).
+
+## Where it runs
+
+SilentScan is a command-line tool that connects to a SQL Server database and
+prints findings. Nothing about it is AI-specific — which is exactly what makes
+it usable by an assistant:
+
+* **Machine-readable by default.** `--format json` is the complete versioned
+  findings schema; `--format sarif` is the CI-gate export. Every finding
+  carries its rule id, source location, resolved base column, indexed flag,
+  confidence tier and, where the rule is verdict-bearing, the plan evidence
+  behind it. Output ordering is deterministic, so a re-scan after a fix is a
+  clean diff rather than a reshuffle — an assistant can fix the SQL and prove
+  the finding is gone in the same loop.
+* **It stays on the machine.** The scan is read-only against whatever database
+  it is pointed at (`LiveReadOnlyGuard`: `SELECT`s only, no DDL, no DML), the
+  analysis core makes no network calls, and the tool uploads nothing anywhere
+  — not to a service, not to a model provider. Point it at a local disposable
+  copy and the schema, the module text and the findings never leave the
+  developer's own box.
+* **Early, not post-mortem.** The whole scope rule is that a defect must be
+  provable from the code and schema. That is what lets the scan run before the
+  commit, on ten rows of test data, instead of waiting for the production
+  workload to expose it — which is the point at which the SQL that "worked in
+  dev" becomes an incident. AI-drafted T-SQL fails precisely here: it compiles,
+  it returns the right rows on a small table, and it is still wrong.
+* **It says what it doesn't know.** Uncertain inference reports `Unknown`;
+  dynamic SQL that can't be proven constant is counted and reported with a
+  machine-readable reason, never silently counted as clean. Precision beats
+  recall throughout — one false positive an assistant acts on is worse than
+  ten missed true positives.
+
+Wire it in wherever the loop already is: a pre-commit or pre-PR run against
+the dev database, a SARIF upload as a CI gate (each rule's `helpUri` links to
+its own page in the generated catalog), or an assistant invoking `scan-db
+--format json` directly and reading the findings back.
 
 ## What SilentScan detects
 
