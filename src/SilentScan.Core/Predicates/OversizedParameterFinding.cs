@@ -15,6 +15,9 @@ namespace SilentScan.Core.Predicates;
 /// memory grant. A live-mode enhancement reading real memory grants out of the plan cache
 /// (mirroring the SilentScan.Live plan-cache reader's own workload-observed-conversion pattern)
 /// is left as explicit future follow-up rather than guessed here.
+/// <see cref="FindingConfidence.Low"/>, matching the "lower severity" framing above: the oracle
+/// actively disproved the naive claim in the common case (identical memory grants), and the real
+/// effect only shows up under a plan shape this pass cannot confirm holds for any given site.
 /// </summary>
 public sealed record OversizedParameterFinding(
     string TableQualifiedName,
@@ -24,4 +27,4 @@ public sealed record OversizedParameterFinding(
     string SourcePath,
     int Line,
     int Column,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.Low);

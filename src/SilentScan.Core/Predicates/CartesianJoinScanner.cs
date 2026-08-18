@@ -129,7 +129,8 @@ public static class CartesianJoinScanner
                             CartesianJoinKind.ExplicitCrossJoin,
                             SchemaObjectNameHelper.Qualify(crossFirst.SchemaObject),
                             SchemaObjectNameHelper.Qualify(crossSecond.SchemaObject),
-                            sourcePath, crossSecond.StartLine, crossSecond.StartColumn));
+                            sourcePath, crossSecond.StartLine, crossSecond.StartColumn,
+                            FindingConfidence.Medium));
                     }
                 }
             }

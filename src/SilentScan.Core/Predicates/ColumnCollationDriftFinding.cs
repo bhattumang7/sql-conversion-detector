@@ -13,6 +13,10 @@ namespace SilentScan.Core.Predicates;
 /// table/table variable column (whose relevant baseline is tempdb's own collation, not the user
 /// database's - the classic cause of collation-conflict errors joining a temp object to a user
 /// table) from an ordinary base table column.
+/// <see cref="FindingConfidence.Medium"/>, not High: the collation drift itself is a certain
+/// catalog fact, but calling it a live problem is speculative (a "seed") until a real comparison
+/// actually reaches this column - matching <see cref="CrossTableTypeDriftFinding"/>'s identical
+/// seed framing and confidence tier.
 /// </summary>
 public sealed record ColumnCollationDriftFinding(
     string TableQualifiedName,
@@ -22,4 +26,4 @@ public sealed record ColumnCollationDriftFinding(
     bool IsTempObject,
     string SourcePath,
     int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.Medium);

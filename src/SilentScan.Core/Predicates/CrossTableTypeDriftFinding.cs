@@ -9,6 +9,10 @@ namespace SilentScan.Core.Predicates;
 /// query actually joins on it. Scoped to FK-linked pairs only - see
 /// docs/detection-checklist.md's own note on why an unqualified same-name-column sweep across
 /// every table pair (no FK, no observed join) was deliberately excluded as a precision risk.
+/// <see cref="FindingConfidence.Medium"/>, not High: the mismatch itself is a certain catalog
+/// fact, but calling it a live problem is speculative (a "seed") until an actual query joins on
+/// this FK - matching this codebase's own "structural risk, not a proven-active cost" tier used
+/// wherever a finding's own doc calls itself a seed rather than a confirmed defect.
 /// </summary>
 public sealed record CrossTableTypeDriftFinding(
     string ConstraintName,
@@ -21,4 +25,4 @@ public sealed record CrossTableTypeDriftFinding(
     bool CollationDiffers,
     string SourcePath,
     int Line,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.Medium);

@@ -11,10 +11,12 @@ namespace SilentScan.Core.Predicates;
 ///
 /// <see cref="CartesianJoinKind.ExplicitCrossJoin"/> and <see cref="CartesianJoinKind.CommaJoin"/>
 /// report separately (not identically) because they carry different intent signals: a written
-/// <c>CROSS JOIN</c> is the author explicitly stating the cartesian product is deliberate (lower
-/// confidence this is a bug - still worth surfacing, since an accidentally-left CROSS JOIN is a
-/// real, if less common, mistake), while a legacy comma-join with no connecting predicate is the
-/// classic "forgot the join condition" defect with no comparable self-documentation.
+/// <c>CROSS JOIN</c> is the author explicitly stating the cartesian product is deliberate
+/// (<see cref="FindingConfidence.Medium"/> - still worth surfacing, since an accidentally-left
+/// CROSS JOIN is a real, if less common, mistake, but lower confidence this is a bug than the
+/// comma-join case below), while a legacy comma-join with no connecting predicate is the
+/// classic "forgot the join condition" defect with no comparable self-documentation
+/// (<see cref="FindingConfidence.High"/>, the record's own default).
 ///
 /// **Known v1 scope limit, deliberate:** only fires when BOTH sides of the gap are themselves a
 /// single plain <c>NamedTableReference</c> (no nested join/derived table/subquery on either side)
