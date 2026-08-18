@@ -269,7 +269,7 @@ public static class StringConcatNullScanner
 
             foreach (var reference in tableReferences)
             {
-                foreach (var leaf in FlattenTableReferences(reference))
+                foreach (var leaf in PredicateTreeWalker.FlattenTableReferences(reference))
                 {
                     if (ResolveDirectBaseTable(leaf) is { } entry)
                     {
@@ -291,37 +291,6 @@ public static class StringConcatNullScanner
             var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
             return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } table ? (alias, table) : null;
-        }
-
-        private static IEnumerable<TableReference> FlattenTableReferences(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case QualifiedJoin join:
-                    foreach (var t in FlattenTableReferences(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenTableReferences(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenTableReferences(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-
-                default:
-                    yield return tableReference;
-                    break;
-            }
         }
 
         /// <summary>

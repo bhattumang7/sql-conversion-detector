@@ -87,4 +87,95 @@ internal static class PredicateTreeWalker
                 break;
         }
     }
+
+    /// <summary>
+    /// Every non-join leaf reachable from a FROM-clause table reference (a real table, a
+    /// derived-table subquery, a TVF call, ...), recursing through <see cref="QualifiedJoin"/>
+    /// and parenthesized joins only - an unqualified join (CROSS JOIN, CROSS/OUTER APPLY) is
+    /// deliberately a recursion dead end, matching <see cref="FlattenJoinNodes"/>'s own policy.
+    /// </summary>
+    public static IEnumerable<TableReference> FlattenTableReferences(TableReference tableReference)
+    {
+        switch (tableReference)
+        {
+            case QualifiedJoin join:
+                foreach (var t in FlattenTableReferences(join.FirstTableReference))
+                {
+                    yield return t;
+                }
+
+                foreach (var t in FlattenTableReferences(join.SecondTableReference))
+                {
+                    yield return t;
+                }
+
+                break;
+
+            case JoinParenthesisTableReference parenthesis:
+                foreach (var t in FlattenTableReferences(parenthesis.Join))
+                {
+                    yield return t;
+                }
+
+                break;
+
+            default:
+                yield return tableReference;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Every leaf <see cref="NamedTableReference"/> reachable from a FROM-clause table
+    /// reference - the nodes that can actually carry a table hint or be named/qualified in a
+    /// finding - recursing through <see cref="QualifiedJoin"/>, <see cref="UnqualifiedJoin"/>
+    /// (CROSS JOIN, CROSS/OUTER APPLY), and parenthesized joins alike. Unlike
+    /// <see cref="FlattenJoinNodes"/>/<see cref="FlattenTableReferences"/>, an unqualified join is
+    /// NOT a dead end here: a named table hinted or referenced under a CROSS APPLY is exactly as
+    /// real as one under an INNER JOIN, and a caller after named tables specifically (rather than
+    /// join structure) has no reason to miss it.
+    /// </summary>
+    public static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
+    {
+        switch (tableReference)
+        {
+            case NamedTableReference named:
+                yield return named;
+                break;
+
+            case QualifiedJoin join:
+                foreach (var t in FlattenNamedTables(join.FirstTableReference))
+                {
+                    yield return t;
+                }
+
+                foreach (var t in FlattenNamedTables(join.SecondTableReference))
+                {
+                    yield return t;
+                }
+
+                break;
+
+            case UnqualifiedJoin unqualified:
+                foreach (var t in FlattenNamedTables(unqualified.FirstTableReference))
+                {
+                    yield return t;
+                }
+
+                foreach (var t in FlattenNamedTables(unqualified.SecondTableReference))
+                {
+                    yield return t;
+                }
+
+                break;
+
+            case JoinParenthesisTableReference parenthesis:
+                foreach (var t in FlattenNamedTables(parenthesis.Join))
+                {
+                    yield return t;
+                }
+
+                break;
+        }
+    }
 }

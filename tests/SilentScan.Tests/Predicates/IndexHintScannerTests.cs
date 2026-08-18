@@ -109,4 +109,21 @@ public sealed class IndexHintScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void HintOnTableUnderCrossApply_Fires()
+    {
+        // A named table under CROSS APPLY/OUTER APPLY (an UnqualifiedJoin, not a QualifiedJoin)
+        // was previously outside the FROM-tree walk entirely - PredicateTreeWalker.FlattenNamedTables
+        // now descends into it the same way it already did for an ordinary INNER/OUTER JOIN.
+        var catalog = CatalogWithIndex();
+        catalog.AddOrReplace(Table("dbo", "OrderLines", [Col("OrderId")], []));
+
+        var findings = Scan(
+            "SELECT 1 FROM dbo.OrderLines ol CROSS APPLY dbo.Orders o WITH (INDEX(IX_Orders_Status));", catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndexHintFindingKind.HintedIndexNotSeekable, finding.Kind);
+        Assert.Equal("IX_Orders_Status", finding.HintedIndexName);
+    }
 }

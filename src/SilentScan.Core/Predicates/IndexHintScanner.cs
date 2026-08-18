@@ -89,7 +89,7 @@ public static class IndexHintScanner
                 join.SearchCondition.Accept(referenceVisitor);
             }
 
-            var namedTables = (fromClause is null ? [] : fromClause.TableReferences.SelectMany(FlattenNamedTables))
+            var namedTables = (fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenNamedTables))
                 .Concat(target is NamedTableReference targetNamed ? [targetNamed] : [])
                 .ToList();
 
@@ -153,38 +153,6 @@ public static class IndexHintScanner
                         IndexHintFindingKind.HintedIndexNotSeekable, table.QualifiedName, hintedName, leadingColumn,
                         sourcePath, hint.StartLine, hint.StartColumn));
                 }
-            }
-        }
-
-        /// <summary>Yields every leaf <see cref="NamedTableReference"/> in the join tree - the nodes that can actually carry a table hint.</summary>
-        private static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case NamedTableReference named:
-                    yield return named;
-                    break;
-
-                case QualifiedJoin join:
-                    foreach (var t in FlattenNamedTables(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenNamedTables(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenNamedTables(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
             }
         }
 

@@ -41,7 +41,7 @@ public static class CartesianJoinScanner
         private void AnalyzeFromClause(FromClause from, WhereClause? whereClause)
         {
             var topLevel = from.TableReferences;
-            var allNamed = topLevel.SelectMany(FlattenNamedTables).ToList();
+            var allNamed = topLevel.SelectMany(PredicateTreeWalker.FlattenNamedTables).ToList();
             if (allNamed.Count < 2)
             {
                 return;
@@ -296,53 +296,6 @@ public static class CartesianJoinScanner
 
                 case JoinParenthesisTableReference parenthesis:
                     foreach (var t in FlattenUnqualifiedJoins(parenthesis.Join))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-            }
-        }
-
-        /// <summary>Yields every leaf <see cref="NamedTableReference"/> in a FROM-tree root -
-        /// every table this pass can name/attribute a qualifier to, including ones nested inside
-        /// a join this pass otherwise declines to report a witness pair against directly.</summary>
-        private static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
-        {
-            switch (tableReference)
-            {
-                case NamedTableReference named:
-                    yield return named;
-                    break;
-
-                case QualifiedJoin join:
-                    foreach (var t in FlattenNamedTables(join.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenNamedTables(join.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-
-                case UnqualifiedJoin unqualified:
-                    foreach (var t in FlattenNamedTables(unqualified.FirstTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    foreach (var t in FlattenNamedTables(unqualified.SecondTableReference))
-                    {
-                        yield return t;
-                    }
-
-                    break;
-
-                case JoinParenthesisTableReference parenthesis:
-                    foreach (var t in FlattenNamedTables(parenthesis.Join))
                     {
                         yield return t;
                     }
