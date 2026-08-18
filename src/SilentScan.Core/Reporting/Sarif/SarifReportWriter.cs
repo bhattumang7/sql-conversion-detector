@@ -104,6 +104,7 @@ public static class SarifReportWriter
         results.AddRange(report.TriggerCorrectnessFindings.Select(ToResult));
         results.AddRange(report.CrossModuleLockOrderFindings.Select(ToResult));
         results.AddRange(report.TriggerRecursionCycleFindings.Select(ToResult));
+        results.AddRange(report.CheckConstraintFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -693,6 +694,27 @@ public static class SarifReportWriter
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var kindDisplay = finding.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint";
         var message = $"'{finding.ConstraintName}' ({kindDisplay} on '{finding.TableQualifiedName}') is untrusted - the engine does not guarantee it holds over existing rows, and forfeits join-elimination/constraint-based query rewrites that assume it does.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(CheckConstraintFinding finding)
+    {
+        // Error, not warning - a data-correctness bug the same certainty tier
+        // NotInNullableSubqueryFinding/AnsiPaddingMismatchFinding get, not the "structural risk,
+        // not provably-wrong-result" Warning tier UntrustedConstraintFinding itself uses: both
+        // kinds here are unconditional, oracle-confirmed engine mechanics with no workload
+        // dependence - see CheckConstraintFinding's own doc comment for the evidence.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CheckConstraintRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            CheckConstraintFindingKind.NullNotHandled =>
+                $"'{finding.ConstraintName}' (CHECK on '{finding.TableQualifiedName}.{finding.ColumnName}') has no IS NULL/IS NOT NULL test against '{finding.ColumnName}' anywhere in its predicate, and '{finding.ColumnName}' is nullable - a NULL value silently passes this constraint under SQL Server's three-valued logic, even though the constraint reads as if it forbids bad data.",
+            CheckConstraintFindingKind.ConstraintOnIdentityColumn =>
+                $"'{finding.ConstraintName}' (CHECK on '{finding.TableQualifiedName}.{finding.ColumnName}') references the IDENTITY column '{finding.ColumnName}' directly - every insert whose auto-generated identity value doesn't yet satisfy this predicate fails deterministically (Msg 547), consuming the identity counter on each failed attempt, until the counter catches up and failures silently stop forever.",
+            _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, "Unhandled CheckConstraintFindingKind."),
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }

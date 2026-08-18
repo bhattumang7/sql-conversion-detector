@@ -153,6 +153,8 @@ public static class SarifRuleCatalog
     public const string NonPersistedComputedColumnRuleId = "silentscan/catalog/non-persisted-computed-column";
     public const string SelfReferencingDmlRuleId = "silentscan/dml/self-referencing";
     public const string TemporalTableHistoryIndexGapRuleId = "silentscan/catalog/temporal-history-index-gap";
+    public const string CheckConstraintNullNotHandledRuleId = "silentscan/catalog/check-constraint-null-not-handled";
+    public const string CheckConstraintOnIdentityColumnRuleId = "silentscan/catalog/check-constraint-on-identity-column";
 
     public static string ModuleCompileFlagRuleId(ModuleCompileFlagFindingKind kind) => kind switch
     {
@@ -465,6 +467,13 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled UntrustedConstraintFindingKind."),
     };
 
+    public static string CheckConstraintRuleId(CheckConstraintFindingKind kind) => kind switch
+    {
+        CheckConstraintFindingKind.NullNotHandled => CheckConstraintNullNotHandledRuleId,
+        CheckConstraintFindingKind.ConstraintOnIdentityColumn => CheckConstraintOnIdentityColumnRuleId,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled CheckConstraintFindingKind."),
+    };
+
     public static string TvfFenceRuleId(TvfFenceFindingKind kind) => kind switch
     {
         TvfFenceFindingKind.CorrelatedApply => TvfFenceCorrelatedApplyRuleId,
@@ -638,6 +647,8 @@ public static class SarifRuleCatalog
             Rule(ForcedSerialNonParallelizableIntrinsicRuleId, "One of a finite, oracle-confirmed list of intrinsic functions/globals (OBJECT_ID, IDENT_CURRENT, ERROR_NUMBER, ERROR_MESSAGE, ERROR_LINE, ERROR_SEVERITY, ERROR_STATE, ERROR_PROCEDURE, @@TRANCOUNT) referenced inside a query with a real FROM clause forces that query's plan serial, confirmed as NonParallelPlanReason=\"NonParallelizableIntrinsicFunction\"."),
             Rule(UntrustedForeignKeyRuleId, "A foreign key the engine itself does not trust (sys.foreign_keys.is_not_trusted) - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement. Forfeits join-elimination and other constraint-based query rewrites for every query that touches it."),
             Rule(UntrustedCheckConstraintRuleId, "A CHECK constraint the engine itself does not trust (sys.check_constraints.is_not_trusted) - almost always the result of a WITH NOCHECK re-enabling ALTER TABLE statement. The constraint may not actually hold over existing rows, and the optimizer forfeits constraint-based rewrites that assume it does."),
+            Rule(CheckConstraintNullNotHandledRuleId, "A nullable column's own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate - SQL Server's three-valued logic means a comparison against NULL evaluates to UNKNOWN, never FALSE, and a CHECK constraint only rejects a row when its predicate is FALSE, so a NULL value silently passes a constraint that reads as if it forbids bad data."),
+            Rule(CheckConstraintOnIdentityColumnRuleId, "A CHECK constraint's own definition directly references an IDENTITY column - the identity counter advances even through a failed insert, so a numeric-threshold CHECK here rejects every insert deterministically until the counter happens to satisfy it, then silently stops mattering forever with no code change."),
             Rule(CascadingForeignKeyRuleId, "A foreign key with a non-NO_ACTION ON DELETE/ON UPDATE action - a single DML statement against the referenced table silently cascades to every dependent row in the child table too, with no visible predicate change at the call site."),
             Rule(MultiReferencedCteRuleId, "A CTE referenced 2+ times downstream of its own WITH clause - SQL Server does not materialize a plain CTE once and reuse it, so each reference independently re-runs the CTE's own defining query. A self-reference inside a recursive CTE's own body is never counted - that is the structurally mandated recursion mechanism, not optional re-invocation."),
             Rule(NestedViewDepthRuleId, "A view/inline TVF nested 2+ view/TVF layers deep before reaching a base table - a change to a base table now has to be traced through 2+ independent view layers before its blast radius is understood, and each layer is a place a SELECT */column-list mismatch or silent type widening can hide."),

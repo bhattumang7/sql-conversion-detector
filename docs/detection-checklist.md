@@ -4010,30 +4010,101 @@ makes them the cleanest findings in this entire file.
       9/835 (1.1%), all cross-checked directly against `sys.tables`/
       `sys.columns` before trusting the scanner. All three kept as genuine,
       if low-confidence, signals rather than dropped.
-- [ ] **CHECK constraint that doesn't account for NULL** (source: a real
+- [x] **CHECK constraint that doesn't account for NULL** (source: a real
       practitioner post read directly, not a tool survey — Brent Ozar's "Keep
-      it Constrained") — SQL Server's three-valued logic means a `CHECK`
-      whose predicate has no `IS NULL`/`IS NOT NULL` branch silently PASSES
-      any row where the checked column is `NULL`, even though the constraint
-      reads as if it forbids bad data (`CHECK (Price > 0)` does not reject
-      `Price = NULL`). Schema-decidable: `CatalogCheckConstraint`'s definition
-      text already carries the predicate, and the referenced column's own
-      nullability is already on `CatalogColumn` — this is a parse of text we
-      already have plus one AST walk for a bare `IS NULL` test on each
-      referenced column, no new catalog read required. Fires only when the
-      checked column is itself nullable (a `NOT NULL` column makes the
-      concern moot) and the predicate has no NULL-handling branch anywhere
-      reachable — same "AND-only-reachable" discipline the composite-index
-      scanner already uses, so a NULL guard hidden in an OR branch still
-      counts as handled. Distinct from the shipped
-      `UntrustedConstraintScanner` stream (that one is about `NOCHECK`
+      it Constrained") — shipped as `CheckConstraintFindingKind.NullNotHandled`
+      (`CheckConstraintScanner`/`CheckConstraintFinding`). SQL Server's
+      three-valued logic means a `CHECK` whose predicate has no `IS NULL`/
+      `IS NOT NULL` test against the checked column silently PASSES any row
+      where that column is `NULL`, even though the constraint reads as if it
+      forbids bad data. Oracle-confirmed directly against the standing Docker
+      instance (disposable scratch database, dropped immediately after): a
+      nullable `Price` column with `CHECK (Price > 0)` genuinely rejected
+      `INSERT ... VALUES (-5)` (Msg 547) but genuinely ACCEPTED
+      `INSERT ... VALUES (NULL)` with no error at all; rewriting the predicate
+      to the textbook fix `CHECK (Price IS NULL OR Price > 0)` was
+      oracle-confirmed to accept the same `NULL` row while still rejecting
+      `-5`, proving both the bug and the standard fix.
+      <br><br>
+      AST-decidable, catalog-plus-text: `CatalogCheckConstraint.DefinitionText`
+      (a new additive field, `sys.check_constraints.definition` verbatim,
+      live-mode only) is reparsed through the same throwaway
+      `SELECT 1 WHERE {definition}` wrapper `SchemaDependencyScanner` already
+      uses for the identical text, then walked for every referenced column
+      (`ColumnReferenceExpression`) and every bare `col IS [NOT] NULL` test
+      (`BooleanIsNullExpression`) reachable ANYWHERE in the tree. Deliberately
+      corrected mid-build: `sys.check_constraints.parent_column_id` is 0 for
+      any table-level (as opposed to column-level) constraint — confirmed
+      directly against the oracle, a two-column `CHECK` declared as a table
+      constraint reports `parent_column_id = 0` even though it plainly
+      references specific columns — so the scanner never trusts that catalog
+      column at all and instead resolves every referenced column purely from
+      the reparsed AST, correctly handling multi-column table-level
+      constraints the original "one column per constraint" framing didn't
+      anticipate. Fires only when the checked column is itself nullable (a
+      `NOT NULL` column makes the concern moot) and no `IS NULL`/`IS NOT NULL`
+      test against that column is reachable anywhere in the predicate.
+      <br><br>
+      The "AND-only-reachable" discipline is applied INVERTED from how the
+      composite-index scanner and `NotInNullableSubqueryScanner` use it: those
+      require a violating condition to be AND-reachable before firing, and
+      treat "referenced anywhere, OR branches included" as liberal grounds to
+      suppress. Here the risk is the ABSENCE of a guard, so the same liberal,
+      OR-inclusive collection is what suppresses a finding: a guard hidden
+      inside an OR branch (the textbook fix above) still counts as handled.
+      Only a direct `col IS [NOT] NULL` shape counts — `ISNULL(col, ...)`/
+      `COALESCE(col, ...)` is a materially different AST shape (a scalar
+      function, not a boolean test) and is deliberately NOT treated as an
+      equivalent guard; confirmed this is the right call against a real
+      finding in the local test database (see coverage below) where a
+      `CHECK` guarded `COALESCE([RunId],[VehicleId]) IS NOT NULL` without
+      guarding either bare column — the scanner correctly still flags both
+      `RunId` and `VehicleId`, since the constraint's own predicate never
+      actually tests either column for `NULL` on its own. Distinct from the
+      shipped `UntrustedConstraintScanner` stream (that one is about `NOCHECK`
       re-enablement losing the optimizer's trust in an otherwise-correct
-      constraint; this one is about the constraint's own text being wrong).
-      The companion half of the same post — "only one `NULL` is allowed per
-      column in a unique constraint" — is not a defect to detect, it's
-      correct, documented engine behavior a developer might not know; better
-      served by fix-guidance text on a future filtered-unique-index rule than
-      by a finding of its own.
+      constraint; this one is about the constraint's own text being wrong,
+      independent of trust state). `FindingConfidence.High`, SARIF Error: not
+      a magnitude estimate or workload-dependent risk, but a guaranteed,
+      unconditional gap in this exact constraint's own enforcement against any
+      current or future `NULL` row — the same certainty tier
+      `NotInNullableSubqueryFinding` already uses for an analogous
+      three-valued-logic gap, not the Warning tier `UntrustedConstraintFinding`
+      itself uses for its own, genuinely workload-independent-but-not-
+      provably-wrong claim. The companion half of the same post — "only one
+      `NULL` is allowed per column in a unique constraint" — is not a defect
+      to detect, it's correct, documented engine behavior a developer might
+      not know; better served by fix-guidance text on a future
+      filtered-unique-index rule than by a finding of its own.
+      <br><br>
+      **Real coverage against the local test database: 68 findings**, all
+      `NullNotHandled` (195 total `CHECK` constraints exist; 0
+      `ConstraintOnIdentityColumn` findings — see that item below for the
+      cross-check). Independently cross-checked with a hand-rolled
+      `sys.check_constraints`/`sys.columns` query (a cruder, whole-definition
+      substring test for `IS NULL`/`IS NOT NULL`, not the scanner's own
+      per-column AST walk): the hand query found 75, a 7-row gap fully
+      explained by inspecting every discrepancy's real definition text
+      directly, not papered over — every one confirms the SCANNER is more
+      precise, not buggy: (1) several hand-query "violations" were columns
+      genuinely guarded by their own `IS NOT NULL` test reachable through an
+      OR chain (e.g. `[EarlyThreshold] IS NOT NULL OR [LateThreshold] IS NOT
+      NULL OR ...`, each column guarding itself) — the crude hand query's
+      naive `CHARINDEX('IS NULL', ...)` substring check doesn't match `IS NOT
+      NULL` text at all (it is not a substring of "IS NOT NULL"), so it
+      wrongly flagged these; the scanner's real AST walk correctly recognized
+      `IS NOT NULL` as a guard and suppressed them. (2) several scanner
+      findings the hand query missed were the mirror bug in the hand query
+      itself: it checked for ANY `IS NULL`/`IS NOT NULL` text ANYWHERE in a
+      constraint's whole definition, not per-referenced-column, so a
+      constraint guarding one column (e.g. `[EndDateTime] IS NULL`) made the
+      hand query wrongly skip an entirely different, genuinely unguarded
+      column referenced in the same predicate (`StartDateTime`, inside
+      `datediff(minute,[EndDateTime],[StartDateTime])`) — the scanner's own
+      per-column precision correctly still flagged it. (3) the
+      `COALESCE(...)  IS NOT NULL` case described above, where the hand
+      query's substring match treated the whole constraint as guarded but the
+      scanner correctly still fired for the ungoverned bare columns.
 
 ### B. Query anti-patterns still unbuilt
 Cross-referenced against a widely-read practitioner code-review post: of its
@@ -4927,15 +4998,54 @@ script-family sweep had. No source citation carried into this file.
       cross-checked directly (`sys.triggers WHERE parent_class = 0`, the
       server-scoped class logon triggers live under, returns zero rows -
       this instance has no logon trigger of any kind), not a detection gap.
-- [ ] **`CHECK` constraint accidentally placed on an `IDENTITY` column** — a
-      numeric-threshold `CHECK` on the identity column itself (e.g.
-      `CHECK (Id > 5)`) blocks every insert until the auto-generated counter
-      happens to satisfy it, then silently starts working once it does -
-      genuinely a "fails deterministically in dev, exactly the catch-before-
-      prod case" finding, sharper than most items in this file.
-      Schema-decidable: `CatalogColumn.IsIdentity` plus a `CHECK`
-      constraint's definition text referencing that same column, cheap
-      catalog+text check.
+- [x] **`CHECK` constraint accidentally placed on an `IDENTITY` column** —
+      shipped as `CheckConstraintFindingKind.ConstraintOnIdentityColumn`
+      (`CheckConstraintScanner`/`CheckConstraintFinding`, same type/file as
+      the `NullNotHandled` item above — one shared `Kind` discriminator
+      covering both catalog-plus-text CHECK-correctness claims, this
+      codebase's established convention). A numeric-threshold `CHECK` on the
+      identity column itself (e.g. `CHECK (Id > 5)`) blocks every insert until
+      the auto-generated counter happens to satisfy it, then silently starts
+      working once it does. Oracle-confirmed directly against the standing
+      Docker instance (disposable scratch database, dropped immediately
+      after): an `IDENTITY(1,1)` column with `CHECK (Id > 5)` rejected FOUR
+      back-to-back inserts (Msg 547, identity values 1 through 5) — and the
+      identity counter kept ADVANCING through every rejected attempt exactly
+      as documented `IDENTITY` behavior (the value is generated before
+      constraint evaluation, and a failed statement never gives it back),
+      leaving the table with a 5-value gap before the fifth insert finally
+      succeeded at `Id = 6`. Every insert against a freshly-created table with
+      this shape is guaranteed to fail deterministically until the counter
+      happens to satisfy the predicate on its own, then the failures stop
+      forever with no code change — exactly the "fails in dev, catch-before-
+      prod" shape CLAUDE.md's own precision-first bar exists for.
+      <br><br>
+      Schema-decidable, purely from `CatalogColumn.IsIdentity` plus the
+      `CHECK` constraint's own definition text referencing that same column
+      (no reachability/NULL-guard nuance needed here, unlike the sibling
+      kind: an `IDENTITY` column is always `NOT NULL` by construction, and
+      this kind fires on simple column reference alone) — reuses exactly the
+      same reparsed-AST column-reference walk `NullNotHandled` already builds
+      per constraint, so both kinds are computed from one pass over
+      `DatabaseCatalog.CheckConstraints`. `FindingConfidence.High`, SARIF
+      Error: the counter-vs-threshold mechanics are mechanical,
+      oracle-confirmed engine behavior with no workload-dependence at all —
+      the constraint is either already satisfied by the current counter value
+      (a provable no-op, since `IDENTITY` never decreases) or still rejecting
+      every insert, and either way it can never do the job its own predicate
+      text suggests.
+      <br><br>
+      **Real coverage against the local test database: 0 findings** — a
+      confirmed honest zero, not a broken scanner: independently cross-checked
+      with a hand-rolled `sys.check_constraints`/`sys.identity_columns` query
+      (`CHARINDEX('[' + ic.name + ']', cc.definition) > 0` for every identity
+      column on every table carrying a `CHECK` constraint) against the same
+      database, which also returned zero rows. The local test database
+      genuinely carries 600 identity columns and 195 `CHECK` constraints
+      total, so this is a real "structural pattern this pass can detect,
+      just not present in this particular corpus" result, not a coverage gap
+      — recorded here rather than silently dropped, per this project's own
+      "honest counts, including zero" discipline.
 - [x] **Monotonically increasing clustered key (an `IDENTITY` column, or any
       other always-ascending key) with no `OPTIMIZE_FOR_SEQUENTIAL_KEY` —
       shipped** as

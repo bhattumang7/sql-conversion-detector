@@ -134,6 +134,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
         blocks.AddRange(CrossModuleLockOrder(report, headingLevel, pathBase));
         blocks.AddRange(TriggerRecursionCycle(report, headingLevel, pathBase));
+        blocks.AddRange(CheckConstraint(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -208,6 +209,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Trigger correctness", report.TriggerCorrectnessFindings.Count);
         AddCount(counts, "Cross-module lock ordering", report.CrossModuleLockOrderFindings.Count);
         AddCount(counts, "Multi-hop trigger recursion cycles", report.TriggerRecursionCycleFindings.Count);
+        AddCount(counts, "CHECK constraint text correctness (NULL handling, IDENTITY-column placement)", report.CheckConstraintFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1332,6 +1334,29 @@ public static class ReadableScanReportWriter
                 f.ConstraintName,
                 f.TableQualifiedName,
                 f.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> CheckConstraint(ScanReport report, int level, string? pathBase)
+    {
+        if (report.CheckConstraintFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"CHECK constraint text correctness ({report.CheckConstraintFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A CHECK constraint whose own predicate text is wrong, independent of trust state. \"NULL not handled\": a nullable column's predicate has no IS NULL/IS NOT NULL test anywhere against it, so a NULL value silently passes under three-valued logic even though the constraint reads as if it forbids bad data. \"On IDENTITY column\": the predicate directly references an IDENTITY column - the counter advances through every failed insert, so a numeric-threshold CHECK here fails deterministically until the counter catches up, then silently stops mattering forever.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ConstraintHeader, "Table", "Column", "Kind"],
+            [.. report.CheckConstraintFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ConstraintName,
+                f.TableQualifiedName,
+                f.ColumnName,
+                f.Kind == CheckConstraintFindingKind.NullNotHandled ? "NULL not handled" : "on IDENTITY column",
             })]);
     }
 

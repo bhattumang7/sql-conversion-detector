@@ -349,6 +349,13 @@ public static class ScanReportBuilder
             untrustedConstraintStage.Complete($"{untrustedConstraintFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<CheckConstraintFinding> checkConstraintFindings;
+        using (var checkConstraintStage = progress.Begin("scanning CHECK constraint text"))
+        {
+            checkConstraintFindings = CheckConstraintScanner.Scan(catalog);
+            checkConstraintStage.Complete($"{checkConstraintFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<CascadingForeignKeyFinding> cascadingForeignKeyFindings;
         using (var cascadingFkStage = progress.Begin("scanning cascading FK actions"))
         {
@@ -1236,6 +1243,7 @@ public static class ScanReportBuilder
         nonUniqueUpdateSourceFindings = [.. nonUniqueUpdateSourceFindings.Where(f => f.Confidence <= minimumConfidence)];
         forcedSerialFindings = [.. forcedSerialFindings.Where(f => f.Confidence <= minimumConfidence)];
         untrustedConstraintFindings = [.. untrustedConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
+        checkConstraintFindings = [.. checkConstraintFindings.Where(f => f.Confidence <= minimumConfidence)];
         cascadingForeignKeyFindings = [.. cascadingForeignKeyFindings.Where(f => f.Confidence <= minimumConfidence)];
         multiReferencedCteFindings = [.. multiReferencedCteFindings.Where(f => f.Confidence <= minimumConfidence)];
         nestedViewDepthFindings = [.. nestedViewDepthFindings.Where(f => f.Confidence <= minimumConfidence)];
@@ -1322,6 +1330,7 @@ public static class ScanReportBuilder
             triggerCorrectnessFindings,
             crossModuleLockOrderFindings,
             triggerRecursionCycleFindings,
+            checkConstraintFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

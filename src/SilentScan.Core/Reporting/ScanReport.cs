@@ -72,6 +72,7 @@ public sealed record ScanReport(
     IReadOnlyList<TriggerCorrectnessFinding> TriggerCorrectnessFindings,
     IReadOnlyList<CrossModuleLockOrderFinding> CrossModuleLockOrderFindings,
     IReadOnlyList<TriggerRecursionCycleFinding> TriggerRecursionCycleFindings,
+    IReadOnlyList<CheckConstraintFinding> CheckConstraintFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -335,5 +336,10 @@ public sealed record ScanReport(
     /// (docs/detection-checklist.md "Second full-archive practitioner sweep (2026-08-18)" §G
     /// "Multi-hop trigger recursion cycle across tables") - the scanner and finding type existed
     /// already but were never actually wired into this report; this bump is that wiring landing.
-    public const int CurrentSchemaVersion = 55;
+    /// Bumped to 56 for the new <see cref="CheckConstraintFindings"/> stream (docs/detection-
+    /// checklist.md Tier 2 §A: "CHECK constraint that doesn't account for NULL" and "CHECK
+    /// constraint accidentally placed on an IDENTITY column") - both oracle-confirmed against the
+    /// standing Docker instance, catalog-plus-text-decidable from the newly additive
+    /// <see cref="Catalog.CatalogCheckConstraint.DefinitionText"/> field.
+    public const int CurrentSchemaVersion = 56;
 }

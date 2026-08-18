@@ -426,7 +426,7 @@ public sealed class LiveCatalogReader
     {
         const string sql = """
             SELECT cc.name AS constraint_name, s.name AS schema_name, t.name AS table_name,
-                   cc.is_not_trusted, cc.is_disabled
+                   cc.is_not_trusted, cc.is_disabled, cc.definition
             FROM sys.check_constraints cc
             JOIN sys.tables t ON t.object_id = cc.parent_object_id
             JOIN sys.schemas s ON s.schema_id = t.schema_id
@@ -443,7 +443,8 @@ public sealed class LiveCatalogReader
                 ConstraintName: reader.GetString(0),
                 TableQualifiedName: $"{reader.GetString(1)}.{reader.GetString(2)}",
                 IsNotTrusted: reader.GetBoolean(3),
-                IsDisabled: reader.GetBoolean(4)));
+                IsDisabled: reader.GetBoolean(4),
+                DefinitionText: await reader.IsDBNullAsync(5, cancellationToken) ? string.Empty : reader.GetString(5)));
         }
 
         return constraints;
