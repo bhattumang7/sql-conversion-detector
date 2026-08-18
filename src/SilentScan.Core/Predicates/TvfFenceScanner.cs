@@ -110,12 +110,7 @@ public static class TvfFenceScanner
                 : [];
 
             var isCorrelated = argumentColumns.Count > 0;
-            var kindResult = isCorrelated switch
-            {
-                true => TvfFenceFindingKind.CorrelatedApply,
-                false when isStandalone => TvfFenceFindingKind.Standalone,
-                _ => TvfFenceFindingKind.FromOrJoin,
-            };
+            var kindResult = TvfFenceClassifier.ClassifyDirectReference(isCorrelated, isStandalone);
 
             var correlatedColumns = isCorrelated ? argumentColumns : null;
 

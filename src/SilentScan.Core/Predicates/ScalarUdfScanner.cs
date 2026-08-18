@@ -158,7 +158,7 @@ public static class ScalarUdfScanner
         private void Emit(FunctionCall node, string qualifiedName, ScalarUdfInfo info)
         {
             var context = ResolveContext(node);
-            var kind = context.IsPredicate() ? ScalarUdfFindingKind.PredicateInvocation : ScalarUdfFindingKind.ProjectionInvocation;
+            var kind = ScalarUdfClassifier.ClassifyInvocationKind(context);
 
             var (inlineability, blocker) = ScalarUdfInlineabilityClassifier.Classify(info);
             var constantArgumentsNotFolded = info.IsSchemaBound == false && node.Parameters.Count > 0 && node.Parameters.All(p => p is Literal);
