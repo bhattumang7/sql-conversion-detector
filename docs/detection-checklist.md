@@ -6763,12 +6763,40 @@ verifiable.
         collation-mismatch test its own doc comment cites
         `VerdictClassifier` for — route it through the real one. Best done
         one scanner at a time when that rule is next touched.
-  - [ ] **`SourceSpan` + shared finding emitter** — replaces hand-threaded
-        `(sourcePath, StartLine, StartColumn)` triples, the identical
-        `OrderBy` tails in four catalog scanners, and the copy-pasted
-        nested depth/origin emission in `TvfFenceScanner`/`ScalarUdfScanner`;
-        the natural place for `Confidence` to become a real rule output
-        (today it's a record default no scanner sets from evidence).
+  - [x] **Investigated — two of the four claimed pieces here aren't real
+        duplication.** The `OrderBy` "tails" in `MaxTypedColumnScanner`/
+        `ColumnCollationDriftScanner`/`CrossTableTypeDriftScanner`/
+        `ProcCallArgumentMismatchScanner` each sort by different keys
+        (`TableQualifiedName`+`ColumnName` vs `ParentTableQualifiedName`+
+        `ParentColumnName` vs `SourcePath`+`Line`+`Column`) — ordinary,
+        idiomatic per-type LINQ, not duplicated logic; a generic sort helper
+        would be the premature abstraction CLAUDE.md warns against for two
+        lines of code. `TvfFenceScanner.TryEmitNestedFinding`/
+        `ScalarUdfScanner.TryEmitNested` share only the shape "look up an
+        origin map, then construct a finding" — the constructed types
+        (`TvfFenceFinding`/`ScalarUdfFinding`) share almost no fields, so
+        there's nothing to extract beyond the origin-map lookup guard, which
+        isn't worth generic machinery for three lines. Remaining two pieces
+        are real but large enough to need their own decision:
+  - [ ] **Hand-threaded `(sourcePath, StartLine, StartColumn)` triples across
+        ~84 call sites** — a `SourceSpan(node)`-style helper only reduces
+        argument-list length, not real logic duplication, since every finding
+        record already exposes plain `SourcePath`/`Line`/`Column` fields for
+        JSON compatibility; the alternative (having finding records actually
+        *carry* a `SourceSpan` object) means changing the public JSON shape
+        of every finding type simultaneously - a breaking schema change
+        far larger and riskier than anything else in this list. Needs an
+        explicit decision on which of those two (cosmetic call-site helper vs.
+        real breaking schema migration) before any code, not a default
+        "just do it."
+  - [ ] **`Confidence` as a real, evidence-based rule output** instead of a
+        record default no scanner sets. This is a per-rule content/judgment
+        task across 150+ rule kinds (what evidence quality justifies
+        High/Medium/Low for *this specific* rule), the same shape and scale
+        as the machine-readable rule catalog's content problem below - not a
+        mechanical refactor, and a partial pass (a few rules done, the rest
+        left at the High default) would misrepresent confidence as
+        evidence-based when it mostly still isn't.
   - [x] **`IRelocatableFinding`** — shipped 2026-08-18. Rather than renaming
         `ColumnPosition`/`Column` across seven finding records (blocked on a
         real collision: `TypedPredicateFinding.Column` is the operand, not a
