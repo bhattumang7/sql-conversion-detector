@@ -6695,12 +6695,29 @@ verifiable.
       visitors. Template for the target shape:
       `ScalarUdfInlineabilityClassifier` (pure facts → decision function,
       shared by two scanners). Pieces, in dependency order:
-  - [ ] **`ScopeTracker`/`ScopedSqlVisitorBase`** — extract the scope/CTE
-        stack, proc/trigger body scoping, and the nine `CreateOrAlter*`
-        overrides that `NonSargablePredicateScanner` copies verbatim from
-        `TypedPredicateExtractor` (its own comments say "Mirrors
-        TypedPredicateExtractor's identical …" five times). Highest value:
-        kills ~250 duplicated lines and the two-copies-drift hazard.
+  - [x] **`ScopedSqlVisitorBase`** — shipped 2026-08-18, narrower than first
+        scoped. Only the genuinely identical pieces moved: the scope/CTE
+        stacks, `PushCteScope`, `CurrentCteRelations`, `CurrentResolutionContext`,
+        `MergeCtes`. `VisitProcedureOrFunctionBody`/`VisitTriggerBody`/the nine
+        `CreateOrAlter*` overrides turned out NOT to be safely mergeable as-is:
+        `TypedPredicateExtractor`'s copies also reset `_variables`/
+        `_formalParameterNames`, record parameters, and track the WITH
+        RECOMPILE guard in the same methods, which `NonSargablePredicateScanner`
+        has no equivalent of - and their two `BuildTriggerPseudoTableRelations`
+        copies were found to already disagree (only `TypedPredicateExtractor`
+        ledgers a DDL/LOGON trigger's missing target table as a construct kind;
+        `NonSargablePredicateScanner` silently returns empty) - a real,
+        pre-existing behavioral discrepancy, not something a mechanical merge
+        should paper over. Unifying those needs a template-method design
+        (base owns the scope push/pop, subclasses hook in their own extra
+        state) plus a deliberate decision on the ledger discrepancy - left
+        open below rather than force-merged.
+  - [ ] **Unify `VisitProcedureOrFunctionBody`/`VisitTriggerBody`/the nine
+        `CreateOrAlter*` overrides** via template-method hooks on
+        `ScopedSqlVisitorBase`, and decide (don't silently pick) whether
+        `NonSargablePredicateScanner`'s `BuildTriggerPseudoTableRelations`
+        should start ledgering a DDL/LOGON trigger's missing target table the
+        way `TypedPredicateExtractor`'s already does.
   - [ ] **`ResolvedColumnFacts` + one resolver** — one lineage/catalog query
         returning type/indexed/nullable/collation/depth/origin;
         `NonSargablePredicateScanner` currently re-resolves the same column
