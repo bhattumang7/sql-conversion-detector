@@ -123,10 +123,7 @@ public static class VerdictClassifier
         // predicate that does not compile at all would be worse than an Unknown. A literal is
         // always "coercible default" (never conflicts) and is excluded here; it is handled by
         // <see cref="ClassifySameCategory"/>'s own literal branch instead.
-        if (!otherIsLiteral
-            && columnType.IsStringFamily && otherType.IsStringFamily
-            && columnType.Collation is { } columnCollation && otherType.Collation is { } otherCollation
-            && !string.Equals(columnCollation.Name, otherCollation.Name, StringComparison.OrdinalIgnoreCase))
+        if (!otherIsLiteral && HasGenuineCollationMismatch(columnType, otherType))
         {
             return (Verdict.OperandClash, null);
         }
@@ -138,6 +135,23 @@ public static class VerdictClassifier
 
         return ClassifyCrossCategory(columnType, otherType, otherIsLiteral, operatorText);
     }
+
+    /// <summary>
+    /// True when both types are string-family with genuinely different, both-resolved collations -
+    /// the "does not compile at all" (Msg 468, oracle-verified) shape <see cref="ClassifyWithReason"/>
+    /// checks before the category split above, independent of type CATEGORY. Exposed as its own
+    /// named check (not just inlined in <see cref="ClassifyWithReason"/>) so a caller that needs
+    /// only this specific fact - e.g. <c>Predicates.CrossTableTypeDriftScanner</c>, deciding
+    /// whether a foreign-key column pair's types have drifted, not classifying a live predicate's
+    /// verdict - can ask the one authoritative implementation instead of re-deriving it. Callers
+    /// comparing a column against a literal must not call this directly: a literal is always
+    /// "coercible default" (never conflicts) - the same exclusion <see cref="ClassifyWithReason"/>
+    /// itself applies (its own <c>otherIsLiteral</c> check) before calling this.
+    /// </summary>
+    public static bool HasGenuineCollationMismatch(SqlType columnType, SqlType otherType) =>
+        columnType.IsStringFamily && otherType.IsStringFamily
+        && columnType.Collation is { } columnCollation && otherType.Collation is { } otherCollation
+        && !string.Equals(columnCollation.Name, otherCollation.Name, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Every cross-category pair - same family (int vs bigint, char vs nvarchar, date vs
