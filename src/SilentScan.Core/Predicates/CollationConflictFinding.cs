@@ -24,4 +24,10 @@ public sealed record CollationConflictFinding(
     int Line,
     int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<CollationConflictFinding>
+{
+    int IRelocatableFinding<CollationConflictFinding>.PositionColumn => ColumnPosition;
+
+    CollationConflictFinding IRelocatableFinding<CollationConflictFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}

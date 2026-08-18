@@ -56,4 +56,10 @@ public sealed record ScalarUdfFinding(
     int OriginLine = 0,
     string? ReferenceFragmentText = null,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ScalarUdfFinding>
+{
+    int IRelocatableFinding<ScalarUdfFinding>.PositionColumn => Column;
+
+    ScalarUdfFinding IRelocatableFinding<ScalarUdfFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}

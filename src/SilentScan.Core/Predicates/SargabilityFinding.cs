@@ -48,4 +48,10 @@ public sealed record SargabilityFinding(
     string? TableQualifiedName = null,
     bool? Indexed = null,
     string? PredicateFragmentText = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<SargabilityFinding>
+{
+    int IRelocatableFinding<SargabilityFinding>.PositionColumn => Column;
+
+    SargabilityFinding IRelocatableFinding<SargabilityFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}

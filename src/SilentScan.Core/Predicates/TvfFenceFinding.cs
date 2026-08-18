@@ -82,4 +82,10 @@ public sealed record TvfFenceFinding(
     IReadOnlyList<string>? CorrelatedOuterColumns = null,
     string? ReferenceFragmentText = null,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TvfFenceFinding>
+{
+    int IRelocatableFinding<TvfFenceFinding>.PositionColumn => Column;
+
+    TvfFenceFinding IRelocatableFinding<TvfFenceFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}

@@ -18,4 +18,10 @@ public sealed record WriteLossFinding(
     int Line,
     int ColumnPosition,
     SourceSpan? DynamicSqlCallSite = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<WriteLossFinding>
+{
+    int IRelocatableFinding<WriteLossFinding>.PositionColumn => ColumnPosition;
+
+    WriteLossFinding IRelocatableFinding<WriteLossFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}

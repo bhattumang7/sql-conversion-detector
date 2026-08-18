@@ -39,7 +39,13 @@ public sealed record TypedPredicateFinding(
     string? UnknownReason = null,
     string? PredicateFragmentText = null,
     string? Fingerprint = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<TypedPredicateFinding>
+{
+    int IRelocatableFinding<TypedPredicateFinding>.PositionColumn => ColumnPosition;
+
+    TypedPredicateFinding IRelocatableFinding<TypedPredicateFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}
 
 /// <summary>Everything <see cref="TypedPredicateExtractor.Extract"/> found in one parsed file: type-precedence verdicts, predicates that compare an expression-derived (CAST/computed) column rather than a real one, and predicates that don't even compile (a collation conflict between two real columns).</summary>
 public sealed record PredicateExtractionResult(

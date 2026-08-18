@@ -51,7 +51,13 @@ public sealed record ExpressionDerivedFinding(
     string? PredicateFragmentText = null,
     string? ImmediateRelationQualifiedName = null,
     string? ImmediateRelationAlias = null,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High) : IRelocatableFinding<ExpressionDerivedFinding>
+{
+    int IRelocatableFinding<ExpressionDerivedFinding>.PositionColumn => ColumnPosition;
+
+    ExpressionDerivedFinding IRelocatableFinding<ExpressionDerivedFinding>.Relocated(SourceSpan span, SourceSpan? callSite, FindingConfidence confidence) =>
+        this with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = callSite, Confidence = confidence };
+}
 
 /// <summary>A real base table column found underneath an expression-derived provenance chain, and whether it's indexed (which is what makes the finding worth fixing).</summary>
 public sealed record UnderlyingBaseColumn(string TableQualifiedName, string ColumnName, bool Indexed);

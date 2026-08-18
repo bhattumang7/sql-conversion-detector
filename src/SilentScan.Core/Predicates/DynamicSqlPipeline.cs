@@ -900,46 +900,17 @@ public static partial class DynamicSqlPipeline
     /// <summary>The worse (numerically higher) of two <see cref="FindingConfidence"/> values - a finding nested inside a script that itself rested on an assumption is never MORE trustworthy than that assumption.</summary>
     private static FindingConfidence Worse(FindingConfidence a, FindingConfidence b) => (FindingConfidence)Math.Max((int)a, (int)b);
 
-    private static SargabilityFinding Remap(SargabilityFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
+    /// <summary>
+    /// Shared by every <see cref="IRelocatableFinding{TSelf}"/> finding type - extracted from
+    /// seven near-identical copies (docs/detection-checklist.md "Engineering debt"). Sets the
+    /// call site and confidence directly from <paramref name="script"/>, distinct from
+    /// <see cref="RemapNested{TFinding}"/>'s chaining behavior below.
+    /// </summary>
+    private static TFinding Remap<TFinding>(TFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
+        where TFinding : IRelocatableFinding<TFinding>
     {
-        var span = map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
-    }
-
-    private static TypedPredicateFinding Remap(TypedPredicateFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
-    {
-        var span = map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
-    }
-
-    private static ExpressionDerivedFinding Remap(ExpressionDerivedFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
-    {
-        var span = map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
-    }
-
-    private static CollationConflictFinding Remap(CollationConflictFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
-    {
-        var span = map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
-    }
-
-    private static WriteLossFinding Remap(WriteLossFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
-    {
-        var span = map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
-    }
-
-    private static TvfFenceFinding Remap(TvfFenceFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
-    {
-        var span = map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
-    }
-
-    private static ScalarUdfFinding Remap(ScalarUdfFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
-    {
-        var span = map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = script.CallSite, Confidence = script.Confidence };
+        var span = map(finding.Line, finding.PositionColumn);
+        return finding.Relocated(span, script.CallSite, script.Confidence);
     }
 
     private static SkippedConstruct Remap(SkippedConstruct entry, DynamicSqlScript script) =>
@@ -957,47 +928,14 @@ public static partial class DynamicSqlPipeline
     /// text (that's what the nested dynamic SQL engine pass was actually parsing).
     /// One more hop through <paramref name="outerScript"/>'s segment map resolves both to real
     /// source coordinates, chaining however many nesting levels deep this finding came from.
+    /// Shared by every <see cref="IRelocatableFinding{TSelf}"/> finding type - extracted from
+    /// seven near-identical copies (docs/detection-checklist.md "Engineering debt").
     /// </summary>
-    private static SargabilityFinding RemapNested(SargabilityFinding finding, DynamicSqlScript outerScript)
+    private static TFinding RemapNested<TFinding>(TFinding finding, DynamicSqlScript outerScript)
+        where TFinding : IRelocatableFinding<TFinding>
     {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
-    }
-
-    private static TypedPredicateFinding RemapNested(TypedPredicateFinding finding, DynamicSqlScript outerScript)
-    {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
-    }
-
-    private static ExpressionDerivedFinding RemapNested(ExpressionDerivedFinding finding, DynamicSqlScript outerScript)
-    {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
-    }
-
-    private static CollationConflictFinding RemapNested(CollationConflictFinding finding, DynamicSqlScript outerScript)
-    {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
-    }
-
-    private static WriteLossFinding RemapNested(WriteLossFinding finding, DynamicSqlScript outerScript)
-    {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.ColumnPosition);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, ColumnPosition = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
-    }
-
-    private static TvfFenceFinding RemapNested(TvfFenceFinding finding, DynamicSqlScript outerScript)
-    {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
-    }
-
-    private static ScalarUdfFinding RemapNested(ScalarUdfFinding finding, DynamicSqlScript outerScript)
-    {
-        var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
-        return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column, DynamicSqlCallSite = RemapCallSite(finding.DynamicSqlCallSite, outerScript), Confidence = Worse(finding.Confidence, outerScript.Confidence) };
+        var span = outerScript.SegmentMap.Map(finding.Line, finding.PositionColumn);
+        return finding.Relocated(span, RemapCallSite(finding.DynamicSqlCallSite, outerScript), Worse(finding.Confidence, outerScript.Confidence));
     }
 
     /// <summary>
