@@ -1286,21 +1286,14 @@ public static class TypedPredicateExtractor
         /// </summary>
         private void TryAddOversizedParameterFinding(PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, TSqlFragment node)
         {
-            if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType })
-            {
-                return;
-            }
-
-            if (column.Type is not { IsStringFamily: true, IsMax: false, Length: { } columnLength } columnType
-                || otherType is not { IsStringFamily: true, IsMax: false, Length: { } otherLength }
-                || columnType.Category != otherType.Category
-                || otherLength <= columnLength)
+            if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType }
+                || Rules.ParameterLengthClassifier.ClassifyOversized(column.Type, otherType) is not { } result)
             {
                 return;
             }
 
             OversizedParameterFindings.Add(new OversizedParameterFinding(
-                column.TableQualifiedName, column.ColumnName, columnLength, otherLength, sourcePath, node.StartLine, node.StartColumn));
+                column.TableQualifiedName, column.ColumnName, result.ColumnLength, result.OtherLength, sourcePath, node.StartLine, node.StartColumn));
         }
 
         /// <summary>
@@ -1316,32 +1309,16 @@ public static class TypedPredicateExtractor
         private void TryAddUnderLengthParameterFinding(
             PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, string operatorText, TSqlFragment node)
         {
-            if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType })
+            if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType }
+                || Rules.ParameterLengthClassifier.ClassifyUnderLength(column.Type, otherType) is not { } result)
             {
                 return;
             }
 
-            if (column.Type is not { IsStringFamily: true, IsMax: false, Length: { } columnLength }
-                || otherType is not { IsStringFamily: true, IsMax: false })
-            {
-                return;
-            }
-
-            if (column.Type.Category != otherType.Category)
-            {
-                return;
-            }
-
-            var isImplicitDefault = otherType.Length is null;
-            if (!isImplicitDefault && otherType.Length >= columnLength)
-            {
-                return;
-            }
-
-            var changesRangeOrPatternShape = operatorText is "LIKE" or "<" or "<=" or ">" or ">=";
+            var changesRangeOrPatternShape = Rules.ParameterLengthClassifier.ChangesRangeOrPatternShape(operatorText);
 
             UnderLengthParameterFindings.Add(new UnderLengthParameterFinding(
-                column.TableQualifiedName, column.ColumnName, columnLength, otherType.Length, isImplicitDefault,
+                column.TableQualifiedName, column.ColumnName, result.ColumnLength, result.OtherLength, result.IsImplicitDefault,
                 operatorText, changesRangeOrPatternShape, sourcePath, node.StartLine, node.StartColumn));
         }
 
@@ -1413,9 +1390,8 @@ public static class TypedPredicateExtractor
         /// </summary>
         private bool TryRecordCollationConflict(PredicateOperand.Column first, PredicateOperand.Column second, string operatorText, TSqlFragment node)
         {
-            if (first.Type is not { IsStringFamily: true, Collation: { } firstCollation }
-                || second.Type is not { IsStringFamily: true, Collation: { } secondCollation }
-                || string.Equals(firstCollation.Name, secondCollation.Name, StringComparison.OrdinalIgnoreCase))
+            if (!Rules.VerdictClassifier.HasGenuineCollationMismatch(first.Type, second.Type)
+                || first.Type?.Collation is not { } firstCollation || second.Type?.Collation is not { } secondCollation)
             {
                 return false;
             }

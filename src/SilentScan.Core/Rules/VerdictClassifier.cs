@@ -148,8 +148,8 @@ public static class VerdictClassifier
     /// "coercible default" (never conflicts) - the same exclusion <see cref="ClassifyWithReason"/>
     /// itself applies (its own <c>otherIsLiteral</c> check) before calling this.
     /// </summary>
-    public static bool HasGenuineCollationMismatch(SqlType columnType, SqlType otherType) =>
-        columnType.IsStringFamily && otherType.IsStringFamily
+    public static bool HasGenuineCollationMismatch(SqlType? columnType, SqlType? otherType) =>
+        columnType is { IsStringFamily: true } && otherType is { IsStringFamily: true }
         && columnType.Collation is { } columnCollation && otherType.Collation is { } otherCollation
         && !string.Equals(columnCollation.Name, otherCollation.Name, StringComparison.OrdinalIgnoreCase);
 
