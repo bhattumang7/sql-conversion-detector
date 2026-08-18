@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SilentScan</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5c5c5c;
+    --accent: #0a5cff;
+    --border: #e0e0e0;
+    --code-bg: #f5f5f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --accent: #4993ff;
+      --border: #30363d;
+      --code-bg: #161b22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+  }
+  h1 {
+    font-size: 2.2rem;
+    margin-bottom: 0.25rem;
+  }
+  .tagline {
+    color: var(--muted);
+    font-size: 1.1rem;
+    margin-top: 0;
+    margin-bottom: 2.5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.5rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+  }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    border-radius: 6px;
+  }
+  code {
+    padding: 0.15em 0.4em;
+    font-size: 0.9em;
+  }
+  pre {
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.85em;
+  }
+  ul { padding-left: 1.3rem; }
+  a { color: var(--accent); }
+  footer {
+    margin-top: 4rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>SilentScan</h1>
+  <p class="tagline">A static analyser for SQL Server (T-SQL) code.</p>
+
+  <p>
+    SilentScan finds correctness and performance problems that are detectable
+    from SQL code and schema alone &mdash; before the query ever runs in
+    production. It is type-aware, direction-aware, and lineage-aware: findings
+    trace a predicate back through views and table-valued functions to the
+    base table column that actually causes the problem.
+  </p>
+
+  <h2>What it looks for</h2>
+  <ul>
+    <li>Implicit conversions that silently turn an index seek into a scan</li>
+    <li>Collation mismatches across joined or compared columns</li>
+    <li>Non-sargable predicates (function-wrapped columns, leading-wildcard
+      <code>LIKE</code>, column arithmetic)</li>
+    <li>Dynamic SQL whose text can be proven constant, analyzed the same way
+      as static SQL</li>
+  </ul>
+
+  <h2>How it's verified</h2>
+  <p>
+    Every verdict-bearing rule is checked against a plan-XML oracle, not
+    inferred from plan shape or table size &mdash; a finding is confirmed only
+    when the execution plan actually shows the conversion happening on the
+    column side of the predicate.
+  </p>
+
+  <h2>Usage</h2>
+  <pre><code>silentscan scan &lt;path-to-sql&gt;
+silentscan scan-db &lt;connection-string&gt;   # read-only, SELECT-only
+silentscan scan-corpus &lt;manifest.json&gt;
+silentscan verify-corpus &lt;manifest.json&gt;</code></pre>
+  <p>Output is versioned JSON, with a SARIF export for CI.</p>
+
+  <h2>Project</h2>
+  <p>
+    Source, issue tracker, and full documentation live in the GitHub
+    repository:
+    <a href="https://github.com/bhattumang7/mssql-silentscan">github.com/bhattumang7/mssql-silentscan</a>.
+  </p>
+
+  <footer>
+    This page is a placeholder landing page for the project's GitHub Pages
+    site.
+  </footer>
+</main>
+</body>
+</html>
