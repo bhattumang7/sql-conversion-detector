@@ -6814,15 +6814,42 @@ verifiable.
         finding resting on an assumption about reparsed dynamic SQL text.
         Considered deleting the whole concept and decided against it - it is
         doing real work, not vestigial.
-  - [ ] What's actually left, now scoped correctly: the remaining 52 rule
-        types still default to `High` - some may deserve a second look, but
-        there is no evidence today that any specific one is wrong, so this is
-        a "review sometime," not urgent work. Separately, `Confidence` today
-        is fixed per rule *type*; two findings of the same rule always get
-        the same value even when one rests on more resolved evidence than the
-        other - varying it per finding *instance* for the handful of rules
-        where that distinction matters is real but narrow, nothing like a
-        150-rule sweep.
+  - [x] **Did the full per-rule review of all 51 High-default finding types
+        (`DynamicSqlScript` excluded - internal pipeline plumbing, not a
+        reportable finding).** For each: does it rest on an oracle-confirmed
+        or unconditional engine mechanism (stays High), or does its own doc
+        comment hedge the claim / call itself a "seed" / disagree with its
+        own documented severity? 46 of 51 were already correctly justified -
+        this codebase's per-rule reasoning is more mature than first assumed.
+        Four were not, all fixed (`SilentScan.Core/Predicates/*.cs`,
+        commit c20c23d):
+    - `CrossTableTypeDriftFinding`, `ColumnCollationDriftFinding`: both call
+      themselves a "seed" in their own doc comments - schema mismatch is
+      certain, calling it a live problem is speculative until a real query
+      reaches it. High → Medium.
+    - `OversizedParameterFinding`: its own doc says the oracle disproved the
+      claimed harm in the common case (identical memory grants) and calls
+      itself "lower severity" - the record default disagreed with its own
+      documentation. High → Low.
+    - `CartesianJoinFinding`: doc already said an explicit CROSS JOIN
+      deserves lower confidence than a forgotten comma-join; the scanner
+      never implemented the split. Now split: comma-join stays High,
+      explicit CROSS JOIN → Medium.
+    - `UnderLengthParameterFinding` considered and NOT changed: its own doc
+      explicitly claims `WriteLossFinding`'s severity tier, and unlike
+      `OversizedParameterFinding`, its mechanism was never oracle-disproven.
+    - Also corrected an investigation dead-end along the way: initially
+      misread `SecurityFinding`/`ControlFlowRiskFinding`/`QueryAntiPatternFinding`/
+      `DeadCodeFinding`/`TriggerCorrectnessFinding`/`ViewOrderingFinding` as
+      having documented-but-unimplemented per-kind confidence, based on a
+      `grep "Confidence:"` that only matches named arguments - all six
+      already vary confidence correctly per kind via positional arguments.
+      Correction recorded here so the same false lead isn't rediscovered.
+  - [ ] Confidence today is fixed per rule *type* (uniform across every
+        instance of a single-kind finding); varying it per finding
+        *instance* for the handful of rules where that distinction
+        genuinely matters is real but narrow - nothing like a 150-rule
+        sweep, not attempted this pass.
   - [x] **`IRelocatableFinding`** — shipped 2026-08-18. Rather than renaming
         `ColumnPosition`/`Column` across seven finding records (blocked on a
         real collision: `TypedPredicateFinding.Column` is the operand, not a
