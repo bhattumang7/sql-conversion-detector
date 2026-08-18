@@ -356,6 +356,13 @@ public static class ScanReportBuilder
             checkConstraintStage.Complete($"{checkConstraintFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<SecurityPredicateIndexFinding> securityPredicateIndexFindings;
+        using (var securityPredicateIndexStage = progress.Begin("scanning RLS predicate index coverage"))
+        {
+            securityPredicateIndexFindings = SecurityPredicateIndexScanner.Scan(catalog);
+            securityPredicateIndexStage.Complete($"{securityPredicateIndexFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<DefaultNullableConstraintFinding> defaultNullableConstraintFindings;
         using (var defaultNullableStage = progress.Begin("scanning nullable DEFAULT constraints"))
         {
@@ -1435,6 +1442,7 @@ public static class ScanReportBuilder
             bareTopNoOrderByFindings,
             stringConcatNullFindings,
             aggregateDivisionColumnstoreFindings,
+            securityPredicateIndexFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

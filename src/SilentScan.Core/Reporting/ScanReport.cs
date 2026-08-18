@@ -79,6 +79,7 @@ public sealed record ScanReport(
     IReadOnlyList<BareTopNoOrderByFinding> BareTopNoOrderByFindings,
     IReadOnlyList<StringConcatNullFinding> StringConcatNullFindings,
     IReadOnlyList<AggregateDivisionColumnstoreFinding> AggregateDivisionColumnstoreFindings,
+    IReadOnlyList<SecurityPredicateIndexFinding> SecurityPredicateIndexFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -372,5 +373,19 @@ public sealed record ScanReport(
     /// attempt against this environment's own engine build; runs in both modes, using the same
     /// <see cref="Catalog.CatalogIndex.IsColumnstore"/> flag already populated by both the file-mode
     /// and live-mode catalog builders).
-    public const int CurrentSchemaVersion = 58;
+    /// Bumped to 59 for the new <see cref="SecurityPredicateIndexFindings"/> stream
+    /// (docs/detection-checklist.md practitioner-sweep item "Row-Level Security predicate function
+    /// with no supporting index on its own filtered columns") - a new live-only catalog read
+    /// (<see cref="Catalog.DatabaseCatalog.SecurityPredicates"/>, from <c>sys.security_policies</c>/
+    /// <c>sys.security_predicates</c>, neither read by this codebase before) cross-checked against
+    /// an enabled RLS FILTER predicate's own bound columns (reparsed from
+    /// <c>sys.security_predicates.predicate_definition</c> - there is no dedicated predicate-
+    /// function-id column) and the secured table's actual indexes. Oracle-confirmed forced-scan
+    /// mechanism (a Clustered Index Scan carrying the inlined predicate as a residual filter vs. a
+    /// genuine Index Seek once a supporting index exists); the checklist's own "forces single-
+    /// threaded execution" half was NOT reproduced live on this environment's SQL Server 2022
+    /// (RTM-CU23) build (a forced full-optimization, cost-based plan parallelized identically with
+    /// RLS enabled and disabled) and is deliberately dropped from the shipped finding rather than
+    /// asserted unverified.
+    public const int CurrentSchemaVersion = 59;
 }

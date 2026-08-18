@@ -4788,16 +4788,102 @@ is carried into this file - only the mechanism and the design implication.
       `TRY_CAST` at all (`sys.computed_columns.definition LIKE '%TRY_CAST%'`
       returns 0 rows) - not a detection gap, this codebase's own real corpus
       simply doesn't use the pattern this rule targets.
-- [ ] **Row-Level Security predicate function with no supporting index on its
-      own filtered columns** — an RLS security predicate runs on every access
-      to the secured table and forces single-threaded execution; with no
-      index on the columns the predicate function itself filters by, that
-      forced-serial cost compounds with a forced scan. Catalog+AST decidable:
-      `sys.security_policies`/`sys.security_predicates` name the secured
-      table and predicate function; parsing the function body for its own
-      filtered columns and checking them against the table's indexes is the
-      same shape as any other predicate-vs-index check already in this
-      project. New catalog read needed (security policies aren't read today).
+- [x] **Row-Level Security predicate function with no supporting index on its
+      own filtered columns — shipped as `SecurityPredicateIndexFinding`/
+      `SecurityPredicateIndexScanner`, with an honest scope correction on the
+      original draft's "forces single-threaded execution" half.** New live-
+      only catalog read (`DatabaseCatalog.SecurityPredicates`, from
+      `sys.security_policies`/`sys.security_predicates` - neither read by
+      this codebase before), populated by a new `LiveCatalogReader.
+      ReadSecurityPredicatesAsync`. `sys.security_predicates` carries no
+      dedicated predicate-function-id column (confirmed empirically against
+      the standing Docker oracle): the only way to recover the predicate
+      function's own name and its bound (secured-table) columns is to
+      reparse `predicate_definition` itself (e.g.
+      `([Security].[fn_TenantPredicate]([TenantId]))`) - a bare SELECT-list
+      scalar-expression reparse, the same throwaway-wrapper-statement
+      technique `CatalogCheckConstraint.DefinitionText`/`sys.indexes.
+      filter_definition` already use elsewhere in this codebase, extracting
+      the `FunctionCall` and treating each bare-column-reference argument as
+      one of the predicate's own filtered columns - a scope correction from
+      the original draft's "parsing the function body": the call-site
+      argument list is what a security-policy predicate function is always
+      invoked with (the table's own columns, positionally bound to the
+      function's parameters), so it is both simpler and more reliable than
+      trying to infer semantics from the function's own body text, which can
+      contain arbitrary logic (`SESSION_CONTEXT`, other predicates) this
+      pass has no reason to understand.
+
+      Oracle-confirmed directly against the standing Docker oracle
+      (disposable scratch database, dropped immediately after): a real
+      `CREATE SECURITY POLICY ... ADD FILTER PREDICATE
+      Security.fn_TenantPredicate(TenantId) ON dbo.T WITH (STATE = ON)`
+      against a 50,000-row table. With no index on `TenantId`, `SET
+      STATISTICS XML ON` for a plain `SELECT COUNT(*) FROM dbo.T`
+      (`StmtSimple.SecurityPolicyApplied="true"`) showed a `Clustered Index
+      Scan` carrying the inlined predicate function's own logic as a
+      residual `<Predicate>` (`TenantId=CONVERT(int,session_context(N'Tenant
+      Id'),0)`) evaluated against every row. With an index added on
+      `TenantId` and the identical query re-run, the plan switched to a
+      genuine `Index Seek` with a `SeekPredicate` on that column and no
+      residual filter at all - the same seek-vs-scan contrast this
+      codebase's other predicate-vs-index streams already document.
+
+      **The original draft's "forces single-threaded execution" half is
+      DROPPED as an honest scope correction** after a real, documented
+      attempt to reproduce it live failed. A trivial-plan probe (a bare
+      `SELECT COUNT(*)`, `StatementOptmLevel="TRIVIAL"`) is always serial
+      regardless of RLS - not RLS-specific evidence on its own. Forcing a
+      genuine cost-based, non-trivial plan (`StatementOptmLevel="FULL"`, a
+      `GROUP BY`/hash-aggregate query, `cost threshold for parallelism`
+      temporarily lowered to 0 so the optimizer would actually consider a
+      parallel plan) showed the RLS-secured query compile to
+      `DegreeOfParallelism = 12` - genuinely parallel, and identical to the
+      same query re-run with the security policy disabled
+      (`SecurityPolicyApplied="false"`, also DOP 12). On this environment's
+      engine build (SQL Server 2022, RTM-CU23), a standard inlineable FILTER
+      predicate (an inline TVF, the pattern Microsoft's own RLS
+      documentation recommends and the only pattern this finding targets)
+      does NOT force serial execution - this may be a real historical
+      restriction from an earlier engine generation, or may apply only to a
+      non-inlineable/BLOCK predicate shape this pass never targets, but
+      either way this tool does not claim it, since it could not confirm it
+      live on the engine it actually runs against.
+
+      `FindingConfidence.Medium` - matching the discipline
+      `IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable`/
+      `MonotonicClusteredKeyMissingSequentialOptimization` already use for
+      an exact, oracle-confirmed structural precondition (no supporting
+      index on the predicate's own bound columns → the engine cannot seek)
+      whose actual real-world cost is still workload-dependent (table size,
+      access frequency) - a structural risk flag, not a proven-magnitude
+      claim. SARIF Warning floor (Note for Low, per the shared confidence
+      floor table).
+
+      Scope: only an ENABLED FILTER predicate is inspected (a BLOCK
+      predicate does not filter the table's own read path the way a FILTER
+      predicate does - it only gates specific write operations); a disabled
+      policy is provably inert. Only a predicate function invoked with at
+      least one bare-column-reference argument is inspected - a literal,
+      expression, or zero-argument call binds to nothing this pass can
+      resolve, and is left unanalyzed rather than guessed at. Fires when
+      NONE of the predicate's own bound columns individually leads an active
+      (non-disabled, unfiltered, non-columnstore) index - deliberately
+      column-by-column, not composite-leading-prefix the way
+      `UnindexedForeignKey` checks a single constraint's own column SET:
+      this pass cannot see the predicate function's own body, so it cannot
+      tell whether multiple bound columns combine with AND (a composite
+      leading-prefix index would suffice) or OR (each column needs its own
+      index) - requiring every bound column to individually lead some index
+      is the direction that never over-reports either way. Live-mode only
+      by construction (RLS is a purely server-side binding with no in-module
+      DDL text a file-mode scan of application code would ever see).
+
+      **Real coverage against the local test database: 0 findings** — a
+      real, honest zero, cross-checked directly (`SELECT COUNT(*) FROM
+      sys.security_policies` and `sys.security_predicates` both return 0
+      rows - this database uses no Row-Level Security at all today, not
+      merely no unindexed RLS predicate), not a detection gap.
 - [x] **Columnstore index present on a table that is also a live DML target of
       transactional code — shipped** as
       `IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable`, a structural

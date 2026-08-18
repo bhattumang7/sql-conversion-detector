@@ -111,6 +111,7 @@ public static class SarifReportWriter
         results.AddRange(report.BareTopNoOrderByFindings.Select(ToResult));
         results.AddRange(report.StringConcatNullFindings.Select(ToResult));
         results.AddRange(report.AggregateDivisionColumnstoreFindings.Select(ToResult));
+        results.AddRange(report.SecurityPredicateIndexFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -789,6 +790,22 @@ public static class SarifReportWriter
         var message = $"{finding.AggregateFunctionName}(...) on '{finding.TableQualifiedName}' (backed by a columnstore index) contains a CASE-guarded division by a non-constant divisor - historically reported as unreliable under batch-mode/vectorized execution's own CASE-branch evaluation, unlike rowstore scalar evaluation.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(SecurityPredicateIndexFinding finding)
+    {
+        // Warning, not Error - a structural risk flag (Medium confidence): the "no supporting
+        // index on the predicate's own bound columns forces a scan+residual-filter" mechanism is
+        // oracle-confirmed and unconditional, but the actual real-world cost is still workload-
+        // dependent (table size, access frequency), the same tier
+        // IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable already uses for an analogous
+        // exact-structural-precondition-but-workload-dependent-cost claim.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SecurityPredicateIndexRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var columns = string.Join(", ", finding.FilteredColumns);
+        var message = $"'{finding.TableQualifiedName}' is secured by RLS policy '{finding.PolicyQualifiedName}''s FILTER predicate '{finding.PredicateFunctionQualifiedName}', bound to column(s) {columns} - none of them leads an active index on this table, so this predicate is silently applied to every SELECT/UPDATE/DELETE against this table as a residual, per-row filter over a full scan rather than a seek.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
     }
 
     private static SarifResult ToResult(CascadingForeignKeyFinding finding)

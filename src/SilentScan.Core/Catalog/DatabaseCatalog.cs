@@ -29,6 +29,8 @@ public sealed class DatabaseCatalog
 
     private readonly List<CatalogCheckConstraint> _checkConstraints = [];
 
+    private readonly List<CatalogSecurityPredicate> _securityPredicates = [];
+
     private readonly List<TemporalTablePair> _temporalTablePairs = [];
 
     private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
@@ -173,6 +175,11 @@ public sealed class DatabaseCatalog
     public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
 
     public IReadOnlyList<CatalogCheckConstraint> CheckConstraints => _checkConstraints;
+
+    /// <summary>Row-Level Security predicate bindings, live from <c>sys.security_policies</c>/<c>sys.security_predicates</c> only - same "engine-authoritative, never parsed from DDL" reasoning as <see cref="ForeignKeys"/>/<see cref="CheckConstraints"/>. Always empty for a file-mode scan.</summary>
+    public void AddSecurityPredicate(CatalogSecurityPredicate predicate) => _securityPredicates.Add(predicate);
+
+    public IReadOnlyList<CatalogSecurityPredicate> SecurityPredicates => _securityPredicates;
 
     /// <summary>
     /// A system-versioned temporal table's own current-table/history-table pairing, read live from

@@ -113,6 +113,11 @@ public sealed class LiveCatalogReader
             catalog.AddCheckConstraint(checkConstraint);
         }
 
+        foreach (var securityPredicate in await ReadSecurityPredicatesAsync(connection, cancellationToken))
+        {
+            catalog.AddSecurityPredicate(securityPredicate);
+        }
+
         foreach (var (qualifiedName, indexes) in await ReadIndexedViewsAsync(connection, cancellationToken))
         {
             catalog.AddIndexedView(qualifiedName, indexes);
@@ -453,6 +458,51 @@ public sealed class LiveCatalogReader
         }
 
         return constraints;
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md practitioner-sweep item "Row-Level Security predicate function
+    /// with no supporting index on its own filtered columns" - see <see
+    /// cref="SilentScan.Core.Catalog.CatalogSecurityPredicate"/>'s own doc comment for why
+    /// <c>predicate_definition</c> (not a dedicated function-id column - there isn't one) is the
+    /// only catalog-level way to recover the predicate function's own bound columns, and <see
+    /// cref="SilentScan.Core.Predicates.SecurityPredicateIndexFinding"/> for the full scope/oracle
+    /// story.
+    /// <c>sys.security_policies.is_ms_shipped</c> does not exist (confirmed directly against the
+    /// standing Docker oracle - unlike <c>sys.tables</c>, a security policy has no shipped/system
+    /// variant to exclude), so only the secured TABLE side is filtered on
+    /// <c>is_ms_shipped = 0</c>, matching every other reader in this file.
+    /// </summary>
+    private static async Task<List<CatalogSecurityPredicate>> ReadSecurityPredicatesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT ps.name AS policy_schema, pol.name AS policy_name,
+                   ts.name AS table_schema, tt.name AS table_name,
+                   sp.predicate_definition, sp.predicate_type_desc, pol.is_enabled
+            FROM sys.security_predicates sp
+            JOIN sys.security_policies pol ON pol.object_id = sp.object_id
+            JOIN sys.schemas ps ON ps.schema_id = pol.schema_id
+            JOIN sys.tables tt ON tt.object_id = sp.target_object_id
+            JOIN sys.schemas ts ON ts.schema_id = tt.schema_id
+            WHERE tt.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var predicates = new List<CatalogSecurityPredicate>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            predicates.Add(new CatalogSecurityPredicate(
+                PolicyQualifiedName: $"{reader.GetString(0)}.{reader.GetString(1)}",
+                TargetTableQualifiedName: $"{reader.GetString(2)}.{reader.GetString(3)}",
+                PredicateDefinitionText: await reader.IsDBNullAsync(4, cancellationToken) ? string.Empty : reader.GetString(4),
+                IsFilterPredicate: string.Equals(reader.GetString(5), "FILTER", StringComparison.OrdinalIgnoreCase),
+                IsPolicyEnabled: reader.GetBoolean(6)));
+        }
+
+        return predicates;
     }
 
     /// <summary>

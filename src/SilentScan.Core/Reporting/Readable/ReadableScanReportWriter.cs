@@ -141,6 +141,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(BareTopNoOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(StringConcatNull(report, headingLevel, pathBase));
         blocks.AddRange(AggregateDivisionColumnstore(report, headingLevel, pathBase));
+        blocks.AddRange(SecurityPredicateIndex(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -222,6 +223,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Bare TOP with no ORDER BY", report.BareTopNoOrderByFindings.Count);
         AddCount(counts, "+ concatenation of a nullable string column with no NULL guard", report.StringConcatNullFindings.Count);
         AddCount(counts, "CASE-guarded aggregate division on a columnstore-backed table", report.AggregateDivisionColumnstoreFindings.Count);
+        AddCount(counts, "RLS predicate with no supporting index", report.SecurityPredicateIndexFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1498,6 +1500,29 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.AggregateFunctionName,
                 f.TableQualifiedName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> SecurityPredicateIndex(ScanReport report, int level, string? pathBase)
+    {
+        if (report.SecurityPredicateIndexFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"RLS predicate with no supporting index ({report.SecurityPredicateIndexFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An enabled Row-Level Security FILTER predicate's own bound column(s) lead no active index on the secured table - the predicate is silently applied to every SELECT/UPDATE/DELETE against this table, so the engine cannot seek and must evaluate it as a residual, per-row filter over a full scan. Oracle-confirmed scan-vs-seek contrast; the checklist's own 'forces single-threaded execution' claim was not reproduced live on this tool's own standing engine build and is deliberately not asserted here.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Policy", "Predicate function", "Filtered column(s)"],
+            [.. report.SecurityPredicateIndexFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.PolicyQualifiedName,
+                f.PredicateFunctionQualifiedName,
+                string.Join(", ", f.FilteredColumns),
             })]);
     }
 
