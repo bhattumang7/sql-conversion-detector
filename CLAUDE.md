@@ -10,10 +10,9 @@ Oracle-backed rules (engine-authoritative catalog, lineage pass, plan-XML
 oracle) are the template. Syntax-only rules ship too, same finding schema,
 fire/near-miss fixtures instead of an oracle.
 
-**Tool-first.** The tool (`silentscan scan`/`scan-db`/`scan-corpus`/
-`verify-corpus`, JSON + SARIF findings) is the deliverable. **Precision beats
-recall everywhere** — one false positive in a published finding is worse than
-ten missed true positives.
+**Tool-first.** The tool (`silentscan scan-db`/`scan-corpus-live`, JSON + SARIF
+findings) is the deliverable. **Precision beats recall everywhere** — one false
+positive in a published finding is worse than ten missed true positives.
 
 **Standing docs** — exactly these, updated in place, read fresh each session:
 
