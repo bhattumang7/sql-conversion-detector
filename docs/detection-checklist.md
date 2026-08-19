@@ -44,7 +44,20 @@ Competitor tools are referred to generically; real identities are in
       look promising by name; most others — `LoadStatsFailed`, `SkewnessThresholdNotMet`,
       `CompilationTimeThresholdExceeded` — read as clearly runtime/data-dependent
       and out of scope); needs its own oracle probe pair and calibration
-      before shipping, per "For every new stream" below. `sys.dm_xe_map_values('interleaved_execution_disabled_reasons')`
+      before shipping, per "For every new stream" below.
+      **Blocked (2026-08-20, confirmed directly): the local Docker instance
+      cannot oracle-verify this at all.** PSP is compat level 170+; this SQL
+      Server 2022 (16.0.4236.2) instance rejects `ALTER DATABASE ... SET
+      COMPATIBILITY_LEVEL = 170` outright (Msg 15048 — valid values top out
+      at 160). No PSP-aware plan/XEvent exists to probe on this build at
+      all, so "TableVariable" (or any of the other 39 reasons) cannot be
+      verified against a real engine here — only against the DMV's name,
+      which is exactly the kind of unverified claim CLAUDE.md's precision
+      discipline forbids shipping. Do not build this rule until a SQL
+      Server 2025 (or later, compat-170-capable) target is available to
+      verify against; re-check `@@VERSION`/`ALTER DATABASE ... SET
+      COMPATIBILITY_LEVEL = 170` before re-attempting, don't assume the
+      infrastructure gap has closed. `sys.dm_xe_map_values('interleaved_execution_disabled_reasons')`
       surveyed the same day — separately confirmed (oracle-verified directly:
       a compile-only `SET SHOWPLAN_XML` plan for an MSTVF shows the stale
       100-row estimate, only a real-executed `SET STATISTICS XML` plan shows
