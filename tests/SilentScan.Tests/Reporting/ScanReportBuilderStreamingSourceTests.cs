@@ -9,28 +9,29 @@ using SilentScan.Verify.Deployment;
 namespace SilentScan.Tests.Reporting;
 
 /// <summary>
-/// A live scan runs against ASTs that are ~200x the size of the module text they parsed from
-/// (measured directly: 12MB of module text peaked at 2.5GB RSS) - <c>SilentScan.Live.LiveScanRunner</c>
-/// no longer parses every module once and holds a single <c>List&lt;SqlParseResult&gt;</c> for
-/// the whole run; instead it keeps only the cheap module TEXT and hands
-/// <see cref="ScanReportBuilder.BuildFromParseResults"/> a lazy <c>IEnumerable&lt;SqlParseResult&gt;</c>
-/// that reparses fresh every time something enumerates it, so each phase's ASTs become garbage
-/// before the next phase's reparse begins.
+/// <see cref="ScanReportBuilder.BuildFromParseResults"/> must consume its <c>allParseResults</c>
+/// parameter EXACTLY ONCE, materializing it up front rather than re-enumerating it per phase.
 ///
-/// That whole design rests on <see cref="ScanReportBuilder.BuildFromParseResults"/> genuinely
-/// RE-ENUMERATING its <c>allParseResults</c> parameter multiple times internally (once per
-/// full-corpus phase: lineage, call graph, the dynamic-SQL fixpoint rounds, SELECT INTO,
-/// Tier-1, typed extraction) rather than materializing it into a list at the top and reading
-/// from that materialized copy for the rest of the method - a single `.ToList()` slipped in at
-/// the top would silently erase the whole memory win with no functional test able to see it,
-/// since every finding would still come out identical. This locks in that contract directly by
-/// counting how many times a wrapped source is enumerated.
+/// This test previously asserted the opposite. A live scan hands in a lazy source that reparses
+/// every module from cheap retained text on each enumeration, and the intent was that never
+/// materializing would keep peak memory down, since a parsed AST runs ~200x the size of its
+/// source text. Measured directly, it did not: the method runs ~50 whole-database phases, so the
+/// lazy source was re-enumerated 50 times and every module parsed 50 times per scan. At the scale
+/// that motivated the design (800 modules, ~12MB of module text) that cost 380s and 87GB of
+/// allocation against 27s and 6GB once materialized, while peak working set differed by 5.9%
+/// (1,683MB lazy versus 1,783MB materialized). Re-parsing bought a rounding error of memory for a
+/// 14x runtime penalty, and the garbage it produced is what made a forced GC at every phase
+/// boundary look necessary (see <c>PhaseMemory</c>).
+///
+/// The contract worth locking in is therefore the inverse one, and it needs a test for the same
+/// reason the old one did: every finding comes out identical either way, so nothing functional
+/// would notice a regression back to per-phase re-enumeration.
 /// </summary>
 [Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderStreamingSourceTests
 {
     [Fact]
-    public async Task AllParseResults_IsEnumeratedMoreThanOnce()
+    public async Task AllParseResults_IsEnumeratedExactlyOnce()
     {
         const string Sql = """
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -50,13 +51,10 @@ public sealed class ScanReportBuilderStreamingSourceTests
 
         var report = ScanReportBuilder.BuildFromParseResults(countingSource, catalog);
 
-        // The exact count is an implementation detail (it depends on how many full-corpus
-        // phases the method has); what must never regress is "more than once" - proof that
-        // BuildFromParseResults treats its parameter as a genuinely re-enumerable, non-cached
-        // SOURCE rather than a one-shot sequence it materializes and reuses internally.
-        Assert.True(
-            countingSource.EnumerationCount > 1,
-            $"expected allParseResults to be enumerated more than once (streaming contract), but it was enumerated {countingSource.EnumerationCount} time(s) - a `.ToList()`/`.ToArray()` was likely added at the top of BuildFromParseResults, silently erasing the memory win of a lazy, reparsing live-mode source.");
+        // Exactly one: the count is not an implementation detail here, because a live source
+        // reparses every module on each enumeration. Two enumerations means every module is
+        // parsed twice, and the method has ~50 phases to grow that back into a 50x parse.
+        Assert.Equal(1, countingSource.EnumerationCount);
 
         // Not a vacuous pass: the pipeline still produces the real finding through however many
         // re-enumerations happened.
