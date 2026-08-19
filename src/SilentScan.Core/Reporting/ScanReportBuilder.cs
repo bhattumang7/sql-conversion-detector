@@ -781,7 +781,7 @@ public static class ScanReportBuilder
                 .AsParallel()
                 .SelectMany(r =>
                 {
-                    var findings = DuplicationScanner.Scan(r);
+                    var findings = DuplicationScanner.Scan(r, catalog);
                     duplicationStage.Advance();
                     return findings;
                 })

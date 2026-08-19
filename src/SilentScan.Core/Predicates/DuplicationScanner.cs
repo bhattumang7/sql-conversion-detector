@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
 
@@ -27,13 +28,13 @@ public static class DuplicationScanner
     /// string that should be a constant" case this rule targets.</summary>
     private const int MinDuplicatedLiteralLength = 3;
 
-    public static IReadOnlyList<DuplicationFinding> Scan(SqlParseResult parseResult)
+    public static IReadOnlyList<DuplicationFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var findings = new List<DuplicationFinding>();
 
         ScanComments(parseResult, findings);
 
-        var visitor = new Visitor(parseResult.SourcePath);
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
         findings.AddRange(visitor.Findings);
 
@@ -148,16 +149,30 @@ public static class DuplicationScanner
     private sealed class Visitor : TSqlFragmentVisitor
     {
         private readonly string sourcePath;
+        private readonly DatabaseCatalog catalog;
 
-        public Visitor(string sourcePath)
+        public Visitor(string sourcePath, DatabaseCatalog catalog)
         {
             this.sourcePath = sourcePath;
+            this.catalog = catalog;
             _currentModule = sourcePath;
         }
 
         public List<DuplicationFinding> Findings { get; } = [];
 
         private string _currentModule;
+
+        /// <summary>
+        /// Nearest-enclosing-statement direct base tables, alias/name to <see cref="CatalogTable"/> -
+        /// pushed on entering a QuerySpecification/UPDATE/DELETE's own FROM scope, popped on exit.
+        /// Deliberately shallow (direct base tables only, no CTE/view/derived-table resolution,
+        /// no outer-scope fallback for a correlated subquery) - see
+        /// <see cref="DirectBaseTableResolver"/>'s own doc comment for why that's the safe v1
+        /// limit every caller of it shares: a reference this can't resolve is left unresolved,
+        /// never guessed at, matching <see cref="CanClaimTautologyOrContradiction"/>'s own "stay
+        /// quiet" contract when nullability can't be proven.
+        /// </summary>
+        private readonly Stack<Dictionary<string, CatalogTable>> _tableScopeStack = new();
 
         /// <summary>Tracks every IfStatement reached as a PRIOR IfStatement's own ElseStatement -
         /// the default top-down traversal will visit these nodes again on its own once we recurse
@@ -298,18 +313,92 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
+        public override void ExplicitVisit(QuerySpecification node)
+        {
+            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences));
+            base.ExplicitVisit(node);
+            _tableScopeStack.Pop();
+        }
+
+        public override void ExplicitVisit(UpdateStatement node)
+        {
+            var spec = node.UpdateSpecification;
+            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target));
+            base.ExplicitVisit(node);
+            _tableScopeStack.Pop();
+        }
+
+        public override void ExplicitVisit(DeleteStatement node)
+        {
+            var spec = node.DeleteSpecification;
+            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target));
+            base.ExplicitVisit(node);
+            _tableScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(BooleanComparisonExpression node)
         {
             if (BothLiterals(node.FirstExpression, node.SecondExpression))
             {
                 CheckAlwaysTrueOrFalseLiteralComparison(node);
             }
-            else if (SameText(node.FirstExpression, node.SecondExpression))
+            else if (SameText(node.FirstExpression, node.SecondExpression) && CanClaimTautologyOrContradiction(node.FirstExpression))
             {
                 Add(DuplicationFindingKind.IdenticalBinaryOperands, node.ComparisonType.ToString(), node, FindingConfidence.High);
             }
 
             base.ExplicitVisit(node);
+        }
+
+        /// <summary>
+        /// The "always true/false" claim this rule makes is only sound under two-valued logic - a
+        /// nullable operand makes <c>x = x</c> (or any other comparison of <c>x</c> against
+        /// itself) evaluate to UNKNOWN, not TRUE, whenever <c>x</c> is NULL at runtime, and
+        /// <c>Col = Col</c> on a nullable column is the idiomatic defensive NULL filter, not a
+        /// mistake (2026-08 audit: this scanner asserted the tautology unconditionally, including
+        /// on nullable columns, where "remove the redundant comparison" changes the result set).
+        /// Scoped to COLUMN operands specifically, per the decided fix: a non-column operand
+        /// (a local variable, a function call, an arbitrary expression) keeps the prior
+        /// unconditional behavior unchanged - this scanner has never tracked variable nullability
+        /// and extending the same NOT-NULL proof requirement there would silently suppress every
+        /// existing variable-vs-itself finding for a case the audit never flagged. A column this
+        /// shallow scope can't resolve at all (view/CTE/derived-table/ambiguous/no catalog entry)
+        /// is treated the SAME as a nullable one - "never fires without proof", not "fires unless
+        /// disproven".
+        /// </summary>
+        private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
+        {
+            if (expression is not ColumnReferenceExpression columnRef)
+            {
+                return true;
+            }
+
+            return ResolveColumn(columnRef) is { IsNullable: false };
+        }
+
+        private CatalogColumn? ResolveColumn(ColumnReferenceExpression columnRef)
+        {
+            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || _tableScopeStack.Count == 0)
+            {
+                return null;
+            }
+
+            var scope = _tableScopeStack.Peek();
+            var columnName = identifiers[^1].Value;
+
+            if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedTable))
+            {
+                return qualifiedTable.FindColumn(columnName);
+            }
+
+            if (identifiers.Count == 1 && scope.Count == 1)
+            {
+                return scope.Values.Single().FindColumn(columnName);
+            }
+
+            // Unqualified column with more than one table in scope is genuinely ambiguous from
+            // this shallow resolver's own point of view - never guess which table it binds to.
+            return null;
         }
 
         public override void ExplicitVisit(BooleanBinaryExpression node)

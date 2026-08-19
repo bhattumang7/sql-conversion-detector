@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -6,7 +7,10 @@ namespace SilentScan.Tests.Predicates;
 /// <summary>
 /// docs/detection-checklist.md Tier 4 "Dead and duplicated code" - the pattern-matching half.
 /// Fully syntax-only, no oracle needed - see <see cref="DuplicationFinding"/>'s own doc comment
-/// for the full scope/precision-guard rationale these tests exercise.
+/// for the full scope/precision-guard rationale these tests exercise. No DDL appears in any of
+/// these bodies, so the catalog every call builds is always empty - the column-nullability gate
+/// added to IdenticalBinaryOperands (2026-08 audit) never resolves a column here, which is exactly
+/// what keeps every existing variable-vs-itself test below unaffected by that gate.
 /// </summary>
 public sealed class DuplicationScannerTests
 {
@@ -14,7 +18,7 @@ public sealed class DuplicationScannerTests
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
-        return DuplicationScanner.Scan(result);
+        return DuplicationScanner.Scan(result, CatalogBuilder.Build([result]));
     }
 
     // --- Commented-out code -------------------------------------------------
@@ -417,6 +421,52 @@ public sealed class DuplicationScannerTests
                 DECLARE @y INT = 2;
                 IF @x = @y PRINT 'x';
             END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void ColumnEqualsItself_ProvenNotNull_FiresIdenticalBinaryOperands()
+    {
+        // 2026-08 audit: the tautology claim is only sound when Code can never be NULL - proven
+        // here via NOT NULL in the DDL, so the finding is safe to keep.
+        var findings = Scan("""
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
+            GO
+            SELECT 1 FROM dbo.Orders WHERE Code = Code;
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void ColumnEqualsItself_Nullable_NeverFiresIdenticalBinaryOperands()
+    {
+        // Code = Code is the idiomatic defensive NULL filter on a nullable column (NULL = NULL is
+        // UNKNOWN, not TRUE) - not a mistake, and "remove the redundant comparison" would change
+        // the result set. Must stay quiet rather than assert a false tautology.
+        var findings = Scan("""
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) NULL);
+            GO
+            SELECT 1 FROM dbo.Orders WHERE Code = Code;
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
+    }
+
+    [Fact]
+    public void ColumnEqualsItself_UnresolvableAgainstAmbiguousScope_NeverFiresIdenticalBinaryOperands()
+    {
+        // Two tables in scope, an unqualified reference - this shallow resolver never guesses
+        // which table Code binds to, so it must stay quiet exactly like the nullable case above,
+        // even though one of the two Code columns happens to be NOT NULL.
+        var findings = Scan("""
+            CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
+            CREATE TABLE dbo.Archive (Code VARCHAR(20) NOT NULL);
+            GO
+            SELECT 1 FROM dbo.Orders, dbo.Archive WHERE Code = Code;
             """);
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.IdenticalBinaryOperands);
