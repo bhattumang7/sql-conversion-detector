@@ -82,6 +82,24 @@ public static class SelectStarViewScanner
     {
         public List<SelectStarViewFinding> Findings { get; } = [];
 
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
+
+        /// <summary>
+        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
+        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
+        /// qualified, so it always shadows a same-named real base table/view; resolving without
+        /// it (cteRelations always null, pre-fix) could match a CTE-shadowed reference against an
+        /// unrelated real view sharing its name (2026-08 audit).
+        /// </summary>
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, lineage.AllRelations, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
             InspectQuery(node);
@@ -95,7 +113,8 @@ public static class SelectStarViewScanner
                 return;
             }
 
-            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, catalog, lineage.AllRelations, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyCteRelations;
+            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, catalog, lineage.AllRelations, sourcePath, ledger: null, cteRelations, procScope: null);
 
             var wholeQueryStar = node.SelectElements.OfType<SelectStarExpression>().FirstOrDefault(s => s.Qualifier is not { Count: > 0 });
 

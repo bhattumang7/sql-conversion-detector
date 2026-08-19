@@ -35,6 +35,24 @@ public static class PostExpansionJoinWidthScanner
     {
         public List<PostExpansionJoinWidthFinding> Findings { get; } = [];
 
+        /// <summary>
+        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
+        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
+        /// qualified, so it always shadows a same-named real base table; resolving through the
+        /// catalog instead (cteRelations always null, pre-fix) silently counted a CTE-shadowed
+        /// leaf as a real, expandable base table using an unrelated real table's own expansion
+        /// factor, rather than the honest "unresolved, partially unexpanded" this scanner already
+        /// gives a derived table or PIVOT (2026-08 audit).
+        /// </summary>
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
             InspectFromClause(node.FromClause);
@@ -48,7 +66,8 @@ public static class PostExpansionJoinWidthScanner
                 return;
             }
 
-            var (_, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            var (_, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
             if (ordered.Count == 0)
             {
                 return;

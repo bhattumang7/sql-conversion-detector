@@ -21,8 +21,11 @@ namespace SilentScan.Core.Predicates;
 /// produced it).
 ///
 /// Deliberately base-table-only and WHERE-clause-only, like <see cref="CatchAllPredicateScanner"/>:
-/// column resolution goes through <see cref="FromScopeResolver"/> with no CTE/view/temp-table
-/// scoping (empty resolved-views map, null ledger/CTE map/proc scope), and JOIN ON/HAVING
+/// column resolution goes through <see cref="FromScopeResolver"/> with no VIEW/temp-table
+/// scoping (empty resolved-views map, null ledger/proc scope) - CTE shadowing IS resolved
+/// properly, though, not left to that limit (2026-08 audit: cteRelations was always null, letting
+/// a CTE-shadowed reference silently resolve against an unrelated same-named real table). JOIN
+/// ON/HAVING
 /// predicates and MERGE's own ON clause are a known, explicitly out-of-v1-scope gap (MERGE's
 /// scope resolution differs enough to need its own dedicated work - the identical reasoning
 /// <see cref="CatchAllPredicateScanner"/> already documents for excluding it). Only
@@ -198,15 +201,15 @@ public static class ParameterReassignmentPredicateScanner
             switch (statement)
             {
                 case SelectStatement { QueryExpression: QuerySpecification spec } select when !HasOptionRecompile(select.OptimizerHints):
-                    InspectSearchCondition(spec.WhereClause?.SearchCondition, spec.FromClause, state);
+                    InspectSearchCondition(spec.WhereClause?.SearchCondition, spec.FromClause, select.WithCtesAndXmlNamespaces, state);
                     break;
 
                 case UpdateStatement { UpdateSpecification: { } upd } update when !HasOptionRecompile(update.OptimizerHints):
-                    InspectSearchCondition(upd.WhereClause?.SearchCondition, upd.Target, upd.FromClause, state);
+                    InspectSearchCondition(upd.WhereClause?.SearchCondition, upd.Target, upd.FromClause, update.WithCtesAndXmlNamespaces, state);
                     break;
 
                 case DeleteStatement { DeleteSpecification: { } del } delete when !HasOptionRecompile(delete.OptimizerHints):
-                    InspectSearchCondition(del.WhereClause?.SearchCondition, del.Target, del.FromClause, state);
+                    InspectSearchCondition(del.WhereClause?.SearchCondition, del.Target, del.FromClause, delete.WithCtesAndXmlNamespaces, state);
                     break;
 
                 // MERGE's own ON clause needs its own dedicated scope-resolution work - the same
@@ -219,25 +222,27 @@ public static class ParameterReassignmentPredicateScanner
         private static bool HasOptionRecompile(IList<OptimizerHint> hints) =>
             hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
 
-        private void InspectSearchCondition(BooleanExpression? condition, FromClause? fromClause, FlowState state)
+        private void InspectSearchCondition(BooleanExpression? condition, FromClause? fromClause, WithCtesAndXmlNamespaces? withClause, FlowState state)
         {
             if (condition is null || fromClause is null)
             {
                 return;
             }
 
-            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
             InspectSearchConditionCore(condition, byAlias, ordered, state);
         }
 
-        private void InspectSearchCondition(BooleanExpression? condition, TableReference target, FromClause? extraFromClause, FlowState state)
+        private void InspectSearchCondition(BooleanExpression? condition, TableReference target, FromClause? extraFromClause, WithCtesAndXmlNamespaces? withClause, FlowState state)
         {
             if (condition is null)
             {
                 return;
             }
 
-            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+            var cteRelations = CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
             var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(target, extraFromClause, context);
             InspectSearchConditionCore(condition, byAlias, ordered, state);
         }

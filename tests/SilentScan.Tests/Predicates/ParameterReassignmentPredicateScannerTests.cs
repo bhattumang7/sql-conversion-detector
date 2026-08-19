@@ -43,6 +43,31 @@ public sealed class ParameterReassignmentPredicateScannerTests
     }
 
     [Fact]
+    public void CteSharesNameWithIndexedBaseTable_AttributesThroughToTheRealUnderlyingColumn()
+    {
+        // Same shape as CatchAllPredicateScanner's own 2026-08 audit finding: cteRelations was
+        // always null, so a CTE named the same as dbo.Customers silently resolved against the
+        // real table's own indexed Code column instead of the CTE's actual body (which renames
+        // Region to Code). Fixed: the reference resolves THROUGH the CTE to its true source -
+        // Region (unindexed), not Code (indexed) - so the finding's own shape changes to match
+        // reality rather than staying wrong.
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                WITH Customers AS (SELECT Region AS Code FROM dbo.Customers)
+                SELECT 1 FROM Customers WHERE Code = @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Region", finding.ColumnName);
+        Assert.False(finding.Indexed);
+    }
+
+    [Fact]
     public void SelectSetVariableReassignsParameter_ThenPredicateUse_Fires()
     {
         var findings = Scan(
