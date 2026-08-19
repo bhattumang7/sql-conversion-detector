@@ -77,9 +77,7 @@ public static class ExpressionTypeInferencer
 
         TryConvertCall tryConvertCall => SqlTypeReferenceResolver.Resolve(tryConvertCall.DataType, columnCollation: null, typeAliases, unsizedStringOrBinaryDefaultLength: 30),
 
-        BinaryExpression binary => Combine(
-            Resolve(binary.FirstExpression, resolveLeaf, typeAliases),
-            Resolve(binary.SecondExpression, resolveLeaf, typeAliases)),
+        BinaryExpression binary => ResolveBinary(binary, resolveLeaf, typeAliases),
 
         // NULLIF is NOT a precedence merge (oracle-verified - see class remarks): always
         // expr1's own type, regardless of what expr2 is. expr2 is still walked for a nested
@@ -97,6 +95,64 @@ public static class ExpressionTypeInferencer
 
         _ => resolveLeaf(expression),
     };
+
+    /// <summary>
+    /// String concatenation (<c>+</c> where both sides are string-family) is NOT the same rule
+    /// as CASE/COALESCE's own precedence-branch merge, oracle-verified directly (Docker,
+    /// sys.columns.max_length off a SELECT ... INTO probe): <c>varchar(10) + varchar(15)</c>
+    /// resolves <c>varchar(25)</c> - the SUM of the two lengths, not <c>Math.Max</c> of
+    /// them (which is CASE/COALESCE's own rule, <see cref="CombineSameCategoryStrings"/>). Every
+    /// other binary-expression shape (arithmetic +/-/*, or a `+` where at least one side isn't
+    /// string-family) still uses the general precedence <see cref="Combine"/> path unchanged.
+    /// </summary>
+    private static SqlType? ResolveBinary(BinaryExpression binary, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    {
+        var left = Resolve(binary.FirstExpression, resolveLeaf, typeAliases);
+        var right = Resolve(binary.SecondExpression, resolveLeaf, typeAliases);
+
+        return binary.BinaryExpressionType == BinaryExpressionType.Add && left is { IsStringFamily: true } && right is { IsStringFamily: true }
+            ? CombineStringConcat(left, right)
+            : Combine(left, right);
+    }
+
+    /// <summary>
+    /// Sums both operands' lengths, capped at the category's own hard maximum width (8000 for
+    /// char/varchar, 4000 for nchar/nvarchar - <c>Length</c> is a character count throughout this
+    /// codebase, so nvarchar's 4000-character cap is the same 8000-BYTE limit varchar's 8000-
+    /// character cap is) - oracle-verified directly: <c>varchar(5000) + varchar(5000)</c> (sum
+    /// 10000) resolves <c>varchar(8000)</c>, never auto-promoting to MAX the way an explicit
+    /// CAST/CONCAT would. Either side already MAX makes the result MAX (also oracle-verified:
+    /// <c>varchar(max) + varchar(10)</c> resolves <c>varchar(max)</c>), same rule
+    /// <see cref="CombineSameCategoryStrings"/> already uses. A mismatched string CATEGORY
+    /// (char + varchar) falls back to the general precedence <see cref="Combine"/> rule instead -
+    /// this method's own sum rule was verified for same-category concatenation only.
+    /// </summary>
+    private static SqlType? CombineStringConcat(SqlType left, SqlType right)
+    {
+        if (left.Category != right.Category)
+        {
+            return Combine(left, right);
+        }
+
+        if (left.Collation is not null && right.Collation is not null && left.Collation.Name != right.Collation.Name)
+        {
+            return null;
+        }
+
+        var collation = left.Collation ?? right.Collation;
+        if (left.IsMax || right.IsMax)
+        {
+            return new SqlType(left.Category, Collation: collation, IsMax: true);
+        }
+
+        if (left.Length is not { } l || right.Length is not { } r)
+        {
+            return new SqlType(left.Category, Collation: collation);
+        }
+
+        var maxWidth = left.Category is SqlTypeCategory.NChar or SqlTypeCategory.NVarChar ? 4000 : 8000;
+        return new SqlType(left.Category, Length: Math.Min(l + r, maxWidth), Collation: collation);
+    }
 
     private static SqlType? CombineCase(
         IEnumerable<WhenClause> whenClauses, ScalarExpression? elseExpression, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
@@ -167,8 +223,13 @@ public static class ExpressionTypeInferencer
             return left.IsStringFamily ? CombineSameCategoryStrings(left, right) : left;
         }
 
+        // The merged result's true length is genuinely unknown here (SQL Server widens precision
+        // further than either branch's own declared facet, per this class's own remarks) -
+        // LengthKnown: false so a caller like ParameterLengthClassifier never reads this null
+        // Length as "declared with no explicit length," a fabricated cause for a length this
+        // pass never actually inferred.
         var winner = left.Category > right.Category ? left : right;
-        return winner.IsStringFamily ? new SqlType(winner.Category, Collation: winner.Collation) : new SqlType(winner.Category);
+        return winner.IsStringFamily ? new SqlType(winner.Category, Collation: winner.Collation, LengthKnown: false) : new SqlType(winner.Category);
     }
 
     /// <summary>

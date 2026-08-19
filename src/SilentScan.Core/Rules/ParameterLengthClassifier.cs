@@ -52,6 +52,15 @@ public static class ParameterLengthClassifier
         }
 
         var isImplicitDefault = otherType.Length is null;
+        if (isImplicitDefault && !otherType.LengthKnown)
+        {
+            // Length is null because this pass couldn't compute the merged result's true length
+            // (e.g. a cross-category CASE/COALESCE/arithmetic merge), not because the source
+            // genuinely declared no explicit length - reporting IsImplicitDefault here would
+            // assert a cause this pass never actually inferred (CLAUDE.md: never guess).
+            return null;
+        }
+
         if (!isImplicitDefault && otherType.Length >= columnLength)
         {
             return null;

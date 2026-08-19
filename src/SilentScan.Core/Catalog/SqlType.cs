@@ -10,8 +10,16 @@ public sealed record SqlType(
     int? Precision = null,
     int? Scale = null,
     Collation? Collation = null,
-    bool IsMax = false)
+    bool IsMax = false,
+    bool LengthKnown = true)
 {
+    // LengthKnown distinguishes "Length is null because this facet genuinely has none, or was
+    // genuinely declared with none" (the default, true) from "Length is null because this pass
+    // couldn't compute it" (e.g. ExpressionTypeInferencer.Combine's cross-category merge, which
+    // has no way to know a merged result's true length) - a caller that reads a null Length as
+    // "declared with T-SQL's implicit length-1 default" must check this first, or it fabricates a
+    // cause for a length it never actually inferred. See Rules.ParameterLengthClassifier.
+
     public bool IsStringFamily => Category is SqlTypeCategory.Char or SqlTypeCategory.VarChar
         or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar or SqlTypeCategory.Text
         or SqlTypeCategory.NText;

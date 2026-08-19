@@ -1515,6 +1515,10 @@ public static class TypedPredicateExtractor
                 {
                     argumentType = Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
                 }
+                else if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
+                {
+                    argumentType = Rules.BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
+                }
 
                 return new PredicateOperand.Value(argumentType);
             }

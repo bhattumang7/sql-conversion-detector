@@ -144,6 +144,31 @@ public static class BuiltinFunctionTypeResolver
     /// </summary>
     private static readonly HashSet<string> IntegerWideningAggregates = new(StringComparer.OrdinalIgnoreCase) { "SUM", "AVG" };
 
+    /// <summary>
+    /// LEFT/RIGHT/SUBSTRING/STUFF/REPLACE genuinely change the result's own declared length -
+    /// unlike UPPER/LOWER/LTRIM/RTRIM/REVERSE, whose declared length is unchanged by the
+    /// operation (only the runtime string content, never the declared max length, shortens).
+    /// Passing through the SOURCE argument's own length here was a real bug: <c>LEFT(@p100, 3)</c>
+    /// was typed <c>varchar(100)</c>, when the real result is <c>varchar(3)</c> - fabricating an
+    /// Oversized-parameter finding where the truth is under-length, or vice versa. Computing the
+    /// real per-function length would need this class to see the OTHER arguments too (a non-
+    /// constant length argument makes even that unknowable), a larger change than this fix's
+    /// scope - so instead this marks the result's Length unknown (<see cref="SqlType.LengthKnown"/>)
+    /// rather than asserting the wrong one.
+    /// </summary>
+    private static readonly HashSet<string> LengthUnknownAfterArgumentType = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "LEFT", "RIGHT", "SUBSTRING", "STUFF", "REPLACE",
+    };
+
+    /// <summary>True for LEFT/RIGHT/SUBSTRING/STUFF/REPLACE - the caller must pass the resolved argument type through <see cref="ClearLengthIfUnknown"/> rather than using it unmodified.</summary>
+    public static bool ResultLengthDiffersFromArgument(string functionName) =>
+        LengthUnknownAfterArgumentType.Contains(functionName);
+
+    /// <summary>Nulls an already-resolved argument type's Length/LengthKnown - see <see cref="LengthUnknownAfterArgumentType"/>'s own doc comment for why the source argument's length can't just be reused.</summary>
+    public static SqlType ClearLengthIfUnknown(SqlType argumentType) =>
+        argumentType with { Length = null, LengthKnown = false };
+
     /// <summary>True for DATEADD - the caller must resolve its third argument's type and pass it through <see cref="ResolveDateAddResult"/> rather than using it unmodified, since the passthrough only holds when that argument is already date/time-family.</summary>
     public static bool RequiresDateAddResultAdjustment(string functionName) =>
         string.Equals(functionName, "DATEADD", StringComparison.OrdinalIgnoreCase);

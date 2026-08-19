@@ -266,4 +266,89 @@ public sealed class ExpressionTypeInferencerTests
 
         Assert.Equal(20, result!.Length);
     }
+
+    [Fact]
+    public void Resolve_StringConcatenation_OracleVerified_SumsLengthsRatherThanMax()
+    {
+        // Oracle-verified directly (Docker, sys.columns.max_length off a SELECT ... INTO probe):
+        // varchar(10) + varchar(15) resolves varchar(25) - the SUM, not CASE/COALESCE's own
+        // Math.Max rule, which this expression used to be typed through by mistake.
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 15, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
+        };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.VarChar, result!.Category);
+        Assert.Equal(25, result.Length);
+    }
+
+    [Fact]
+    public void Resolve_StringConcatenation_OracleVerified_CapsAtHardMaximumRatherThanPromotingToMax()
+    {
+        // Oracle-verified: varchar(5000) + varchar(5000) (sum 10000) resolves varchar(8000), the
+        // category's own hard cap - it does NOT auto-promote to varchar(max) the way an explicit
+        // CAST/CONCAT would.
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 5000),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 5000),
+        };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.False(result!.IsMax);
+        Assert.Equal(8000, result.Length);
+    }
+
+    [Fact]
+    public void Resolve_StringConcatenation_NvarcharCapsAtFourThousandCharacters()
+    {
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.NVarChar, Length: 3000),
+            ["B"] = new SqlType(SqlTypeCategory.NVarChar, Length: 3000),
+        };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.False(result!.IsMax);
+        Assert.Equal(4000, result.Length);
+    }
+
+    [Fact]
+    public void Resolve_StringConcatenation_EitherSideMax_ResultIsMax()
+    {
+        // Oracle-verified: varchar(max) + varchar(10) resolves varchar(max).
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.VarChar, IsMax: true),
+            ["B"] = new SqlType(SqlTypeCategory.VarChar, Length: 10),
+        };
+
+        Assert.True(Resolve("A + B", typesByName)!.IsMax);
+    }
+
+    [Fact]
+    public void Resolve_CrossCategoryStringMerge_LengthUnknownRatherThanImplicitlyNulled()
+    {
+        // The gap this fix closes: a cross-category merge (nvarchar beats char in T-SQL
+        // precedence) previously returned the winning string-family category with Length: null,
+        // which ParameterLengthClassifier read as "no explicit length declared" (T-SQL's implicit
+        // length-1 default) - a fabricated cause for a length this pass never actually inferred.
+        // LengthKnown: false now marks the distinction.
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["NvarcharCol"] = new SqlType(SqlTypeCategory.NVarChar, Length: 20),
+            ["CharCol"] = new SqlType(SqlTypeCategory.Char, Length: 10),
+        };
+
+        var result = Resolve("CASE WHEN 1 = 1 THEN NvarcharCol ELSE CharCol END", typesByName);
+
+        Assert.Equal(SqlTypeCategory.NVarChar, result!.Category);
+        Assert.Null(result.Length);
+        Assert.False(result.LengthKnown);
+    }
 }

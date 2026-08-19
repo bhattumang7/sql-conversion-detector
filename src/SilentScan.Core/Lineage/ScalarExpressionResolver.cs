@@ -80,6 +80,10 @@ public static class ScalarExpressionResolver
             {
                 argumentType = BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
             }
+            else if (argumentType is not null && BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
+            {
+                argumentType = BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
+            }
 
             return new ColumnProvenance.Expression(argumentType, inputs, context.SourcePath, functionCall.StartLine);
         }
