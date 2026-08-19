@@ -3453,6 +3453,32 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_SixIndependentOptionalFiltersWithMixedDeclaredTypes_DeclinesRatherThanSilentlyDroppingTheCallSite()
+    {
+        // 2026-08 audit: unlike the ten-filter test above, EXEC() built via a STRING-LIST
+        // concatenation (SqlTextValue.Concat, which by design drops DeclaredType - see
+        // TryEmitFromValue's own doc comment) of six independently-optional VARCHAR/NVARCHAR
+        // pieces has no single declared type for Widen's uniform-type rescue to fall back on:
+        // 2^6 = 64 combinations exceed the 32-assembly cap, Widen genuinely collapses to Tainted
+        // (CardinalityCapReason), and the site must be reported Unanalyzable - not silently
+        // dropped with zero findings and zero scripts, which was the actual bug (two discarded
+        // TryEmitFromValue returns; DynamicSqlSummary.TotalCallSites is derived from findings, so
+        // a dropped site under-counted the summary too).
+        var declares = string.Concat(Enumerable.Range(0, 6).Select(i =>
+            $"DECLARE @c{i} {(i % 2 == 0 ? "VARCHAR(50)" : "NVARCHAR(50)")} = N''; DECLARE @f{i} BIT = 0; "));
+        var sets = string.Concat(Enumerable.Range(0, 6).Select(i =>
+            $"IF @f{i} = 1 BEGIN SET @c{i} = N' AND A{i}=1'; END "));
+        var concat = string.Join(" + ", Enumerable.Range(0, 6).Select(i => $"@c{i}"));
+
+        var result = Scan(declares + sets + $"EXEC (N'SELECT 1' + {concat});");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("diverges-across-if-branches:cardinality-cap", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
     public void Scan_IfBranchOwnFoldFails_ElseBranchFine_RecoversTheKnownBranchAsAGuardedAlternative()
     {
         // The THEN branch's own assignment can't fold (FORMAT is not a whitelisted builtin - its

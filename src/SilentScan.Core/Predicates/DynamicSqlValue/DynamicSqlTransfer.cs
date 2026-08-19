@@ -1075,7 +1075,11 @@ public static class DynamicSqlTransfer
     {
         if (TryNarrowByActiveGuard(value, activeGuards) is { } narrowed)
         {
-            TryEmitFromValue(narrowed, node, context, parameterDeclarationText, argumentBindings, isExecString);
+            if (TryEmitFromValue(narrowed, node, context, parameterDeclarationText, argumentBindings, isExecString) is { } narrowedFailureReason)
+            {
+                context.Findings.Add(Unanalyzable(node, context, narrowedFailureReason));
+            }
+
             return;
         }
 
@@ -1090,7 +1094,7 @@ public static class DynamicSqlTransfer
             var recovered = false;
             foreach (var alternative in tainted.GuardedAlternatives ?? [])
             {
-                recovered |= TryEmitFromValue(alternative.Value, node, context, parameterDeclarationText, argumentBindings, isExecString);
+                recovered |= TryEmitFromValue(alternative.Value, node, context, parameterDeclarationText, argumentBindings, isExecString) is null;
             }
 
             if (!recovered)
@@ -1113,7 +1117,10 @@ public static class DynamicSqlTransfer
             return;
         }
 
-        TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings, isExecString);
+        if (TryEmitFromValue(value, node, context, parameterDeclarationText, argumentBindings, isExecString) is { } failureReason)
+        {
+            context.Findings.Add(Unanalyzable(node, context, failureReason));
+        }
     }
 
     private static SqlTextValue.Template? TryNarrowByActiveGuard(SqlTextValue value, IReadOnlyList<string> activeGuards)
@@ -1128,14 +1135,27 @@ public static class DynamicSqlTransfer
             .FirstOrDefault();
     }
 
-    private static bool TryEmitFromValue(
+    /// <summary>
+    /// Returns null on success; a non-null machine-readable reason means nothing was emitted for
+    /// <paramref name="value"/>. Every caller MUST act on a non-null return - either fold it into
+    /// its own broader recovery attempt (the guarded-alternatives loop) or surface it as an
+    /// <see cref="Unanalyzable"/> finding - never discard it: a discarded failure here is a
+    /// dynamic-SQL call site with no script AND no finding, invisible to
+    /// <see cref="Reporting.DynamicSqlSummary"/> including its own <c>TotalCallSites</c>
+    /// (2026-08 audit -
+    /// two call sites below used to discard this return entirely, most reachable when <see
+    /// cref="SqlTextValue.Widen"/> itself collapses a live, non-Tainted value to Tainted, which
+    /// <see cref="EmitScriptsOrFinding"/>'s own pre-check for the oversized-expansion case can't
+    /// see coming since it pattern-matches on <c>Widen(...) is Template</c>).
+    /// </summary>
+    private static string? TryEmitFromValue(
         SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
     {
         var site = context.Span(node);
         var widened = SqlTextValue.Widen(value, context.Cap, site);
-        if (widened is SqlTextValue.Tainted)
+        if (widened is SqlTextValue.Tainted widenedTainted)
         {
-            return false;
+            return widenedTainted.Reason;
         }
 
         var widenedTemplate = (SqlTextValue.Template)widened;
@@ -1145,8 +1165,8 @@ public static class DynamicSqlTransfer
             // the main-value path): this guards every OTHER caller - the guarded-alternatives
             // recovery loop, the narrowed-by-active-guard path - so no route into Expand can
             // materialize an absurd expansion. Declining one oversized alternative is just
-            // "not recovered", the same false every other unusable alternative returns.
-            return false;
+            // "not recovered", the same failure every other unusable alternative returns.
+            return SqlTextValue.ExpansionSizeCapReason;
         }
 
         var assemblies = SqlTextValue.Expand(widenedTemplate, context.Cap);
@@ -1175,7 +1195,7 @@ public static class DynamicSqlTransfer
                 rendered.Placeholders.Count > 0 ? rendered.Placeholders : null, isExecString));
         }
 
-        return true;
+        return null;
     }
 
     /// <summary>
