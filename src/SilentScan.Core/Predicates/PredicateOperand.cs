@@ -36,7 +36,7 @@ public abstract record PredicateOperand
         string TableQualifiedName,
         string ColumnName,
         SqlType? Type,
-        bool Indexed,
+        bool? Indexed,
         int Depth,
         ColumnProvenance Provenance,
         string? ImmediateRelationQualifiedName = null,

@@ -704,9 +704,13 @@ public static class NonSargablePredicateScanner
 
             return provenance switch
             {
+                // A table this pass never resolved at all (Unknown, never a guess) is distinct
+                // from a resolved table with no matching index (false) - the `?? false` this
+                // used to fall back to collapsed both into "not indexed," ranking an
+                // unresolvable-catalog finding as confirmed noise instead of Unknown.
                 ColumnProvenance.BaseColumn baseColumn => (
                     baseColumn.TableQualifiedName,
-                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName) ?? false,
+                    catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName),
                     baseColumn.Type),
 
                 // A multi-statement TVF's own RETURNS TABLE(...) column has no real backing

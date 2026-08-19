@@ -162,7 +162,7 @@ public static class SarifReportWriter
         // seek to lose. Every corpus finding this tool has actually produced against real-world
         // repos has been on an unindexed column (an audit finding), so without this every one of
         // them reported at "error" regardless of whether an index was ever in play.
-        var level = finding.Column.Indexed ? baseLevel : DowngradeOneLevel(baseLevel);
+        var level = finding.Column.Indexed == true ? baseLevel : DowngradeOneLevel(baseLevel);
         level = FloorLevelForConfidence(level, finding.Confidence);
 
         var depthNote = DescribeDepth(finding.Column.Depth);
@@ -1459,15 +1459,12 @@ public static class SarifReportWriter
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled WriteLossKind."),
     };
 
-    private static string DescribeIndexNote(PredicateOperand.Column column)
+    private static string DescribeIndexNote(PredicateOperand.Column column) => column.Indexed switch
     {
-        if (!column.Indexed)
-        {
-            return ", not indexed";
-        }
-
-        return column.IndexName is { } indexName ? $", indexed ({indexName})" : ", indexed";
-    }
+        true => column.IndexName is { } indexName ? $", indexed ({indexName})" : ", indexed",
+        false => ", not indexed",
+        null => ", indexed status unresolved",
+    };
 
     private static string DescribeDepth(int depth)
     {

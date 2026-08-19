@@ -3524,7 +3524,9 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         Assert.Equal("sys.objects", finding.Column.TableQualifiedName);
         Assert.Equal("type_desc", finding.Column.ColumnName);
         Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-        Assert.False(finding.Column.Indexed);
+        // sys.objects has no CREATE DDL anywhere in this scan, so catalog.Find can never resolve
+        // it - Indexed is honestly Unknown (null), not a guessed false (CLAUDE.md: never guess).
+        Assert.Null(finding.Column.Indexed);
         Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
 
         await AssertNoColumnConversionAsync(finding);
@@ -3547,7 +3549,9 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         Assert.Equal("INFORMATION_SCHEMA.COLUMNS", finding.Column.TableQualifiedName);
         Assert.Equal("ORDINAL_POSITION", finding.Column.ColumnName);
         Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
-        Assert.False(finding.Column.Indexed);
+        // INFORMATION_SCHEMA.COLUMNS has no CREATE DDL anywhere either, so catalog.Find can never
+        // resolve it - Indexed is honestly Unknown (null), not a guessed false.
+        Assert.Null(finding.Column.Indexed);
         Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
 
         await AssertNoColumnConversionAsync(finding);

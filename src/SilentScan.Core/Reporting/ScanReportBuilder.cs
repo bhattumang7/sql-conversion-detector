@@ -1197,7 +1197,7 @@ public static class ScanReportBuilder
             .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)];
         typedFindings = [.. typedFindings
             .OrderBy(f => VerdictRank(f.Verdict))
-            .ThenByDescending(f => f.Column.Indexed)
+            .ThenBy(f => f.Column.Indexed switch { true => 0, null => 1, false => 2 })
             .ThenByDescending(f => f.Column.Depth)
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
             .ThenBy(f => f.Line)];

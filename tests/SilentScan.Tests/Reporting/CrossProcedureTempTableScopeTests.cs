@@ -77,8 +77,9 @@ public sealed class CrossProcedureTempTableScopeTests
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("#Results", finding.Column.TableQualifiedName);
         // Never claims a real index - no single caller's own #Results is "the" source when two
-        // legitimately different physical temp tables (just an identical shape) could be it.
-        Assert.False(finding.Column.Indexed);
+        // legitimately different physical temp tables (just an identical shape) could be it, so
+        // this stays Unknown (null) rather than a guessed false.
+        Assert.Null(finding.Column.Indexed);
     }
 
     [Fact]

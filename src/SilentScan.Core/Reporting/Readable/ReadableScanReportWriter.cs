@@ -337,15 +337,12 @@ public static class ReadableScanReportWriter
         DescribeOrigin(finding.Column, pathBase),
     ];
 
-    private static string DescribeIndexed(PredicateOperand.Column column)
+    private static string DescribeIndexed(PredicateOperand.Column column) => column.Indexed switch
     {
-        if (!column.Indexed)
-        {
-            return "no";
-        }
-
-        return column.IndexName is { } indexName ? $"yes ({indexName})" : "yes";
-    }
+        true => column.IndexName is { } indexName ? $"yes ({indexName})" : "yes",
+        false => "no",
+        null => "unresolved",
+    };
 
     private static IEnumerable<ReadableBlock> CollationConflicts(ScanReport report, int level, string? pathBase)
     {
@@ -827,7 +824,7 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.VariableName,
                 f.Operator,
-                f.Indexed ? "yes" : "no",
+                f.Indexed switch { true => "yes", false => "no", null => "unresolved" },
             })]);
     }
 

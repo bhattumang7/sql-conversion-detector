@@ -30,7 +30,7 @@ namespace SilentScan.Core.Predicates;
 public sealed record LocalVariablePredicateFinding(
     string TableQualifiedName,
     string ColumnName,
-    bool Indexed,
+    bool? Indexed,
     int Depth,
     string VariableName,
     string Operator,

@@ -1666,10 +1666,16 @@ public static class TypedPredicateExtractor
                 // catalog entry and always reported Indexed=false for any indexed temp
                 // object - a real table was never stored with a scope, so passing one is always
                 // safe (DatabaseCatalog falls back to the unscoped lookup automatically).
-                var matchedIndex = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindIndexedColumn(baseColumn.ColumnName);
+                var tableEntry = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope);
+                var matchedIndex = tableEntry?.FindIndexedColumn(baseColumn.ColumnName);
+                // A table this pass never resolved at all (Unknown, never a guess) is distinct
+                // from a resolved table with no matching index (Indexed: false) - collapsing both
+                // to false would rank an unresolvable-catalog finding as confirmed noise
+                // (ScanReportBuilder's own ranking already expects this tri-state).
+                bool? indexed = tableEntry is null ? null : matchedIndex is not null;
                 var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
                 return new PredicateOperand.Column(
-                    baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, matchedIndex is not null, baseColumn.Depth, baseColumn,
+                    baseColumn.TableQualifiedName, baseColumn.ColumnName, baseColumn.Type, indexed, baseColumn.Depth, baseColumn,
                     immediateRelation?.RelationQualifiedName, immediateRelation?.ExposedColumnName, matchedIndex?.Name);
             }
 
