@@ -21,14 +21,7 @@ public static class AggregateDivisionColumnstoreScanner
 
     public static IReadOnlyList<AggregateDivisionColumnstoreFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        // File-wide, not per-statement: a CTE declared anywhere in this file shadows a same-named
-        // real base table for ITS OWN statement's lifetime, but this coarser set only ever causes
-        // an extra decline (a real table in a DIFFERENT statement sharing a CTE's name elsewhere
-        // in the file), never a false positive - the safe direction CLAUDE.md's precision-first
-        // rule asks for, and far simpler than per-statement CTE-scope tracking for a scanner with
-        // none today (2026-08 audit: DirectBaseTableResolver never consulted CTE scope at all).
-        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
-        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -39,16 +32,44 @@ public static class AggregateDivisionColumnstoreScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+        // Real per-statement CTE scope (Phase 1.5 "one binder"): a QuerySpecification has no
+        // direct access to its enclosing SelectStatement's WithCtesAndXmlNamespaces, so this is
+        // captured on the way down and consulted from ExplicitVisit(QuerySpecification) - matching
+        // ConstrainedColumnStatementVisitor's own precedent. Replaces the previous file-wide
+        // CteNameCollector decline-set, which only ever caused an extra decline rather than a
+        // false positive but is no longer needed once real FromScopeResolver resolution is here.
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
         public List<AggregateDivisionColumnstoreFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames);
-            if (tables.Count > 0 && tables.Values.Any(t => t.Indexes.Any(ix => ix.IsColumnstore)))
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+            var (_, ordered) = FromScopeResolver.Resolve(node.FromClause, context);
+            var tables = ordered
+                .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
+                .Select(e => e.Relation.QualifiedName!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(name => catalog.Find(name))
+                .Where(t => t is not null && t.Kind == CatalogTableKind.Table)
+                .Select(t => t!)
+                .ToList();
+
+            if (tables.Count > 0 && tables.Any(t => t.Indexes.Any(ix => ix.IsColumnstore)))
             {
-                var columnstoreTable = tables.Values.First(t => t.Indexes.Any(ix => ix.IsColumnstore));
+                var columnstoreTable = tables.First(t => t.Indexes.Any(ix => ix.IsColumnstore));
                 foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
                 {
                     InspectTopLevel(element.Expression, columnstoreTable);
