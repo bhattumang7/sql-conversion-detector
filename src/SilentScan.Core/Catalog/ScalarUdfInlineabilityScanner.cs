@@ -207,6 +207,15 @@ public static class ScalarUdfInlineabilityScanner
                     Report($"references non-inlineable UDF {qualifiedName}");
                 }
             }
+            else if (node.FunctionName is { Value: { } aggName } && string.Equals(aggName, "STRING_AGG", StringComparison.OrdinalIgnoreCase))
+            {
+                // Oracle-confirmed 2026-08-20 (real Docker probe): a plain, non-accumulating
+                // `SELECT @r = STRING_AGG(...) FROM t` (not reading @r's own prior value - that
+                // shape is the separate AggregatingAssignment check above) still blocks inlining.
+                // Matches the documented "StringAggFunc" reason by name - distinct from ordinary
+                // aggregates (SUM/COUNT/AVG), which do not block on their own.
+                Report("STRING_AGG()");
+            }
             else if (node.CallTarget is ExpressionCallTarget
                 && node.FunctionName is { Value: { } xmlMethodName } && XmlInstanceMethods.Contains(xmlMethodName))
             {

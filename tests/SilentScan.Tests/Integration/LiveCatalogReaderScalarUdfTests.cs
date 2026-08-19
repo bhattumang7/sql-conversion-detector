@@ -163,6 +163,17 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @x + LEN(@n);
         END;
         GO
+        CREATE TABLE dbo.AggSource (grp INT NOT NULL, s VARCHAR(50) NOT NULL);
+        GO
+        CREATE FUNCTION dbo.fn_StringAgg (@x INT)
+        RETURNS VARCHAR(200)
+        AS
+        BEGIN
+            DECLARE @r VARCHAR(200);
+            SELECT @r = STRING_AGG(s, ',') FROM dbo.AggSource WHERE grp = @x;
+            RETURN @r;
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -309,6 +320,17 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_SuserName", out var info));
         Assert.True(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionUsingStringAgg_EngineReportsNotInlineable()
+    {
+        // Oracle-confirmed 2026-08-20 (real Docker probe): STRING_AGG blocks inlining even without
+        // the separate self-referencing accumulator-assignment shape.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_StringAgg", out var info));
+        Assert.False(info!.EngineIsInlineable);
     }
 
     [Fact]

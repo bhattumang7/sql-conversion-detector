@@ -389,6 +389,31 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionUsingStringAgg_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionUsingStringAgg_EngineReportsNotInlineable): a plain, non-accumulating
+        // SELECT @r = STRING_AGG(...) FROM t (does not read @r's own prior value, so it is NOT the
+        // separate AggregatingAssignment shape) still blocks inlining, matching the documented
+        // "StringAggFunc" reason.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.AggSource (grp INT NOT NULL, s VARCHAR(50) NOT NULL);
+            GO
+            CREATE FUNCTION dbo.fn_StringAgg (@x INT)
+            RETURNS VARCHAR(200)
+            AS
+            BEGIN
+                DECLARE @r VARCHAR(200);
+                SELECT @r = STRING_AGG(s, ',') FROM dbo.AggSource WHERE grp = @x;
+                RETURN @r;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_StringAgg", out var info));
+        Assert.Contains("STRING_AGG", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
         // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.

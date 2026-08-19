@@ -461,8 +461,11 @@ declaring an XML-typed variable with no method call does not block
 inlining, isolated separately), a body querying a `sys.*` catalog view/table
 (oracle-confirmed 2026-08-20; calling a system *function* alone, e.g.
 `SUSER_SNAME()`, does not — isolated separately, so this is catalog table
-access specifically, matching the documented "SystemDataAccess" reason), or
-`WITH SCHEMABINDING`-related edge cases. The inlineability bit is per-UDF observable in the catalog
+access specifically, matching the documented "SystemDataAccess" reason),
+`STRING_AGG(...)` (oracle-confirmed 2026-08-20; blocks even without the
+separate self-referencing accumulator-assignment shape above — an ordinary
+aggregate like SUM/COUNT/AVG does not block on its own), or `WITH
+SCHEMABINDING`-related edge cases. The inlineability bit is per-UDF observable in the catalog
 (`sys.sql_modules.is_inlineable`) — prefer reading that flag over
 re-implementing the blocker scan, and use the body scan only to *explain*
 why inlining fails.
