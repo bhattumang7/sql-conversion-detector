@@ -8,68 +8,95 @@
 <meta property="og:title" content="SilentScan — the bugs SQL Server never warns you about">
 <meta property="og:description" content="Free static analyzer for SQL Server / T-SQL. 234 rules read from code and schema — no execution plan needed. Runs locally and read-only.">
 <meta property="og:type" content="website">
+<meta name="theme-color" content="#08090c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@500;600;700&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<!-- reveals are opt-in: without JS to add .in, nothing may start hidden -->
+<script>document.documentElement.classList.add('js');</script>
 <style>
   :root {
     color-scheme: dark light;
 
-    --ink: #080d13;
-    --ink-2: #0c131b;
-    --panel: #111922;
-    --panel-2: #15202b;
-    --edge: #26313d;
-    --edge-soft: #1b242e;
-    --fg: #edeee9;
-    --dim: #94a0aa;
-    --faint: #6a7681;
+    /* ground */
+    --void: #08090c;
+    --sunken: #050609;
+    --pane: rgba(255, 255, 255, 0.042);
+    --pane-2: rgba(255, 255, 255, 0.028);
+    --pane-solid: #12141a;
+    --well: rgba(0, 0, 0, 0.3);
 
-    --signal: #f0a936;
-    --signal-bg: rgba(240, 169, 54, 0.11);
-    --solid: #f0a936;
-    --solid-fg: #17120a;
-    --alert: #fb5138;
-    --alert-bg: rgba(251, 81, 56, 0.12);
-    --accent: #f0a936;
-    --accent-bg: rgba(240, 169, 54, 0.1);
+    /* hairlines: bright at the top edge, fading down — surfaces catch light */
+    --edge-top: rgba(255, 255, 255, 0.16);
+    --edge-bot: rgba(255, 255, 255, 0.045);
+    --edge-flat: rgba(255, 255, 255, 0.09);
+    --edge-soft: rgba(255, 255, 255, 0.06);
 
-    --grid: rgba(255, 255, 255, 0.026);
-    --glow: rgba(240, 169, 54, 0.1);
-    --shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 18px 40px -24px rgba(0,0,0,0.9);
+    /* ink */
+    --fg: #f3f5f8;
+    --dim: #a3adba;
+    --faint: #6d7787;
 
-    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
-    --body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    /* signal */
+    --signal: #4d9bff;
+    --signal-lo: #1668e3;
+    --signal-hi: #4d9bff;
+    --signal-bg: rgba(77, 155, 255, 0.13);
+    --signal-line: rgba(77, 155, 255, 0.34);
+    --on-signal: #ffffff;
+    --alert: #ff6152;
+    --accent: var(--signal);
+
+    /* light: bloom + specular + elevation */
+    --bloom-key: rgba(77, 155, 255, 0.2);
+    --bloom-fill: rgba(88, 74, 214, 0.2);
+    --spec: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0) 150px);
+    --lift: 0 1px 0 rgba(255, 255, 255, 0.055) inset, 0 24px 60px -34px rgba(0, 0, 0, 0.95);
+    --lift-hi: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 34px 74px -34px rgba(0, 0, 0, 1);
+
+    --display: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+    --body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
     --gut: clamp(1.15rem, 4vw, 2.5rem);
-    --wide: 1120px;
+    --wide: 1140px;
+    --r-lg: 20px;
+    --r-md: 14px;
+    --r-sm: 10px;
   }
 
   @media (prefers-color-scheme: light) {
     :root {
-      --ink: #f1f3f6;
-      --ink-2: #ffffff;
-      --panel: #ffffff;
-      --panel-2: #f8f9fb;
-      --edge: #dde2e8;
-      --edge-soft: #e8ecf1;
-      --fg: #0f141a;
-      --dim: #545e68;
-      --faint: #808a94;
+      --void: #fbfbfd;
+      --sunken: #f2f3f7;
+      --pane: rgba(255, 255, 255, 0.92);
+      --pane-2: rgba(255, 255, 255, 0.6);
+      --pane-solid: #ffffff;
+      --well: rgba(15, 20, 30, 0.035);
 
-      --signal: #9a6100;
-      --signal-bg: rgba(154, 97, 0, 0.09);
-      --solid: #b3730a;
-      --solid-fg: #ffffff;
-      --alert: #b8351d;
-      --alert-bg: rgba(184, 53, 29, 0.09);
-      --accent: #8f5a00;
-      --accent-bg: rgba(154, 97, 0, 0.08);
+      --edge-top: rgba(15, 20, 30, 0.13);
+      --edge-bot: rgba(15, 20, 30, 0.07);
+      --edge-flat: rgba(15, 20, 30, 0.1);
+      --edge-soft: rgba(15, 20, 30, 0.07);
 
-      --grid: rgba(15, 20, 26, 0.034);
-      --glow: rgba(154, 97, 0, 0.09);
-      --shadow: 0 1px 2px rgba(11,21,32,0.04), 0 18px 40px -30px rgba(11,21,32,0.35);
+      --fg: #0a0c11;
+      --dim: #4e5765;
+      --faint: #7a8494;
+
+      --signal: #0969da;
+      --signal-lo: #1d5fd0;
+      --signal-hi: #3b82f6;
+      --signal-bg: rgba(9, 105, 218, 0.075);
+      --signal-line: rgba(9, 105, 218, 0.26);
+      --on-signal: #ffffff;
+      --alert: #c0341d;
+
+      --bloom-key: rgba(77, 155, 255, 0.17);
+      --bloom-fill: rgba(88, 74, 214, 0.12);
+      --spec: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 150px);
+      --lift: 0 1px 2px rgba(15, 22, 36, 0.05), 0 18px 44px -30px rgba(15, 22, 36, 0.4);
+      --lift-hi: 0 2px 4px rgba(15, 22, 36, 0.06), 0 28px 60px -30px rgba(15, 22, 36, 0.5);
     }
   }
 
@@ -79,150 +106,186 @@
 
   body {
     margin: 0;
-    background: var(--ink);
+    background: var(--void);
     color: var(--fg);
     font-family: var(--body);
     font-size: 16.5px;
     line-height: 1.62;
+    letter-spacing: -0.006em;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
+  /* ambient bloom: the accent keys the hero, indigo fills the sides.
+     absolute, not fixed — the light belongs to the hero and scrolls away with it */
+  .atmos {
+    position: absolute;
+    top: -180px;
+    left: 0;
+    right: 0;
+    height: 1080px;
     pointer-events: none;
     z-index: 0;
     background:
-      radial-gradient(900px 420px at 50% -140px, var(--glow), transparent 70%),
-      repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 88px),
-      repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 88px);
+      radial-gradient(720px 460px at 50% 300px, var(--bloom-key), transparent 68%),
+      radial-gradient(980px 560px at 12% 170px, var(--bloom-fill), transparent 70%),
+      radial-gradient(820px 500px at 90% 360px, var(--bloom-fill), transparent 72%);
+    filter: blur(16px);
   }
 
   .wrap { position: relative; z-index: 1; max-width: var(--wide); margin: 0 auto; padding: 0 var(--gut); }
-  .mono { font-family: var(--mono); }
 
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; text-underline-offset: 3px; }
-  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 4px; }
+
+  /* the surface system: gradient hairline + specular top, on every raised thing */
+  .surface {
+    position: relative;
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    background:
+      linear-gradient(var(--pane), var(--pane-2)) padding-box,
+      linear-gradient(180deg, var(--edge-top), var(--edge-bot)) border-box;
+    box-shadow: var(--lift);
+    backdrop-filter: blur(20px) saturate(1.25);
+  }
+  .surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--spec);
+    pointer-events: none;
+  }
+  .surface > * { position: relative; }
 
   /* ---------- nav ---------- */
-  nav {
-    position: sticky;
-    top: 0;
-    z-index: 40;
-    background: color-mix(in srgb, var(--ink) 82%, transparent);
-    backdrop-filter: blur(14px) saturate(1.3);
-    border-bottom: 1px solid var(--edge-soft);
-  }
-  .navrow {
+  .navdock { position: sticky; top: 0; z-index: 40; padding-top: 0.7rem; }
+  .navbar {
     display: flex;
     align-items: center;
-    gap: 1.25rem;
-    height: 58px;
+    gap: 1.35rem;
+    height: 54px;
+    padding: 0 1.15rem;
+    border-radius: 100px;
   }
   .brand {
     font-family: var(--mono);
     font-weight: 600;
-    font-size: 0.98rem;
-    letter-spacing: -0.02em;
+    font-size: 0.95rem;
+    letter-spacing: -0.03em;
     color: var(--fg);
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
     margin-right: auto;
   }
   .brand:hover { text-decoration: none; }
   .brand .caret {
-    width: 9px; height: 17px;
-    background: var(--signal);
-    border-radius: 1px;
-    box-shadow: 0 0 12px var(--signal);
+    width: 8px; height: 16px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--signal-hi), var(--signal-lo));
+    box-shadow: 0 0 14px var(--signal-line);
   }
-  .navlink { color: var(--dim); font-size: 0.9rem; }
+  .navlink { color: var(--dim); font-size: 0.895rem; font-weight: 450; transition: color 0.16s ease; }
   .navlink:hover { color: var(--fg); text-decoration: none; }
-  .pill {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--signal);
-    background: var(--signal-bg);
-    border: 1px solid color-mix(in srgb, var(--signal) 35%, transparent);
-    border-radius: 100px;
-    padding: 0.2rem 0.6rem;
-  }
-  @media (max-width: 620px) { .navlink.hide-sm { display: none; } }
+  @media (max-width: 660px) { .navlink.hide-sm { display: none; } .navbar { gap: 1rem; } }
 
   /* ---------- hero ---------- */
-  header.hero { padding: clamp(3.5rem, 9vw, 7rem) 0 0; }
+  header.hero { padding: clamp(3.2rem, 8vw, 6.2rem) 0 0; }
   .eyebrow {
     font-family: var(--mono);
-    font-size: 0.75rem;
-    letter-spacing: 0.16em;
+    font-size: 0.74rem;
+    letter-spacing: 0.15em;
     text-transform: uppercase;
     color: var(--faint);
     display: flex;
     flex-wrap: wrap;
     gap: 0.55rem;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.6rem;
   }
   .eyebrow b { color: var(--signal); font-weight: 500; }
-  .eyebrow .sep { color: var(--edge); }
+  .eyebrow .sep { color: var(--edge-flat); }
 
   h1 {
     font-family: var(--display);
     font-weight: 700;
-    font-size: clamp(2.5rem, 7.4vw, 4.6rem);
-    line-height: 0.98;
-    letter-spacing: -0.038em;
-    margin: 0 0 1.5rem;
-    max-width: 16ch;
+    font-size: clamp(2.6rem, 7.6vw, 4.9rem);
+    line-height: 0.97;
+    letter-spacing: -0.042em;
+    margin: 0 0 1.6rem;
+    max-width: 15ch;
+    background: linear-gradient(174deg, var(--fg) 26%, var(--dim));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
-  h1 em { font-style: normal; color: var(--dim); }
 
   .lede {
-    font-size: clamp(1.02rem, 1.9vw, 1.2rem);
+    font-size: clamp(1.03rem, 1.9vw, 1.21rem);
     color: var(--dim);
     max-width: 60ch;
-    margin: 0 0 2.1rem;
+    margin: 0 0 2.2rem;
   }
   .lede strong { color: var(--fg); font-weight: 500; }
 
-  .cta { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  .cta { display: flex; flex-wrap: wrap; gap: 0.7rem; align-items: center; }
   .btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.55rem;
-    font-family: var(--mono);
-    font-size: 0.92rem;
+    gap: 0.5rem;
+    font-family: var(--body);
+    font-size: 0.945rem;
     font-weight: 500;
-    padding: 0.72rem 1.15rem;
-    border-radius: 9px;
+    letter-spacing: -0.012em;
+    padding: 0.76rem 1.25rem;
+    border-radius: 100px;
     border: 1px solid transparent;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
   }
-  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn:hover { text-decoration: none; transform: translateY(-1.5px); }
+  .btn:active { transform: translateY(0); }
   .btn-primary {
-    background: var(--solid);
-    color: var(--solid-fg);
-    box-shadow: 0 10px 30px -16px color-mix(in srgb, var(--solid) 80%, transparent);
+    background: linear-gradient(180deg, var(--signal-hi), var(--signal-lo));
+    color: var(--on-signal);
+    font-weight: 600;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.45) inset,
+      0 10px 30px -12px var(--signal-line),
+      0 2px 6px -2px rgba(0, 0, 0, 0.4);
   }
-  .btn-primary:hover { box-shadow: 0 16px 36px -16px color-mix(in srgb, var(--solid) 90%, transparent); }
-  .btn-ghost { border-color: var(--edge); color: var(--fg); background: var(--panel); }
-  .btn-ghost:hover { border-color: var(--accent); }
-  .cta-note { font-size: 0.85rem; color: var(--faint); font-family: var(--mono); }
+  .btn-primary:hover { filter: brightness(1.06); box-shadow: 0 1px 0 rgba(255,255,255,0.5) inset, 0 18px 40px -14px var(--signal-line), 0 2px 6px -2px rgba(0,0,0,0.4); }
+  .btn-ghost {
+    color: var(--fg);
+    background:
+      linear-gradient(var(--pane), var(--pane-2)) padding-box,
+      linear-gradient(180deg, var(--edge-top), var(--edge-bot)) border-box;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+    backdrop-filter: blur(16px);
+  }
+  .btn-ghost:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset, 0 12px 30px -18px rgba(0,0,0,0.9); }
+  .cta-note { font-size: 0.845rem; color: var(--faint); font-family: var(--mono); }
 
   /* ---------- signature: the silence readout ---------- */
+  .readout-shell { position: relative; margin: clamp(2.6rem, 6vw, 4.2rem) 0 0; }
+  /* warm bloom bleeding out from under the panel */
+  .readout-shell::before {
+    content: "";
+    position: absolute;
+    inset: 12% 6% -8%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, var(--bloom-key), transparent);
+    filter: blur(40px);
+    z-index: 0;
+    pointer-events: none;
+  }
   .readout {
     position: relative;
     overflow: hidden;
-    margin: clamp(2.5rem, 6vw, 4rem) 0 0;
-    border: 1px solid var(--edge);
-    border-radius: 14px;
-    background: linear-gradient(180deg, var(--panel-2), var(--panel));
-    box-shadow: var(--shadow);
+    border-radius: var(--r-lg);
+    box-shadow: var(--lift-hi);
   }
   .readout .head {
     display: flex;
@@ -230,21 +293,33 @@
     gap: 0.75rem;
     justify-content: space-between;
     align-items: center;
-    padding: 0.7rem 1.15rem;
+    padding: 0.78rem 1.25rem;
     border-bottom: 1px solid var(--edge-soft);
     font-family: var(--mono);
-    font-size: 0.73rem;
+    font-size: 0.72rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--faint);
   }
-  .readout .head .tag { color: var(--alert); }
-  .readout .body { padding: 1.4rem 1.15rem 1.15rem; }
+  .readout .head .tag {
+    color: var(--alert);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .readout .head .tag::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--alert);
+    box-shadow: 0 0 10px var(--alert);
+  }
+  .readout .body { padding: 1.5rem 1.25rem 0; }
   .readout .stmt {
     font-family: var(--mono);
-    font-size: clamp(0.95rem, 2.4vw, 1.22rem);
-    letter-spacing: -0.01em;
-    margin-bottom: 1.5rem;
+    font-size: clamp(0.95rem, 2.4vw, 1.24rem);
+    letter-spacing: -0.015em;
+    margin-bottom: 1.6rem;
     overflow-x: auto;
     white-space: nowrap;
     padding-bottom: 0.2rem;
@@ -257,23 +332,25 @@
     display: grid;
     grid-template-columns: 8.5rem 1fr;
     align-items: center;
-    gap: 0 1rem;
-    padding: 0.7rem 0;
-    border-top: 1px dashed var(--edge-soft);
+    gap: 0 1.1rem;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--edge-soft);
   }
   .lane .who {
     font-family: var(--mono);
-    font-size: 0.76rem;
+    font-size: 0.75rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--faint);
   }
-  .lane .trace { display: block; width: 100%; height: 34px; }
+  .lane .trace { display: block; width: 100%; height: 36px; overflow: visible; }
+  .lane .trace path { stroke-linecap: round; stroke-linejoin: round; }
+  .lane.loud .trace path { filter: drop-shadow(0 0 6px var(--alert)); }
   .lane .verdict {
     grid-column: 2;
     font-family: var(--mono);
-    font-size: 0.83rem;
-    margin-top: 0.15rem;
+    font-size: 0.815rem;
+    margin-top: 0.2rem;
   }
   .lane.quiet .verdict { color: var(--faint); }
   .lane.loud .verdict { color: var(--alert); }
@@ -286,57 +363,70 @@
 
   .readout .foot {
     border-top: 1px solid var(--edge-soft);
-    padding: 1rem 1.15rem 1.1rem;
-    font-size: 0.88rem;
+    background: var(--well);
+    padding: 1.15rem 1.25rem 1.25rem;
+    font-size: 0.885rem;
     color: var(--dim);
-    margin: 1.15rem -1.15rem -1.15rem;
+    margin: 1.2rem -1.25rem 0;
   }
   .readout .foot code { color: var(--fg); }
 
   .sweep {
     position: absolute;
     top: 0; bottom: 0;
-    width: 140px;
+    width: 180px;
     pointer-events: none;
-    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--signal) 14%, transparent), transparent);
+    z-index: 2;
+    background: linear-gradient(90deg, transparent, var(--signal-bg), transparent);
     opacity: 0;
   }
   @media (prefers-reduced-motion: no-preference) {
-    .sweep { animation: sweep 6.5s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+    .sweep { animation: sweep 9s cubic-bezier(0.45, 0, 0.2, 1) infinite; }
     @keyframes sweep {
-      0%   { transform: translateX(-160px); opacity: 0; }
-      12%  { opacity: 1; }
-      70%  { opacity: 1; }
-      82%, 100% { transform: translateX(1200px); opacity: 0; }
+      0%   { transform: translateX(-200px); opacity: 0; }
+      14%  { opacity: 1; }
+      66%  { opacity: 1; }
+      80%, 100% { transform: translateX(1240px); opacity: 0; }
     }
+    /* traces draw themselves left to right, the way the scan reads the statement.
+       on load, not on scroll — the readout is above the fold, and gating the
+       signature element on JS would leave it blank if the script never runs */
+    .lane .trace path {
+      stroke-dasharray: 660;
+      animation: draw 1.5s cubic-bezier(0.35, 0.1, 0.2, 1) 0.35s backwards;
+    }
+    .lane.loud .trace path { animation-delay: 0.8s; }
+    @keyframes draw { from { stroke-dashoffset: 660; } to { stroke-dashoffset: 0; } }
   }
 
   /* ---------- stat rail ---------- */
   .rail {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    border: 1px solid var(--edge);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     overflow: hidden;
-    margin-top: 1.25rem;
-    background: var(--panel);
+    margin-top: 1.1rem;
   }
-  .rail div { padding: 1.05rem 1rem; border-left: 1px solid var(--edge-soft); }
+  .rail div { padding: 1.1rem 1.15rem; border-left: 1px solid var(--edge-soft); }
   .rail div:first-child { border-left: 0; }
   .rail .n {
     font-family: var(--display);
     font-weight: 700;
-    font-size: 1.85rem;
-    letter-spacing: -0.03em;
+    font-size: 1.95rem;
+    letter-spacing: -0.035em;
     line-height: 1.1;
+    background: linear-gradient(170deg, var(--fg) 30%, var(--dim));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
   .rail .l {
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: 0.71rem;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--faint);
-    margin-top: 0.15rem;
+    margin-top: 0.2rem;
   }
   @media (max-width: 640px) {
     .rail { grid-template-columns: repeat(2, 1fr); }
@@ -345,167 +435,193 @@
   }
 
   /* ---------- sections ---------- */
-  section { padding: clamp(3.5rem, 8vw, 6.5rem) 0 0; }
+  section { padding: clamp(3.6rem, 8vw, 6.8rem) 0 0; }
   .kicker {
     font-family: var(--mono);
-    font-size: 0.74rem;
+    font-size: 0.73rem;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--faint);
-    margin-bottom: 0.9rem;
+    margin-bottom: 0.95rem;
   }
   h2 {
     font-family: var(--display);
     font-weight: 700;
-    font-size: clamp(1.7rem, 3.6vw, 2.4rem);
-    line-height: 1.08;
-    letter-spacing: -0.03em;
+    font-size: clamp(1.75rem, 3.7vw, 2.5rem);
+    line-height: 1.06;
+    letter-spacing: -0.035em;
     margin: 0 0 1rem;
     max-width: 22ch;
+    background: linear-gradient(172deg, var(--fg) 34%, var(--dim));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
-  .sub { color: var(--dim); max-width: 62ch; margin: 0 0 2.2rem; }
+  .sub { color: var(--dim); max-width: 62ch; margin: 0 0 2.3rem; }
   p { margin: 0 0 1rem; }
 
-  /* ---------- the loop ---------- */
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  /* ---------- the loop (a real sequence, so it is numbered) ---------- */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
   @media (max-width: 800px) { .steps { grid-template-columns: 1fr; } }
-  .step {
-    border: 1px solid var(--edge);
-    border-radius: 12px;
-    background: var(--panel);
-    padding: 1.3rem 1.25rem 1.4rem;
-    position: relative;
-  }
+  .step { padding: 1.35rem 1.3rem 1.45rem; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+  .step:hover { transform: translateY(-2px); box-shadow: var(--lift-hi); }
   .step .no {
     font-family: var(--mono);
-    font-size: 0.75rem;
-    color: var(--accent);
-    letter-spacing: 0.1em;
+    font-size: 0.73rem;
+    color: var(--signal);
+    letter-spacing: 0.12em;
     display: block;
-    margin-bottom: 0.85rem;
+    margin-bottom: 0.9rem;
   }
   .step h3 {
     font-family: var(--display);
     font-weight: 600;
-    font-size: 1.12rem;
-    letter-spacing: -0.02em;
+    font-size: 1.14rem;
+    letter-spacing: -0.025em;
     margin: 0 0 0.45rem;
   }
-  .step p { color: var(--dim); font-size: 0.93rem; margin: 0; }
-  .step code { background: var(--ink-2); border: 1px solid var(--edge-soft); }
+  .step p { color: var(--dim); font-size: 0.925rem; margin: 0; }
 
   /* ---------- families ---------- */
-  .families { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--edge-soft); border: 1px solid var(--edge); border-radius: 12px; overflow: hidden; }
+  .families {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    border-radius: var(--r-md);
+    overflow: hidden;
+    border: 1px solid transparent;
+    background:
+      linear-gradient(var(--edge-soft), var(--edge-soft)) padding-box,
+      linear-gradient(180deg, var(--edge-top), var(--edge-bot)) border-box;
+    box-shadow: var(--lift);
+  }
   @media (max-width: 900px) { .families { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 600px) { .families { grid-template-columns: 1fr; } }
-  .fam { background: var(--panel); padding: 1.25rem 1.2rem 1.35rem; transition: background 0.18s ease; }
-  .fam:hover { background: var(--panel-2); }
+  .fam {
+    background: var(--pane-solid);
+    padding: 1.3rem 1.25rem 1.4rem;
+    transition: background 0.18s ease;
+  }
+  .fam:hover { background: color-mix(in srgb, var(--pane-solid) 88%, var(--signal)); }
   .fam h3 {
-    font-size: 0.98rem;
-    font-weight: 500;
+    font-size: 0.985rem;
+    font-weight: 600;
     font-family: var(--body);
     margin: 0 0 0.4rem;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.018em;
   }
-  .fam p { color: var(--dim); font-size: 0.885rem; margin: 0; }
+  .fam p { color: var(--dim); font-size: 0.875rem; margin: 0; }
   .fam code { font-size: 0.85em; }
-  .fam-cta { display: block; color: inherit; background: var(--panel-2); }
-  .fam-cta:hover { text-decoration: none; background: var(--accent-bg); }
-  .fam-cta h3 { color: var(--accent); }
+  .fam-cta { display: block; color: inherit; }
+  .fam-cta:hover { text-decoration: none; background: var(--signal-bg); }
+  .fam-cta h3 { color: var(--signal); }
 
   /* ---------- split panels ---------- */
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
   @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
-  .card {
-    border: 1px solid var(--edge);
-    border-radius: 12px;
-    background: var(--panel);
-    padding: 1.4rem 1.35rem 1.5rem;
-  }
+  .card { padding: 1.5rem 1.4rem 1.6rem; }
   .card h3 {
     font-family: var(--display);
     font-weight: 600;
-    font-size: 1.08rem;
-    letter-spacing: -0.02em;
-    margin: 0 0 0.6rem;
+    font-size: 1.12rem;
+    letter-spacing: -0.025em;
+    margin: 0 0 0.65rem;
   }
-  .card p { color: var(--dim); font-size: 0.92rem; }
+  .card p { color: var(--dim); font-size: 0.915rem; }
   .card p:last-child { margin-bottom: 0; }
 
-  .hops { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.4rem; margin: 1.1rem 0 0.9rem; }
+  .hops { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.4rem; margin: 1.15rem 0 0.95rem; }
   .hop {
     border: 1px solid var(--edge-soft);
-    border-radius: 8px;
-    background: var(--ink-2);
-    padding: 0.5rem 0.7rem;
+    border-radius: var(--r-sm);
+    background: var(--well);
+    padding: 0.5rem 0.72rem;
     font-family: var(--mono);
-    font-size: 0.78rem;
+    font-size: 0.775rem;
   }
   .hop .k {
     display: block;
-    font-size: 0.64rem;
+    font-size: 0.63rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--faint);
     margin-bottom: 0.15rem;
   }
-  .arrow { color: var(--edge); align-self: center; }
+  .arrow { color: var(--faint); align-self: center; opacity: 0.6; }
   .badge {
     display: inline-block;
     font-family: var(--mono);
-    font-size: 0.76rem;
+    font-size: 0.755rem;
     color: var(--signal);
     background: var(--signal-bg);
-    border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent);
-    border-radius: 7px;
-    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--signal-line);
+    border-radius: 100px;
+    padding: 0.32rem 0.75rem;
   }
 
   /* ---------- checklist ---------- */
-  .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.9rem; max-width: 78ch; }
-  .checks li { display: grid; grid-template-columns: 1.4rem 1fr; gap: 0.6rem; color: var(--dim); font-size: 0.95rem; }
+  .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; max-width: 78ch; }
+  .checks li { display: grid; grid-template-columns: 1.5rem 1fr; gap: 0.6rem; color: var(--dim); font-size: 0.945rem; }
   .checks li b { color: var(--fg); font-weight: 500; }
-  .checks .mark { color: var(--signal); font-family: var(--mono); }
+  .checks .mark {
+    width: 7px; height: 7px;
+    margin-top: 0.66rem;
+    border-radius: 50%;
+    background: var(--signal);
+    box-shadow: 0 0 10px var(--signal-line);
+  }
 
   /* ---------- code block ---------- */
   pre {
     font-family: var(--mono);
-    background: var(--ink-2);
-    border: 1px solid var(--edge);
-    border-radius: 12px;
-    padding: 1.15rem 1.2rem;
+    background: var(--sunken);
+    border: 1px solid var(--edge-soft);
+    border-radius: var(--r-md);
+    padding: 1.2rem 1.25rem;
     overflow-x: auto;
-    font-size: 0.85rem;
+    font-size: 0.845rem;
     line-height: 1.85;
-    margin: 0 0 1.1rem;
+    margin: 0 0 1.2rem;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   }
   pre .c { color: var(--faint); }
   pre code { background: none; border: 0; padding: 0; font-size: inherit; }
   code {
     font-family: var(--mono);
-    background: var(--panel-2);
+    background: var(--well);
+    border: 1px solid var(--edge-soft);
     border-radius: 5px;
-    padding: 0.12em 0.38em;
-    font-size: 0.87em;
+    padding: 0.1em 0.36em;
+    font-size: 0.86em;
   }
 
   /* ---------- closing cta ---------- */
-  .close {
-    margin-top: clamp(3.5rem, 8vw, 6.5rem);
-    border: 1px solid var(--edge);
-    border-radius: 16px;
-    background: linear-gradient(160deg, var(--panel-2), var(--panel));
-    padding: clamp(2rem, 5vw, 3.2rem);
-    text-align: center;
-    box-shadow: var(--shadow);
+  .close-shell { position: relative; margin-top: clamp(3.6rem, 8vw, 6.8rem); }
+  .close-shell::before {
+    content: "";
+    position: absolute;
+    inset: 14% 8% -10%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, var(--bloom-key), transparent);
+    filter: blur(44px);
+    z-index: 0;
+    pointer-events: none;
   }
-  .close h2 { margin: 0 auto 0.8rem; max-width: 18ch; }
-  .close .sub { margin: 0 auto 1.8rem; }
+  .close {
+    position: relative;
+    border-radius: var(--r-lg);
+    padding: clamp(2.1rem, 5vw, 3.4rem);
+    text-align: center;
+    overflow: hidden;
+    box-shadow: var(--lift-hi);
+  }
+  .close h2 { margin: 0 auto 0.85rem; max-width: 18ch; }
+  .close .sub { margin: 0 auto 1.9rem; }
   .close .cta { justify-content: center; }
 
   footer {
-    margin-top: 3rem;
-    padding: 1.6rem 0 3.5rem;
+    margin-top: 3.2rem;
+    padding: 1.7rem 0 3.6rem;
     border-top: 1px solid var(--edge-soft);
     color: var(--faint);
     font-size: 0.85rem;
@@ -518,23 +634,25 @@
 
   /* ---------- motion ---------- */
   @media (prefers-reduced-motion: no-preference) {
-    .rise { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.2, 0.7, 0.3, 1); }
-    .rise.in { opacity: 1; transform: none; }
-    .d1 { transition-delay: 0.06s; } .d2 { transition-delay: 0.12s; } .d3 { transition-delay: 0.18s; }
+    .js .rise { opacity: 0; transform: translateY(16px); transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.3, 1); }
+    .js .rise.in { opacity: 1; transform: none; }
+    .d1 { transition-delay: 0.07s; } .d2 { transition-delay: 0.14s; } .d3 { transition-delay: 0.21s; }
   }
 </style>
 </head>
 <body>
+<div class="atmos" aria-hidden="true"></div>
 
-<nav>
-  <div class="wrap navrow">
-    <a class="brand" href="#top"><span class="caret" aria-hidden="true"></span>silentscan</a>
-    <a class="navlink" href="rules.html">234 rules</a>
-    <a class="navlink hide-sm" href="#loop">How it works</a>
-    <a class="navlink" href="https://github.com/bhattumang7/mssql-silentscan">GitHub</a>
-    <span class="pill">Free</span>
+<div class="navdock">
+  <div class="wrap">
+    <nav class="navbar surface">
+      <a class="brand" href="#top"><span class="caret" aria-hidden="true"></span>silentscan</a>
+      <a class="navlink" href="rules.html">234 rules</a>
+      <a class="navlink hide-sm" href="#loop">How it works</a>
+      <a class="navlink" href="https://github.com/bhattumang7/mssql-silentscan">GitHub</a>
+    </nav>
   </div>
-</nav>
+</div>
 
 <main id="top">
 <header class="hero">
@@ -557,46 +675,48 @@
       <span class="cta-note">Free &middot; read-only &middot; nothing leaves your machine</span>
     </div>
 
-    <div class="readout rise in d3" aria-label="Example: a silent implicit conversion">
-      <div class="sweep" aria-hidden="true"></div>
-      <div class="head">
-        <span class="tag">Silent failure</span>
-        <span>orders.OrderCode varchar(20) &middot; @code nvarchar(20)</span>
-      </div>
-      <div class="body">
-        <div class="stmt">
-          <span class="clip"><span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="col">orders</span> </span><span class="kw">WHERE</span> <span class="col">OrderCode</span> = <span class="var">@code</span>
+    <div class="readout-shell rise in d3">
+      <div class="readout surface" aria-label="Example: a silent implicit conversion">
+        <div class="sweep" aria-hidden="true"></div>
+        <div class="head">
+          <span class="tag">Silent failure</span>
+          <span>orders.OrderCode varchar(20) &middot; @code nvarchar(20)</span>
         </div>
+        <div class="body">
+          <div class="stmt">
+            <span class="clip"><span class="kw">SELECT</span> * <span class="kw">FROM</span> <span class="col">orders</span> </span><span class="kw">WHERE</span> <span class="col">OrderCode</span> = <span class="var">@code</span>
+          </div>
 
-        <div class="lane quiet">
-          <span class="who">SQL Server</span>
-          <svg class="trace" viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M0 17 H600" fill="none" stroke="currentColor" stroke-width="1.25" opacity="0.32"/>
-          </svg>
-          <span class="verdict">no error &middot; no warning &middot; no log entry</span>
+          <div class="lane quiet">
+            <span class="who">SQL Server</span>
+            <svg class="trace" viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0 17 H600" fill="none" stroke="currentColor" stroke-width="1.25" opacity="0.32"/>
+            </svg>
+            <span class="verdict">no error &middot; no warning &middot; no log entry</span>
+          </div>
+
+          <div class="lane loud">
+            <span class="who">SilentScan</span>
+            <svg class="trace" viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0 17 H286 L300 3 L314 31 L326 17 H600" fill="none" stroke="var(--alert)" stroke-width="1.7"/>
+            </svg>
+            <span class="verdict"><b>column converted, not the value</b> &middot; index seek lost &middot; read from the types alone</span>
+          </div>
+
+          <p class="foot">
+            T-SQL always converts the lower-precedence side. When that side is the
+            column, the seek quietly becomes a scan — same results, more reads,
+            every time it runs. Flip the cast to the parameter and the seek comes
+            back. Two declared types and a predicate are all it takes to know
+            that, so SilentScan says it without running the query. The execution
+            plan is where the rule was <em>proven</em>, not where the finding
+            comes from.
+          </p>
         </div>
-
-        <div class="lane loud">
-          <span class="who">SilentScan</span>
-          <svg class="trace" viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M0 17 H286 L300 3 L314 31 L326 17 H600" fill="none" stroke="var(--alert)" stroke-width="1.6"/>
-          </svg>
-          <span class="verdict"><b>column converted, not the value</b> &middot; index seek lost &middot; read from the types alone</span>
-        </div>
-
-        <p class="foot">
-          T-SQL always converts the lower-precedence side. When that side is the
-          column, the seek quietly becomes a scan — same results, more reads,
-          every time it runs. Flip the cast to the parameter and the seek comes
-          back. Two declared types and a predicate are all it takes to know
-          that, so SilentScan says it without running the query. The execution
-          plan is where the rule was <em>proven</em>, not where the finding
-          comes from.
-        </p>
       </div>
     </div>
 
-    <div class="rail rise">
+    <div class="rail surface rise">
       <div><div class="n">234</div><div class="l">rules</div></div>
       <div><div class="n">11</div><div class="l">families</div></div>
       <div><div class="n">150</div><div class="l">fire / near-miss fixtures</div></div>
@@ -616,17 +736,17 @@
       and a reviewer skims because it looks fine.
     </p>
     <div class="steps">
-      <div class="step rise">
+      <div class="step surface rise">
         <span class="no">01</span>
         <h3>Write</h3>
         <p>You or your AI assistant drafts the SQL. It compiles and it passes the smoke test — that was never the hard part.</p>
       </div>
-      <div class="step rise d1">
+      <div class="step surface rise d1">
         <span class="no">02</span>
         <h3>Scan</h3>
         <p>Run <code>scan-db</code> against a disposable dev copy. It reads the catalog and your module text — no plan, no workload, nothing executed.</p>
       </div>
-      <div class="step rise d2">
+      <div class="step surface rise d2">
         <span class="no">03</span>
         <h3>Fix</h3>
         <p>Findings come back as JSON or SARIF with rule id, location, base column and the evidence behind the verdict. Fix, re-scan, watch it disappear.</p>
@@ -708,7 +828,7 @@
       its claim says so instead of guessing.
     </p>
     <div class="split">
-      <div class="card rise">
+      <div class="card surface rise">
         <h3>Proven in the lab, not at scan time</h3>
         <p>
           Your scan never asks the server for a plan. But before a
@@ -727,7 +847,7 @@
           engine — a static verdict, never a guess about your workload.
         </p>
       </div>
-      <div class="card rise d1">
+      <div class="card surface rise d1">
         <h3>Lineage all the way down</h3>
         <p>
           Most analyzers stop at whichever layer they parse first. A dynamic-SQL
@@ -762,10 +882,10 @@
       machine-readable, running where the code is being written.
     </p>
     <ul class="checks rise">
-      <li><span class="mark">&#9679;</span><span><b>Machine-readable by default.</b> Versioned JSON or SARIF, deterministically ordered, every finding carrying its rule id, location, resolved base column, indexed flag, confidence tier and the evidence behind the verdict. Enough for an assistant to fix the SQL and re-run the scan to prove the finding is gone.</span></li>
-      <li><span class="mark">&#9679;</span><span><b>It stays on your machine.</b> The scan is read-only — <code>SELECT</code>s only, no DDL, no DML — the analysis core makes no network calls, and nothing is uploaded to a service or a model provider. Your schema, your module text, your findings.</span></li>
-      <li><span class="mark">&#9679;</span><span><b>It says what it doesn't know.</b> Uncertain inference reports <code>Unknown</code>. Dynamic SQL that can't be proven constant is counted with a machine-readable reason. An assistant acting on a confident wrong answer is worse than one told plainly what isn't known.</span></li>
-      <li><span class="mark">&#9679;</span><span><b>Or just gate CI.</b> The same run emits SARIF, with each rule's <code>helpUri</code> pointing at its own page in the catalog — so the explanation travels with the finding.</span></li>
+      <li><span class="mark" aria-hidden="true"></span><span><b>Machine-readable by default.</b> Versioned JSON or SARIF, deterministically ordered, every finding carrying its rule id, location, resolved base column, indexed flag, confidence tier and the evidence behind the verdict. Enough for an assistant to fix the SQL and re-run the scan to prove the finding is gone.</span></li>
+      <li><span class="mark" aria-hidden="true"></span><span><b>It stays on your machine.</b> The scan is read-only — <code>SELECT</code>s only, no DDL, no DML — the analysis core makes no network calls, and nothing is uploaded to a service or a model provider. Your schema, your module text, your findings.</span></li>
+      <li><span class="mark" aria-hidden="true"></span><span><b>It says what it doesn't know.</b> Uncertain inference reports <code>Unknown</code>. Dynamic SQL that can't be proven constant is counted with a machine-readable reason. An assistant acting on a confident wrong answer is worse than one told plainly what isn't known.</span></li>
+      <li><span class="mark" aria-hidden="true"></span><span><b>Or just gate CI.</b> The same run emits SARIF, with each rule's <code>helpUri</code> pointing at its own page in the catalog — so the explanation travels with the finding.</span></li>
     </ul>
   </div>
 </section>
@@ -789,15 +909,17 @@ silentscan scan-corpus-live &lt;manifest.json&gt;             <span class="c"># 
       against the database you connect to.
     </p>
 
-    <div class="close rise">
-      <h2>Free, and it never leaves your laptop.</h2>
-      <p class="sub">
-        Clone it, point it at a dev copy, read the findings. No account, no
-        upload, no service in the middle.
-      </p>
-      <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/bhattumang7/mssql-silentscan">github.com/bhattumang7/mssql-silentscan</a>
-        <a class="btn btn-ghost" href="rules.html">See what it finds</a>
+    <div class="close-shell rise">
+      <div class="close surface">
+        <h2>Free, and it never leaves your laptop.</h2>
+        <p class="sub">
+          Clone it, point it at a dev copy, read the findings. No account, no
+          upload, no service in the middle.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/bhattumang7/mssql-silentscan">github.com/bhattumang7/mssql-silentscan</a>
+          <a class="btn btn-ghost" href="rules.html">See what it finds</a>
+        </div>
       </div>
     </div>
 
