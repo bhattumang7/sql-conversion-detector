@@ -18,7 +18,7 @@ namespace SilentScan.Verify.Deployment;
 /// </summary>
 public static partial class GoBatchSplitter
 {
-    [GeneratedRegex(@"^GO\s*(\d+)?\s*(--.*)?$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^GO\s*(\d+)?\s*(--.*|/\*.*\*/)?$", RegexOptions.IgnoreCase)]
     private static partial Regex GoLinePattern();
 
     public static IReadOnlyList<string> Split(string script)
@@ -26,10 +26,11 @@ public static partial class GoBatchSplitter
         var batches = new List<string>();
         var current = new StringBuilder();
         var state = LexState.Default;
+        var commentDepth = 0;
 
         foreach (var rawLine in SplitLines(script))
         {
-            var (line, endState) = ScanLine(rawLine, state);
+            var (line, endState, endCommentDepth) = ScanLine(rawLine, state, commentDepth);
 
             if (state == LexState.Default && endState == LexState.Default)
             {
@@ -44,6 +45,7 @@ public static partial class GoBatchSplitter
 
             current.Append(rawLine).Append('\n');
             state = endState;
+            commentDepth = endCommentDepth;
         }
 
         FlushBatch(current, batches, repeatCount: 1);
@@ -87,69 +89,116 @@ public static partial class GoBatchSplitter
         }
     }
 
-    /// <summary>Re-scans one line character by character, tracking whether it ends inside a string literal or block comment so the caller never treats a GO-shaped line inside either as a real separator.</summary>
-    private static (string Line, LexState EndState) ScanLine(string line, LexState startState)
+    /// <summary>
+    /// Re-scans one line character by character, tracking whether it ends inside a string
+    /// literal, a bracketed identifier (<c>[...]</c>), a double-quoted identifier
+    /// (<c>"..."</c> - delimited here regardless of QUOTED_IDENTIFIER, since either way it isn't
+    /// a real GO separator underneath it), or a block comment, so the caller never treats a
+    /// GO-shaped line inside any of them as a real separator. <paramref name="startCommentDepth"/>
+    /// tracks nested block comments (<c>/* ... /* ... */ ... */</c>) - only the OUTERMOST
+    /// <c>*/</c> actually exits, matching T-SQL's own nesting behavior.
+    /// </summary>
+    private static (string Line, LexState EndState, int EndCommentDepth) ScanLine(string line, LexState startState, int startCommentDepth)
     {
         var state = startState;
+        var commentDepth = startCommentDepth;
         var i = 0;
         while (i < line.Length)
         {
-            (i, state) = state switch
+            (i, state, commentDepth) = state switch
             {
                 LexState.Default => ScanDefault(line, i),
-                LexState.InString => ScanInString(line, i),
-                LexState.InBlockComment => ScanInBlockComment(line, i),
-                _ => (i + 1, state),
+                LexState.InString => ScanInDelimited(line, i, '\'', LexState.InString),
+                LexState.InBracket => ScanInBracket(line, i),
+                LexState.InQuotedIdentifier => ScanInDelimited(line, i, '"', LexState.InQuotedIdentifier),
+                LexState.InBlockComment => ScanInBlockComment(line, i, commentDepth),
+                _ => (i + 1, state, commentDepth),
             };
         }
 
-        return (line, state);
+        return (line, state, commentDepth);
     }
 
-    private static (int NextIndex, LexState NextState) ScanDefault(string line, int i)
+    private static (int NextIndex, LexState NextState, int CommentDepth) ScanDefault(string line, int i)
     {
         if (line[i] == '\'')
         {
-            return (i + 1, LexState.InString);
+            return (i + 1, LexState.InString, 0);
+        }
+
+        if (line[i] == '[')
+        {
+            return (i + 1, LexState.InBracket, 0);
+        }
+
+        if (line[i] == '"')
+        {
+            return (i + 1, LexState.InQuotedIdentifier, 0);
         }
 
         if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '*')
         {
-            return (i + 2, LexState.InBlockComment);
+            return (i + 2, LexState.InBlockComment, 1);
         }
 
         if (i + 1 < line.Length && line[i] == '-' && line[i + 1] == '-')
         {
             // Line comment: nothing after this point on the line is code, but whatever
             // preceded it still is - just stop scanning this line.
-            return (line.Length, LexState.Default);
+            return (line.Length, LexState.Default, 0);
         }
 
-        return (i + 1, LexState.Default);
+        return (i + 1, LexState.Default, 0);
     }
 
-    private static (int NextIndex, LexState NextState) ScanInString(string line, int i)
+    /// <summary>Shared escaping rule for both <c>'...'</c> string literals and <c>"..."</c> quoted identifiers - a doubled delimiter is a literal instance of it, not the end of the region.</summary>
+    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInDelimited(string line, int i, char delimiter, LexState inState)
     {
-        if (line[i] != '\'')
+        if (line[i] != delimiter)
         {
-            return (i + 1, LexState.InString);
+            return (i + 1, inState, 0);
         }
 
-        // A doubled '' is an escaped quote, not the string's end.
-        return i + 1 < line.Length && line[i + 1] == '\''
-            ? (i + 2, LexState.InString)
-            : (i + 1, LexState.Default);
+        return i + 1 < line.Length && line[i + 1] == delimiter
+            ? (i + 2, inState, 0)
+            : (i + 1, LexState.Default, 0);
     }
 
-    private static (int NextIndex, LexState NextState) ScanInBlockComment(string line, int i) =>
-        i + 1 < line.Length && line[i] == '*' && line[i + 1] == '/'
-            ? (i + 2, LexState.Default)
-            : (i + 1, LexState.InBlockComment);
+    /// <summary>A doubled <c>]]</c> inside a bracketed identifier is a literal <c>]</c>, not the identifier's end - same escaping shape as a quoted string/identifier, but bracket-specific since <c>[</c> itself never needs escaping inside one.</summary>
+    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInBracket(string line, int i)
+    {
+        if (line[i] != ']')
+        {
+            return (i + 1, LexState.InBracket, 0);
+        }
+
+        return i + 1 < line.Length && line[i + 1] == ']'
+            ? (i + 2, LexState.InBracket, 0)
+            : (i + 1, LexState.Default, 0);
+    }
+
+    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInBlockComment(string line, int i, int commentDepth)
+    {
+        if (i + 1 < line.Length && line[i] == '/' && line[i + 1] == '*')
+        {
+            return (i + 2, LexState.InBlockComment, commentDepth + 1);
+        }
+
+        if (i + 1 < line.Length && line[i] == '*' && line[i + 1] == '/')
+        {
+            var nextDepth = commentDepth - 1;
+            return nextDepth == 0 ? (i + 2, LexState.Default, 0) : (i + 2, LexState.InBlockComment, nextDepth);
+        }
+
+        return (i + 1, LexState.InBlockComment, commentDepth);
+    }
 
     private enum LexState
     {
         Default,
         InString,
+        InBracket,
+        InQuotedIdentifier,
         InBlockComment,
     }
 }

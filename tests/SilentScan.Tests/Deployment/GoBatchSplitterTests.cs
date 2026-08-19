@@ -119,4 +119,67 @@ public sealed class GoBatchSplitterTests
 
         Assert.Equal(2, batches.Count);
     }
+
+    [Fact]
+    public void Split_GoInsideBracketedIdentifier_DoesNotSplit()
+    {
+        // An apostrophe inside a bracketed identifier used to flip the lexer into InString (no
+        // dedicated bracket state existed at all), swallowing the real GO separator that follows
+        // into the same batch as the next statement.
+        var script = "SELECT [Customer's\nGO\nOrder] FROM T;\nGO\nSELECT 2;";
+
+        var batches = GoBatchSplitter.Split(script);
+
+        Assert.Equal(2, batches.Count);
+        Assert.Contains("Customer's", batches[0]);
+        Assert.Contains("Order] FROM T", batches[0]);
+        Assert.Contains("SELECT 2", batches[1]);
+    }
+
+    [Fact]
+    public void Split_DoubledClosingBracketInsideIdentifier_StaysInsideTheBracketState()
+    {
+        // [a]]b] is a single bracketed identifier containing a literal ']' (escaped as ']]') -
+        // a naive scanner that treats the middle ']' as the identifier's end would desynchronize
+        // state for the rest of the script, same failure shape as the string-escaping test above.
+        var script = "SELECT [a]]b] FROM T;\nGO\nSELECT 1;";
+
+        var batches = GoBatchSplitter.Split(script);
+
+        Assert.Equal(2, batches.Count);
+    }
+
+    [Fact]
+    public void Split_NestedBlockComment_DoesNotSplitOnInnerClose()
+    {
+        // T-SQL block comments nest - only the OUTERMOST */ actually closes the comment. A
+        // scanner with no depth counter exits at the first inner */, treating the GO between it
+        // and the real outer */ as a genuine separator and splitting mid-comment.
+        var script = "/* outer /* inner */ still commented\nGO\nstill commented */\nSELECT 1;\nGO\nSELECT 2;";
+
+        var batches = GoBatchSplitter.Split(script);
+
+        Assert.Equal(2, batches.Count);
+        Assert.Contains("SELECT 1", batches[0]);
+        Assert.Contains("SELECT 2", batches[1]);
+    }
+
+    [Fact]
+    public void Split_GoWithTrailingBlockComment_Splits()
+    {
+        var batches = GoBatchSplitter.Split("SELECT 1;\nGO /* deploy step */\nSELECT 2;");
+
+        Assert.Equal(2, batches.Count);
+    }
+
+    [Fact]
+    public void Split_GoInsideQuotedIdentifier_DoesNotSplit()
+    {
+        var script = "SELECT \"Customer\nGO\nOrder\" FROM T;\nGO\nSELECT 2;";
+
+        var batches = GoBatchSplitter.Split(script);
+
+        Assert.Equal(2, batches.Count);
+        Assert.Contains("SELECT 2", batches[1]);
+    }
 }
