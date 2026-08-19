@@ -49,6 +49,12 @@ public static class ColumnProvenanceAnalysis
         _ => null,
     };
 
+    /// <summary>
+    /// SQL Server's own decimal max precision (documented, and the ceiling
+    /// <see cref="WidenDecimalFacets"/>'s own formula must never exceed).
+    /// </summary>
+    private const int MaxDecimalPrecision = 38;
+
     private static bool AllBranchesAgree(IReadOnlyList<ColumnProvenance> branches, out SqlType? agreedType)
     {
         agreedType = null;
@@ -77,11 +83,70 @@ public static class ColumnProvenanceAnalysis
                 // first branch's collation would be a guess about exactly the fact (SQL_* vs
                 // Windows) that decides ScanForced vs RangeSeek. Null the collation so the
                 // verdict engine sees collation-unknown, not a wrong one.
-                agreedType = agreedType with { Collation = null };
+                agreedType = agreedType with { Collation = null, Length = null, LengthKnown = false };
+            }
+            else if (agreedType.IsStringFamily)
+            {
+                agreedType = WidenStringFacets(agreedType, branchType);
+            }
+            else if (agreedType.Category == SqlTypeCategory.Decimal)
+            {
+                agreedType = WidenDecimalFacets(agreedType, branchType);
             }
         }
 
         return agreedType is not null;
+    }
+
+    /// <summary>
+    /// A UNION of same-category, same-collation-status string branches of differing length takes
+    /// the WIDER of the two (oracle-verified: <c>sys.dm_exec_describe_first_result_set</c> off a
+    /// real deployed <c>varchar(10) UNION ALL varchar(200)</c> view reports <c>max_length 200</c>) -
+    /// the identical rule <see cref="Rules.ExpressionTypeInferencer"/>'s own CASE/COALESCE merge
+    /// already uses (<c>Math.Max</c>), previously applied only there; a union column silently kept
+    /// whichever branch happened to be first instead. MAX-ness widens the same way a CASE/COALESCE
+    /// merge's own MAX handling already does.
+    /// </summary>
+    private static SqlType WidenStringFacets(SqlType agreedType, SqlType branchType)
+    {
+        if (agreedType.IsMax || branchType.IsMax)
+        {
+            return agreedType with { Length = null, IsMax = true };
+        }
+
+        if (agreedType.Length is not { } l || branchType.Length is not { } r)
+        {
+            return agreedType with { Length = null, LengthKnown = false };
+        }
+
+        return agreedType with { Length = Math.Max(l, r) };
+    }
+
+    /// <summary>
+    /// A UNION of two DECIMAL branches widens scale to the wider of the two, and precision to
+    /// the wider INTEGER-digit count (precision minus scale) plus that widened scale - oracle-
+    /// verified directly (<c>sys.dm_exec_describe_first_result_set</c>): <c>DECIMAL(5,3) UNION ALL
+    /// DECIMAL(10,1)</c> resolves <c>DECIMAL(12,3)</c> (scale = MAX(3,1) = 3; integer digits =
+    /// MAX(5-3, 10-1) = MAX(2,9) = 9; precision = 9+3 = 12) - NOT simply <c>Math.Max</c> of each
+    /// facet independently (that would give the wrong DECIMAL(10,3)), and not the "keep the
+    /// winning branch's own declared facets" approximation
+    /// <see cref="Rules.ExpressionTypeInferencer"/>'s own remarks document as accepted there for
+    /// CASE/COALESCE - this is a real widening, not an approximation, because a union's own
+    /// column-parity check (<c>LiveLineageParityChecker</c>) compares directly against the live
+    /// engine's own answer for this exact shape.
+    /// </summary>
+    private static SqlType WidenDecimalFacets(SqlType agreedType, SqlType branchType)
+    {
+        if (agreedType.Precision is not { } p1 || agreedType.Scale is not { } s1
+            || branchType.Precision is not { } p2 || branchType.Scale is not { } s2)
+        {
+            return agreedType with { Precision = null, Scale = null };
+        }
+
+        var scale = Math.Max(s1, s2);
+        var integerDigits = Math.Max(p1 - s1, p2 - s2);
+        var precision = Math.Min(integerDigits + scale, MaxDecimalPrecision);
+        return agreedType with { Precision = precision, Scale = scale };
     }
 
     /// <summary>Every base table column reachable underneath this provenance (0, 1, or many - an expression, or a UNION of several branches, can combine several columns).</summary>

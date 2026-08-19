@@ -153,4 +153,69 @@ public sealed class ColumnProvenanceAnalysisTests
         Assert.Equal("vw_branch.sql", site.SourcePath);
         Assert.Equal(12, site.Line);
     }
+
+    [Fact]
+    public void TryGetScalarType_UnionOfDifferingLengthStringBranches_WidensToTheWider()
+    {
+        // Oracle-verified (sys.dm_exec_describe_first_result_set off a real deployed view):
+        // varchar(10) UNION ALL varchar(200) resolves varchar(200) - the WIDER of the two, not
+        // whichever branch happened to be first.
+        var narrow = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10));
+        var wide = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 200));
+        var union = new ColumnProvenance.Union([narrow, wide]);
+
+        var type = ColumnProvenanceAnalysis.TryGetScalarType(union);
+
+        Assert.Equal(200, type!.Length);
+    }
+
+    [Fact]
+    public void TryGetScalarType_UnionOfDifferingLengthStringBranches_ReverseOrder_StillWidensToTheWider()
+    {
+        var wide = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 200));
+        var narrow = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10));
+        var union = new ColumnProvenance.Union([wide, narrow]);
+
+        var type = ColumnProvenanceAnalysis.TryGetScalarType(union);
+
+        Assert.Equal(200, type!.Length);
+    }
+
+    [Fact]
+    public void TryGetScalarType_UnionWithOneMaxBranch_ResultIsMax()
+    {
+        var bounded = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.NVarChar, Length: 3750));
+        var max = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.NVarChar, IsMax: true));
+        var union = new ColumnProvenance.Union([bounded, max]);
+
+        var type = ColumnProvenanceAnalysis.TryGetScalarType(union);
+
+        Assert.True(type!.IsMax);
+    }
+
+    [Fact]
+    public void TryGetScalarType_UnionOfDecimalBranches_WidensPrecisionAndScale()
+    {
+        // Oracle-verified: DECIMAL(5,3) UNION ALL DECIMAL(10,1) resolves DECIMAL(12,3) - scale
+        // widens to MAX(3,1)=3; integer digits widen to MAX(5-3,10-1)=MAX(2,9)=9; precision =
+        // 9+3=12. Not Math.Max of each facet independently (that would wrongly give (10,3)).
+        var a = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.Decimal, Precision: 5, Scale: 3));
+        var b = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.Decimal, Precision: 10, Scale: 1));
+        var union = new ColumnProvenance.Union([a, b]);
+
+        var type = ColumnProvenanceAnalysis.TryGetScalarType(union);
+
+        Assert.Equal(12, type!.Precision);
+        Assert.Equal(3, type.Scale);
+    }
+
+    [Fact]
+    public void TryGetScalarType_UnionOfSameLengthStringBranches_RegressionGuard_PreservesTheLength()
+    {
+        var a = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 20));
+        var b = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 20));
+        var union = new ColumnProvenance.Union([a, b]);
+
+        Assert.Equal(20, ColumnProvenanceAnalysis.TryGetScalarType(union)!.Length);
+    }
 }
