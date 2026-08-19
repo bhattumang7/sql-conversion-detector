@@ -226,6 +226,19 @@ public static class FromScopeResolver
             return (cteAlias, new ScopeEntry(cteRelation, IsViewLayer: false));
         }
 
+        // SchemaObjectNameHelper.Qualify only reads Database/Schema/Base - it silently drops a
+        // ServerIdentifier, so a four-part linked-server reference (LinkedSrv.OtherDb.dbo.T)
+        // would otherwise collapse to the same catalog key as an unrelated LOCAL OtherDb.dbo.T,
+        // silently inheriting that local table's columns/indexes. CatalogBuilder's own synonym
+        // path already guards this identically; the FROM-clause path had no equivalent.
+        if (named.SchemaObject.ServerIdentifier is { Value.Length: > 0 })
+        {
+            ledger?.Record(
+                AnalysisPass.Lineage, sourcePath, named.StartLine, named.StartColumn,
+                FromTableReferenceConstructKind, $"'{SchemaObjectNameHelper.Qualify(named.SchemaObject)}': names a linked server - four-part cross-server table references are not modeled");
+            return (named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value, new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false));
+        }
+
         // Canonicalized through any synonym chain BEFORE either lookup below - a synonym for a
         // VIEW can only ever resolve via the resolvedViews dictionary (views are never in
         // DatabaseCatalog at all), and a finding/probe against a synonym'd table must name the
@@ -355,6 +368,16 @@ public static class FromScopeResolver
     private static (string? Alias, ScopeEntry Entry) ResolveTvfTableReference(SchemaObjectFunctionTableReference tvf, ResolutionContext context)
     {
         var (catalog, resolvedViews, sourcePath, ledger, _, _, _) = context;
+
+        // Same ServerIdentifier guard as the ordinary NamedTableReference case above - see its
+        // own comment for why silently dropping it risks colliding with an unrelated local name.
+        if (tvf.SchemaObject.ServerIdentifier is { Value.Length: > 0 })
+        {
+            ledger?.Record(
+                AnalysisPass.Lineage, sourcePath, tvf.StartLine, tvf.StartColumn,
+                "FROM table-valued function", $"'{SchemaObjectNameHelper.Qualify(tvf.SchemaObject)}': names a linked server - four-part cross-server table references are not modeled");
+            return (tvf.Alias?.Value, new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false));
+        }
 
         // A table-valued function invoked in a FROM clause (docs/audit-remediation-
         // plan.md Phase 4.2, audit finding B2). LineageResolver already resolves both

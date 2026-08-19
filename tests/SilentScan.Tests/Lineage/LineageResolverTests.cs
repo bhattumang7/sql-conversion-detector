@@ -772,4 +772,28 @@ public sealed class LineageResolverTests
 
         Assert.Null(lineage.Find("dbo.itvf_Orders"));
     }
+
+    [Fact]
+    public void Resolve_FourPartLinkedServerReference_NeverCollidesWithLocalTableOfSameTail()
+    {
+        // The gap this fix closes: SchemaObjectNameHelper.Qualify only reads Database/Schema/
+        // Base, silently dropping ServerIdentifier - a genuine local OtherDb.dbo.Orders and a
+        // remote LinkedSrv.OtherDb.dbo.Orders reference used to collapse to the identical catalog
+        // key "OtherDb.dbo.Orders", so the view below would have silently inherited the LOCAL
+        // table's columns instead of staying honestly unresolved. CREATE TABLE itself can never
+        // carry a database qualifier (T-SQL requires USE first), so the "local" side of the
+        // collision is a same-database table that a genuinely local three-part reference resolves
+        // correctly - proving the remote reference is NOT quietly treated as the same three-part
+        // shape once the server part is dropped.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "CREATE VIEW dbo.vw_Local AS SELECT OrderId FROM dbo.Orders;",
+            "CREATE VIEW dbo.vw_Remote AS SELECT OrderId FROM LinkedSrv.SomeDb.dbo.Orders;");
+
+        var localView = lineage.Find("dbo.vw_Local")!;
+        Assert.IsType<ColumnProvenance.BaseColumn>(localView.FindColumn("OrderId")!.Provenance);
+
+        var remoteView = lineage.Find("dbo.vw_Remote")!;
+        Assert.IsType<ColumnProvenance.Unknown>(remoteView.FindColumn("OrderId")!.Provenance);
+    }
 }
