@@ -37,12 +37,23 @@ public static class CorpusLiveScanRunner
         try
         {
             var source = await LiveCorpusDeployer.DeployAndReadAsync(repo, repoRoot, databaseName, sqlOptions, cancellationToken);
-            var report = ScanReportBuilder.BuildFromParseResults(source.ModuleParseResults, catalog: source.Catalog, minimumConfidence: minimumConfidence)
-                with { ParseHealth = ParseHealthReportBuilder.BuildFromParseResults(source.FileParseResults) };
+            var moduleScan = ScanReportBuilder.BuildFromParseResults(source.ModuleParseResults, catalog: source.Catalog, minimumConfidence: minimumConfidence);
+
+            // moduleScan.ParseHealth (built from the POST-DEPLOYMENT module text this scan
+            // actually analyzed) is preserved here, not discarded - a module that deployed
+            // successfully but failed to reparse from sys.sql_modules (170+ syntax, a QUOTED_
+            // IDENTIFIER edge case, a ScriptDOM bug) previously vanished from every report section
+            // with no trace once this field was overwritten. report.ParseHealth is instead the
+            // file-level dialect-sniffing signal LiveCorpusModuleSource.FileParseResults' own doc
+            // comment specifies (a file that never even deploys, which the module-derived health
+            // above can never see since it only knows about modules that DID reach sys.sql_modules)
+            // - both are real, distinct facts, so both survive as separate fields rather than one
+            // silently replacing the other.
+            var report = moduleScan with { ParseHealth = ParseHealthReportBuilder.BuildFromParseResults(source.FileParseResults) };
 
             return new CorpusLiveRepoResult(
                 repo, report, LiveCatalogSummary.From(source.Catalog), source.ModuleParseResults.Count,
-                source.UnanalyzableModules, source.DeploymentMessages, source.UnmappedModules);
+                source.UnanalyzableModules, source.DeploymentMessages, source.UnmappedModules, moduleScan.ParseHealth);
         }
         finally
         {
@@ -61,9 +72,17 @@ public static class CorpusLiveScanRunner
 /// One corpus repo's engine-authoritative scan: the same <see cref="ScanReport"/> shape every
 /// other scan mode produces, plus how many modules deployed/read successfully, every module the
 /// engine could not read a body for (CLR/encrypted - never silently dropped), every deployment
-/// message (a batch skipped by the whitelist, or one that failed even after retries), and every
+/// message (a batch skipped by the whitelist, or one that failed even after retries), every
 /// live-read module this run could not map back to the repo file that declares it (should be
-/// empty in practice - ledgered rather than assumed).
+/// empty in practice - ledgered rather than assumed), and whether the POST-DEPLOYMENT module text
+/// this scan actually analyzed (read back from <c>sys.sql_modules</c>) reparsed cleanly -
+/// <see cref="ModuleParseHealth"/>, distinct from <see cref="Report"/>'s own <c>ParseHealth</c>,
+/// which is the PRE-DEPLOYMENT file-level dialect-sniffing signal
+/// (<see cref="Verify.Corpus.LiveCorpusModuleSource.FileParseResults"/>'s own doc comment). A
+/// module can deploy successfully yet fail to reparse (170+ syntax the parser doesn't yet select
+/// for, a QUOTED_IDENTIFIER edge case, a ScriptDOM bug) - when that happens it contributes zero
+/// findings, and <see cref="ModuleParseHealth"/> is the only place that fact survives; CLAUDE.md's
+/// "never silently counted as clean" applies here just as much as to a file that never deploys.
 /// </summary>
 public sealed record CorpusLiveRepoResult(
     CorpusRepoEntry Repo,
@@ -72,4 +91,5 @@ public sealed record CorpusLiveRepoResult(
     int ModulesAnalyzed,
     IReadOnlyList<UnanalyzableModule> UnanalyzableModules,
     IReadOnlyList<string> DeploymentMessages,
-    IReadOnlyList<string> UnmappedModules);
+    IReadOnlyList<string> UnmappedModules,
+    ParseHealthReport ModuleParseHealth);

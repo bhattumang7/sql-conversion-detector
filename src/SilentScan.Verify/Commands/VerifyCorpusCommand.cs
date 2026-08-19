@@ -201,8 +201,14 @@ public static class VerifyCorpusCommand
             // handed back - not a separate, independently re-parsed set.
             var lineage = LineageResolver.Resolve(catalog, source.ModuleParseResults);
 
-            var report = ScanReportBuilder.BuildFromParseResults(source.ModuleParseResults, catalog, minimumConfidence)
-                with { ParseHealth = ParseHealthReportBuilder.BuildFromParseResults(source.FileParseResults) };
+            var moduleScan = ScanReportBuilder.BuildFromParseResults(source.ModuleParseResults, catalog, minimumConfidence);
+
+            // moduleScan.ParseHealth (built from the POST-DEPLOYMENT module text this scan
+            // actually analyzed) is captured before being overwritten below - a module that
+            // deployed successfully but failed to reparse from sys.sql_modules previously vanished
+            // from every report section with no trace once this field was replaced outright.
+            var moduleParseHealth = moduleScan.ParseHealth;
+            var report = moduleScan with { ParseHealth = ParseHealthReportBuilder.BuildFromParseResults(source.FileParseResults) };
             var probeWorthy = report.TypedFindings.Where(f => f.Verdict is Verdict.ScanForced or Verdict.RangeSeek).ToList();
 
             // How many DISTINCT (table, column, operator, other-type) defects probeWorthy
@@ -299,7 +305,8 @@ public static class VerifyCorpusCommand
                 ScalarUdfProbeFailed: [.. scalarUdfResults.Where(r => r.Outcome == ScalarUdfOutcome.ProbeFailed)],
                 DynamicSql: report.DynamicSqlSummary,
                 PassesDialectSniffing: report.ParseHealth.PassesDialectSniffing,
-                ParseSuccessRate: report.ParseHealth.ParseSuccessRate);
+                ParseSuccessRate: report.ParseHealth.ParseSuccessRate,
+                ModulesWithReparseErrors: [.. moduleParseHealth.Files.Where(f => f.Errors.Count > 0).Select(f => f.Path)]);
         }
         finally
         {
@@ -354,6 +361,7 @@ public sealed record RepoVerificationSummary(
     DynamicSqlSummary DynamicSql,
     bool PassesDialectSniffing,
     double ParseSuccessRate,
+    IReadOnlyList<string> ModulesWithReparseErrors,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
     // A Medium-confidence finding (one that rested on a dynamic-SQL placeholder assumption -

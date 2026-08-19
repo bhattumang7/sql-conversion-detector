@@ -106,6 +106,35 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
         Assert.Equal("#Report", finding.Column.TableQualifiedName);
     }
 
+    /// <summary>
+    /// ModuleParseHealth (the POST-DEPLOYMENT reparse of every module this scan actually
+    /// analyzed) must survive independently of Report.ParseHealth (the PRE-DEPLOYMENT file-level
+    /// dialect-sniffing signal) - previously the module-derived health was silently overwritten
+    /// by the file-level one, so a module that deployed but failed to reparse from
+    /// sys.sql_modules would vanish from every report section with no trace.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ModuleParseHealth_IsIndependentOfFileLevelHealth()
+    {
+        WriteFile("Tables/Orders.sql", "CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY);");
+        WriteFile("Procedures/usp_GetOrder.sql", """
+            CREATE PROCEDURE dbo.usp_GetOrder AS
+            BEGIN
+                SELECT OrderId FROM dbo.Orders;
+            END
+            """);
+
+        var repo = BuildRepo(nameof(RunAsync_ModuleParseHealth_IsIndependentOfFileLevelHealth));
+        var result = await CorpusLiveScanRunner.RunAsync(repo, _repoRoot, SqlServerOptions.LocalDocker);
+
+        // One deployed module (usp_GetOrder) reparsed cleanly from sys.sql_modules; two source
+        // files (Orders.sql, usp_GetOrder.sql) reflected in the separate file-level signal.
+        Assert.Single(result.ModuleParseHealth.Files);
+        Assert.Empty(result.ModuleParseHealth.Files[0].Errors);
+        Assert.True(result.ModuleParseHealth.PassesDialectSniffing);
+        Assert.Equal(2, result.Report.ParseHealth.TotalFiles);
+    }
+
     [Fact]
     public async Task RunAsync_DisallowedStatementInDdlFile_SkippedAndReportedNeverExecuted()
     {

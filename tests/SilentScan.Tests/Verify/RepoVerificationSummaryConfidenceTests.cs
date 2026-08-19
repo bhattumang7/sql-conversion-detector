@@ -56,7 +56,8 @@ public sealed class RepoVerificationSummaryConfidenceTests
         ScalarUdfProbeFailed: [],
         DynamicSql: new DynamicSqlSummary(0, 0, 0, 0, new Dictionary<string, int>()),
         PassesDialectSniffing: true,
-        ParseSuccessRate: 1.0);
+        ParseSuccessRate: 1.0,
+        ModulesWithReparseErrors: []);
 
     [Fact]
     public void ConfirmedByConfidence_MixedConfidenceConfirmations_SegregatesRatherThanSums()

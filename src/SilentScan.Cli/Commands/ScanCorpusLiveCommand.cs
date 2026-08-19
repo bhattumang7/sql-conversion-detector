@@ -211,6 +211,16 @@ public static class ScanCorpusLiveCommand
                 $"{ParseHealthReport.MinimumAcceptableParseSuccessRate:P0} dialect-sniffing threshold - findings are still reported, but treat them with reduced confidence.");
         }
 
+        // Distinct from the file-level dialect-sniffing check above: a module that deployed
+        // successfully can still fail to reparse from its own sys.sql_modules text, contributing
+        // zero findings while never appearing in a "parse failure" section anywhere else.
+        foreach (var failure in result.ModuleParseHealth.Files.Where(f => f.Errors.Count > 0))
+        {
+            await stderr.WriteLineAsync(
+                $"warning: '{repo.Name}' module '{failure.Path}' deployed but its own definition failed to reparse " +
+                $"({failure.Errors.Count} error(s)) - it contributes zero findings to this scan.");
+        }
+
         return result;
     }
 
