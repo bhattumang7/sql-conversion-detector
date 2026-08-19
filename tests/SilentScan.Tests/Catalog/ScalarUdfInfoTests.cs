@@ -266,6 +266,87 @@ public sealed class ScalarUdfInfoTests
         Assert.Null(info!.InlineabilityBlocker);
     }
 
+    [Theory]
+    [InlineData("DECLARE @c INT = @doc.value('(/a)[1]', 'INT');", "value")]
+    [InlineData("DECLARE @c XML = @doc.query('/a');", "query")]
+    [InlineData("DECLARE @c BIT = @doc.exist('/a');", "exist")]
+    public void Build_FunctionUsingXmlInstanceMethod_RecordsInlineabilityBlocker(string statement, string methodName)
+    {
+        // Oracle-confirmed 2026-08-20 (all three tested individually against the real engine,
+        // plus .nodes()/.modify() below - LiveCatalogReaderScalarUdfTests): an XML data-type
+        // instance method call blocks inlining; declaring an XML-typed variable alone does not
+        // (see Build_FunctionDeclaringXmlVariableWithNoMethodCall_NoBlocker).
+        var catalog = BuildFrom($$"""
+            CREATE FUNCTION dbo.fn_XmlMethod (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @doc XML = '<a><b>1</b></a>';
+                {{statement}}
+                RETURN @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlMethod", out var info));
+        Assert.Contains(methodName, info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionUsingXmlNodesShredding_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_XmlNodes (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @doc XML = '<a><b>1</b></a>';
+                DECLARE @c INT;
+                SELECT TOP 1 @c = 1 FROM @doc.nodes('/a/b') AS t(c);
+                RETURN @x + ISNULL(@c, 0);
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlNodes", out var info));
+        Assert.Contains("nodes", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionUsingXmlModify_RecordsInlineabilityBlocker()
+    {
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_XmlModify (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @doc XML = '<a/>';
+                SET @doc.modify('insert <b/> into (/a)[1]');
+                RETURN @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlModify", out var info));
+        Assert.Contains("modify", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionDeclaringXmlVariableWithNoMethodCall_NoBlocker()
+    {
+        // No-method-call control, otherwise identical: isolates the XML METHOD CALL as the
+        // blocker, not the XML data type itself (oracle-confirmed 2026-08-20).
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_XmlNoMethod (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @doc XML = '<a/>';
+                RETURN @x + 1;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlNoMethod", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
     [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {

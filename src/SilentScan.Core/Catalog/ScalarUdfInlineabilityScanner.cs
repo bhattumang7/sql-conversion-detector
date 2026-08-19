@@ -17,6 +17,12 @@ public static class ScalarUdfInlineabilityScanner
         "GETDATE", "GETUTCDATE", "SYSDATETIME", "SYSUTCDATETIME", "SYSDATETIMEOFFSET", "CURRENT_TIMESTAMP",
     };
 
+    /// <summary>The <c>&lt;expr&gt;.method(...)</c>-shaped XML data-type instance methods reached via <see cref="FunctionCall"/> - <c>.nodes()</c>/<c>.modify()</c> are separate ScriptDom node shapes, handled by their own visitor overrides.</summary>
+    private static readonly HashSet<string> XmlInstanceMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "value", "query", "exist",
+    };
+
     /// <summary>
     /// Returns a human-readable blocker reason for the first Appendix-3 pattern found in
     /// <paramref name="body"/>, or null when the scan found nothing - which must be read as
@@ -185,9 +191,40 @@ public static class ScalarUdfInlineabilityScanner
                     Report($"references non-inlineable UDF {qualifiedName}");
                 }
             }
+            else if (node.CallTarget is ExpressionCallTarget
+                && node.FunctionName is { Value: { } xmlMethodName } && XmlInstanceMethods.Contains(xmlMethodName))
+            {
+                // Oracle-confirmed 2026-08-20 (real Docker probe, all three tested individually):
+                // an XML data-type instance method call blocks inlining - declaring an XML-typed
+                // variable alone does not (isolated separately). CallTarget is ExpressionCallTarget
+                // for any `<expr>.method(...)` shape, not XML-specific by itself, but "value"/
+                // "query"/"exist" are not real method names on any other built-in instance-method
+                // type (hierarchyid/geometry/geography all use differently-named methods), so this
+                // scanner does not need local variable type tracking (which it has none of today)
+                // to keep this precise.
+                Report($"XML data-type method .{xmlMethodName}()");
+            }
             else if (node.FunctionName is { Value: { } functionName } && TimeDependentIntrinsics.Contains(functionName))
             {
                 Report($"time-dependent intrinsic {functionName.ToUpperInvariant()}()");
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>Oracle-confirmed 2026-08-20: <c>FROM @doc.nodes(...)</c> XML shredding blocks inlining, same family as the other XML instance methods above.</summary>
+        public override void ExplicitVisit(VariableMethodCallTableReference node)
+        {
+            Report("XML data-type method .nodes()");
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>Oracle-confirmed 2026-08-20: <c>SET @doc.modify(...)</c> blocks inlining, same family as the other XML instance methods above - FunctionCallExists distinguishes this method-call form from a plain <c>SET @v = expr</c>.</summary>
+        public override void ExplicitVisit(SetVariableStatement node)
+        {
+            if (node.FunctionCallExists && string.Equals(node.Identifier?.Value, "modify", StringComparison.OrdinalIgnoreCase))
+            {
+                Report("XML data-type method .modify()");
             }
 
             base.ExplicitVisit(node);

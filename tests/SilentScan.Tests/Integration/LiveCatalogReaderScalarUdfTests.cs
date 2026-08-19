@@ -129,6 +129,23 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @c + @x;
         END;
         GO
+        CREATE FUNCTION dbo.fn_XmlValue (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @doc XML = '<a><b>1</b></a>';
+            DECLARE @c INT = @doc.value('(/a/b)[1]', 'INT');
+            RETURN @c + @x;
+        END;
+        GO
+        CREATE FUNCTION dbo.fn_XmlNoMethod (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @doc XML = '<a/>';
+            RETURN @x + 1;
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -233,6 +250,27 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_OrderByWithTop", out var info));
+        Assert.True(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionUsingXmlValueMethod_EngineReportsNotInlineable()
+    {
+        // Oracle-confirmed 2026-08-20 (real Docker probe, also tested individually for
+        // .query()/.exist()/.nodes()/.modify() - all five report is_inlineable = 0).
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlValue", out var info));
+        Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionDeclaringXmlVariableWithNoMethodCall_EngineReportsInlineable()
+    {
+        // Isolates the XML METHOD CALL as the blocker, not the XML data type itself.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlNoMethod", out var info));
         Assert.True(info!.EngineIsInlineable);
     }
 
