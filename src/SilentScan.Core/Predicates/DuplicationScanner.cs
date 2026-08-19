@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
 
@@ -34,7 +35,11 @@ public static class DuplicationScanner
 
         ScanComments(parseResult, findings);
 
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        // File-wide, not per-statement - see AggregateDivisionColumnstoreScanner's own comment on
+        // this exact tradeoff (2026-08 audit): only ever causes an extra decline, never a false
+        // positive, and far simpler than per-statement CTE-scope tracking for a scanner with none.
+        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
         parseResult.Fragment.Accept(visitor);
         findings.AddRange(visitor.Findings);
 
@@ -150,11 +155,13 @@ public static class DuplicationScanner
     {
         private readonly string sourcePath;
         private readonly DatabaseCatalog catalog;
+        private readonly IReadOnlySet<string> cteNames;
 
-        public Visitor(string sourcePath, DatabaseCatalog catalog)
+        public Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames)
         {
             this.sourcePath = sourcePath;
             this.catalog = catalog;
+            this.cteNames = cteNames;
             _currentModule = sourcePath;
         }
 
@@ -315,7 +322,7 @@ public static class DuplicationScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences));
+            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames));
             base.ExplicitVisit(node);
             _tableScopeStack.Pop();
         }
@@ -323,7 +330,7 @@ public static class DuplicationScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target));
+            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target));
             base.ExplicitVisit(node);
             _tableScopeStack.Pop();
         }
@@ -331,7 +338,7 @@ public static class DuplicationScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target));
+            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target));
             base.ExplicitVisit(node);
             _tableScopeStack.Pop();
         }

@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -20,7 +21,14 @@ public static class AggregateDivisionColumnstoreScanner
 
     public static IReadOnlyList<AggregateDivisionColumnstoreFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        // File-wide, not per-statement: a CTE declared anywhere in this file shadows a same-named
+        // real base table for ITS OWN statement's lifetime, but this coarser set only ever causes
+        // an extra decline (a real table in a DIFFERENT statement sharing a CTE's name elsewhere
+        // in the file), never a false positive - the safe direction CLAUDE.md's precision-first
+        // rule asks for, and far simpler than per-statement CTE-scope tracking for a scanner with
+        // none today (2026-08 audit: DirectBaseTableResolver never consulted CTE scope at all).
+        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -31,13 +39,13 @@ public static class AggregateDivisionColumnstoreScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
     {
         public List<AggregateDivisionColumnstoreFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames);
             if (tables.Count > 0 && tables.Values.Any(t => t.Indexes.Any(ix => ix.IsColumnstore)))
             {
                 var columnstoreTable = tables.Values.First(t => t.Indexes.Any(ix => ix.IsColumnstore));

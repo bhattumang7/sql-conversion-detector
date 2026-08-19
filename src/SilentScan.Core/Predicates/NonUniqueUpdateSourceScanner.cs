@@ -63,9 +63,10 @@ public static class NonUniqueUpdateSourceScanner
                 return;
             }
 
+            var cteNames = withClause is null ? EmptyCteNames : CteNameCollector.Collect(withClause);
             foreach (var join in spec.FromClause!.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
-                InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses);
+                InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses, cteNames);
             }
         }
 
@@ -74,21 +75,17 @@ public static class NonUniqueUpdateSourceScanner
         /// its statement's own lifetime, including an updatable-CTE UPDATE target - resolving
         /// through the catalog instead (cteRelations always null, pre-fix) silently matched the
         /// target against an unrelated real table sharing the CTE's name (2026-08 audit).
-        /// <see cref="InspectJoin"/>'s own source-side resolution
-        /// (<see cref="DirectBaseTableResolver.ResolveDirectBaseTableName"/>) has the identical
-        /// gap and is NOT fixed by this - DirectBaseTableResolver is catalog-only by its own
-        /// documented design and is shared by six other scanners; widening it is tracked
-        /// separately in docs/detection-checklist.md rather than folded in here silently.
         /// </summary>
         private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+        private static readonly IReadOnlySet<string> EmptyCteNames = new HashSet<string>();
 
-        private void InspectJoin(QualifiedJoin join, string targetAlias, string targetQualifiedName, IList<SetClause> setClauses)
+        private void InspectJoin(QualifiedJoin join, string targetAlias, string targetQualifiedName, IList<SetClause> setClauses, IReadOnlySet<string> cteNames)
         {
-            var (firstAlias, firstQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.FirstTableReference);
-            var (secondAlias, secondQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference);
+            var (firstAlias, firstQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.FirstTableReference, cteNames);
+            var (secondAlias, secondQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference, cteNames);
 
             string sourceAlias, sourceQualifiedName;
             if (string.Equals(firstAlias, targetAlias, StringComparison.OrdinalIgnoreCase) && secondAlias is not null && secondQualifiedName is not null)

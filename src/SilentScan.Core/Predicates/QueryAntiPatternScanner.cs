@@ -853,7 +853,7 @@ public static class QueryAntiPatternScanner
 
             foreach (var join in node.FromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
-                var (joinedAlias, joinedQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference);
+                var (joinedAlias, joinedQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference, cteNames);
                 if (joinedAlias is null || joinedQualifiedName is null)
                 {
                     continue;

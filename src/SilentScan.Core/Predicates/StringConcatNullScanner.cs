@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -28,7 +29,11 @@ public static class StringConcatNullScanner
 
     public static IReadOnlyList<StringConcatNullFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        // File-wide, not per-statement - see AggregateDivisionColumnstoreScanner's own comment on
+        // this exact tradeoff (2026-08 audit): only ever causes an extra decline, never a false
+        // positive, and far simpler than per-statement CTE-scope tracking for a scanner with none.
+        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -56,13 +61,13 @@ public static class StringConcatNullScanner
 
     private readonly record struct Leaf(LeafKind Kind, bool IsNullableColumn, string? TableQualifiedName, string? ColumnName);
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
     {
         public List<StringConcatNullFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames);
             if (tables.Count > 0)
             {
                 foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
@@ -77,7 +82,7 @@ public static class StringConcatNullScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target);
             if (tables.Count > 0)
             {
                 foreach (var setClause in spec.SetClauses.OfType<AssignmentSetClause>())

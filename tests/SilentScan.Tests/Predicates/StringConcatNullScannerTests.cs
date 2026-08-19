@@ -58,6 +58,22 @@ public sealed class StringConcatNullScannerTests
     }
 
     [Fact]
+    public void CteSharesNameWithRealTable_NeverFires()
+    {
+        // 2026-08 audit: DirectBaseTableResolver never consulted CTE scope at all - a CTE named
+        // the same as dbo.Person silently resolved against the REAL table instead, matching
+        // MiddleName against its real (nullable) column and firing on a statement that, through
+        // the CTE, never reads the real table's MiddleName. A CTE is never schema-qualified, so
+        // it always shadows a same-named real base table; DirectBaseTableResolver now declines a
+        // CTE-shadowed reference entirely rather than mismatching it.
+        var findings = Scan(
+            "WITH Person AS (SELECT FirstName, MiddleName FROM dbo.Person WHERE MiddleName IS NOT NULL) " +
+            "SELECT FirstName + ' ' + MiddleName FROM Person;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void NullableOperandGuardedByIsNull_NeverFires()
     {
         var findings = Scan("SELECT FirstName + ' ' + ISNULL(MiddleName, '') FROM dbo.Person;");

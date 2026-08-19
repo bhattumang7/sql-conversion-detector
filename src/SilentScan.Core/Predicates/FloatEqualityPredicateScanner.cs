@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -13,13 +14,19 @@ namespace SilentScan.Core.Predicates;
 /// Reuses <see cref="DirectBaseTableResolver"/>'s "flatten the join tree to its direct base-table
 /// leaves, matched by alias" shape rather than the full <see cref="Lineage.FromScopeResolver"/>
 /// scope-chain/lineage machinery - a real, known v1 scope limit (a float/real predicate reached
-/// through a view/CTE/derived table is left unanalyzed, not guessed at).
+/// through a view/derived table is left unanalyzed, not guessed at; a CTE-shadowed reference is
+/// also declined, via DirectBaseTableResolver's own file-wide CTE-name awareness, rather than
+/// mismatched against an unrelated same-named real table).
 /// </summary>
 public static class FloatEqualityPredicateScanner
 {
     public static IReadOnlyList<FloatEqualityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        var visitor = new Visitor(parseResult.SourcePath, catalog);
+        // File-wide, not per-statement - see AggregateDivisionColumnstoreScanner's own comment on
+        // this exact tradeoff (2026-08 audit): only ever causes an extra decline, never a false
+        // positive, and far simpler than per-statement CTE-scope tracking for a scanner with none.
+        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
+        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -30,13 +37,13 @@ public static class FloatEqualityPredicateScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
     {
         public List<FloatEqualityFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames);
             // node.WhereClause.SearchCondition is null for a positioned "WHERE CURRENT OF
             // @cursor" - a WhereClause with no boolean search condition at all, not a normal
             // filter predicate - so this checks the condition itself, not just the clause.
@@ -53,7 +60,7 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target);
             // See ExplicitVisit(QuerySpecification)'s own comment - a positioned "WHERE CURRENT
             // OF @cursor" carries a null SearchCondition.
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
@@ -69,7 +76,7 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, spec.Target);
+            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target);
             // See ExplicitVisit(QuerySpecification)'s own comment - a positioned "WHERE CURRENT
             // OF @cursor" carries a null SearchCondition.
             if (spec.WhereClause?.SearchCondition is { } whereCondition)

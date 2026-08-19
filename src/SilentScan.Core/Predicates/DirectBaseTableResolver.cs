@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Lineage;
 
 namespace SilentScan.Core.Predicates;
 
@@ -8,17 +9,30 @@ namespace SilentScan.Core.Predicates;
 /// alias (or bare name when unaliased)" logic used by several standalone scanners that
 /// deliberately work off the raw join tree rather than the full <see
 /// cref="Lineage.FromScopeResolver"/> scope-chain/lineage machinery (a known v1 scope limit shared
-/// by every caller: a reference reached through a view/CTE/derived table is left unanalyzed, not
+/// by every caller: a reference reached through a view/derived table is left unanalyzed, not
 /// guessed at). Was byte-identical across <c>FloatEqualityPredicateScanner</c> and
 /// <c>AggregateDivisionColumnstoreScanner</c>, whose own doc comments already named each other as
 /// precedent without anyone extracting it; <c>NonUniqueUpdateSourceScanner</c> resolves one
 /// reference at a time with the same rule.
+///
+/// CTE shadowing is NOT covered by that "unanalyzed" framing, though, and every caller must pass
+/// a real <c>cteNames</c> set (typically <see cref="Lineage.CteNameCollector.Collect"/> over the
+/// enclosing statement) rather than an empty set: a CTE is never schema-qualified, so it always
+/// shadows a same-named real base table for its statement's own lifetime, and a raw
+/// <c>SchemaObjectNameHelper.Qualify</c> + <c>catalog.Find</c> lookup has no way to see that on
+/// its own - it silently matched a CTE-shadowed reference against an unrelated real table sharing
+/// its name (2026-08 audit), which is the opposite of "unanalyzed", not a variant of it.
 /// </summary>
 internal static class DirectBaseTableResolver
 {
-    public static (string Alias, CatalogTable Table)? ResolveDirectBaseTable(DatabaseCatalog catalog, TableReference tableReference)
+    public static (string Alias, CatalogTable Table)? ResolveDirectBaseTable(DatabaseCatalog catalog, TableReference tableReference, IReadOnlySet<string> cteNames)
     {
         if (tableReference is not NamedTableReference named)
+        {
+            return null;
+        }
+
+        if (named.SchemaObject.SchemaIdentifier is null && cteNames.Contains(named.SchemaObject.BaseIdentifier.Value))
         {
             return null;
         }
@@ -31,16 +45,16 @@ internal static class DirectBaseTableResolver
     /// <summary>
     /// Flattens every reference to its direct <see cref="NamedTableReference"/> leaves - only a
     /// leaf that resolves to a real base <see cref="CatalogTableKind.Table"/> is kept; a view,
-    /// TVF, derived table, or unresolved reference is silently excluded. <paramref
+    /// TVF, derived table, CTE, or unresolved reference is silently excluded. <paramref
     /// name="extraTarget"/> covers an UPDATE/DELETE with no explicit FROM clause at all, where the
     /// statement's own target table is the only thing in scope.
     /// </summary>
     public static Dictionary<string, CatalogTable> ResolveDirectBaseTables(
-        DatabaseCatalog catalog, IList<TableReference>? tableReferences, TableReference? extraTarget = null)
+        DatabaseCatalog catalog, IList<TableReference>? tableReferences, IReadOnlySet<string> cteNames, TableReference? extraTarget = null)
     {
         var tables = new Dictionary<string, CatalogTable>(StringComparer.OrdinalIgnoreCase);
 
-        if (extraTarget is not null && ResolveDirectBaseTable(catalog, extraTarget) is { } targetEntry)
+        if (extraTarget is not null && ResolveDirectBaseTable(catalog, extraTarget, cteNames) is { } targetEntry)
         {
             tables[targetEntry.Alias] = targetEntry.Table;
         }
@@ -54,7 +68,7 @@ internal static class DirectBaseTableResolver
         {
             foreach (var leaf in PredicateTreeWalker.FlattenTableReferences(reference))
             {
-                if (ResolveDirectBaseTable(catalog, leaf) is { } entry)
+                if (ResolveDirectBaseTable(catalog, leaf, cteNames) is { } entry)
                 {
                     tables[entry.Alias] = entry.Table;
                 }
@@ -65,9 +79,9 @@ internal static class DirectBaseTableResolver
     }
 
     /// <summary>Same rule as <see cref="ResolveDirectBaseTable"/>, but as a nullable-string pair for callers matching a join side by alias rather than collecting a whole scope's tables.</summary>
-    public static (string? Alias, string? QualifiedName) ResolveDirectBaseTableName(DatabaseCatalog catalog, TableReference tableReference)
+    public static (string? Alias, string? QualifiedName) ResolveDirectBaseTableName(DatabaseCatalog catalog, TableReference tableReference, IReadOnlySet<string> cteNames)
     {
-        var resolved = ResolveDirectBaseTable(catalog, tableReference);
+        var resolved = ResolveDirectBaseTable(catalog, tableReference, cteNames);
         return resolved is { } entry ? (entry.Alias, entry.Table.QualifiedName) : (null, null);
     }
 
