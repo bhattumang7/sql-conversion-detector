@@ -28,17 +28,17 @@ public static class RulesDocGenerator
             File.WriteAllText(Path.Combine(rulesDir, fileName), RulePageHtmlWriter.Write(rule, examples));
         }
 
-        var prunedCount = 0;
-        foreach (var existing in Directory.EnumerateFiles(rulesDir, "*.html"))
+        // Materialized before the first delete: the enumeration is lazy, so deleting out of the
+        // directory it is still walking is undefined across filesystems.
+        var stale = Directory.EnumerateFiles(rulesDir, "*.html")
+            .Where(existing => !expectedFileNames.Contains(Path.GetFileName(existing)))
+            .ToList();
+        foreach (var existing in stale)
         {
-            if (!expectedFileNames.Contains(Path.GetFileName(existing)))
-            {
-                File.Delete(existing);
-                prunedCount++;
-            }
+            File.Delete(existing);
         }
 
-        return prunedCount;
+        return stale.Count;
     }
 
     private static RuleExample ReadExample(string repoRoot, string firesRelativePath)

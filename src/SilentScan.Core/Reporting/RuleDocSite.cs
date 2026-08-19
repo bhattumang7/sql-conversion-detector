@@ -12,18 +12,40 @@ namespace SilentScan.Core.Reporting;
 /// </summary>
 public static class RuleDocSite
 {
-    public const string IndexUrl = "https://umangbhatt.in/mssql-silentscan/rules.html";
+    /// <summary>
+    /// Where the published rule pages live. Deliberately a hardcoded absolute URL, and the only
+    /// one in the codebase: a SARIF <c>helpUri</c> has to resolve from whatever machine reads the
+    /// findings, so it cannot be relative, and the index page's links are generated against this
+    /// same root. Making it configurable would let the two drift apart - the exact failure this
+    /// class exists to prevent.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Major Code Smell", "S1075:URIs should not be hardcoded",
+        Justification = "The published site root is a fixed, externally-resolvable fact, not an environment setting - see the comment above. Composing both public URLs from this single constant keeps them from diverging.")]
+    private const string SiteRoot = "https://umangbhatt.in/mssql-silentscan";
 
-    private const string BaseUrl = "https://umangbhatt.in/mssql-silentscan/rules/";
+    public const string IndexUrl = SiteRoot + "/rules.html";
+
+    private const string BaseUrl = SiteRoot + "/rules/";
     private const string SilentScanPrefix = "silentscan/";
     private const string MediumConfidenceSuffix = "/medium-confidence";
     private const string LowConfidenceSuffix = "/low-confidence";
 
     /// <summary>Strips a confidence suffix, if present, back to the base rule ID it was derived from.</summary>
-    public static string BaseRuleId(string ruleId) =>
-        ruleId.EndsWith(MediumConfidenceSuffix, StringComparison.Ordinal) ? ruleId[..^MediumConfidenceSuffix.Length]
-        : ruleId.EndsWith(LowConfidenceSuffix, StringComparison.Ordinal) ? ruleId[..^LowConfidenceSuffix.Length]
-        : ruleId;
+    public static string BaseRuleId(string ruleId)
+    {
+        if (ruleId.EndsWith(MediumConfidenceSuffix, StringComparison.Ordinal))
+        {
+            return ruleId[..^MediumConfidenceSuffix.Length];
+        }
+
+        if (ruleId.EndsWith(LowConfidenceSuffix, StringComparison.Ordinal))
+        {
+            return ruleId[..^LowConfidenceSuffix.Length];
+        }
+
+        return ruleId;
+    }
 
     public static string Slug(string ruleId)
     {

@@ -933,9 +933,9 @@ silentscan scan-corpus-live &lt;manifest.json&gt;             <span class="c"># 
 
 <script>
   (function () {
-    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var reduce = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
     var items = document.querySelectorAll('.rise:not(.in)');
-    if (reduce.matches || !('IntersectionObserver' in window)) {
+    if (reduce.matches || !('IntersectionObserver' in globalThis)) {
       items.forEach(function (el) { el.classList.add('in'); });
       return;
     }

@@ -11,9 +11,10 @@ namespace SilentScan.Tests.Reporting;
 /// published link shows up here as a slug collision or a mismatched URI, not as a 404 someone
 /// finds later.
 /// </summary>
-public sealed class RuleDocSiteTests
+public sealed partial class RuleDocSiteTests
 {
-    private static readonly Regex SlugPattern = new("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.Compiled);
+    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    private static partial Regex SlugPattern();
 
     [Fact]
     public void Slug_EveryCatalogRule_IsUniqueAndWellFormed()
@@ -22,7 +23,7 @@ public sealed class RuleDocSiteTests
 
         foreach (var slug in slugs)
         {
-            Assert.Matches(SlugPattern, slug);
+            Assert.Matches(SlugPattern(), slug);
         }
 
         var distinct = slugs.Distinct(StringComparer.Ordinal).Count();
