@@ -271,9 +271,16 @@ public static class LiveScanRunner
             // never a stored procedure body at all, so it never became a TypedPredicateFinding in
             // the first place, no matter how often the plan cache shows it converting. This
             // promotes exactly the (table, column) pairs the module-body pass never covered.
+            // SQL Server identifiers are case-insensitive - every other identifier map in this
+            // codebase (DatabaseCatalog's own dictionaries) is keyed OrdinalIgnoreCase, but the
+            // default tuple comparer ToHashSet() would otherwise use here is ordinal/case-
+            // sensitive. One side of this key comes from parsed module text, the other from the
+            // live plan cache/sys metadata - a casing difference between them (dbo.Orders vs
+            // dbo.orders) would miss the match and publish a duplicate workload finding for a
+            // column this scan already reported.
             var alreadyCovered = report.TypedFindings
                 .Select(f => (f.Column.TableQualifiedName, f.Column.ColumnName))
-                .ToHashSet();
+                .ToHashSet(TupleOrdinalIgnoreCaseComparer.Instance);
             workloadFindings = await planCacheReader.ReadWorkloadFindingsAsync(catalog, alreadyCovered, cancellationToken: cancellationToken);
         }
 
@@ -329,3 +336,18 @@ public sealed record LiveScanResult(
 
 /// <summary>One static finding plus whether the live plan cache actually shows it converting right now, and how often.</summary>
 public sealed record RankedFinding(TypedPredicateFinding Finding, bool ObservedInLivePlanCache, long ObservedExecutionCount);
+
+/// <summary>SQL Server identifiers are case-insensitive - matches every other identifier map in this codebase (DatabaseCatalog's own dictionaries all use OrdinalIgnoreCase), unlike the default tuple comparer's ordinal/case-sensitive behavior.</summary>
+internal sealed class TupleOrdinalIgnoreCaseComparer : IEqualityComparer<(string TableQualifiedName, string ColumnName)>
+{
+    public static readonly TupleOrdinalIgnoreCaseComparer Instance = new();
+
+    public bool Equals((string TableQualifiedName, string ColumnName) x, (string TableQualifiedName, string ColumnName) y) =>
+        string.Equals(x.TableQualifiedName, y.TableQualifiedName, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(x.ColumnName, y.ColumnName, StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode((string TableQualifiedName, string ColumnName) obj) =>
+        HashCode.Combine(
+            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.TableQualifiedName),
+            StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ColumnName));
+}
