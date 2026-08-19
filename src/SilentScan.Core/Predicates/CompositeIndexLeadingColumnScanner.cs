@@ -57,7 +57,7 @@ public static class CompositeIndexLeadingColumnScanner
 
         private void InspectTable(
             CatalogTable table,
-            HashSet<(string Table, string Column)> andConstrainedColumns,
+            HashSet<ColumnProvenance.BaseColumn> andConstrainedColumns,
             HashSet<(string Table, string Column)> anyReferencedColumns,
             TSqlFragment node)
         {
@@ -76,7 +76,7 @@ public static class CompositeIndexLeadingColumnScanner
                 for (var position = 1; position < index.KeyColumns.Count; position++)
                 {
                     var violatingColumn = index.KeyColumns[position];
-                    if (!andConstrainedColumns.Contains((table.QualifiedName, violatingColumn)))
+                    if (!andConstrainedColumns.Contains(new ColumnProvenance.BaseColumn(table.QualifiedName, violatingColumn, Type: null)))
                     {
                         continue;
                     }

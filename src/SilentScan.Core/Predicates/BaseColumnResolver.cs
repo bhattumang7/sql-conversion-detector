@@ -17,8 +17,15 @@ namespace SilentScan.Core.Predicates;
 /// false violation) or drop OUTPUT-parameter propagation across a differently-cased call site.
 /// ValueTuple element names are compile-time only, so this same comparer applies to any
 /// <c>(string, string)</c> pair regardless of what its own element names are called.
+/// Also implements <see cref="IEqualityComparer{T}"/> of <see cref="ColumnProvenance.BaseColumn"/>
+/// directly (Phase 1.5 "one binder"): a caller holding the richer, depth/type-bearing identity
+/// <see cref="BaseColumnResolver.ResolveBaseColumn"/> now returns can key a set/dictionary by it
+/// without first flattening back down to a tuple - same casing rule, same comparer, one place
+/// it's defined, rather than forking it for the two element shapes.
 /// </summary>
-public sealed class TableColumnKeyComparer : IEqualityComparer<(string Table, string Column)>
+public sealed class TableColumnKeyComparer :
+    IEqualityComparer<(string Table, string Column)>,
+    IEqualityComparer<ColumnProvenance.BaseColumn>
 {
     public static readonly TableColumnKeyComparer Instance = new();
 
@@ -28,6 +35,15 @@ public sealed class TableColumnKeyComparer : IEqualityComparer<(string Table, st
 
     public int GetHashCode((string Table, string Column) obj) =>
         HashCode.Combine(obj.Table.ToUpperInvariant(), obj.Column.ToUpperInvariant());
+
+    public bool Equals(ColumnProvenance.BaseColumn? x, ColumnProvenance.BaseColumn? y) =>
+        x is null || y is null
+            ? ReferenceEquals(x, y)
+            : string.Equals(x.TableQualifiedName, y.TableQualifiedName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.ColumnName, y.ColumnName, StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode(ColumnProvenance.BaseColumn obj) =>
+        HashCode.Combine(obj.TableQualifiedName.ToUpperInvariant(), obj.ColumnName.ToUpperInvariant());
 }
 
 /// <summary>
@@ -45,7 +61,7 @@ public sealed class TableColumnKeyComparer : IEqualityComparer<(string Table, st
 /// </summary>
 internal static class BaseColumnResolver
 {
-    public static (string Table, string Column)? ResolveBaseColumn(
+    public static ColumnProvenance.BaseColumn? ResolveBaseColumn(
         ScalarExpression expression, string sourcePath,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
     {
@@ -56,11 +72,11 @@ internal static class BaseColumnResolver
 
         var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null);
         return provenance is ColumnProvenance.BaseColumn { Depth: 0 } baseColumn
-            ? (baseColumn.TableQualifiedName, baseColumn.ColumnName)
+            ? baseColumn
             : null;
     }
 
-    public static IEnumerable<(string Table, string Column)> ResolveBothSides(
+    public static IEnumerable<ColumnProvenance.BaseColumn> ResolveBothSides(
         BooleanComparisonExpression predicate, string sourcePath,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
     {

@@ -307,10 +307,10 @@ public static class PartialCompositeForeignKeyJoinScanner
                 || (Matches(left, fk.ReferencedTableQualifiedName, pair.ReferencedColumnName) && Matches(right, fk.ParentTableQualifiedName, pair.ParentColumnName));
         }
 
-        private static bool Matches((string Table, string Column)? resolved, string table, string column) =>
+        private static bool Matches(ColumnProvenance.BaseColumn? resolved, string table, string column) =>
             resolved is { } r
-            && string.Equals(r.Table, table, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(r.Column, column, StringComparison.OrdinalIgnoreCase);
+            && string.Equals(r.TableQualifiedName, table, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Resolved through the ALREADY CTE-aware scope chain (<paramref name="byAlias"/>, built

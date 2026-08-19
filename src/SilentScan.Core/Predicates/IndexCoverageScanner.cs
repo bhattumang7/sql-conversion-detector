@@ -53,13 +53,13 @@ public static class IndexCoverageScanner
 
         private void InspectTable(
             CatalogTable table,
-            HashSet<(string Table, string Column)> andConstrainedColumns,
+            HashSet<ColumnProvenance.BaseColumn> andConstrainedColumns,
             HashSet<(string Table, string Column)> allReferencedColumns,
             TSqlFragment node)
         {
             var constrainedColumnsOnTable = andConstrainedColumns
-                .Where(c => string.Equals(c.Table, table.QualifiedName, StringComparison.OrdinalIgnoreCase))
-                .Select(c => c.Column)
+                .Where(c => string.Equals(c.TableQualifiedName, table.QualifiedName, StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.ColumnName)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             if (constrainedColumnsOnTable.Count == 0)

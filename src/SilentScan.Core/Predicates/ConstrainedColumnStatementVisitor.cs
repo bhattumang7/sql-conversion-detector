@@ -21,7 +21,7 @@ namespace SilentScan.Core.Predicates;
 /// <param name="Node">The statement fragment a finding should be reported against.</param>
 internal sealed record ConstrainedStatement(
     IReadOnlyList<CatalogTable> BaseTables,
-    HashSet<(string Table, string Column)> AndConstrainedColumns,
+    HashSet<ColumnProvenance.BaseColumn> AndConstrainedColumns,
     IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChain,
     IReadOnlyList<QualifiedJoin> JoinNodes,
     BooleanExpression? WhereCondition,
