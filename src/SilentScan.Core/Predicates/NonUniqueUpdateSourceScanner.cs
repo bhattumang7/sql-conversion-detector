@@ -63,10 +63,9 @@ public static class NonUniqueUpdateSourceScanner
                 return;
             }
 
-            var cteNames = withClause is null ? EmptyCteNames : CteNameCollector.Collect(withClause);
             foreach (var join in spec.FromClause!.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
-                InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses, cteNames);
+                InspectJoin(join, targetAlias, targetQualifiedName, spec.SetClauses, byAlias);
             }
         }
 
@@ -80,19 +79,35 @@ public static class NonUniqueUpdateSourceScanner
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-        private static readonly IReadOnlySet<string> EmptyCteNames = new HashSet<string>();
 
-        private void InspectJoin(QualifiedJoin join, string targetAlias, string targetQualifiedName, IList<SetClause> setClauses, IReadOnlySet<string> cteNames)
+        /// <summary>
+        /// The alias a <see cref="NamedTableReference"/> is known by in its own FROM clause -
+        /// matches <see cref="ExplicitVisit(UpdateStatement)"/>'s own <c>targetAlias</c> extraction.
+        /// Any other <see cref="TableReference"/> shape (subquery, TVF, another nested JOIN) is
+        /// unresolvable to a single alias here and correctly falls through to null - a known,
+        /// stated v1 scope limit (a join two hops from the target, or through something other than
+        /// a direct base table, is a materially different claim this scanner does not make).
+        /// </summary>
+        private static string? AliasOf(TableReference reference) =>
+            reference is NamedTableReference named ? named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value : null;
+
+        private void InspectJoin(
+            QualifiedJoin join, string targetAlias, string targetQualifiedName,
+            IList<SetClause> setClauses, IReadOnlyDictionary<string, ScopeEntry> byAlias)
         {
-            var (firstAlias, firstQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.FirstTableReference, cteNames);
-            var (secondAlias, secondQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference, cteNames);
+            var firstAlias = AliasOf(join.FirstTableReference);
+            var secondAlias = AliasOf(join.SecondTableReference);
 
             string sourceAlias, sourceQualifiedName;
-            if (string.Equals(firstAlias, targetAlias, StringComparison.OrdinalIgnoreCase) && secondAlias is not null && secondQualifiedName is not null)
+            if (string.Equals(firstAlias, targetAlias, StringComparison.OrdinalIgnoreCase)
+                && secondAlias is not null && byAlias.TryGetValue(secondAlias, out var secondEntry)
+                && !secondEntry.IsViewLayer && secondEntry.Relation.QualifiedName is { } secondQualifiedName)
             {
                 (sourceAlias, sourceQualifiedName) = (secondAlias, secondQualifiedName);
             }
-            else if (string.Equals(secondAlias, targetAlias, StringComparison.OrdinalIgnoreCase) && firstAlias is not null && firstQualifiedName is not null)
+            else if (string.Equals(secondAlias, targetAlias, StringComparison.OrdinalIgnoreCase)
+                && firstAlias is not null && byAlias.TryGetValue(firstAlias, out var firstEntry)
+                && !firstEntry.IsViewLayer && firstEntry.Relation.QualifiedName is { } firstQualifiedName)
             {
                 (sourceAlias, sourceQualifiedName) = (firstAlias, firstQualifiedName);
             }
