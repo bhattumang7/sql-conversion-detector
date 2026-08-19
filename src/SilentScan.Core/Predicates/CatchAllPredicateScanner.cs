@@ -15,9 +15,13 @@ namespace SilentScan.Core.Predicates;
 /// scanner rather than bolted onto the existing predicate walk.
 ///
 /// Deliberately base-table-only, like <see cref="PartialCompositeForeignKeyJoinScanner"/>: column
-/// resolution goes through <see cref="FromScopeResolver"/> with no CTE/view/temp-table scoping
-/// (empty resolved-views map, null ledger/CTE map/proc scope) - a known v1 scope limit, not a
-/// silently-missed case. Formal-parameter/RECOMPILE-guard tracking is this scanner's own copy of
+/// resolution goes through <see cref="FromScopeResolver"/> with no VIEW/temp-table scoping (empty
+/// resolved-views map, null ledger/proc scope) - a known v1 scope limit, not a silently-missed
+/// case. CTE shadowing is resolved properly, though, not left to this limit: a CTE is never
+/// schema-qualified, so it always shadows a same-named real base table for its statement's own
+/// lifetime, and resolving through the catalog instead (cteRelations always null, pre-fix)
+/// silently matched a CTE-shadowed reference against an unrelated real table sharing its name
+/// (2026-08 audit). Formal-parameter/RECOMPILE-guard tracking is this scanner's own copy of
 /// the identical logic <see cref="TypedPredicateExtractor"/> uses for the same purpose - a
 /// separate visitor over the same AST, so it cannot share that class's private state.
 /// </summary>
@@ -50,6 +54,8 @@ public static class CatchAllPredicateScanner
 
         private bool HasActiveRecompileGuard => _procedureHasWithRecompile || _statementHasOptionRecompile;
 
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
         public override void ExplicitVisit(CreateProcedureStatement node) =>
             VisitProcedureOrFunctionBody(node.Parameters, node.Options.Any(o => o.OptionKind == ProcedureOptionKind.Recompile), node);
 
@@ -74,7 +80,9 @@ public static class CatchAllPredicateScanner
         public override void ExplicitVisit(SelectStatement node)
         {
             var previous = BeginStatementOptimizerHints(node.OptimizerHints);
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
             base.ExplicitVisit(node);
+            cteScopeStack.Pop();
             _statementHasOptionRecompile = previous;
         }
 
@@ -82,7 +90,8 @@ public static class CatchAllPredicateScanner
         {
             if (!HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+                var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
                 InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
             }
 
@@ -95,7 +104,7 @@ public static class CatchAllPredicateScanner
             var spec = node.UpdateSpecification;
             if (!HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+                var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
                 InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
             }
 
@@ -109,7 +118,7 @@ public static class CatchAllPredicateScanner
             var spec = node.DeleteSpecification;
             if (!HasActiveRecompileGuard)
             {
-                var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+                var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
                 InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
             }
 
@@ -152,8 +161,8 @@ public static class CatchAllPredicateScanner
             _procedureHasWithRecompile = previousProcedureHasWithRecompile;
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
         {

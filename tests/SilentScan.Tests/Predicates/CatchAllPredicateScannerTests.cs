@@ -63,6 +63,34 @@ public sealed class CatchAllPredicateScannerTests
     }
 
     [Fact]
+    public void CteSharesNameWithIndexedBaseTable_AttributesThroughToTheRealUnderlyingColumn()
+    {
+        // 2026-08 audit (the finding that started it): cteRelations was always null, so a CTE
+        // named the same as dbo.Customers silently resolved against the real table's OWN "Code"
+        // column instead of the CTE's actual body - firing table=dbo.Customers col=Code
+        // indexed=True, a finding about the indexed column named in the OUTER query text but
+        // never actually read (the CTE renames Region to Code; the real catch-all is on Region).
+        // Fixed: the reference now resolves THROUGH the CTE to its true source - Region, not
+        // Code, and Region is unindexed here, so the finding's own shape changes to match reality
+        // rather than just disappearing (a CTE is never schema-qualified, so it always shadows a
+        // same-named real base table, but the underlying read is still genuine and still reported
+        // - correctly attributed, not incorrectly attributed the way the pre-fix bug was).
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                WITH Customers AS (SELECT Region AS Code FROM dbo.Customers)
+                SELECT 1 FROM Customers WHERE (Code = @p OR @p IS NULL);
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Customers", finding.TableQualifiedName);
+        Assert.Equal("Region", finding.ColumnName);
+        Assert.False(finding.Indexed);
+    }
+
+    [Fact]
     public void UnindexedColumn_StillFiresButReportsUnindexed()
     {
         var findings = Scan(
