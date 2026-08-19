@@ -18,6 +18,7 @@ namespace SilentScan.Tests.Predicates;
 /// tests lock in, matching the reasoning documented on <see cref="ModuleCompileFlagFinding"/>
 /// itself.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ModuleCompileFlagPipelineTests
 {
     [Fact]

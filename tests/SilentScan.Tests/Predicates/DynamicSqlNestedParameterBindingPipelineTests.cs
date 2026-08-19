@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// explicit value hand-off at the call site, not a name match across unrelated scopes. Runs
 /// through ScanReportBuilder, the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class DynamicSqlNestedParameterBindingPipelineTests
 {
     private static async Task<ScanReport> Scan(string sql)

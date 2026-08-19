@@ -30,6 +30,7 @@ namespace SilentScan.Tests.Diagnostics;
 /// load-bearing for a verdict. See Rules/VerdictClassifierTests.cs and
 /// Catalog/CollationTests.cs for the positive coverage this evidence backs.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class KnownGapCharacterizationTests
 {
     private static async Task<ScanReport> Scan(string sql)

@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Predicates;
 /// parses it with DynamicSqlParameterDeclarations.TryParse(text, catalog.TypeAliases) once the
 /// real catalog exists. Runs through ScanReportBuilder, the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class DynamicSqlParameterAliasPipelineTests
 {
     private static async Task<ScanReport> Scan(string sql)

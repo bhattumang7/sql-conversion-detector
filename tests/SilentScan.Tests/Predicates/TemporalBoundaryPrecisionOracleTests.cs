@@ -11,6 +11,7 @@ namespace SilentScan.Tests.Predicates;
 /// right at the edge of the precision gap and reading it back through both the buggy and the
 /// correct query shape.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class TemporalBoundaryPrecisionOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(TemporalBoundaryPrecisionOracleTests);

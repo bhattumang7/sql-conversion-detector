@@ -11,6 +11,7 @@ namespace SilentScan.Tests.Predicates;
 /// source is deterministic. Also directly confirms the load-bearing MERGE contrast this finding's
 /// own doc comment cites, rather than trusting Microsoft's documentation blind.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class NonUniqueUpdateSourceOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(NonUniqueUpdateSourceOracleTests);

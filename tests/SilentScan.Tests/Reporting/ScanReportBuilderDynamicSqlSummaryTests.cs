@@ -10,6 +10,7 @@ namespace SilentScan.Tests.Reporting;
 /// its own output, so the "X% of dynamic SQL call sites we could not analyze" figure CLAUDE.md's
 /// dynamic SQL policy requires had to be hand-counted from the finding list (an audit finding).
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderDynamicSqlSummaryTests
 {
     [Fact]

@@ -17,6 +17,7 @@ namespace SilentScan.Tests.Reporting;
 /// state what the scan could NOT establish have to survive into it rather than being trimmed as
 /// noise.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ReadableScanReportWriterTests
 {
     /// <summary>

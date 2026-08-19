@@ -20,6 +20,7 @@ namespace SilentScan.Tests.Predicates;
 /// existing compile-only <see cref="PlanXmlCapture"/> (<c>SET SHOWPLAN_XML ON</c>) is the right
 /// tool here, unlike for RECOMPILE.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class LocalVariablePredicateOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(LocalVariablePredicateOracleTests);

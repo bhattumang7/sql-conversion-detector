@@ -23,6 +23,7 @@ namespace SilentScan.Tests.Predicates;
 /// <c>PlanXmlCapture</c> every other Tier-1 sargability oracle test in this codebase uses -
 /// deliberate and necessary here, not an inconsistency.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class CatchAllPredicateOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(CatchAllPredicateOracleTests);

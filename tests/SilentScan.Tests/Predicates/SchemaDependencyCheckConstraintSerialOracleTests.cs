@@ -19,6 +19,7 @@ namespace SilentScan.Tests.Predicates;
 /// constraint; a plain SELECT with no WHERE/JOIN touching the constrained column shows no such
 /// marker.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SchemaDependencyCheckConstraintSerialOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(SchemaDependencyCheckConstraintSerialOracleTests);

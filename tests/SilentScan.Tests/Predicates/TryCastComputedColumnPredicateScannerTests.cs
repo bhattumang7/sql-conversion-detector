@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Predicates;
 /// evidence. Structural/AST+catalog tests for the extraction logic (file-mode catalog, mirroring
 /// <see cref="CatchAllPredicateScannerTests"/>'s own shape), plus an end-to-end live-oracle test.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class TryCastComputedColumnPredicateScannerTests
 {
     private static IReadOnlyList<TryCastComputedColumnPredicateFinding> Scan(string sql)

@@ -31,6 +31,7 @@ namespace SilentScan.Tests.Reporting;
 /// against is read from a real database that was deployed only the SQL known to be valid - the
 /// engine is still the sole source of catalog truth, it just never sees the broken batch text.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderParseRecoveryTests
 {
     [Fact]

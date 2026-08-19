@@ -11,6 +11,7 @@ namespace SilentScan.Tests.Predicates;
 /// session's own variable completely UNCHANGED - not reset to NULL, not defaulted, literally
 /// untouched regardless of what it held before the call.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class OutputParameterOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(OutputParameterOracleTests);

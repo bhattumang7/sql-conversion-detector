@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// general mechanism), not a per-finding proof - <see cref="UnderLengthParameterFinding"/> stays
 /// non-verdict-bearing and structural for the reasons its own doc comment states.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class UnderLengthParameterOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(UnderLengthParameterOracleTests);

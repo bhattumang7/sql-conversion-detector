@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Predicates;
 /// NOT to trigger this, proving the scanner's own exclusion of them is grounded in real behavior,
 /// not a guess either way.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class NonParallelizableIntrinsicOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(NonParallelizableIntrinsicOracleTests);

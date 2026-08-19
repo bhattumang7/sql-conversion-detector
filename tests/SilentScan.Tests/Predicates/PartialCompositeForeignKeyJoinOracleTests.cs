@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Predicates;
 /// relational algebra, unaffected by CE version, interleaved execution, or UDF inlining, so a
 /// single oracle run stands for every engine version this tool targets.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class PartialCompositeForeignKeyJoinOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(PartialCompositeForeignKeyJoinOracleTests);

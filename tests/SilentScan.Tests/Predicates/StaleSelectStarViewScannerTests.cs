@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// registry is live-only by construction; the end-to-end oracle test proves the real
 /// LiveCatalogReader read.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class StaleSelectStarViewScannerTests
 {
     private static ViewDefinition View(string sql)

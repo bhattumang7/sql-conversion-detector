@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Predicates;
 /// <c>NonParallelPlanReason</c> is an actual-plan attribute, the same class of correction the
 /// catch-all-predicate stream's RECOMPILE oracle needed earlier this session.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class TableVariableModificationOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(TableVariableModificationOracleTests);

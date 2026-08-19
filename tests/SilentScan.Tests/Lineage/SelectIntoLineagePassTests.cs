@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Lineage;
 /// closes that by re-resolving every target's columns once lineage exists. Runs through
 /// <see cref="ScanReportBuilder"/>, the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SelectIntoLineagePassTests
 {
     private static async Task<ScanReport> Scan(string sql)

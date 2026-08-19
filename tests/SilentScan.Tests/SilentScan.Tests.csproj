@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <None Include="fixtures/**/*.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

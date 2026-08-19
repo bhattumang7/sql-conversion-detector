@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Lineage;
 /// wrapper made every predicate through any recursive CTE unclassifiable for no real reason.
 /// Runs through <see cref="ScanReportBuilder"/>, the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class RecursiveCteAnchorTypeTests
 {
     private static async Task<ScanReport> Scan(string sql)

@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Reporting;
 /// whether the repo's files actually parsed as T-SQL. A repo below the parse-success bar must be
 /// visibly marked rather than sitting in the table looking like any other row.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ReadableCorpusReportWriterTests
 {
     private const string FindingSql = """

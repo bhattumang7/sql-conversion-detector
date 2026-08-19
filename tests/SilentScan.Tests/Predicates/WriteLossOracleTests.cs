@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Predicates;
 /// no corpus text is ever executed, only these hand-written literals against a table this test
 /// class itself created and drops in <see cref="OracleTestFixture.DisposeAsync"/>.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class WriteLossOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(WriteLossOracleTests);

@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// NonSargablePredicateScanner and TypedPredicateExtractor. Runs through
 /// <see cref="ScanReportBuilder"/>, the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class DynamicSqlScopePropagationTests
 {
     private static async Task<ScanReport> Scan(string sql)

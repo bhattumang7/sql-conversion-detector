@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Predicates;
 /// were never visible to Tier-1 regardless of scope, only to the typed pass. Runs through
 /// ScanReportBuilder, the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class Tier1TriggerScopeTests
 {
     private static async Task<ScanReport> Scan(string sql)

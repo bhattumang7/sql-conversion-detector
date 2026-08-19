@@ -11,6 +11,7 @@ namespace SilentScan.Tests.Predicates;
 /// cref="CheckConstraintScannerTests"/>'s own shape: hand-built-catalog unit tests for the
 /// scanner's own logic, plus an end-to-end live-oracle test proving the real deployment path.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class DefaultNullableConstraintScannerTests
 {
     private static CatalogTable Table(string schema, string name, IReadOnlyList<CatalogColumn> columns) =>

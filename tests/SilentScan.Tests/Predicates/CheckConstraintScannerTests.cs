@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Predicates;
 /// scanner; the engine mechanics themselves were separately verified against the real standing
 /// Docker oracle (docs/detection-checklist.md carries that evidence).
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class CheckConstraintScannerTests
 {
     private static CatalogTable Table(string schema, string name, IReadOnlyList<CatalogColumn> columns) =>

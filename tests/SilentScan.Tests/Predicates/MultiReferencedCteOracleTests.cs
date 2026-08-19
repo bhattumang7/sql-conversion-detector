@@ -12,6 +12,7 @@ namespace SilentScan.Tests.Predicates;
 /// knows this" SQL Server behavior to be backwards once actually checked against the oracle, so
 /// this claim gets the same direct verification rather than being assumed.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class MultiReferencedCteOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(MultiReferencedCteOracleTests);

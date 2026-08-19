@@ -15,6 +15,7 @@ namespace SilentScan.Tests.Catalog;
 /// real base object, not the synonym name. Runs through <see cref="ScanReportBuilder"/>, the
 /// same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SynonymResolutionTests
 {
     private static async Task<ScanReport> Scan(string sql)

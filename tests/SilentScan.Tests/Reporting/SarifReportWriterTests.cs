@@ -10,6 +10,7 @@ using SilentScan.Tests.Support;
 
 namespace SilentScan.Tests.Reporting;
 
+[Trait("Category", "Oracle")]
 public sealed class SarifReportWriterTests
 {
     [Fact]

@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// <c>AnsiPaddingMismatchOracleTests</c>/<c>TemporalBoundaryPrecisionOracleTests</c> already
 /// verify this class of finding in this codebase).
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class NotInNullableSubqueryOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(NotInNullableSubqueryOracleTests);

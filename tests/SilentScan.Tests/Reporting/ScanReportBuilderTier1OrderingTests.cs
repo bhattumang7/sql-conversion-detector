@@ -9,6 +9,7 @@ namespace SilentScan.Tests.Reporting;
 /// TypedFindings' own existing <c>ThenByDescending(f => f.Column.Indexed)</c> ranking, which
 /// Tier1Findings never had until now - this test is the regression guard for that gap.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ScanReportBuilderTier1OrderingTests
 {
     private const string Sql = """

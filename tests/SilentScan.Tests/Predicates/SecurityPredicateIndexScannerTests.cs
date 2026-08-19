@@ -16,6 +16,7 @@ namespace SilentScan.Tests.Predicates;
 /// documented with their own plan-XML evidence in <see cref="SecurityPredicateIndexFinding"/>'s own
 /// doc comment.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SecurityPredicateIndexScannerTests
 {
     private static CatalogTable Table(string schema, string name, IReadOnlyList<CatalogColumn> columns, IReadOnlyList<CatalogIndex> indexes) =>

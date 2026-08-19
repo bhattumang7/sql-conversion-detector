@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Predicates;
 /// plumbing (schema version bump, confidence filtering, live catalog agreement) rather than to
 /// re-cover the AST logic already covered there.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SecondSweepGLiveOracleTests
 {
     [Fact]

@@ -17,6 +17,7 @@ namespace SilentScan.Tests.Lineage;
 /// since that IS a real, nameable gap - see
 /// Diagnostics/KnownGapCharacterizationTests.CrossDatabaseReference_GetsAKeyNothingPopulates_NoTypedFinding.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class SystemDatabaseReferenceTests
 {
     private static async Task<ScanReport> Scan(string sql)

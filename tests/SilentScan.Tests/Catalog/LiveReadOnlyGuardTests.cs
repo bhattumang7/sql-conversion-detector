@@ -9,6 +9,7 @@ namespace SilentScan.Tests.Catalog;
 /// via its <c>CreateReadOnlyCommand</c> extension - this pins the guard's own logic directly, so
 /// a future edit that weakens it (e.g. widening the allowed statement set) fails here first.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class LiveReadOnlyGuardTests
 {
     [Fact]

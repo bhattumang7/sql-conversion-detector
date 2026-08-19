@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Reporting;
 /// sound. Runs through <see cref="ScanReportBuilder"/> (via <see cref="EngineAuthoritativeScan"/>),
 /// the same entry point production uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class CrossProcedureTempTableScopeTests
 {
     private static async Task<ScanReport> Scan(string sql)

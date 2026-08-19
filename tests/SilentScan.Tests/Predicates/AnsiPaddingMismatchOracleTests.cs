@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Predicates;
 /// matches, both with a padded column and with a trailing-whitespace literal) before LIKE was
 /// confirmed as the one shape that actually differs.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class AnsiPaddingMismatchOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(AnsiPaddingMismatchOracleTests);

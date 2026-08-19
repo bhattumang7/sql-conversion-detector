@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Predicates;
 /// real-world shape this rule targets: BEGIN TRANSACTION before a TRY/CATCH whose CATCH block
 /// never rolls back leaves the transaction open identically, even though an error occurred.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class TransactionHygieneOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(TransactionHygieneOracleTests);

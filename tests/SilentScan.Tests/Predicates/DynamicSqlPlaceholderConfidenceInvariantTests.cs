@@ -21,6 +21,7 @@ namespace SilentScan.Tests.Predicates;
 /// finding - this test exercises that path end-to-end via the real production entry point
 /// (<see cref="EngineAuthoritativeScan"/>), not by re-deriving the invariant from the internals.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class DynamicSqlPlaceholderConfidenceInvariantTests
 {
     public static TheoryData<string, string> PlaceholderBearingScenarios => new()

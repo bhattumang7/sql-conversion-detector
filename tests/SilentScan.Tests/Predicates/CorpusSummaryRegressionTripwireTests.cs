@@ -20,6 +20,7 @@ namespace SilentScan.Tests.Predicates;
 /// database needed - this only asserts the STATIC summary shape, not oracle confirmation (that's
 /// FullPipelineSyntheticMiniProjectTests' job, per-finding, already).
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class CorpusSummaryRegressionTripwireTests
 {
     private static readonly string ProjectDir = Path.Combine(AppContext.BaseDirectory, "fixtures", "mini_project");

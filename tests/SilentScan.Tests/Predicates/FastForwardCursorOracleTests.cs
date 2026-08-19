@@ -13,6 +13,7 @@ namespace SilentScan.Tests.Predicates;
 /// same advice's own reputation. <c>STATIC</c>/<c>KEYSET</c>/<c>DYNAMIC</c> cursors do NOT trigger
 /// this mechanism, also confirmed directly.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class FastForwardCursorOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(FastForwardCursorOracleTests);

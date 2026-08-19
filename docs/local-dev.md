@@ -19,7 +19,19 @@ not at the server level — each spike/bench database sets it explicitly after
 scripts/dotnet-safe.sh build
 scripts/dotnet-safe.sh test
 scripts/dotnet-safe.sh test --filter "FullyQualifiedName~DynamicSql"
+scripts/dotnet-safe.sh test --filter "Category!=Oracle"   # fast loop, no DB: ~3,000 tests in seconds
+scripts/dotnet-safe.sh test --filter "Category=Oracle"    # DB-backed only: ~650 tests, minutes (needs Docker SQL Server)
 ```
+
+Every test class that deploys to or queries the live Docker SQL Server
+carries `[Trait("Category", "Oracle")]` (measured 2026-08-19: this is exactly
+the DB-touching set — `OracleTestFixture`, `EngineAuthoritativeScan`,
+`DatabaseProvisioner`, a raw `SqlConnection`, or `PipelineOracleVerification`
+anywhere in the file). A new test class that touches any of those needs the
+same trait, or it silently drops out of the DB-backed tier's coverage while
+still slowing down the "fast" one. `Category!=Oracle` is the tight edit-loop
+filter; plain `scripts/dotnet-safe.sh test` (no filter) still runs everything
+and is what a pre-commit/pre-publish gate must use.
 
 Always go through `scripts/dotnet-safe.sh`, never a bare `dotnet build`/
 `dotnet test` piped into `tail`/`head`/`grep`/etc. Both commands spawn
@@ -49,6 +61,17 @@ never run two `dotnet build`/`dotnet test` invocations against this checkout
 at the same time; `sonar-scan.ps1` guards itself against this with its own
 build lock (`.sonar-scan.lock`), but a manually-run `dotnet build` or
 `dotnet test` you launch yourself isn't covered by it.
+
+`tests/SilentScan.Tests/xunit.runner.json` pins `maxParallelThreads` to 6,
+overriding xUnit's own default of "one thread per logical CPU"
+(`Environment.ProcessorCount`, 12 on this dev box). That default oversubscribes:
+12 is the *logical* CPU count on a 6-*physical*-core, hyperthreaded machine, and
+the Docker SQL Server container needs real physical cores of its own at the same
+time a DB-backed test run is hammering it. Measured directly (2026-08-19, same
+331-test slice each time): 12 threads → 157.9s wall, 6 threads → 136.9s — capping
+to the physical core count was consistently faster than the logical-CPU default,
+not slower, across every thread count tried in the 4-6 range. Re-measure before
+changing this if the dev/CI machine's core count differs.
 
 The Docker SQL Server above is a hard requirement for `dotnet test` overall,
 not just for `Integration/`: verdict-bearing tests across `Predicates/` also

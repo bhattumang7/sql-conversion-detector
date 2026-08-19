@@ -18,6 +18,7 @@ namespace SilentScan.Tests.Predicates;
 /// comparison and reporting path rather than a new finding type, per the checklist item's own
 /// instruction.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class CastConvertUnsizedLengthOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(CastConvertUnsizedLengthOracleTests);

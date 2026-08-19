@@ -21,6 +21,7 @@ namespace SilentScan.Tests.Predicates;
 /// sniffing for a stored-procedure EXEC is fully visible to the compile-only
 /// <c>SET SHOWPLAN_XML ON</c> probe <see cref="PlanXmlCapture"/> already uses.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ParameterReassignmentPredicateOracleTests : OracleTestFixture
 {
     protected override string DatabaseNameSeed => nameof(ParameterReassignmentPredicateOracleTests);

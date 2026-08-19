@@ -15,6 +15,7 @@ namespace SilentScan.Tests.Reporting;
 /// (CLAUDE.md calls that a P0), so it cannot be a line buried under the findings it undermines,
 /// and the connection string must never reach a report that gets written to a file and shared.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class ReadableLiveScanWriterTests
 {
     private static readonly LiveCatalogSummary Catalog = new("SQL_Latin1_General_CP1_CI_AS", 12, 96, 20, 1, []);
