@@ -470,7 +470,8 @@ public static class ReadableScanReportWriter
         SargabilityFindingKind.CaseFoldOnColumn => "UPPER/LOWER applied to the column",
         SargabilityFindingKind.DateFunctionOnColumn => "Date-part function applied to the column",
         SargabilityFindingKind.CharindexOrLeftOnColumn => "CHARINDEX/LEFT applied to the column",
-        _ => "LIKE with a non-literal pattern",
+        SargabilityFindingKind.LikePatternNotLiteral => "LIKE with a non-literal pattern",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SargabilityFindingKind."),
     };
 
     private static string Tier1Explanation(SargabilityFindingKind kind) => kind switch
@@ -537,7 +538,8 @@ public static class ReadableScanReportWriter
         TvfFenceFindingKind.NestedUnderViewOrTvf => "Fence inherited through a view/TVF layer",
         TvfFenceFindingKind.FromOrJoin => "Direct FROM/JOIN reference",
         TvfFenceFindingKind.InsertExec => "INSERT ... EXEC (forced worktable materialization)",
-        _ => "Standalone reference (fence present, nothing to poison)",
+        TvfFenceFindingKind.Standalone => "Standalone reference (fence present, nothing to poison)",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled TvfFenceFindingKind."),
     };
 
     private static IEnumerable<ReadableBlock> ScalarUdf(ScanReport report, int level, string? pathBase)
@@ -1335,7 +1337,8 @@ public static class ReadableScanReportWriter
     {
         ForcedSerialFindingKind.TableVariableModification => "Table variable modification",
         ForcedSerialFindingKind.FastForwardCursor => "FAST_FORWARD cursor",
-        _ => "Non-parallelizable intrinsic",
+        ForcedSerialFindingKind.NonParallelizableIntrinsic => "Non-parallelizable intrinsic",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ForcedSerialFindingKind."),
     };
 
     private static IEnumerable<ReadableBlock> UntrustedConstraint(ScanReport report, int level, string? pathBase)
@@ -2118,7 +2121,8 @@ public static class ReadableScanReportWriter
         SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature => "Module compiled under ANSI_NULLS OFF",
         SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature => "SET NUMERIC_ROUNDABORT ON",
         SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature => "SET ANSI_WARNINGS OFF",
-        _ => "SET CONCAT_NULL_YIELDS_NULL OFF",
+        SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature => "SET CONCAT_NULL_YIELDS_NULL OFF",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SetOptionFindingKind."),
     };
 
     private static string ScalarUdfTitle(ScalarUdfFindingKind kind) => kind switch
@@ -2126,7 +2130,8 @@ public static class ReadableScanReportWriter
         ScalarUdfFindingKind.PredicateInvocation => "Called in a predicate (non-sargable, per-row)",
         ScalarUdfFindingKind.NestedUnderViewOrTvf => "Reached through a view/iTVF layer",
         ScalarUdfFindingKind.SchemaDependency => "Called from a computed column/DEFAULT/CHECK constraint",
-        _ => "Called outside a predicate (per-row, sargability unaffected)",
+        ScalarUdfFindingKind.ProjectionInvocation => "Called outside a predicate (per-row, sargability unaffected)",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled ScalarUdfFindingKind."),
     };
 
     private static string ScalarUdfInlineabilityDisplay(ScalarUdfFinding finding) => finding.Inlineability switch
