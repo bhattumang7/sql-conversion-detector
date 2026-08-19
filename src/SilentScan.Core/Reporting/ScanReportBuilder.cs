@@ -799,7 +799,7 @@ public static class ScanReportBuilder
                 .AsParallel()
                 .SelectMany(r =>
                 {
-                    var findings = DeprecatedSyntaxScanner.Scan(r);
+                    var findings = DeprecatedSyntaxScanner.Scan(r, catalog);
                     deprecatedSyntaxStage.Advance();
                     return findings;
                 })

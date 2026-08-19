@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 
 namespace SilentScan.Core.Predicates;
@@ -39,13 +40,30 @@ public static class DeprecatedSyntaxScanner
         "sp_revokelogin", "sp_srvrolepermission",
     };
 
-    public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult)
+    /// <param name="parseResult">The already-parsed module/file to scan.</param>
+    /// <param name="catalog">
+    /// When supplied (live/corpus mode only - file-mode scanning never populates this), used to
+    /// suppress the "= NULL"/"&lt;&gt; NULL" findings for a module whose own live-read
+    /// <c>sys.sql_modules.uses_ansi_nulls</c> is false: under ANSI_NULLS OFF (baked in at
+    /// CREATE/ALTER time), <c>col = NULL</c> behaves as <c>col IS NULL</c> and genuinely matches
+    /// NULL rows, so the finding's core claim - a silent always-false trap - would be actively
+    /// wrong for that module. A module this pass can't resolve the flag for (file-mode, or a
+    /// live catalog lookup miss) keeps the finding - CLAUDE.md precision discipline treats a
+    /// false positive as worse than a missed one, but an unresolved flag is the documented
+    /// majority-case default (ANSI_NULLS ON), not a license to suppress speculatively.
+    /// </param>
+    public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
         var findings = new List<DeprecatedSyntaxFinding>();
 
         ScanTaskComments(parseResult, findings);
 
-        var visitor = new Visitor(parseResult.SourcePath);
+        var ansiNullsIsOff = catalog is not null
+            && TryGetModuleQualifiedName(parseResult.Fragment) is { } qualifiedName
+            && catalog.TryGetModuleUsesAnsiNulls(qualifiedName, out var usesAnsiNulls)
+            && !usesAnsiNulls;
+
+        var visitor = new Visitor(parseResult.SourcePath, ansiNullsIsOff);
         parseResult.Fragment.Accept(visitor);
         findings.AddRange(visitor.Findings);
 
@@ -115,11 +133,63 @@ public static class DeprecatedSyntaxScanner
         return false;
     }
 
+    /// <summary>The qualified name of the single procedure/function/view/trigger a parse result's own top-level CREATE/ALTER statement declares, if any - null for a parse result with no such statement (an ad-hoc script, a batch of plain DML) or with more than one candidate (a multi-object file-mode script, where no single module's own ANSI_NULLS flag would apply to the whole fragment anyway).</summary>
+    private static string? TryGetModuleQualifiedName(TSqlFragment fragment)
+    {
+        if (fragment is not TSqlScript script)
+        {
+            return null;
+        }
+
+        var collector = new ModuleNameCollector();
+        script.Accept(collector);
+        return collector.Names is [{ } only] ? only : null;
+    }
+
+    private static string QualifiedName(SchemaObjectName name) =>
+        name.SchemaIdentifier is { } schema
+            ? $"{schema.Value}.{name.BaseIdentifier.Value}"
+            : name.BaseIdentifier.Value;
+
+    private sealed class ModuleNameCollector : TSqlFragmentVisitor
+    {
+        public List<string> Names { get; } = [];
+
+        public override void Visit(CreateProcedureStatement node) => Names.Add(QualifiedName(node.ProcedureReference.Name));
+
+        public override void Visit(AlterProcedureStatement node) => Names.Add(QualifiedName(node.ProcedureReference.Name));
+
+        public override void Visit(CreateOrAlterProcedureStatement node) => Names.Add(QualifiedName(node.ProcedureReference.Name));
+
+        public override void Visit(CreateViewStatement node) => Names.Add(QualifiedName(node.SchemaObjectName));
+
+        public override void Visit(AlterViewStatement node) => Names.Add(QualifiedName(node.SchemaObjectName));
+
+        public override void Visit(CreateOrAlterViewStatement node) => Names.Add(QualifiedName(node.SchemaObjectName));
+
+        public override void Visit(CreateFunctionStatement node) => Names.Add(QualifiedName(node.Name));
+
+        public override void Visit(AlterFunctionStatement node) => Names.Add(QualifiedName(node.Name));
+
+        public override void Visit(CreateOrAlterFunctionStatement node) => Names.Add(QualifiedName(node.Name));
+
+        public override void Visit(CreateTriggerStatement node) => Names.Add(QualifiedName(node.Name));
+
+        public override void Visit(AlterTriggerStatement node) => Names.Add(QualifiedName(node.Name));
+
+        public override void Visit(CreateOrAlterTriggerStatement node) => Names.Add(QualifiedName(node.Name));
+    }
+
     private sealed class Visitor : TSqlFragmentVisitor
     {
         private readonly string sourcePath;
+        private readonly bool ansiNullsIsOff;
 
-        public Visitor(string sourcePath) => this.sourcePath = sourcePath;
+        public Visitor(string sourcePath, bool ansiNullsIsOff)
+        {
+            this.sourcePath = sourcePath;
+            this.ansiNullsIsOff = ansiNullsIsOff;
+        }
 
         public List<DeprecatedSyntaxFinding> Findings { get; } = [];
 
@@ -129,13 +199,13 @@ public static class DeprecatedSyntaxScanner
 
             switch (node.ComparisonType)
             {
-                case BooleanComparisonType.Equals when comparesToNull:
+                case BooleanComparisonType.Equals when comparesToNull && !ansiNullsIsOff:
                     Add(DeprecatedSyntaxFindingKind.EqualsNullComparison, node,
                         "\"= NULL\" never matches any row under the default ANSI_NULLS ON session setting, including a genuinely NULL value - use \"IS NULL\".");
                     break;
 
                 case BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation
-                    when comparesToNull:
+                    when comparesToNull && !ansiNullsIsOff:
                     Add(DeprecatedSyntaxFindingKind.NotEqualsNullComparison, node,
                         "\"<> NULL\"/\"!= NULL\" never matches any row under the default ANSI_NULLS ON session setting - use \"IS NOT NULL\".");
                     break;
@@ -279,10 +349,6 @@ public static class DeprecatedSyntaxScanner
             _ => type.ToString(),
         };
 
-        private static string QualifiedName(SchemaObjectName name) =>
-            name.SchemaIdentifier is { } schema
-                ? $"{schema.Value}.{name.BaseIdentifier.Value}"
-                : name.BaseIdentifier.Value;
 
         private void Add(DeprecatedSyntaxFindingKind kind, TSqlFragment node, string detail) =>
             Findings.Add(new DeprecatedSyntaxFinding(

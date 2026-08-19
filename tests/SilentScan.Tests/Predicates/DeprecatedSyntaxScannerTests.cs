@@ -1,3 +1,4 @@
+using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 
@@ -87,6 +88,52 @@ public sealed class DeprecatedSyntaxScannerTests
     public void EqualsNull_Fires()
     {
         var findings = Scan("SELECT * FROM dbo.T WHERE Col = NULL;");
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    /// <summary>
+    /// Under ANSI_NULLS OFF (baked in at CREATE/ALTER time from sys.sql_modules.uses_ansi_nulls),
+    /// "= NULL" behaves as "IS NULL" and genuinely matches NULL rows - the finding's core claim
+    /// (a silent always-false trap) would be actively wrong for this module, so it must be
+    /// suppressed rather than fired unconditionally.
+    /// </summary>
+    [Fact]
+    public void EqualsNull_ModuleUsesAnsiNullsOff_Suppressed()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
+        Assert.False(result.HasErrors);
+
+        var catalog = new DatabaseCatalog();
+        catalog.AddModuleUsesAnsiNulls("dbo.usp_Find", usesAnsiNulls: false);
+        var findings = DeprecatedSyntaxScanner.Scan(result, catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind is DeprecatedSyntaxFindingKind.EqualsNullComparison or DeprecatedSyntaxFindingKind.NotEqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_ModuleUsesAnsiNullsTrue_StillFires()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
+        Assert.False(result.HasErrors);
+
+        var catalog = new DatabaseCatalog();
+        catalog.AddModuleUsesAnsiNulls("dbo.usp_Find", usesAnsiNulls: true);
+        var findings = DeprecatedSyntaxScanner.Scan(result, catalog);
+
+        Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
+    }
+
+    [Fact]
+    public void EqualsNull_ModuleFlagUnresolved_StillFires()
+    {
+        // No catalog entry for this module at all (file-mode scanning, or a live catalog lookup
+        // miss) - the documented majority-case default (ANSI_NULLS ON) applies, not a
+        // speculative suppression.
+        var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
+        Assert.False(result.HasErrors);
+
+        var findings = DeprecatedSyntaxScanner.Scan(result, catalog: new DatabaseCatalog());
 
         Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
     }
