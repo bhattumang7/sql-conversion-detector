@@ -29,8 +29,10 @@ public sealed class LiveModuleReader
         var modules = await ReadReadableModulesAsync(connection, cancellationToken);
         var encrypted = await ReadEncryptedModulesAsync(connection, cancellationToken);
         var clr = await ReadClrModulesAsync(connection, cancellationToken);
+        var nonStandard = await ReadNonStandardModuleTypesAsync(connection, cancellationToken);
+        var numberedProcedureBodies = await ReadNumberedProcedureBodiesBeyondFirstAsync(connection, cancellationToken);
 
-        return new LiveModuleReadResult(modules, [.. encrypted, .. clr]);
+        return new LiveModuleReadResult(modules, [.. encrypted, .. clr, .. nonStandard, .. numberedProcedureBodies]);
     }
 
     private static async Task<List<LiveModule>> ReadReadableModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
@@ -123,6 +125,69 @@ public sealed class LiveModuleReader
             """;
 
         return await ReadUnanalyzableAsync(connection, sql, UnanalyzableModuleReason.ClrAssemblyModule, cancellationToken);
+    }
+
+    /// <summary>
+    /// A <c>sys.sql_modules</c> row with a genuinely readable body whose OWN object type falls
+    /// outside the standard view/procedure/function/trigger set <see cref="ReadReadableModulesAsync"/>
+    /// parses - a replication-filter procedure (<c>RF</c>), a legacy rule (<c>R</c>), or a
+    /// standalone default (<c>D</c>) all carry readable T-SQL text this reader has simply never
+    /// modeled. Previously dropped silently by the type filter alone, with no
+    /// <see cref="UnanalyzableModule"/> entry to say so - the exact honesty gap
+    /// <see cref="ReadEncryptedModulesAsync"/>/<see cref="ReadClrModulesAsync"/> already close for
+    /// their own unreadable-body cases.
+    /// </summary>
+    private static async Task<List<UnanalyzableModule>> ReadNonStandardModuleTypesAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type
+            FROM sys.sql_modules m
+            JOIN sys.objects o ON o.object_id = m.object_id
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            WHERE o.is_ms_shipped = 0
+              AND m.definition IS NOT NULL
+              AND o.type NOT IN ('V', 'P', 'FN', 'TF', 'IF', 'TR')
+            ORDER BY s.name, o.name;
+            """;
+
+        return await ReadUnanalyzableAsync(connection, sql, UnanalyzableModuleReason.NonStandardModuleType, cancellationToken);
+    }
+
+    /// <summary>
+    /// A numbered stored procedure's body beyond #1 - <c>sys.sql_modules</c> only ever holds body
+    /// #1's own text for a numbered proc's single shared <c>sys.objects</c> row, so bodies 2..n
+    /// (real, callable T-SQL via <c>EXEC ProcName;2</c>) were never read at all despite this same
+    /// reader's own <see cref="SilentScan.Core.Predicates.DeprecatedSyntaxScanner"/> already
+    /// flagging the numbered-procedure syntax when it appears in text this pass DID read. Reported
+    /// per body (<c>schema.name;procedure_number</c>-shaped in the qualified name used elsewhere)
+    /// rather than assumed clean.
+    /// </summary>
+    private static async Task<List<UnanalyzableModule>> ReadNumberedProcedureBodiesBeyondFirstAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, o.name AS object_name, np.procedure_number
+            FROM sys.numbered_procedures np
+            JOIN sys.objects o ON o.object_id = np.object_id
+            JOIN sys.schemas s ON s.schema_id = o.schema_id
+            WHERE o.is_ms_shipped = 0
+              AND np.procedure_number > 1
+            ORDER BY s.name, o.name, np.procedure_number;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var results = new List<UnanalyzableModule>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new UnanalyzableModule(
+                SchemaName: reader.GetString(0),
+                ObjectName: $"{reader.GetString(1)};{reader.GetInt16(2)}",
+                ObjectTypeCode: "P",
+                Reason: UnanalyzableModuleReason.NumberedProcedureBody));
+        }
+
+        return results;
     }
 
     private static async Task<List<UnanalyzableModule>> ReadUnanalyzableAsync(

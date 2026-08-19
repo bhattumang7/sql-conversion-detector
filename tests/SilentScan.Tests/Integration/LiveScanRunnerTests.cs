@@ -84,4 +84,28 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
         Assert.Equal(UnanalyzableModuleReason.Encrypted, unanalyzable.Reason);
         Assert.Equal("dbo.usp_EncryptedLookup", unanalyzable.QualifiedName);
     }
+
+    [Fact]
+    public async Task RunAsync_NumberedProcedureBodyBeyondFirst_IsReportedUnanalyzableNotSilentlyDropped()
+    {
+        // sys.sql_modules only ever holds a numbered procedure's body #1 text - body #2 is real,
+        // callable T-SQL (EXEC dbo.usp_Numbered;2) that this pass has no path to read at all, and
+        // must not silently vanish with no trace the way it did before this fix.
+        const string numberedProcSql = """
+            CREATE PROCEDURE dbo.usp_Numbered;1 AS SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'x';
+            GO
+            CREATE PROCEDURE dbo.usp_Numbered;2 AS SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'y';
+            """;
+        await new SilentScan.Verify.Deployment.ScriptDeployer(Options).DeployAsync(numberedProcSql, DatabaseName);
+
+        var result = await LiveScanRunner.RunAsync(Options.BuildConnectionString(DatabaseName));
+
+        // Body #1 reads normally through sys.sql_modules like any other procedure, alongside the
+        // two plaintext modules from the class-level Ddl.
+        Assert.Equal(3, result.ModulesAnalyzed);
+
+        var unanalyzable = Assert.Single(result.UnanalyzableModules, m => m.ObjectName.StartsWith("usp_Numbered;", StringComparison.Ordinal));
+        Assert.Equal(UnanalyzableModuleReason.NumberedProcedureBody, unanalyzable.Reason);
+        Assert.Equal("dbo.usp_Numbered;2", unanalyzable.QualifiedName);
+    }
 }

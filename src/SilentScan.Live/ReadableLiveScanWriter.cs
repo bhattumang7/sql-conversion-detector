@@ -242,7 +242,16 @@ public static class ReadableLiveScanWriter
             {
                 m.QualifiedName,
                 m.ObjectTypeCode,
-                m.Reason == UnanalyzableModuleReason.Encrypted ? "encrypted (WITH ENCRYPTION)" : "backed by a CLR assembly",
+                DescribeUnanalyzableReason(m.Reason),
             })]);
     }
+
+    private static string DescribeUnanalyzableReason(UnanalyzableModuleReason reason) => reason switch
+    {
+        UnanalyzableModuleReason.Encrypted => "encrypted (WITH ENCRYPTION)",
+        UnanalyzableModuleReason.ClrAssemblyModule => "backed by a CLR assembly",
+        UnanalyzableModuleReason.NonStandardModuleType => "non-standard module type (RF/R/D) - never modeled",
+        UnanalyzableModuleReason.NumberedProcedureBody => "numbered procedure body #2+ - sys.sql_modules only holds body #1",
+        _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unhandled UnanalyzableModuleReason."),
+    };
 }
