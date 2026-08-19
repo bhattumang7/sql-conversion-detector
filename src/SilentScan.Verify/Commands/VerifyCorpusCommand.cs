@@ -282,13 +282,13 @@ public static class VerifyCorpusCommand
                 Tier1NotConfirmed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.NotConfirmed)],
                 Tier1NotProbeable: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.NotProbeable)],
                 Tier1ProbeFailed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ProbeFailed)],
-                Tier1ConfirmedUnindexed: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ConfirmedUnindexed)],
+                Tier1UnindexedNotProbeable: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.UnindexedNotProbeable)],
                 Tier1ConfirmedViaScratchIndex: [.. tier1Results.Where(r => r.Outcome == Tier1Outcome.ConfirmedViaScratchIndex)],
                 ExpressionDerivedConfirmed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.Confirmed)],
                 ExpressionDerivedNotConfirmed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.NotConfirmed)],
                 ExpressionDerivedNotProbeable: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.NotProbeable)],
                 ExpressionDerivedProbeFailed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.ProbeFailed)],
-                ExpressionDerivedConfirmedUnindexed: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.ConfirmedUnindexed)],
+                ExpressionDerivedUnindexedNotProbeable: [.. expressionDerivedResults.Where(r => r.Outcome == ExpressionDerivedOutcome.UnindexedNotProbeable)],
                 TvfFenceConfirmed: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.Confirmed)],
                 TvfFenceNotConfirmed: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.NotConfirmed)],
                 TvfFenceNotProbeable: [.. tvfFenceResults.Where(r => r.Outcome == TvfFenceOutcome.NotProbeable)],
@@ -336,13 +336,13 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<Tier1Result> Tier1NotConfirmed,
     IReadOnlyList<Tier1Result> Tier1NotProbeable,
     IReadOnlyList<Tier1Result> Tier1ProbeFailed,
-    IReadOnlyList<Tier1Result> Tier1ConfirmedUnindexed,
+    IReadOnlyList<Tier1Result> Tier1UnindexedNotProbeable,
     IReadOnlyList<Tier1Result> Tier1ConfirmedViaScratchIndex,
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedConfirmed,
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedNotConfirmed,
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedNotProbeable,
     IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedProbeFailed,
-    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedConfirmedUnindexed,
+    IReadOnlyList<ExpressionDerivedResult> ExpressionDerivedUnindexedNotProbeable,
     IReadOnlyList<TvfFenceResult> TvfFenceConfirmed,
     IReadOnlyList<TvfFenceResult> TvfFenceNotConfirmed,
     IReadOnlyList<TvfFenceResult> TvfFenceNotProbeable,
@@ -372,13 +372,13 @@ public sealed record RepoVerificationSummary(
 
     public ConfidenceTally Tier1ConfirmedByConfidence => ConfidenceTally.Of(Tier1Confirmed, r => r.Finding.Confidence);
 
-    public ConfidenceTally Tier1ConfirmedUnindexedByConfidence => ConfidenceTally.Of(Tier1ConfirmedUnindexed, r => r.Finding.Confidence);
+    public ConfidenceTally Tier1UnindexedNotProbeableByConfidence => ConfidenceTally.Of(Tier1UnindexedNotProbeable, r => r.Finding.Confidence);
 
     public ConfidenceTally Tier1ConfirmedViaScratchIndexByConfidence => ConfidenceTally.Of(Tier1ConfirmedViaScratchIndex, r => r.Finding.Confidence);
 
     public ConfidenceTally ExpressionDerivedConfirmedByConfidence => ConfidenceTally.Of(ExpressionDerivedConfirmed, r => r.Finding.Confidence);
 
-    public ConfidenceTally ExpressionDerivedConfirmedUnindexedByConfidence => ConfidenceTally.Of(ExpressionDerivedConfirmedUnindexed, r => r.Finding.Confidence);
+    public ConfidenceTally ExpressionDerivedUnindexedNotProbeableByConfidence => ConfidenceTally.Of(ExpressionDerivedUnindexedNotProbeable, r => r.Finding.Confidence);
 
     public ConfidenceTally CollationConflictConfirmedByConfidence => ConfidenceTally.Of(CollationConflictConfirmed, r => r.Finding.Confidence);
 

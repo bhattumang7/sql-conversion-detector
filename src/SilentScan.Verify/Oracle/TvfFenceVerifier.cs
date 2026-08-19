@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Predicates;
 
@@ -15,8 +16,8 @@ namespace SilentScan.Verify.Oracle;
 /// </summary>
 public sealed class TvfFenceVerifier
 {
-    private const string TableValuedFunctionMarker = "PhysicalOp=\"Table-valued function\"";
     private const string InsertExecMarker = "StatementType=\"INSERT EXEC\"";
+    private static readonly XNamespace ShowPlanNs = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
 
     private readonly PlanXmlCapture _planXmlCapture;
     private readonly FunctionParameterReader _functionParameterReader;
@@ -63,13 +64,50 @@ public sealed class TvfFenceVerifier
             return new TvfFenceResult(finding, TvfFenceOutcome.ProbeFailed, ex.Message);
         }
 
-        var hasFenceOperator = planXml.Contains(TableValuedFunctionMarker, StringComparison.Ordinal);
+        var hasFenceOperator = HasMatchingTableValuedFunction(planXml, qualifiedName);
         return hasFenceOperator
             ? new TvfFenceResult(finding, TvfFenceOutcome.Confirmed, null)
             : new TvfFenceResult(
                 finding, TvfFenceOutcome.NotConfirmed,
-                $"The plan for '{qualifiedName}' shows no Table-valued function operator - it dissolved into base operators like an inline TVF, contradicting the finding's own claim.");
+                $"The plan for '{qualifiedName}' shows no Table-valued function operator naming '{qualifiedName}' itself - it dissolved into base operators like an inline TVF (or the plan's only TVF operator names a different function entirely), contradicting the finding's own claim.");
     }
+
+    // Checking for a bare "PhysicalOp=\"Table-valued function\"" anywhere in the plan document
+    // would confirm off an entirely unrelated TVF the same batch happens to reference - this
+    // parses the plan and requires the RelOp's own name to match THIS finding's function.
+    // Unlike <UserDefinedFunction FunctionName="...">, showplan's own <TableValuedFunction>
+    // element carries no FunctionName attribute at all (oracle-verified directly against
+    // Docker) - the function's identity instead sits on a nested
+    // <Object Database="[..]" Schema="[..]" Table="[..]"> element, exactly like an ordinary
+    // table reference's own Object element.
+    private static bool HasMatchingTableValuedFunction(string planXml, string qualifiedName)
+    {
+        var doc = XDocument.Parse(planXml);
+        return doc.Descendants(ShowPlanNs + "RelOp")
+            .Where(relOp => (string?)relOp.Attribute("PhysicalOp") == "Table-valued function")
+            .SelectMany(relOp => relOp.Descendants(ShowPlanNs + "TableValuedFunction"))
+            .SelectMany(tvf => tvf.Elements(ShowPlanNs + "Object"))
+            .Any(obj => NamesSameFunction(obj, qualifiedName));
+    }
+
+    // The plan's Schema/Table attributes are bracketed and split apart, while
+    // finding.FunctionQualifiedName is always the unbracketed "schema.name"
+    // (SchemaObjectNameHelper.QualifyFunctionCall) - this rebuilds "schema.name" from the plan's
+    // own attributes and compares case-insensitively, ignoring the plan's own Database attribute
+    // exactly like the scalar-UDF check does (a qualified name is never database-prefixed here).
+    private static bool NamesSameFunction(XElement objectElement, string qualifiedName)
+    {
+        var schema = TrimBrackets((string?)objectElement.Attribute("Schema"));
+        var table = TrimBrackets((string?)objectElement.Attribute("Table"));
+        if (schema is null || table is null)
+        {
+            return false;
+        }
+
+        return string.Equals($"{schema}.{table}", qualifiedName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TrimBrackets(string? bracketedIdentifier) => bracketedIdentifier?.Trim('[', ']');
 
     private async Task<TvfFenceResult> VerifyInsertExecAsync(string database, TvfFenceFinding finding, CancellationToken cancellationToken)
     {

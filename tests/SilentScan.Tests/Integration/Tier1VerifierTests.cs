@@ -103,7 +103,7 @@ public sealed class Tier1VerifierTests : IAsyncLifetime
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding, _catalog);
 
-        Assert.Equal(Tier1Outcome.ConfirmedUnindexed, result.Outcome);
+        Assert.Equal(Tier1Outcome.UnindexedNotProbeable, result.Outcome);
     }
 
     [Fact]

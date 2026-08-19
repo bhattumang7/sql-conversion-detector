@@ -48,6 +48,33 @@ public sealed class IndexDeploymentChecker
         return count > 0;
     }
 
+    /// <summary>The name of a non-heap index (clustered or nonclustered) whose leading key column is <paramref name="columnName"/>, if any - lets a caller scope a plan-XML check to that specific index rather than asking "is there an Index Seek anywhere in this plan."</summary>
+    public async Task<string?> TryGetLeadingKeyIndexNameAsync(
+        string database, string schemaQualifiedTable, string columnName, CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT TOP (1) i.name
+            FROM sys.index_columns ic
+            JOIN sys.indexes i ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE ic.object_id = OBJECT_ID(@objectName)
+              AND ic.key_ordinal = 1
+              AND ic.is_included_column = 0
+              AND i.type IN (1, 2)
+              AND c.name = @columnName;
+            """;
+
+        await using var connection = new SqlConnection(_options.BuildConnectionString(database));
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("@objectName", schemaQualifiedTable);
+        command.Parameters.AddWithValue("@columnName", columnName);
+
+        return (string?)await command.ExecuteScalarAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Roadmap Phase E3: the common case in real-world corpora is a ScanForced/RangeSeek
     /// finding on a column the corpus's own DDL never indexed at all - previously this meant

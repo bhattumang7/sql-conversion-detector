@@ -15,6 +15,6 @@ public enum ExpressionDerivedOutcome
     /// <summary>The probe failed to compile/execute against the deployed schema.</summary>
     ProbeFailed,
 
-    /// <summary>No underlying base column is indexed at all - there is no seek to have lost, so the plan-shape signal cannot be checked. Unlike <see cref="Tier1Outcome.ConfirmedUnindexed"/>/<see cref="CorpusFindingOutcome.ConfirmedUnindexed"/>, this does not yet fall back to a scratch index - a documented, smaller follow-up gap (an expression-derived finding can have several underlying base columns across several tables, unlike the single-column case those two already handle).</summary>
-    ConfirmedUnindexed,
+    /// <summary>No underlying base column is indexed at all - there is no seek to have lost, so no plan was ever captured and nothing was confirmed. Unlike <see cref="Tier1Outcome.UnindexedNotProbeable"/>/<see cref="CorpusFindingOutcome.ConfirmedUnindexed"/>, this does not yet fall back to a scratch index - a documented, smaller follow-up gap (an expression-derived finding can have several underlying base columns across several tables, unlike the single-column case those two already handle).</summary>
+    UnindexedNotProbeable,
 }

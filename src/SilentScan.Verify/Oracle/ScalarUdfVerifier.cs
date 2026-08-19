@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Predicates;
 
@@ -36,8 +37,8 @@ namespace SilentScan.Verify.Oracle;
 /// </summary>
 public sealed class ScalarUdfVerifier
 {
-    private const string UserDefinedFunctionMarker = "<UserDefinedFunction";
     private const string InlinedMarker = "ContainsInlineScalarTsqlUdfs=\"1\"";
+    private static readonly XNamespace ShowPlanNs = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
 
     private readonly PlanXmlCapture _planXmlCapture;
     private readonly FunctionParameterReader _functionParameterReader;
@@ -76,7 +77,7 @@ public sealed class ScalarUdfVerifier
             return new ScalarUdfResult(finding, ScalarUdfOutcome.ProbeFailed, ex.Message);
         }
 
-        if (!pinnedPlanXml.Contains(UserDefinedFunctionMarker, StringComparison.Ordinal))
+        if (!HasMatchingUserDefinedFunction(pinnedPlanXml, finding.FunctionQualifiedName))
         {
             return new ScalarUdfResult(
                 finding, ScalarUdfOutcome.NotConfirmed,
@@ -108,7 +109,7 @@ public sealed class ScalarUdfVerifier
         }
 
         var engineInlinedNaturally = naturalPlanXml.Contains(InlinedMarker, StringComparison.Ordinal);
-        var engineDidNotInlineNaturally = naturalPlanXml.Contains(UserDefinedFunctionMarker, StringComparison.Ordinal);
+        var engineDidNotInlineNaturally = HasMatchingUserDefinedFunction(naturalPlanXml, finding.FunctionQualifiedName);
 
         if (finding.Inlineability == ScalarUdfInlineability.NotInlineable && engineInlinedNaturally)
         {
@@ -125,5 +126,31 @@ public sealed class ScalarUdfVerifier
         }
 
         return new ScalarUdfResult(finding, ScalarUdfOutcome.Confirmed, null);
+    }
+
+    // Checking for a bare "<UserDefinedFunction" anywhere in the plan document would confirm off
+    // an entirely unrelated scalar UDF the same batch happens to reference - this parses the plan
+    // and requires the element's own FunctionName to name THIS finding's function.
+    private static bool HasMatchingUserDefinedFunction(string planXml, string qualifiedName)
+    {
+        var doc = XDocument.Parse(planXml);
+        return doc.Descendants(ShowPlanNs + "UserDefinedFunction")
+            .Any(udf => NamesSameFunction((string?)udf.Attribute("FunctionName"), qualifiedName));
+    }
+
+    // The plan's FunctionName can be database-qualified (three parts) while
+    // finding.FunctionQualifiedName never is (SchemaObjectNameHelper.QualifyFunctionCall always
+    // renders schema.name) - an exact match would false-negative on that, so this checks that the
+    // plan name's own trailing "schema.name" matches, database prefix or not.
+    private static bool NamesSameFunction(string? planFunctionName, string qualifiedName)
+    {
+        if (planFunctionName is null)
+        {
+            return false;
+        }
+
+        var stripped = planFunctionName.Replace("[", string.Empty, StringComparison.Ordinal).Replace("]", string.Empty, StringComparison.Ordinal);
+        return string.Equals(stripped, qualifiedName, StringComparison.OrdinalIgnoreCase)
+            || stripped.EndsWith("." + qualifiedName, StringComparison.OrdinalIgnoreCase);
     }
 }

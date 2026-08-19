@@ -96,7 +96,7 @@ public sealed class ExpressionDerivedVerifierTests : IAsyncLifetime
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
 
-        Assert.Equal(ExpressionDerivedOutcome.ConfirmedUnindexed, result.Outcome);
+        Assert.Equal(ExpressionDerivedOutcome.UnindexedNotProbeable, result.Outcome);
     }
 
     [Fact]
