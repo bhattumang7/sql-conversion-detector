@@ -448,10 +448,13 @@ to a non-inlineable UDF, `GOTO`/label usage, a `SELECT @v = expr(@v) FROM t`
 running-accumulator assignment (the running string-concatenation-aggregate
 idiom real code uses in place of `STRING_AGG`/`FOR XML PATH` — a plain
 `SELECT @v = expr FROM t` that does not read its own target variable inlines
-cleanly), or `WITH SCHEMABINDING`-related edge cases. The inlineability bit
-is per-UDF observable in the catalog (`sys.sql_modules.is_inlineable`) —
-prefer reading that flag over re-implementing the blocker scan, and use the
-body scan only to *explain* why inlining fails.
+cleanly), a CTE anywhere in the body (oracle-confirmed 2026-08-20: an
+otherwise-identical function with a `WITH cte AS (...)` block added to its
+body flips `is_inlineable` from 1 to 0), or `WITH SCHEMABINDING`-related edge
+cases. The inlineability bit is per-UDF observable in the catalog
+(`sys.sql_modules.is_inlineable`) — prefer reading that flag over
+re-implementing the blocker scan, and use the body scan only to *explain*
+why inlining fails.
 
 **Parity check against a real corpus (2026-08-17, `ScalarUdfInlineabilityScanner`
 vs. `sys.sql_modules.is_inlineable` on the local test database's 193 distinct

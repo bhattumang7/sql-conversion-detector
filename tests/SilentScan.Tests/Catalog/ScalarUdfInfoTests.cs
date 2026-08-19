@@ -157,6 +157,46 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionUsingCte_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionUsingCte_EngineReportsNotInlineable): a CTE anywhere in the body
+        // defeats sys.sql_modules.is_inlineable.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_Cte (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @r INT;
+                WITH cte AS (SELECT @x AS v)
+                SELECT @r = v FROM cte;
+                RETURN @r;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Cte", out var info));
+        Assert.Contains("CTE", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionWithNoCte_NoBlocker()
+    {
+        // No-CTE control, otherwise identical shape to fn_Cte - isolates the CTE itself as the
+        // blocker rather than the surrounding accumulator-assignment pattern.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_NoCte (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN @x + 1;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_NoCte", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
+    [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
         // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.

@@ -88,6 +88,16 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @s;
         END;
         GO
+        CREATE FUNCTION dbo.fn_Cte (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @r INT;
+            WITH cte AS (SELECT @x AS v)
+            SELECT @r = v FROM cte;
+            RETURN @r;
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -150,6 +160,18 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Plain", out var info));
         Assert.True(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionUsingCte_EngineReportsNotInlineable()
+    {
+        // Oracle-confirmed 2026-08-20 (real Docker probe: an otherwise-identical function with a
+        // WITH clause added to its body flips is_inlineable from 1 to 0) - matches the public,
+        // documented "CTE" reason in sys.dm_xe_map_values('scalar_udf_inlining_blocked_reasons').
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Cte", out var info));
+        Assert.False(info!.EngineIsInlineable);
     }
 
     [Fact]

@@ -99,6 +99,22 @@ public static class ScalarUdfInlineabilityScanner
         }
 
         /// <summary>
+        /// Oracle-confirmed directly (real Docker probe, is_inlineable checked before/after adding
+        /// a WITH clause to an otherwise-identical function body): a CTE anywhere in a scalar UDF's
+        /// body blocks FROID inlining. Matches the public, documented "CTE" reason in
+        /// sys.dm_xe_map_values('scalar_udf_inlining_blocked_reasons') by name.
+        /// </summary>
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            if (node.WithCtesAndXmlNamespaces is not null)
+            {
+                Report("CTE (WITH clause)");
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>
         /// Oracle-confirmed 2026-08-17 (real Docker probe, is_inlineable checked directly): a
         /// `SELECT @v = expr(@v) FROM t` running-accumulator assignment - the string-concatenation-
         /// aggregate idiom real code uses in place of STRING_AGG/FOR XML PATH - is not inlined, while
