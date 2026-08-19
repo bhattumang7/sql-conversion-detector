@@ -225,4 +225,46 @@ public sealed class SqlScriptParserTests
             Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
+
+    // DROP TABLE IF EXISTS was added in SQL Server 2016 (compat level 130) - a well-established,
+    // version-gated construct independent of anything this project probed itself, unlike a very
+    // recent addition whose exact introducing version is easier to get wrong from memory.
+    private const string DropTableIfExists = "DROP TABLE IF EXISTS dbo.T;";
+
+    [Fact]
+    public void ParseText_DropTableIfExists_UnderCompat120_FailsLikeTheRealCompat120TargetWould()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: 120);
+
+        Assert.True(result.HasErrors);
+    }
+
+    [Fact]
+    public void ParseText_DropTableIfExists_UnderCompat130_Succeeds()
+    {
+        var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: 130);
+
+        Assert.False(result.HasErrors);
+    }
+
+    [Fact]
+    public void ParseText_DropTableIfExists_UnknownCompatLevel_UsesNewestDialectAndSucceeds()
+    {
+        // No compat level known (compatibilityLevel: null) - the newest available dialect is
+        // used, which accepts every older construct too (a superset dialect always does).
+        var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: null);
+
+        Assert.False(result.HasErrors);
+    }
+
+    [Fact]
+    public void ParseText_DropTableIfExists_CompatLevelBelow100_FloorsToOldestParserRatherThanGuessingNewer()
+    {
+        // A compat level below ScriptDOM's oldest available parser (100) floors to 100 rather
+        // than silently accepting a newer construct the real, older target would reject - the
+        // more conservative choice per CreateParser's own doc comment.
+        var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: 80);
+
+        Assert.True(result.HasErrors);
+    }
 }

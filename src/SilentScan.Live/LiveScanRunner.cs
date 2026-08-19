@@ -109,7 +109,7 @@ public static class LiveScanRunner
         // next phase's reparse begins, instead of all of them adding up at once.
         IEnumerable<SqlParseResult> parseResultSource() =>
             modules.AsParallel().AsOrdered()
-                .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier));
+                .Select(m => SqlScriptParser.ParseText(m.QualifiedName, m.Definition, m.UsesQuotedIdentifier, catalog.CompatibilityLevel));
 
         // Roadmap Phase C2 (live catalog parity): engine metadata alone knows nothing about
         // temp tables/table variables/TVP shapes or a scalar UDF's return type - those live only

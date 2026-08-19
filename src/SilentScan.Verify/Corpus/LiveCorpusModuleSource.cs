@@ -86,7 +86,7 @@ public static class LiveCorpusDeployer
                     sourcePath = module.QualifiedName;
                 }
 
-                return SqlScriptParser.ParseText(sourcePath, module.Definition, module.UsesQuotedIdentifier);
+                return SqlScriptParser.ParseText(sourcePath, module.Definition, module.UsesQuotedIdentifier, catalog.CompatibilityLevel);
             })
             .ToList();
 
