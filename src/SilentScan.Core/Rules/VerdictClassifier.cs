@@ -56,11 +56,14 @@ public static class VerdictClassifier
     /// <summary>
     /// Same classification as <see cref="Classify"/>, plus - only when the result is
     /// <see cref="Verdict.Unknown"/> - a short, stable reason code naming WHICH of this method's
-    /// three distinct Unknown-producing branches fired: <c>"operand-type-unresolved"</c> (one or
+    /// four distinct Unknown-producing branches fired: <c>"operand-type-unresolved"</c> (one or
     /// both sides never resolved a type at all), <c>"out-of-model-category:{category}"</c>
-    /// (sql_variant/xml/UDT/text-family, CLAUDE.md's own named hard cases), or
+    /// (sql_variant/xml/UDT/text-family, CLAUDE.md's own named hard cases),
     /// <c>"no-probed-matrix-cell"</c> (a real, in-model cross-category pair the oracle matrix has
-    /// simply never been asked about). Null for every non-Unknown verdict - CLAUDE.md's "Unknown,
+    /// simply never been asked about), or <c>"collation-unresolved"</c> (same string category,
+    /// same MAX-ness, but the COLUMN's own real collation - the one thing CONVERT_IMPLICIT could
+    /// ever land on - was never resolved, so a genuinely conflicting collation on the other side
+    /// can't be ruled out). Null for every non-Unknown verdict - CLAUDE.md's "Unknown,
     /// never a guess" discipline is about the verdict itself; a reason code only exists to explain
     /// an Unknown once it's already been reached, never to justify inventing one.
     /// </summary>
@@ -255,12 +258,23 @@ public static class VerdictClassifier
             return (Verdict.RangeSeek, null);
         }
 
-        if (columnType.Collation is null || otherType.Collation is null)
+        if (columnType.Collation is null)
         {
-            // Same category, same MAX-ness, no collation to conflict on (or collation unresolved
-            // on a non-comparison-relevant side) - length/precision differences alone don't
-            // defeat sargability (oracle-verified across varchar/nvarchar facet pairs: every
-            // same-category, same-MAX-ness, same-collation-status pair seeks cleanly).
+            // The COLUMN's own real collation - the one thing CONVERT_IMPLICIT would ever land
+            // on - is unknowable here. The other side (a literal with its own explicit COLLATE,
+            // most concretely) could genuinely disagree with whatever the column's real collation
+            // turns out to be, and this pass has no way to rule that out - reporting SeekPreserved
+            // would assert a fact only the unresolved column collation could actually confirm or
+            // refute. CLAUDE.md: never guess.
+            return (Verdict.Unknown, "collation-unresolved");
+        }
+
+        if (otherType.Collation is null)
+        {
+            // Column's own collation IS resolved; only the OTHER side's collation is unknown -
+            // oracle-verified across varchar/nvarchar facet pairs: every same-category, same-
+            // MAX-ness pair seeks cleanly regardless of the other side's collation status, so
+            // there is nothing left for an unresolved OTHER collation to conflict with.
             return (Verdict.SeekPreserved, null);
         }
 

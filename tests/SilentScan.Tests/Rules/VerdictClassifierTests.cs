@@ -289,6 +289,35 @@ public sealed class VerdictClassifierTests
     }
 
     [Fact]
+    public void Classify_SameCategory_ColumnCollationUnresolved_OtherCollationResolved_Unknown()
+    {
+        // The gap this fix closes: the column's own REAL collation (the one thing
+        // CONVERT_IMPLICIT could ever land on) is unresolved, but the other side carries an
+        // explicit, resolved collation (e.g. a literal's own COLLATE clause) that could
+        // genuinely disagree with whatever the column's real collation turns out to be -
+        // reporting SeekPreserved here would assert a fact only the unresolved column collation
+        // could actually confirm or refute.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: SqlCollation);
+
+        var (verdict, reason) = VerdictClassifier.ClassifyWithReason(column, value, otherIsLiteral: true);
+
+        Assert.Equal(Verdict.Unknown, verdict);
+        Assert.Equal("collation-unresolved", reason);
+    }
+
+    [Fact]
+    public void Classify_SameCategory_ColumnCollationResolved_OtherCollationUnresolved_SeekPreserved()
+    {
+        // Unchanged from before this fix: the column's own collation IS resolved, so there is
+        // nothing left for an unresolved OTHER-side collation to conflict with.
+        var column = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: SqlCollation);
+        var value = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null);
+
+        Assert.Equal(Verdict.SeekPreserved, VerdictClassifier.Classify(column, value));
+    }
+
+    [Fact]
     public void Classify_CrossCategoryStringPair_SameCollation_NoConflict()
     {
         // Matching collations never conflict, category difference or not (oracle-verified:
