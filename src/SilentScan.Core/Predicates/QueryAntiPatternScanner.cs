@@ -817,7 +817,7 @@ public static class QueryAntiPatternScanner
                     continue;
                 }
 
-                var collector = new DirectBaseTableResolver.RawColumnReferenceCollector();
+                var collector = new ColumnAliasHelpers.RawColumnReferenceCollector();
                 condition.Accept(collector);
                 if (collector.References.Count == 0)
                 {
@@ -890,7 +890,7 @@ public static class QueryAntiPatternScanner
                     .OfType<BooleanComparisonExpression>()
                     .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                     .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                    .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, joinedAlias))
+                    .Select(e => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(e, joinedAlias))
                     .Where(c => c is not null)
                     .Select(c => c!)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1026,7 +1026,7 @@ public static class QueryAntiPatternScanner
                 return null;
             }
 
-            var columnAlias = DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(columnExpr, alias);
+            var columnAlias = ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(columnExpr, alias);
             var columnName = columnAlias ?? (columnExpr.MultiPartIdentifier.Identifiers.Count == 1 ? columnExpr.MultiPartIdentifier.Identifiers[0].Value : null);
             return columnName is null ? null : (qualifiedName, columnName, literalExpr);
         }
@@ -1042,7 +1042,7 @@ public static class QueryAntiPatternScanner
         };
 
         // --- Shared syntax-only helpers (RawColumnReferenceCollector, ColumnNameIfQualifiedByAlias)
-        // live in DirectBaseTableResolver - base-table resolution itself goes through
+        // live in ColumnAliasHelpers - base-table resolution itself goes through
         // FromScopeResolver (Phase 1.5 "one binder"), above.
     }
 }

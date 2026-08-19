@@ -36,7 +36,7 @@ internal static class JoinKeyUniqueness
             .OfType<BooleanComparisonExpression>()
             .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
             .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-            .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, sourceAlias))
+            .Select(e => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(e, sourceAlias))
             .Where(c => c is not null)
             .Select(c => c!)
             .Distinct(StringComparer.OrdinalIgnoreCase)

@@ -180,7 +180,7 @@ public static class CartesianJoinScanner
 
         private static List<ColumnReferenceExpression> CollectColumnReferences(TSqlFragment fragment)
         {
-            var collector = new DirectBaseTableResolver.RawColumnReferenceCollector();
+            var collector = new ColumnAliasHelpers.RawColumnReferenceCollector();
             fragment.Accept(collector);
             return collector.References;
         }

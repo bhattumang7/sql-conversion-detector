@@ -157,9 +157,9 @@ public static class NonUniqueUpdateSourceScanner
 
         private static bool ReferencesAlias(ScalarExpression expression, string alias)
         {
-            var collector = new DirectBaseTableResolver.RawColumnReferenceCollector();
+            var collector = new ColumnAliasHelpers.RawColumnReferenceCollector();
             expression.Accept(collector);
-            return collector.References.Any(columnRef => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(columnRef, alias) is not null);
+            return collector.References.Any(columnRef => ColumnAliasHelpers.ColumnNameIfQualifiedByAlias(columnRef, alias) is not null);
         }
     }
 }
