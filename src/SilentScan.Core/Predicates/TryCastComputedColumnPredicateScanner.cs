@@ -80,8 +80,13 @@ public static partial class TryCastComputedColumnPredicateScanner
 
     /// <summary>
     /// Deliberately base-table-only (mirrors <see cref="CatchAllPredicateScanner"/>'s own
-    /// documented v1 scope limit): no CTE/view/temp-table scoping, each statement's own FROM
-    /// clause resolved fresh via <see cref="FromScopeResolver"/> with an empty resolved-views map.
+    /// documented v1 scope limit): no VIEW/temp-table scoping, each statement's own FROM clause
+    /// resolved fresh via <see cref="FromScopeResolver"/> with an empty resolved-views map. A CTE
+    /// is a narrower case than "no scoping" implies, though: it is never schema-qualified, so it
+    /// always shadows a same-named real base table for its statement's own lifetime regardless of
+    /// whether this scanner otherwise looks inside it - resolving against the catalog instead
+    /// (cteRelations always null, pre-fix) silently matched a CTE-shadowed reference against an
+    /// unrelated real table sharing its name (2026-08 audit).
     /// </summary>
     private sealed class Visitor(
         string sourcePath, DatabaseCatalog catalog,
@@ -89,13 +94,23 @@ public static partial class TryCastComputedColumnPredicateScanner
     {
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
         public List<TryCastComputedColumnPredicateFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
             if (node.FromClause is not null)
             {
-                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+                var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+                var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
                 var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
 
                 InspectSearchCondition(node.WhereClause?.SearchCondition, scopeChain);
@@ -112,7 +127,7 @@ public static partial class TryCastComputedColumnPredicateScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
             InspectSearchCondition(spec.WhereClause?.SearchCondition, scopeChain);
             base.ExplicitVisit(node);
@@ -121,14 +136,14 @@ public static partial class TryCastComputedColumnPredicateScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
             InspectSearchCondition(spec.WhereClause?.SearchCondition, scopeChain);
             base.ExplicitVisit(node);
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private void InspectJoins(TableReference tableReference, List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {

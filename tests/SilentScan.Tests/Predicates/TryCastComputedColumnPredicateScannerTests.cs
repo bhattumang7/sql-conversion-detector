@@ -104,6 +104,23 @@ public sealed class TryCastComputedColumnPredicateScannerTests
         Assert.Empty(findings);
     }
 
+    [Fact]
+    public void CteSharesNameWithTheComputedColumnsRealTable_NeverFires()
+    {
+        // 2026-08 audit: cteRelations was always null, so a CTE named the same as dbo.Events -
+        // but projecting only Id, never the TRY_CAST computed column - silently resolved against
+        // the REAL dbo.Events instead, matching ParsedDate against the real table's own computed
+        // column and firing a finding about a query that (through the CTE) never actually reads
+        // it. A CTE is never schema-qualified, so it always shadows a same-named real base table;
+        // resolved correctly, ParsedDate fails to resolve within the CTE's own narrower scope.
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find AS BEGIN " +
+            "WITH Events AS (SELECT Id FROM dbo.Events) " +
+            "SELECT Id FROM Events WHERE ParsedDate = '2024-01-01'; END");
+
+        Assert.Empty(findings);
+    }
+
     /// <summary>
     /// End-to-end against the real standing Docker oracle (a fresh, disposable database, dropped
     /// unconditionally afterward): proves the full live-read path (LiveCatalogReader's
