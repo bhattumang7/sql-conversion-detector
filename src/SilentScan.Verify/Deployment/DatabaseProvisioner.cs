@@ -66,6 +66,19 @@ public sealed partial class DatabaseProvisioner
     /// <summary>Drops <paramref name="databaseName"/> if it exists. Safe to call even if creation never succeeded.</summary>
     public async Task DropIfExistsAsync(string databaseName, CancellationToken cancellationToken = default)
     {
+        // Every live reader this project uses against a disposable database (LiveCatalogReader,
+        // LiveModuleReader, LiveLineageParityChecker, and the rest of LiveScanRunner's stages)
+        // opens its own SqlConnection to `databaseName` and disposes it - but ADO.NET connection
+        // pooling keeps that session physically alive, pooled, rather than closing it. The SET
+        // SINGLE_USER WITH ROLLBACK IMMEDIATE inside DropIfExistsCoreAsync must forcibly evict
+        // every session still attached, including those idle pooled ones, and measured directly
+        // (2026-08-19, full test-suite timing pass) that this wait alone cost ~3s per drop -
+        // dominating the runtime of most database-oracle tests. Clearing just this database's own
+        // connection-string pool first evicts them in-process, no round trip, and cut the same
+        // drop to ~40ms.
+        using var targetConnection = new SqlConnection(_options.BuildConnectionString(databaseName));
+        SqlConnection.ClearPool(targetConnection);
+
         await using var connection = await OpenMasterConnectionAsync(databaseName, cancellationToken);
 
         await DropIfExistsCoreAsync(connection, databaseName, cancellationToken);

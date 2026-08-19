@@ -157,7 +157,9 @@ public sealed class TypeMatrixGenerator
     {
         crossFamilyOther ??= [];
         binaryFamily ??= [];
-        var entries = new List<TypePairProbeResult>();
+        // Concurrent: ProbePairsAsync below runs up to MaxConcurrentProbes probes at once, each
+        // recording its own result into this same bag.
+        var entries = new System.Collections.Concurrent.ConcurrentBag<TypePairProbeResult>();
         string? serverVersion = null;
 
         // Every database name this method provisions carries this call's own unique suffix -
@@ -183,7 +185,7 @@ public sealed class TypeMatrixGenerator
             {
                 var baseFamily = numericFamily.Concat(dateTimeFamily).Concat(binaryFamily).ToList();
                 await DeployFamilyTablesAsync(familyDb, baseFamily, collationName: null, cancellationToken);
-                var familyContext = new ProbeContext(familyDb, CollationName: null, entries, v => serverVersion ??= v, cancellationToken);
+                var familyContext = new ProbeContext(familyDb, CollationName: null, entries, v => Interlocked.CompareExchange(ref serverVersion, v, null), cancellationToken);
 
                 // Cross-probed as ONE combined family, not three separate within-family-only
                 // passes (numeric vs numeric, date/time vs date/time, binary vs binary) - every
@@ -223,13 +225,9 @@ public sealed class TypeMatrixGenerator
                     }
 
                     await DeployFamilyTablesAsync(familyDb, stringFamily, collationName: null, cancellationToken);
-                    foreach (var (otherCategory, _) in crossFamilyOther)
-                    {
-                        foreach (var (stringCategory, stringSyntax) in stringFamily)
-                        {
-                            await ProbeOnePairAsync(otherCategory, stringCategory, stringSyntax, familyContext);
-                        }
-                    }
+                    await ProbePairsAsync(
+                        crossFamilyOther.SelectMany(other => stringFamily.Select(str => (other.Category, str.Category, str.Syntax))),
+                        familyContext);
                 }
             }
             finally
@@ -251,7 +249,7 @@ public sealed class TypeMatrixGenerator
             try
             {
                 await DeployFamilyTablesAsync(stringDb, stringFamily, collation, cancellationToken);
-                var stringContext = new ProbeContext(stringDb, collation, entries, v => serverVersion ??= v, cancellationToken);
+                var stringContext = new ProbeContext(stringDb, collation, entries, v => Interlocked.CompareExchange(ref serverVersion, v, null), cancellationToken);
                 await ProbeFamilyAsync(stringFamily, stringContext);
 
                 // String column vs a non-string value: collation-sensitive because it decides
@@ -260,13 +258,9 @@ public sealed class TypeMatrixGenerator
                 if (crossFamilyOther.Count > 0)
                 {
                     await DeployFamilyTablesAsync(stringDb, crossFamilyOther, collationName: null, cancellationToken);
-                    foreach (var (stringCategory, _) in stringFamily)
-                    {
-                        foreach (var (otherCategory, otherSyntax) in crossFamilyOther)
-                        {
-                            await ProbeOnePairAsync(stringCategory, otherCategory, otherSyntax, stringContext);
-                        }
-                    }
+                    await ProbePairsAsync(
+                        stringFamily.SelectMany(str => crossFamilyOther.Select(other => (str.Category, other.Category, other.Syntax))),
+                        stringContext);
                 }
             }
             finally
@@ -276,7 +270,7 @@ public sealed class TypeMatrixGenerator
             }
         }
 
-        return (entries, serverVersion ?? "unknown");
+        return (entries.ToList(), serverVersion ?? "unknown");
     }
 
     private async Task DeployFamilyTablesAsync(
@@ -293,20 +287,35 @@ public sealed class TypeMatrixGenerator
         await _deployer.DeployAsync(script.ToString(), database, cancellationToken);
     }
 
-    private async Task ProbeFamilyAsync(IReadOnlyList<(SqlTypeCategory Category, string Syntax)> family, ProbeContext context)
-    {
-        foreach (var (columnCategory, _) in family)
-        {
-            foreach (var (otherCategory, otherSyntax) in family)
-            {
-                if (columnCategory == otherCategory)
-                {
-                    continue;
-                }
+    /// <summary>
+    /// Caps how many <see cref="PlanXmlCapture"/> probes run concurrently against the one Docker
+    /// SQL Server instance. Each probe is its own connection/compile-only round trip with no
+    /// shared mutable server-side state (verified: <see cref="PlanXmlCapture"/> holds no fields
+    /// beyond the immutable <see cref="SqlServerOptions"/>), so probes are safe to run
+    /// concurrently. Kept modest rather than matching the host's full core count: this generator
+    /// itself runs from inside one xUnit test that is ALREADY one of many tests xUnit runs
+    /// concurrently across every CPU core - stacking a wide degree of parallelism on top of an
+    /// already fully-subscribed test run oversubscribes the same cores twice and, measured
+    /// directly against the full suite (2026-08-19), made total suite time worse, not better,
+    /// even though it sped up this one test in isolation.
+    /// </summary>
+    private const int MaxConcurrentProbes = 4;
 
-                await ProbeOnePairAsync(columnCategory, otherCategory, otherSyntax, context);
-            }
-        }
+    private Task ProbeFamilyAsync(IReadOnlyList<(SqlTypeCategory Category, string Syntax)> family, ProbeContext context) =>
+        ProbePairsAsync(
+            family
+                .SelectMany(column => family.Select(other => (column.Category, other.Category, other.Syntax)))
+                .Where(p => p.Item1 != p.Item2),
+            context);
+
+    /// <summary>Runs every (columnCategory, otherCategory, otherSyntax) probe in <paramref name="pairs"/> concurrently, up to <see cref="MaxConcurrentProbes"/> at once.</summary>
+    private async Task ProbePairsAsync(
+        IEnumerable<(SqlTypeCategory ColumnCategory, SqlTypeCategory OtherCategory, string OtherSyntax)> pairs, ProbeContext context)
+    {
+        await Parallel.ForEachAsync(
+            pairs,
+            new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentProbes, CancellationToken = context.CancellationToken },
+            (pair, ct) => new ValueTask(ProbeOnePairAsync(pair.ColumnCategory, pair.OtherCategory, pair.OtherSyntax, context with { CancellationToken = ct })));
     }
 
     /// <summary>
@@ -352,7 +361,8 @@ public sealed class TypeMatrixGenerator
 
     /// <summary>Bundles a probe run's fixed context (S107: keeps ProbeFamilyAsync/ProbeOnePairAsync's own parameter lists to just what varies per call).</summary>
     private sealed record ProbeContext(
-        string Database, string? CollationName, List<TypePairProbeResult> Entries, Action<string> RecordServerVersion, CancellationToken CancellationToken);
+        string Database, string? CollationName, System.Collections.Concurrent.ConcurrentBag<TypePairProbeResult> Entries,
+        Action<string> RecordServerVersion, CancellationToken CancellationToken);
 
     private static string SanitizeForIdentifier(string collation)
     {
