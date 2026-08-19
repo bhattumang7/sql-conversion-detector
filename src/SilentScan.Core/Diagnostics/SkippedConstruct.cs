@@ -30,4 +30,7 @@ public sealed class SkipLedger
 
     public void Record(AnalysisPass pass, string sourcePath, int line, int column, string constructKind, string reason) =>
         _entries.Add(new SkippedConstruct(pass, sourcePath, line, column, constructKind, reason));
+
+    /// <summary>Appends every entry from another ledger - lets a caller merge a file-mode catalog build's own skip ledger into a live one (<see cref="Catalog.DatabaseCatalog.MergeFileModeExtras"/>) without reaching into its private state.</summary>
+    public void AddRange(IEnumerable<SkippedConstruct> entries) => _entries.AddRange(entries);
 }

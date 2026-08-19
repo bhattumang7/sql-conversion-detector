@@ -237,6 +237,26 @@ public sealed class SkipLedgerTests
     }
 
     [Fact]
+    public void DatabaseCatalog_MergeFileModeExtras_CarriesFileModeCatalogsSkippedEntriesForward()
+    {
+        // Live/corpus mode previously lost every catalog.Skipped.Record call site - including
+        // WarnIfCaseSensitive, whose whole purpose is telling a reader this scan's ordinal-
+        // ignore-case name matching is unreliable against a case-sensitive catalog collation -
+        // because this merge never touched Skipped at all, so the live catalog's own ledger
+        // stayed permanently empty regardless of what the file-mode build recorded.
+        var alterOnly = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.Ghost ADD Email VARCHAR(200) NULL;");
+        var fileModeCatalog = CatalogBuilder.Build([alterOnly]);
+        Assert.Single(fileModeCatalog.Skipped.Entries);
+
+        var liveCatalog = new DatabaseCatalog();
+        liveCatalog.MergeFileModeExtras(fileModeCatalog);
+
+        var entry = Assert.Single(liveCatalog.Skipped.Entries);
+        Assert.Equal(AnalysisPass.Catalog, entry.Pass);
+        Assert.Contains("dbo.Ghost", entry.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TypedPredicateExtractor_UnrecognizedComparisonOperator_NeverThrows()
     {
         // Historically this path threw NotImplementedException, which would abort an entire

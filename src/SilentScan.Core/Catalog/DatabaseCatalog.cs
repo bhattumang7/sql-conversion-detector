@@ -634,5 +634,14 @@ public sealed class DatabaseCatalog
                 ? liveInfo with { InlineabilityBlocker = liveInfo.InlineabilityBlocker ?? fileInfo.InlineabilityBlocker }
                 : fileInfo;
         }
+
+        // Every catalog.Skipped.Record call site in CatalogBuilder - including
+        // WarnIfCaseSensitive, whose entire purpose is telling a reader this scan's own
+        // ordinal-ignore-case name matching is unreliable against a case-sensitive catalog
+        // collation - was previously dead in live/corpus mode: this merge never touched Skipped,
+        // so the live catalog's own ledger stayed permanently empty regardless of what the
+        // file-mode build (CatalogBuilder.Build, run over the same post-deployment module text
+        // just above) recorded.
+        Skipped.AddRange(fileModeCatalog.Skipped.Entries);
     }
 }
