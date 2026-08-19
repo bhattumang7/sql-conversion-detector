@@ -11,22 +11,19 @@ namespace SilentScan.Core.Predicates;
 /// precision story, including why this is a standalone type/scanner rather than folded into
 /// <see cref="TypedPredicateExtractor"/>'s type-conversion-verdict machinery.
 ///
-/// Reuses <see cref="DirectBaseTableResolver"/>'s "flatten the join tree to its direct base-table
-/// leaves, matched by alias" shape rather than the full <see cref="Lineage.FromScopeResolver"/>
-/// scope-chain/lineage machinery - a real, known v1 scope limit (a float/real predicate reached
-/// through a view/derived table is left unanalyzed, not guessed at; a CTE-shadowed reference is
-/// also declined, via DirectBaseTableResolver's own file-wide CTE-name awareness, rather than
-/// mismatched against an unrelated same-named real table).
+/// Resolves through <see cref="Lineage.FromScopeResolver"/>'s real per-statement scope chain
+/// (Phase 1.5 "one binder") rather than a direct-base-table-only shortcut: a float/real predicate
+/// reached through a view/derived table is still left unanalyzed (<see cref="BaseColumnResolver"/>
+/// only ever resolves a real, depth-0 base column, never guesses through a view layer), but a
+/// CTE-shadowed reference now resolves against the CTE's real underlying column instead of being
+/// declined wholesale or - the bug this scanner's own prior file-wide CTE-name-only awareness
+/// could not distinguish - mismatched against an unrelated same-named real table.
 /// </summary>
 public static class FloatEqualityPredicateScanner
 {
     public static IReadOnlyList<FloatEqualityFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        // File-wide, not per-statement - see AggregateDivisionColumnstoreScanner's own comment on
-        // this exact tradeoff (2026-08 audit): only ever causes an extra decline, never a false
-        // positive, and far simpler than per-statement CTE-scope tracking for a scanner with none.
-        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
-        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -37,22 +34,46 @@ public static class FloatEqualityPredicateScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+        // Real per-statement CTE scope (Phase 1.5 "one binder") - a QuerySpecification has no
+        // direct access to its enclosing SelectStatement's WithCtesAndXmlNamespaces, so this is
+        // captured on the way down and consulted from ExplicitVisit(QuerySpecification), matching
+        // ConstrainedColumnStatementVisitor's own precedent. UpdateStatement/DeleteStatement are
+        // themselves top-level, so they resolve their own WITH clause directly, no stack needed.
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
         public List<FloatEqualityFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
+        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+
+        private static List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChainOf(
+            (IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered) resolved) => [resolved];
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            var scopeChain = ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations)));
+
             // node.WhereClause.SearchCondition is null for a positioned "WHERE CURRENT OF
             // @cursor" - a WhereClause with no boolean search condition at all, not a normal
             // filter predicate - so this checks the condition itself, not just the clause.
             if (node.WhereClause?.SearchCondition is { } whereCondition)
             {
-                Inspect(whereCondition, tables);
+                Inspect(whereCondition, scopeChain);
             }
 
-            InspectJoinOnClauses(node.FromClause?.TableReferences, tables);
+            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain);
 
             base.ExplicitVisit(node);
         }
@@ -60,15 +81,17 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target);
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var scopeChain = ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
+
             // See ExplicitVisit(QuerySpecification)'s own comment - a positioned "WHERE CURRENT
             // OF @cursor" carries a null SearchCondition.
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
-                Inspect(whereCondition, tables);
+                Inspect(whereCondition, scopeChain);
             }
 
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, tables);
+            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain);
 
             base.ExplicitVisit(node);
         }
@@ -76,30 +99,34 @@ public static class FloatEqualityPredicateScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target);
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var scopeChain = ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
+
             // See ExplicitVisit(QuerySpecification)'s own comment - a positioned "WHERE CURRENT
             // OF @cursor" carries a null SearchCondition.
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
-                Inspect(whereCondition, tables);
+                Inspect(whereCondition, scopeChain);
             }
 
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, tables);
+            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain);
 
             base.ExplicitVisit(node);
         }
 
         /// <summary>
         /// A JOIN's own ON clause is a filter position exactly like WHERE - inspected here, against
-        /// the same direct-base-table scope already resolved for the whole FROM clause, rather than
-        /// via a separate <see cref="TSqlFragmentVisitor.ExplicitVisit(QualifiedJoin)"/> override
-        /// (which would need its own copy of the enclosing scope threaded through a field/stack for
-        /// no benefit, since every join in one FROM clause shares the identical <paramref
-        /// name="tables"/> scope this method already has in hand).
+        /// the same resolved scope chain already built for the whole FROM clause, rather than via a
+        /// separate <see cref="TSqlFragmentVisitor.ExplicitVisit(QualifiedJoin)"/> override (which
+        /// would need its own copy of the enclosing scope threaded through a field/stack for no
+        /// benefit, since every join in one FROM clause shares the identical <paramref
+        /// name="scopeChain"/> this method already has in hand).
         /// </summary>
-        private void InspectJoinOnClauses(IList<TableReference>? tableReferences, Dictionary<string, CatalogTable> tables)
+        private void InspectJoinOnClauses(
+            IList<TableReference>? tableReferences,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
-            if (tableReferences is null || tables.Count == 0)
+            if (tableReferences is null)
             {
                 return;
             }
@@ -108,41 +135,40 @@ public static class FloatEqualityPredicateScanner
             {
                 foreach (var join in PredicateTreeWalker.FlattenJoinNodes(reference).Where(j => j.SearchCondition is not null))
                 {
-                    Inspect(join.SearchCondition!, tables);
+                    Inspect(join.SearchCondition!, scopeChain);
                 }
             }
         }
 
-        private void Inspect(BooleanExpression searchCondition, Dictionary<string, CatalogTable> tables)
+        private void Inspect(
+            BooleanExpression searchCondition,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
-            if (tables.Count == 0)
-            {
-                return;
-            }
-
             var collector = new EqualityCollector();
             searchCondition.Accept(collector);
             foreach (var comparison in collector.Comparisons)
             {
-                InspectEquality(comparison, tables);
+                InspectEquality(comparison, scopeChain);
             }
         }
 
-        private void InspectEquality(BooleanComparisonExpression comparison, Dictionary<string, CatalogTable> tables)
+        private void InspectEquality(
+            BooleanComparisonExpression comparison,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             foreach (var side in new[] { comparison.FirstExpression, comparison.SecondExpression })
             {
                 if (side is not ColumnReferenceExpression columnRef
-                    || DirectBaseTableResolver.TryResolveColumn(columnRef, tables) is not { } resolved
-                    || resolved.Column.Type?.Category is not (SqlTypeCategory.Real or SqlTypeCategory.Float))
+                    || BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain) is not { } resolved
+                    || resolved.Type?.Category is not (SqlTypeCategory.Real or SqlTypeCategory.Float))
                 {
                     continue;
                 }
 
                 Findings.Add(new FloatEqualityFinding(
-                    resolved.Table.QualifiedName,
-                    resolved.Column.Name,
-                    resolved.Column.Type!.ToString(),
+                    resolved.TableQualifiedName,
+                    resolved.ColumnName,
+                    resolved.Type!.ToString(),
                     sourcePath,
                     comparison.StartLine,
                     comparison.StartColumn));
