@@ -98,6 +98,17 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @r;
         END;
         GO
+        CREATE TYPE dbo.IntList AS TABLE (v INT);
+        GO
+        CREATE FUNCTION dbo.fn_Tvp (@t dbo.IntList READONLY, @x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @c INT;
+            SELECT @c = COUNT(*) FROM @t;
+            RETURN @c + @x;
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -171,6 +182,17 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Cte", out var info));
+        Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionWithTableValuedParameter_EngineReportsNotInlineable()
+    {
+        // Oracle-confirmed 2026-08-20 (real Docker probe): a scalar UDF taking a table-valued
+        // (READONLY) parameter reports is_inlineable = 0 regardless of what the body does with it.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Tvp", out var info));
         Assert.False(info!.EngineIsInlineable);
     }
 

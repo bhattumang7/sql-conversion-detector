@@ -762,7 +762,7 @@ public static class CatalogBuilder
         {
             var isClr = node.MethodSpecifier is not null;
             var isSchemaBound = node.Options.Any(option => option.OptionKind == FunctionOptionKind.SchemaBinding);
-            var blocker = isClr ? null : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog);
+            var blocker = isClr ? null : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog, node.Parameters);
 
             catalog.AddScalarUdfInfo(
                 qualifiedName,

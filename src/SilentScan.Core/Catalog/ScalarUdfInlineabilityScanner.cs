@@ -27,8 +27,26 @@ public static class ScalarUdfInlineabilityScanner
     /// deliberately left for the callee's own record to speak for itself rather than guessed at
     /// here.
     /// </summary>
-    public static string? FindBlocker(StatementList? body, string ownQualifiedName, DatabaseCatalog catalog)
+    public static string? FindBlocker(
+        StatementList? body, string ownQualifiedName, DatabaseCatalog catalog, IList<ProcedureParameter>? parameters = null)
     {
+        // A table-valued parameter (always READONLY - the only T-SQL context that modifier is
+        // legal in) checked before the body scan even runs, the same catalog-based signal
+        // RegisterProcedureParameters already uses elsewhere for the identical question. Oracle-
+        // confirmed directly (real Docker probe): a scalar UDF taking a TVP reports
+        // is_inlineable = 0 regardless of what the body itself does with it.
+        if (parameters is not null)
+        {
+            foreach (var parameter in parameters)
+            {
+                if (parameter.DataType is UserDataTypeReference userType
+                    && catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is { Kind: CatalogTableKind.TableType })
+                {
+                    return $"table-valued parameter {parameter.VariableName.Value}";
+                }
+            }
+        }
+
         if (body is null)
         {
             return null;

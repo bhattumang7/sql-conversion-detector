@@ -197,6 +197,30 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionWithTableValuedParameter_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionWithTableValuedParameter_EngineReportsNotInlineable): a scalar UDF
+        // taking a table-valued (READONLY) parameter reports is_inlineable = 0 regardless of what
+        // the body itself does with it - checked from the parameter list, not the body scan.
+        var catalog = BuildFrom("""
+            CREATE TYPE dbo.IntList AS TABLE (v INT);
+            GO
+            CREATE FUNCTION dbo.fn_Tvp (@t dbo.IntList READONLY, @x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @c INT;
+                SELECT @c = COUNT(*) FROM @t;
+                RETURN @c + @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Tvp", out var info));
+        Assert.Contains("table-valued parameter", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
         // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.
