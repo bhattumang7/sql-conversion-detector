@@ -71,7 +71,15 @@ Do these when the touched code is being worked on anyway.
       rules decided inline in visitors. Shared traversal is done
       (`ScopedSqlVisitorBase`, `PredicateTreeWalker`); a generic
       `CollectorVisitor<T>` was designed and rejected — the `Flatten*`
-      signatures diverge too much for it to pay.
+      signatures diverge too much for it to pay. The concrete cost of
+      leaving this: adding one rule still touches ~8 files (scanner,
+      finding record, `ScanReportBuilder` scan block, sort, confidence
+      filter, `ScanReport`'s positional params, SARIF writer, readable
+      writer, `RuleCatalog`), and this exact drift already shipped once —
+      `ScanReportBuilder.cs:1238-1247` documents every stream after the
+      original eight silently bypassing the `--confidence` filter until an
+      audit caught it, fixed with 70 more hand-written lines rather than
+      removing the forgettable step.
 - [ ] **Hand-threaded `(sourcePath, StartLine, StartColumn)` triples, ~84 call
       sites.** Blocked on a decision, not on effort: a `SourceSpan(node)`
       helper shortens argument lists only, while having the records carry a
@@ -79,6 +87,22 @@ Do these when the touched code is being worked on anyway.
       Pick one before writing code.
 - [ ] **Per-instance confidence.** Fixed per rule type today; varying it per
       finding instance matters for a handful of rules.
+- [ ] **Engine-version sensitivity as a modeled field, and `SchemaVersion`
+      round-trip enforcement.** CLAUDE.md's "every rule states its
+      engine-version sensitivity" is satisfied today only via rationale
+      prose (two rules — `QueryAntiPatternScanner`,
+      `ScalarUdfInfo.EngineIsInlineable` — actually branch on
+      `CompatibilityLevel` at runtime; nothing else can be queried
+      programmatically). Turning it into a structured field on every one of
+      ~234 rules is a schema decision affecting every finding type at once —
+      pick the shape deliberately, same call as the source-span-threading
+      item above, not inline. Related, smaller facts worth folding into
+      whichever design lands: `TypePairMatrix`'s own `ServerVersion`/
+      `ProbedAtUtc` stamp (16.0.4236.2, compat 160) has zero consumers, so a
+      scan of an older/newer target silently gets that build's verdicts at
+      full confidence; and `ScanReport.CurrentSchemaVersion`'s own ~60-entry
+      changelog is serialized but never read back or asserted against in a
+      test, so nothing forces a bump when the finding shape changes.
 
 ---
 
