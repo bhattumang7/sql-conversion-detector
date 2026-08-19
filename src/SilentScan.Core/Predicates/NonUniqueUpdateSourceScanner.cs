@@ -99,19 +99,7 @@ public static class NonUniqueUpdateSourceScanner
                 return;
             }
 
-            // Matched by the join's own ALIAS, not a resolved base-table qualified name - a
-            // self-join aliases the identical table twice, so a qualified-name-only comparison
-            // could not tell the target side's own column from the source side's.
-            var joinColumns = PredicateTreeWalker.FlattenAnd(join.SearchCondition)
-                .OfType<BooleanComparisonExpression>()
-                .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
-                .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, sourceAlias))
-                .Where(c => c is not null)
-                .Select(c => c!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
+            var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(join.SearchCondition, sourceAlias);
             if (joinColumns.Count == 0)
             {
                 // No equality this scanner could resolve back to the source alias's own columns -
@@ -120,11 +108,7 @@ public static class NonUniqueUpdateSourceScanner
                 return;
             }
 
-            var isProvablyUnique = sourceTable.Indexes.Any(ix =>
-                ix.IsUnique && !ix.IsFiltered && !ix.IsDisabled
-                && ix.KeyColumns.Count > 0
-                && ix.KeyColumns.All(kc => joinColumns.Contains(kc, StringComparer.OrdinalIgnoreCase)));
-            if (isProvablyUnique)
+            if (JoinKeyUniqueness.IsProvenUniqueOver(sourceTable, joinColumns))
             {
                 return;
             }

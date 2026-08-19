@@ -16,8 +16,6 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public static class CompositeIndexLeadingColumnScanner
 {
-    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
     public static IReadOnlyList<CompositeIndexLeadingColumnFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
@@ -32,92 +30,28 @@ public static class CompositeIndexLeadingColumnScanner
         ];
     }
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog)
+        : ConstrainedColumnStatementVisitor(sourcePath, catalog)
     {
         public List<CompositeIndexLeadingColumnFinding> Findings { get; } = [];
 
-        public override void ExplicitVisit(QuerySpecification node)
+        protected override void InspectStatement(ConstrainedStatement statement)
         {
-            Inspect(node.FromClause, node.WhereClause?.SearchCondition, node);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(UpdateStatement node)
-        {
-            var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
-            Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
-            base.ExplicitVisit(node);
-        }
-
-        public override void ExplicitVisit(DeleteStatement node)
-        {
-            var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
-            Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
-            base.ExplicitVisit(node);
-        }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
-
-        private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node)
-        {
-            if (fromClause is null)
-            {
-                return;
-            }
-
-            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
-            Inspect(byAlias, ordered, fromClause, whereCondition, node);
-        }
-
-        private void Inspect(
-            IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered,
-            FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node)
-        {
-            var baseTables = ordered
-                .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)
-                .Select(e => e.Relation.QualifiedName!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(name => catalog.Find(name))
-                .Where(t => t is not null && t.Kind == CatalogTableKind.Table)
-                .Select(t => t!)
-                .ToList();
-
-            if (baseTables.Count == 0)
-            {
-                return;
-            }
-
-            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-
-            var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
-
-            // AND-constrained: reachable without crossing an OR - a column only bound inside an
-            // OR branch doesn't guarantee the leading column is ever actually supplied.
-            var andConstrainedColumns = joinNodes
-                .SelectMany(j => PredicateTreeWalker.FlattenAnd(j.SearchCondition))
-                .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
-                .OfType<BooleanComparisonExpression>()
-                .SelectMany(c => BaseColumnResolver.ResolveBothSides(c, sourcePath, scopeChain))
-                .ToHashSet();
-
             // Referenced anywhere at all - deliberately broader than the AND-constrained set
             // (includes OR branches, IS NULL checks, every comparison operator) - used only to
             // suppress a violation, never to trigger one, so being liberal here is the safe
             // direction: a leading column referenced ANYWHERE, even weakly, is enough to decline.
             var anyReferencedColumns = new HashSet<(string Table, string Column)>();
-            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
-            whereCondition?.Accept(referenceVisitor);
-            foreach (var join in joinNodes)
+            var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns);
+            statement.WhereCondition?.Accept(referenceVisitor);
+            foreach (var join in statement.JoinNodes)
             {
                 join.SearchCondition.Accept(referenceVisitor);
             }
 
-            foreach (var table in baseTables)
+            foreach (var table in statement.BaseTables)
             {
-                InspectTable(table, andConstrainedColumns, anyReferencedColumns, node);
+                InspectTable(table, statement.AndConstrainedColumns, anyReferencedColumns, statement.Node);
             }
         }
 
@@ -162,11 +96,10 @@ public static class CompositeIndexLeadingColumnScanner
 
                     Findings.Add(new CompositeIndexLeadingColumnFinding(
                         table.QualifiedName, index.Name, index.KeyColumns, violatingColumn, position,
-                        sourcePath, node.StartLine, node.StartColumn));
+                        SourcePath, node.StartLine, node.StartColumn));
                     break; // one finding per index - the earliest violating column is evidence enough.
                 }
             }
         }
-
     }
 }

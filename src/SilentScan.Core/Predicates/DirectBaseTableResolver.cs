@@ -85,6 +85,50 @@ internal static class DirectBaseTableResolver
             : null;
     }
 
+    /// <summary>
+    /// Resolves a column reference against a scope built by <see cref="ResolveDirectBaseTables"/>.
+    /// An alias-qualified reference resolves only through that alias; an unqualified one resolves
+    /// only when exactly one table is in scope, so an ambiguous bare column name is left
+    /// unresolved rather than attributed to a guessed table. Was byte-identical (comment included)
+    /// in <c>FloatEqualityPredicateScanner</c> and <c>StringConcatNullScanner</c>, the two scanners
+    /// that pair it with the dictionary this class already builds for them.
+    /// </summary>
+    public static (CatalogTable Table, CatalogColumn Column)? TryResolveColumn(
+        ColumnReferenceExpression columnRef, Dictionary<string, CatalogTable> tables)
+    {
+        var identifiers = columnRef.MultiPartIdentifier?.Identifiers;
+        if (identifiers is null || identifiers.Count == 0)
+        {
+            return null;
+        }
+
+        var columnName = identifiers[^1].Value;
+
+        if (identifiers.Count >= 2)
+        {
+            var alias = identifiers[^2].Value;
+            if (tables.TryGetValue(alias, out var table) && table.FindColumn(columnName) is { } column)
+            {
+                return (table, column);
+            }
+
+            return null;
+        }
+
+        // Unqualified reference - only safe to resolve when exactly one table is in scope, to
+        // avoid guessing which of several tables an ambiguous bare column name belongs to.
+        if (tables.Count == 1)
+        {
+            var single = tables.Values.Single();
+            if (single.FindColumn(columnName) is { } singleColumn)
+            {
+                return (single, singleColumn);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Collects every <see cref="ColumnReferenceExpression"/> reachable from a fragment, unresolved - used only to then test each one against <see cref="ColumnNameIfQualifiedByAlias"/>.</summary>
     public sealed class RawColumnReferenceCollector : TSqlFragmentVisitor
     {

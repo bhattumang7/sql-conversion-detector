@@ -396,26 +396,13 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var joinColumns = PredicateTreeWalker.FlattenAnd(spec.SearchCondition)
-                .OfType<BooleanComparisonExpression>()
-                .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
-                .SelectMany(c => new[] { c.FirstExpression, c.SecondExpression })
-                .Select(e => DirectBaseTableResolver.ColumnNameIfQualifiedByAlias(e, sourceAlias))
-                .Where(c => c is not null)
-                .Select(c => c!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
+            var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(spec.SearchCondition, sourceAlias);
             if (joinColumns.Count == 0)
             {
                 return;
             }
 
-            var isProvablyUnique = sourceTable.Indexes.Any(ix =>
-                ix.IsUnique && !ix.IsFiltered && !ix.IsDisabled
-                && ix.KeyColumns.Count > 0
-                && ix.KeyColumns.All(kc => joinColumns.Contains(kc, StringComparer.OrdinalIgnoreCase)));
-            if (isProvablyUnique)
+            if (JoinKeyUniqueness.IsProvenUniqueOver(sourceTable, joinColumns))
             {
                 return;
             }

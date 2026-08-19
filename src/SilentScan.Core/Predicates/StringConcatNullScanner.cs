@@ -166,7 +166,7 @@ public static class StringConcatNullScanner
                     return new Leaf(LeafKind.String, IsNullableColumn: false, TableQualifiedName: null, ColumnName: null);
 
                 case ColumnReferenceExpression columnRef:
-                    var resolved = TryResolveColumn(columnRef, tables);
+                    var resolved = DirectBaseTableResolver.TryResolveColumn(columnRef, tables);
                     if (resolved is not { } r || r.Column.Type is not { } columnType || !StringCategories.Contains(columnType.Category))
                     {
                         // Unresolvable, or resolved to a non-string catalog type - either way this
@@ -215,42 +215,6 @@ public static class StringConcatNullScanner
 
         private static ScalarExpression Unwrap(ScalarExpression expression) =>
             expression is ParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
-
-        private static (CatalogTable Table, CatalogColumn Column)? TryResolveColumn(
-            ColumnReferenceExpression columnRef, Dictionary<string, CatalogTable> tables)
-        {
-            var identifiers = columnRef.MultiPartIdentifier?.Identifiers;
-            if (identifiers is null || identifiers.Count == 0)
-            {
-                return null;
-            }
-
-            var columnName = identifiers[^1].Value;
-
-            if (identifiers.Count >= 2)
-            {
-                var alias = identifiers[^2].Value;
-                if (tables.TryGetValue(alias, out var table) && table.FindColumn(columnName) is { } column)
-                {
-                    return (table, column);
-                }
-
-                return null;
-            }
-
-            // Unqualified reference - only safe to resolve when exactly one table is in scope, to
-            // avoid guessing which of several tables an ambiguous bare column name belongs to.
-            if (tables.Count == 1)
-            {
-                var table = tables.Values.Single();
-                if (table.FindColumn(columnName) is { } column)
-                {
-                    return (table, column);
-                }
-            }
-
-            return null;
-        }
 
         /// <summary>
         /// Collects every outermost <c>+</c> <see cref="BinaryExpression"/> chain root reachable

@@ -171,24 +171,8 @@ public static class ScalarUdfMap
             node.AcceptChildren(this);
         }
 
-        private ScalarUdfContext ResolveContext(FunctionCall node)
-        {
-            var best = default((int Start, int End, ScalarUdfContext Context)?);
-            foreach (var region in _regions)
-            {
-                if (node.StartOffset < region.Start || node.StartOffset >= region.End)
-                {
-                    continue;
-                }
-
-                if (best is null || region.End - region.Start < best.Value.End - best.Value.Start)
-                {
-                    best = region;
-                }
-            }
-
-            return best?.Context ?? ScalarUdfContext.Other;
-        }
+        private ScalarUdfContext ResolveContext(FunctionCall node) =>
+            ScalarUdfContextRegions.Resolve(_regions, node);
 
         private static ScalarUdfOrigin? WorseOf(ScalarUdfOrigin? existing, ScalarUdfOrigin candidate)
         {
