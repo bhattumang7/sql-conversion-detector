@@ -70,6 +70,18 @@ public sealed class IndexHintScannerTests
     }
 
     [Fact]
+    public void HintedTableReferencedWithDifferentCasingThanDdl_BoundLeadingColumnStillSuppresses()
+    {
+        // 2026-08 audit: same shape as CompositeIndexLeadingColumnScannerTests' casing test -
+        // the leading column IS bound, just through a differently-cased table reference; a
+        // case-sensitive suppression-set lookup missed it and reported a bogus
+        // HintedIndexNotSeekable finding on already-seekable code.
+        var findings = Scan("SELECT 1 FROM DBO.ORDERS WITH (INDEX(IX_Orders_Status)) WHERE Status = 5;", CatalogWithIndex());
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void NoHints_NeverFires()
     {
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE OrderId = 1;", CatalogWithIndex());

@@ -41,7 +41,7 @@ public static class IndexCoverageScanner
             // statement (SELECT list, WHERE, ORDER BY, GROUP BY, JOIN ON, HAVING) - the coverage
             // question needs this broader set, unlike CompositeIndexLeadingColumnScanner's own
             // narrower "referenced anywhere, used only to suppress" set.
-            var allReferencedColumns = new HashSet<(string Table, string Column)>();
+            var allReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, allReferencedColumns);
             statement.Node.Accept(referenceVisitor);
 

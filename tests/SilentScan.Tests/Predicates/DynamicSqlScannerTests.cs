@@ -2162,6 +2162,36 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecWithKnownOutputSummary_CalleeCasingDiffersFromCallGraphEdge_StillSeedsCallerVariable()
+    {
+        // 2026-08 audit: ScanReportBuilder writes this index keyed by the callee's own DECLARED
+        // name (ProcedureOutputSummary.QualifiedName) but the call graph edge that reads it back
+        // carries the CALL-SITE spelling (ProcCallEdge.CalleeQualifiedName) - a bare default
+        // Dictionary comparer silently dropped OUTPUT-parameter propagation whenever the two
+        // differed in casing. Mirrors Scan_ExecWithKnownOutputSummary_SeedsCallerVariable_
+        // ProducesAnalyzableScript exactly, except the EXEC spells the callee in a different case
+        // than the summary index's own key, using the same comparer ScanReportBuilder now
+        // constructs the real index with (TableColumnKeyComparer.Instance).
+        var sql =
+            "DECLARE @select varchar(max);\n" +
+            "EXEC DBO.USP_BUILDSELECTCLAUSE @kind = 1, @out = @select OUTPUT;\n" +
+            "EXEC ('SELECT ' + @select + ' FROM T');";
+
+        var outputArgument = new ProcCallArgument("@out", null, FormalParameterIsOutput: true, CallerVariableName: "@select", IsLiteral: false);
+        var graph = new ProcCallGraph([new ProcCallEdge(null, "DBO.USP_BUILDSELECTCLAUSE", new SourceSpan("test.sql", 2, 1), [outputArgument])]);
+        var summaries = new Dictionary<(string, string), IReadOnlyList<string>>(TableColumnKeyComparer.Instance)
+        {
+            [("dbo.usp_BuildSelectClause", "@out")] = ["Col1, Col2"],
+        };
+
+        var result = ScanWithCallGraphAndOutputSummaries(sql, graph, summaries);
+
+        Assert.Empty(result.Findings);
+        var script = Assert.Single(result.AnalyzableScripts);
+        Assert.Equal("SELECT Col1, Col2 FROM T", script.InnerText);
+    }
+
+    [Fact]
     public void Scan_ExecWithOutputArgumentButNoKnownSummary_FoldsToTypedHole()
     {
         // The call graph resolved the target, but no summary exists for its OUTPUT parameter
@@ -2318,7 +2348,7 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamOmittedByCallerRelyingOnItsOwnLiteralDefault_SeedsFromThatDefault()
+    public void Scan_ProcParamOmittedByCallerRelyingOnItsOwnLiteralDefault_SeedsFromThatDefaultAndWidens()
     {
         // T-SQL lets a caller omit a trailing parameter entirely when the formal declares its own
         // DEFAULT - a real, common shape (found via scan-db --fetch-sql-from-tables against a
@@ -2328,6 +2358,12 @@ public sealed class DynamicSqlScannerTests
         // Before this existed, an omitted argument left the formal's key OUT of `seed` entirely,
         // surfacing as "variable-not-in-scope" for a parameter that WAS genuinely declared and
         // DID have a real, known value - just never passed explicitly.
+        //
+        // 2026-08 audit: the default must widen exactly like a literal ARGUMENT does (see
+        // Scan_ProcParamSeededFromSingleCallerLiteral_ProducesAnalyzableScriptAndExternalCallerAlternative
+        // immediately above) - "the one in-scan caller omitted the argument" is not "the default
+        // always applies"; an external caller this scan can't see may pass anything. Originally
+        // asserted a single, fully-literal script - that was the unsound fold itself.
         var graph = SingleCallerGraph(); // caller passes ZERO arguments at all
 
         var result = ScanWithCallGraph(
@@ -2336,8 +2372,9 @@ public sealed class DynamicSqlScannerTests
             graph);
 
         Assert.Empty(result.Findings);
-        var script = Assert.Single(result.AnalyzableScripts);
-        Assert.Equal("SELECT 1 WHERE Status = 'Active'", script.InnerText);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Active'");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText != "SELECT 1 WHERE Status = 'Active'");
     }
 
     [Fact]

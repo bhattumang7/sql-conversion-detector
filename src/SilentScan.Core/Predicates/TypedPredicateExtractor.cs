@@ -233,17 +233,6 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private sealed class TableColumnKeyComparer : IEqualityComparer<(string Table, string Column)>
-        {
-            public static readonly TableColumnKeyComparer Instance = new();
-
-            public bool Equals((string Table, string Column) x, (string Table, string Column) y) =>
-                string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Column, y.Column, StringComparison.OrdinalIgnoreCase);
-
-            public int GetHashCode((string Table, string Column) obj) =>
-                HashCode.Combine(obj.Table.ToUpperInvariant(), obj.Column.ToUpperInvariant());
-        }
 
         /// <summary>
         /// True for the whole body of a procedure declared <c>WITH RECOMPILE</c>

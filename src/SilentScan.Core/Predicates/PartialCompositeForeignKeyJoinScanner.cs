@@ -127,7 +127,14 @@ public static class PartialCompositeForeignKeyJoinScanner
                 .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
                 .ToList();
 
-            var directlyJoinedTablePairs = new HashSet<(string, string)>();
+            // ValueTuple element names are compile-time only, so a (string Table, string Column)
+            // comparer is the same underlying type as (string, string) - reused directly rather
+            // than duplicating it under a pair-specific name (2026-08 audit: this set and
+            // NormalizedPair's own CompareOrdinal ordering both compared table names
+            // case-sensitively, so a same-pair join spelled with different casing either missed
+            // the "already directly joined" suppression or produced two distinct pair keys for
+            // one real pair).
+            var directlyJoinedTablePairs = new HashSet<(string, string)>(TableColumnKeyComparer.Instance);
             foreach (var join in joinNodes)
             {
                 InspectJoin(join, scopeChain, statementWideEqualities, directlyJoinedTablePairs);
@@ -302,7 +309,7 @@ public static class PartialCompositeForeignKeyJoinScanner
         private static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
         private static (string, string) NormalizedPair(string a, string b) =>
-            string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
+            string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? (a, b) : (b, a);
 
     }
 }

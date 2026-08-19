@@ -116,7 +116,7 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
             .Concat(PredicateTreeWalker.FlattenAnd(whereCondition))
             .OfType<BooleanComparisonExpression>()
             .SelectMany(c => BaseColumnResolver.ResolveBothSides(c, SourcePath, scopeChain))
-            .ToHashSet();
+            .ToHashSet(TableColumnKeyComparer.Instance);
 
         InspectStatement(new ConstrainedStatement(
             baseTables, andConstrainedColumns, scopeChain, joinNodes, whereCondition, node));

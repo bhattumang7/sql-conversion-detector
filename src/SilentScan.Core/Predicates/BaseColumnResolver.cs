@@ -4,6 +4,33 @@ using SilentScan.Core.Lineage;
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
+/// A (table, column) key compares its two parts <see cref="StringComparison.OrdinalIgnoreCase"/>,
+/// matching every other identifier comparison in Catalog/Lineage. Promoted out of
+/// <c>TypedPredicateExtractor</c> to its own public top-level type (2026-08 audit) - a bare
+/// <c>HashSet&lt;(string, string)&gt;</c>/<c>Dictionary&lt;(string, string), ...&gt;</c> silently
+/// takes the ordinal default comparer, and several callers build such a collection keyed by
+/// <see cref="Lineage.ColumnProvenance.BaseColumn.TableQualifiedName"/> (the FROM-clause source
+/// spelling) then probe it with <see cref="Catalog.CatalogTable.QualifiedName"/> (the DDL
+/// spelling) or a call-site's own spelling of a callee name - a reference spelled with different
+/// casing (<c>FROM DBO.ORDERS</c> against <c>CREATE TABLE dbo.Orders</c>) silently missed every
+/// one of these lookups, which made a scanner treat a bound leading column as unreferenced (a
+/// false violation) or drop OUTPUT-parameter propagation across a differently-cased call site.
+/// ValueTuple element names are compile-time only, so this same comparer applies to any
+/// <c>(string, string)</c> pair regardless of what its own element names are called.
+/// </summary>
+public sealed class TableColumnKeyComparer : IEqualityComparer<(string Table, string Column)>
+{
+    public static readonly TableColumnKeyComparer Instance = new();
+
+    public bool Equals((string Table, string Column) x, (string Table, string Column) y) =>
+        string.Equals(x.Table, y.Table, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(x.Column, y.Column, StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode((string Table, string Column) obj) =>
+        HashCode.Combine(obj.Table.ToUpperInvariant(), obj.Column.ToUpperInvariant());
+}
+
+/// <summary>
 /// Shared base-table-only, depth-0 column resolution used by several standalone whole-statement
 /// scanners (docs/detection-checklist.md "Engineering debt" - real duplication found via a
 /// SonarQube scan, not the Flatten-family sweep earlier). <see cref="ResolveBaseColumn"/>/

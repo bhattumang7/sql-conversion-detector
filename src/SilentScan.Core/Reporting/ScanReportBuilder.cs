@@ -1417,7 +1417,12 @@ public static class ScanReportBuilder
         IScanProgress progress)
     {
         const int maxOutputSummaryRounds = 5;
-        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>();
+        // Written keyed by the callee's own declared name (summary.QualifiedName), read keyed by
+        // the call-site spelling (edge.CalleeQualifiedName) - a bare default comparer silently
+        // dropped OUTPUT-parameter propagation whenever the two differed in casing (2026-08
+        // audit). ValueTuple element names are compile-time only, so the (Table, Column) comparer
+        // is the same underlying (string, string) comparer this dictionary needs.
+        var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>(TableColumnKeyComparer.Instance);
         List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
         using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
         {

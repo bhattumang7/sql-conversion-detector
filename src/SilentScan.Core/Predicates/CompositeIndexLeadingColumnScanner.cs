@@ -41,7 +41,7 @@ public static class CompositeIndexLeadingColumnScanner
             // (includes OR branches, IS NULL checks, every comparison operator) - used only to
             // suppress a violation, never to trigger one, so being liberal here is the safe
             // direction: a leading column referenced ANYWHERE, even weakly, is enough to decline.
-            var anyReferencedColumns = new HashSet<(string Table, string Column)>();
+            var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns);
             statement.WhereCondition?.Accept(referenceVisitor);
             foreach (var join in statement.JoinNodes)

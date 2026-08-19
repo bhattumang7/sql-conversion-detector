@@ -61,6 +61,19 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     }
 
     [Fact]
+    public void PredicateOnLeadingColumnWithDifferentCasingThanDdl_StillSuppresses()
+    {
+        // 2026-08 audit: the suppression set is keyed by the FROM-clause spelling
+        // (ColumnProvenance.BaseColumn.TableQualifiedName), the lookup uses the catalog/DDL
+        // spelling (CatalogTable.QualifiedName) - a bare HashSet default comparer treated
+        // "DBO.Orders" and "dbo.Orders" as different tables, so a leading column genuinely bound
+        // through a differently-cased reference fired a false violation.
+        var findings = Scan("SELECT 1 FROM DBO.ORDERS WHERE Region = 1 AND Status = 5;", CatalogWithComposite());
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void LeadingColumnReferencedOnlyInsideOrBranch_StillSuppresses()
     {
         // Conservative by design: even a weak, OR-reachable reference to the leading column is

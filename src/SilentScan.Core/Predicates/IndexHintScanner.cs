@@ -81,7 +81,7 @@ public static class IndexHintScanner
 
             var joinNodes = fromClause is null ? [] : fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
 
-            var anyReferencedColumns = new HashSet<(string Table, string Column)>();
+            var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(sourcePath, scopeChain, anyReferencedColumns);
             whereCondition?.Accept(referenceVisitor);
             foreach (var join in joinNodes)

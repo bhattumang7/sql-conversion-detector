@@ -131,7 +131,7 @@ public static class NotInNullableSubqueryScanner
 
                 var provenance = ScalarExpressionResolver.ResolveColumnReference(filterColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null);
                 if (provenance is ColumnProvenance.BaseColumn { Depth: 0 } filterColumn
-                    && string.Equals(filterColumn.TableQualifiedName, tableQualifiedName, StringComparison.Ordinal)
+                    && string.Equals(filterColumn.TableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(filterColumn.ColumnName, columnName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
