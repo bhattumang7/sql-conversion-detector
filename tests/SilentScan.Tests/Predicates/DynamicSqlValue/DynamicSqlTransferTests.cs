@@ -287,4 +287,26 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal(new SqlType(SqlTypeCategory.Int), hole.Type);
         Assert.Equal("kept", LitText(result["@unrelated"])); // never mentioned by this call, so untouched
     }
+
+    /// <summary>
+    /// sp_executesql's own @params declaration can name an OUTPUT parameter, bound to a caller
+    /// variable exactly like an ordinary stored-procedure call's OUTPUT argument - this scanner
+    /// cannot see what the dynamic SQL text itself assigns to it, so @v must be tainted/havoced
+    /// after the call, not left holding whatever value was proven before it. Without this, a
+    /// later `EXEC(@v)` would be analyzed against SQL that isn't what actually runs.
+    /// </summary>
+    [Fact]
+    public void SpExecuteSql_WithOutputArgument_HavocsCallerVariable()
+    {
+        var result = Run(
+            "DECLARE @v NVARCHAR(50) = 'before'; " +
+            "EXEC sp_executesql N'SELECT 1', N'@out nvarchar(50) OUTPUT', @out = @v OUTPUT;",
+            out _, out var scripts);
+
+        Assert.NotEmpty(scripts); // @stmt itself still resolves and emits normally
+        var template = Assert.IsType<SqlTextValue.Template>(result["@v"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+        Assert.Equal(new SqlType(SqlTypeCategory.NVarChar, Length: 50), hole.Type);
+    }
 }

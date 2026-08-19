@@ -695,16 +695,17 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_IfConditionOnACallerSeededBitmaskProvablyTrue_ResolvesOnlyTheThenBranch()
+    public void Scan_IfConditionOnACallerSeededBitmaskProvablyTrue_StillResolvesBothBranches()
     {
         // A real corpus idiom (found across nearly every spRIL_* report proc in a restored
-        // production database): a caller-seeded literal bitmask parameter gates which of many
-        // dynamic-SQL-building branches actually runs - "IF (@Bits & @Mask) = @Mask ... ELSE ..."
-        // - where @Mask is a local DECLARE'd constant and @Bits is seeded from the proc's own
-        // (single) real caller via the call graph. When both operands are provably known
-        // integers AND the condition references that caller-seeded parameter, the ELSE side is
-        // not a genuine alternative outcome for THIS call graph - it must not survive into the
-        // merged value as a Choice/Tainted.
+        // production database): a literal bitmask parameter from ONE known in-corpus caller gates
+        // which of many dynamic-SQL-building branches runs - "IF (@Bits & @Mask) = @Mask ...
+        // ELSE ..." - where @Mask is a local DECLARE'd constant and @Bits is seeded from that
+        // single call site. A stored procedure is a public surface, though: app code, jobs, and
+        // EXEC-by-name calls this scan's own call graph can't see may pass a different @Bits -
+        // the ELSE branch is a genuine possible outcome for THOSE callers, so it must survive
+        // analysis rather than being pruned away on the strength of the one caller this scan
+        // happened to find.
         var callGraph = new ProcCallGraph([new ProcCallEdge(
             null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
             [new ProcCallArgument("@Bits", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("2", "caller.sql", 1, 1, 0))])]);
@@ -721,59 +722,9 @@ public sealed class DynamicSqlScannerTests
         var extraction = DynamicSqlScannerV2.Scan(result, callGraph: callGraph);
 
         Assert.Empty(extraction.Findings);
-        var script = Assert.Single(extraction.AnalyzableScripts);
-        Assert.Equal("SELECT A", script.InnerText);
-    }
-
-    [Fact]
-    public void Scan_IfConditionOnACallerSeededBitmaskProvablyFalse_ResolvesOnlyTheElseBranch()
-    {
-        var callGraph = new ProcCallGraph([new ProcCallEdge(
-            null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
-            [new ProcCallArgument("@Bits", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("5", "caller.sql", 1, 1, 0))])]);
-        var result = SqlScriptParser.ParseText("test.sql", """
-            CREATE PROCEDURE dbo.usp_Test (@Bits INT) AS
-            BEGIN
-                DECLARE @Mask INT = 2;
-                IF (@Bits & @Mask) = @Mask BEGIN SET @x = 'A'; END ELSE BEGIN SET @x = 'B'; END
-                EXEC('SELECT ' + @x);
-            END
-            """);
-        Assert.False(result.HasErrors);
-
-        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: callGraph);
-
-        Assert.Empty(extraction.Findings);
-        var script = Assert.Single(extraction.AnalyzableScripts);
-        Assert.Equal("SELECT B", script.InnerText);
-    }
-
-    [Fact]
-    public void Scan_AndConditionOnACallerSeededBitmaskWithOneProvablyFalseSideAndOneUnresolvedSide_StillPrunesByShortCircuit()
-    {
-        // Real corpus shape (spRIL_FMStopInformation and others): "IF (@Bits1 & @Mask1) = @Mask1
-        // AND (@Bits2 & @Mask2) = @Mask2" - a multi-flag guard. Proving just ONE conjunct false is
-        // enough to prove the whole AND false, even when @Bits2 is never seeded and its own half
-        // can't be evaluated at all.
-        var callGraph = new ProcCallGraph([new ProcCallEdge(
-            null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
-            [new ProcCallArgument("@Bits1", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("5", "caller.sql", 1, 1, 0))])]);
-        var result = SqlScriptParser.ParseText("test.sql", """
-            CREATE PROCEDURE dbo.usp_Test (@Bits1 INT, @Bits2 INT) AS
-            BEGIN
-                DECLARE @Mask1 INT = 2;
-                DECLARE @Mask2 INT = 4;
-                IF (@Bits1 & @Mask1) = @Mask1 AND (@Bits2 & @Mask2) = @Mask2 BEGIN SET @x = 'A'; END ELSE BEGIN SET @x = 'B'; END
-                EXEC('SELECT ' + @x);
-            END
-            """);
-        Assert.False(result.HasErrors);
-
-        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: callGraph);
-
-        Assert.Empty(extraction.Findings);
-        var script = Assert.Single(extraction.AnalyzableScripts);
-        Assert.Equal("SELECT B", script.InnerText);
+        Assert.Equal(2, extraction.AnalyzableScripts.Count);
+        Assert.Contains(extraction.AnalyzableScripts, s => s.InnerText == "SELECT A");
+        Assert.Contains(extraction.AnalyzableScripts, s => s.InnerText == "SELECT B");
     }
 
     [Fact]
@@ -2045,8 +1996,11 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
-    public void Scan_ProcParamSeededFromSingleCallerLiteral_ProducesAnalyzableScript()
+    public void Scan_ProcParamSeededFromSingleCallerLiteral_ProducesAnalyzableScriptAndExternalCallerAlternative()
     {
+        // A stored procedure is a public surface - the one in-corpus caller found here does not
+        // rule out an external caller passing something else, so the seed is a choice between the
+        // known literal and an unresolved placeholder, not the literal alone.
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var graph = SingleCallerGraph(new ProcCallArgument("@Status", FormalParameterType: null, FormalParameterIsOutput: false, CallerVariableName: null, IsLiteral: true, literal));
 
@@ -2056,17 +2010,20 @@ public sealed class DynamicSqlScannerTests
             graph);
 
         Assert.Empty(result.Findings);
-        var script = Assert.Single(result.AnalyzableScripts);
-        Assert.Equal("SELECT 1 WHERE Status = 'Active'", script.InnerText);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Active'");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText != "SELECT 1 WHERE Status = 'Active'");
     }
 
     [Fact]
-    public void Scan_ProcParamWithMultipleCallersPassingSameLiteral_ProducesAnalyzableScript()
+    public void Scan_ProcParamWithMultipleCallersPassingSameLiteral_StillAddsExternalCallerAlternative()
     {
         // Value-seeding across proc-call edges (roadmap "trace provably-constant dynamic SQL
-        // across proc-call edges", extended beyond a single caller): every known caller supplies
-        // a literal for this parameter, so its runtime value is provably one of them - here both
-        // callers happen to agree, so the assembly set collapses to one script.
+        // across proc-call edges", extended beyond a single caller): every KNOWN caller agreeing
+        // on a literal is still not proof of every possible caller - a stored procedure is a
+        // public surface external code this scan can't see may call too - so the assembly set
+        // still widens to include an unresolved alternative rather than collapsing to just the
+        // one literal every in-corpus caller happens to agree on.
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var argument = new ProcCallArgument("@Status", null, false, null, true, literal);
         var graph = new ProcCallGraph([
@@ -2080,12 +2037,13 @@ public sealed class DynamicSqlScannerTests
             graph);
 
         Assert.Empty(result.Findings);
-        var script = Assert.Single(result.AnalyzableScripts);
-        Assert.Equal("SELECT 1 WHERE Status = 'Active'", script.InnerText);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Active'");
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText != "SELECT 1 WHERE Status = 'Active'");
     }
 
     [Fact]
-    public void Scan_ProcParamWithMultipleCallersPassingDifferentLiterals_BothAssembliesAnalyzed()
+    public void Scan_ProcParamWithMultipleCallersPassingDifferentLiterals_AllAssembliesAnalyzed()
     {
         var activeArgument = new ProcCallArgument(
             "@Status", null, false, null, true, new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2));
@@ -2102,7 +2060,9 @@ public sealed class DynamicSqlScannerTests
             graph);
 
         Assert.Empty(result.Findings);
-        Assert.Equal(2, result.AnalyzableScripts.Count);
+        // Two known-caller literals plus an unresolved alternative for any external caller this
+        // scan's own call graph can't see.
+        Assert.Equal(3, result.AnalyzableScripts.Count);
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Active'");
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Archived'");
     }

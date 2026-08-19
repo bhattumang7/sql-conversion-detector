@@ -95,13 +95,14 @@ public static class DynamicSqlTransfer
         var nestedScope = qualifiedName is null ? context.Scope : new DynamicSqlScope(qualifiedName, context.Scope.TriggerTarget);
         var nestedContext = context with { Scope = nestedScope, DeclaredTypes = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase) };
 
-        var callerSeededNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var seed = qualifiedName is not null && formalParameters is { Count: > 0 }
-            ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext, callerSeededNames)
+            ? BuildParameterSeed(qualifiedName, formalParameters, nestedContext)
             : new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
         SeedBatchDeclaredVariables(procOrFunc.StatementList!.Statements, nestedContext, seed);
 
-        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext), callerSeededNames);
+        // No caller-seeded variable names are supplied, so DynamicSqlCfg's constant-condition
+        // pruning stays inert here - see BuildParameterSeed for why nothing qualifies any more.
+        var cfg = new DynamicSqlCfg(context.SourcePath, context.Cap, (s, activeGuards) => CompileLeaf(s, activeGuards, nestedContext));
         var folded = cfg.Solve(procOrFunc.StatementList!.Statements, seed);
 
         if (qualifiedName is not null && formalParameters is { Count: > 0 })
@@ -121,15 +122,17 @@ public static class DynamicSqlTransfer
     /// real T-SQL guarantee regardless of who calls it) rather than left fully untracked - the
     /// old scanner's <c>SeedSymbolicOrTaint</c>. Every branch here mirrors the old scanner's
     /// <c>BuildParameterSeed</c>/<c>SeedFromSingleEdge</c>/<c>SeedFromMultipleEdges</c> exactly.
-    /// <paramref name="callerSeededNames"/> is populated as a side effect with every formal
-    /// parameter name seeded from a genuine caller-supplied literal argument (never a default
-    /// value or a symbolic/typed-hole fallback) - <see cref="DynamicSqlCfg"/>'s own
-    /// constant-condition pruning uses this to distinguish a real caller-driven branch from
-    /// ordinary always-run boilerplate; see <see cref="DynamicSqlCfg.ApplyConstantConditionPruning"/>'s
-    /// own doc comment for why.
+    /// This used to also report which formal parameters were seeded from a genuine caller-supplied
+    /// literal, so <see cref="DynamicSqlCfg.ApplyConstantConditionPruning"/> could fold a branch
+    /// those parameters decided. Nothing qualifies any more: a seeded literal is now widened
+    /// against an external-caller placeholder (a stored procedure is a public surface - app code,
+    /// jobs and EXEC-by-name callers this scan cannot see may pass anything), and a widened value
+    /// is no longer a literal to fold against. The pruning machinery is left in place and simply
+    /// receives no names; reviving it would need a source of literals that accounts for callers
+    /// outside the scan, not the in-scan call graph alone.
     /// </summary>
     private static Dictionary<string, SqlTextValue> BuildParameterSeed(
-        string qualifiedName, IList<ProcedureParameter> formalParameters, TransferContext context, HashSet<string> callerSeededNames)
+        string qualifiedName, IList<ProcedureParameter> formalParameters, TransferContext context)
     {
         var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
         if (context.CallGraph is null)
@@ -150,7 +153,7 @@ public static class DynamicSqlTransfer
 
         if (edges.Count == 1)
         {
-            SeedFromSingleEdge(edges[0], formalParameters, seed, context, callerSeededNames);
+            SeedFromSingleEdge(edges[0], formalParameters, seed, context);
             return seed;
         }
 
@@ -172,7 +175,7 @@ public static class DynamicSqlTransfer
     }
 
     private static void SeedFromSingleEdge(
-        ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> seed, TransferContext context, HashSet<string> callerSeededNames)
+        ProcCallEdge edge, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> seed, TransferContext context)
     {
         foreach (var formal in formalParameters)
         {
@@ -210,11 +213,23 @@ public static class DynamicSqlTransfer
                 continue;
             }
 
-            seed[paramName] = new SqlTextValue.Template([new TemplatePiece.Lit(
+            var literalValue = new SqlTextValue.Template([new TemplatePiece.Lit(
                 literalArgument.Value, new SourceSpan(literalArgument.SourcePath, literalArgument.StartLine, literalArgument.StartColumn), literalArgument.PrefixLength)]);
-            callerSeededNames.Add(paramName);
+
+            // A stored procedure is a public surface - app code, jobs, EXEC-by-name calls, and
+            // every other database can call it too, invisible to this scan's own call graph. "The
+            // only caller I found in the corpus passed 'X'" is not "the parameter is always 'X'" -
+            // widening against an external-caller placeholder turns the literal into an honest
+            // Unknown-typed hole (via SqlTextValue.Join's own uniform-type recovery) instead of a
+            // provably-wrong assertion, and correctly stops ApplyConstantConditionPruning from
+            // treating it as foldable ground truth - a widened value is no longer a literal to
+            // fold against, so this method now reports no caller-seeded names at all.
+            seed[paramName] = WidenForPossibleExternalCallers(literalValue, formal, context);
         }
     }
+
+    private static SqlTextValue WidenForPossibleExternalCallers(SqlTextValue seeded, ProcedureParameter formal, TransferContext context) =>
+        SqlTextValue.Join(seeded, SeedSymbolicOrTaint(formal, "parameter-not-seeded:external-caller-possible", context), guardText: string.Empty, context.Cap, context.Span(formal));
 
     /// <summary>
     /// When EVERY edge calling this proc supplies a literal argument for a given formal
@@ -253,7 +268,11 @@ public static class DynamicSqlTransfer
         // returns early the moment any edge lacks one, so `combined` is a real seeded value here,
         // never the placeholder Tainted this method started with (unless Join's own cardinality
         // cap collapsed it, whose reason string is deliberately identical to that placeholder).
-        return combined;
+        // Every in-corpus caller agreeing (or even a single caller) is still not "every possible
+        // caller" - a stored procedure is a public surface external code this scan can't see may
+        // call too - so this widens the same way SeedFromSingleEdge does rather than asserting
+        // the corpus-observed literal set as the parameter's complete value space.
+        return WidenForPossibleExternalCallers(combined, formal, context);
     }
 
     private static void CompileTriggerBody(TriggerStatementBody trigger, TransferContext context, bool emit)
@@ -918,6 +937,18 @@ public static class DynamicSqlTransfer
         var parameterDeclarationText = ResolveParameterDeclarationText(procRef, state, context);
         var argumentBindings = ResolveArgumentBindings(procRef);
         EmitScriptsOrFinding(query, node, activeGuards, context, parameterDeclarationText, argumentBindings, isExecString: false);
+
+        // sp_executesql's own @params declaration can name OUTPUT parameters
+        // (N'@out nvarchar(50) OUTPUT'), bound to caller variables via `@out = @v OUTPUT` among
+        // procRef's other parameters exactly like an ordinary stored-procedure call - the value
+        // resolved above is what the dynamic SQL itself IS, not what it writes back. Without
+        // this, @v would keep whatever was proven before this call, and a later EXEC(@v) would
+        // be analyzed against SQL that isn't what actually runs - the one place this scanner
+        // could otherwise assert a proof it doesn't have. CollectWritableVariableNames already
+        // finds these generically (an sp_executesql call parses as an ExecutableProcedureReference
+        // with IsOutput parameters like any other), so this reuses the same taint path every
+        // other unmodeled-callee OUTPUT write goes through.
+        TaintReferencedVariables(node, context, state);
     }
 
     private static Dictionary<string, string>? ResolveArgumentBindings(ExecutableProcedureReference procRef)

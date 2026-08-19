@@ -14,6 +14,7 @@ namespace SilentScan.Tests.Predicates;
 /// ScanReportBuilder (ProcCallGraphBuilder -> DynamicSqlScannerV2 -> DynamicSqlPipeline), the same
 /// entry point production uses, not DynamicSqlScannerV2 in isolation.
 /// </summary>
+[Trait("Category", "Oracle")]
 public sealed class DynamicSqlCrossCallEdgePipelineTests
 {
     private static async Task<ScanReport> Scan(string sql, FindingConfidence minimumConfidence = FindingConfidence.High)
@@ -93,9 +94,11 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     public async Task TwoCallersWithDifferentLiterals_BothAssembliesAnalyzed()
     {
         // Value-seeding across proc-call edges (extended beyond a single caller): every known
-        // caller supplies a literal for @Status, so its runtime value is provably one of them -
-        // both assemblies are reparsed and analyzed, rather than the whole site declining just
-        // because there's more than one call site.
+        // caller supplies a literal for @Status, so both are reparsed and analyzed, rather than
+        // the whole site declining just because there's more than one call site. A stored
+        // procedure is still a public surface, though - external code this scan's own call graph
+        // can't see may call it too - so a third, unresolved assembly is also analyzed for that
+        // case rather than the seed collapsing to just the two known-caller literals.
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
@@ -108,7 +111,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
             CREATE PROCEDURE dbo.usp_CallerB AS BEGIN EXEC dbo.usp_FindByStatus @Status = N'Closed'; END;
             """);
 
-        Assert.Equal(2, report.DynamicSqlFindings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
+        Assert.Equal(3, report.DynamicSqlFindings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
         Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
         // dbo.Orders is never declared in this test's own DDL, so the reparsed predicate's column
         // never resolves to a real catalog table either way - unrelated to the seeding change.

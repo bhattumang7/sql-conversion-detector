@@ -139,8 +139,16 @@ public sealed class DynamicSqlScannerV2Tests
         Assert.Equal("SELECT inner", script.InnerText);
     }
 
+    /// <summary>
+    /// A stored procedure is a public surface - the ONE in-corpus caller this scan found passing
+    /// 'Active' does not mean every caller does (app code, jobs, EXEC-by-name calls are all
+    /// invisible to this scan's own call graph). The seed widens to a choice between the known
+    /// literal (still reported, High confidence) and an unresolved placeholder covering every
+    /// other possible caller (Medium confidence) - never just the one literal asserted as ground
+    /// truth.
+    /// </summary>
     [Fact]
-    public void FormalParameter_SingleKnownCallerWithLiteralArgument_SeedsItsValue()
+    public void FormalParameter_SingleKnownCallerWithLiteralArgument_SeedsChoiceOfLiteralAndExternalCallerPlaceholder()
     {
         var callGraph = new ProcCallGraph([
             new ProcCallEdge(
@@ -155,9 +163,9 @@ public sealed class DynamicSqlScannerV2Tests
             Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
             callGraph: callGraph);
 
-        var script = Assert.Single(result.AnalyzableScripts);
-        Assert.Equal("SELECT Active", script.InnerText);
-        Assert.Equal(FindingConfidence.High, script.Confidence);
+        Assert.Equal(2, result.AnalyzableScripts.Count);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT Active" && s.Confidence == FindingConfidence.High);
+        Assert.Contains(result.AnalyzableScripts, s => s.InnerText != "SELECT Active" && s.Confidence == FindingConfidence.Medium);
     }
 
     [Fact]
@@ -175,7 +183,7 @@ public sealed class DynamicSqlScannerV2Tests
     }
 
     [Fact]
-    public void FormalParameter_MultipleCallersAllLiteral_SeedsTheAgreedSetAsChoice()
+    public void FormalParameter_MultipleCallersAllLiteral_SeedsTheAgreedSetPlusExternalCallerChoice()
     {
         var callGraph = new ProcCallGraph([
             new ProcCallEdge(null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
@@ -190,8 +198,12 @@ public sealed class DynamicSqlScannerV2Tests
             Parse("CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS BEGIN EXEC('SELECT ' + @Status); END;"),
             callGraph: callGraph);
 
-        var texts = result.AnalyzableScripts.Select(s => s.InnerText).OrderBy(t => t, StringComparer.Ordinal).ToList();
-        Assert.Equal(["SELECT Active", "SELECT Inactive"], texts);
+        // Both known callers' literals, plus an unresolved alternative for any external caller
+        // this scan's own call graph can't see - a stored procedure is a public surface.
+        Assert.Equal(3, result.AnalyzableScripts.Count);
+        var texts = result.AnalyzableScripts.Select(s => s.InnerText).ToList();
+        Assert.Contains("SELECT Active", texts);
+        Assert.Contains("SELECT Inactive", texts);
     }
 
     [Fact]
