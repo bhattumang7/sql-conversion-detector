@@ -453,7 +453,9 @@ otherwise-identical function with a `WITH cte AS (...)` block added to its
 body flips `is_inlineable` from 1 to 0), a table-valued (`READONLY`)
 parameter (oracle-confirmed 2026-08-20: checked from the parameter list
 itself, not the body — blocks inlining regardless of what the body does
-with it), or `WITH SCHEMABINDING`-related edge cases. The inlineability bit is per-UDF observable in the catalog
+with it), an `ORDER BY` with no `TOP` (oracle-confirmed 2026-08-20: the
+identical query with `TOP N` added inlines cleanly), or `WITH
+SCHEMABINDING`-related edge cases. The inlineability bit is per-UDF observable in the catalog
 (`sys.sql_modules.is_inlineable`) — prefer reading that flag over
 re-implementing the blocker scan, and use the body scan only to *explain*
 why inlining fails.

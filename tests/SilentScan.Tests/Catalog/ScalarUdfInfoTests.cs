@@ -221,6 +221,52 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionWithOrderByAndNoTop_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionWithOrderByNoTop_EngineReportsNotInlineable): ORDER BY with no TOP
+        // defeats sys.sql_modules.is_inlineable, matching the documented "OrderByWithoutTop"
+        // reason.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.OrderSource (v INT NOT NULL);
+            GO
+            CREATE FUNCTION dbo.fn_OrderByNoTop (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @c INT;
+                SELECT @c = v FROM dbo.OrderSource ORDER BY v;
+                RETURN @c + @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_OrderByNoTop", out var info));
+        Assert.Contains("ORDER BY", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionWithOrderByAndTop_NoBlocker()
+    {
+        // TOP control, otherwise identical shape - isolates ORDER-BY-without-TOP as the blocker
+        // rather than ORDER BY itself.
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.OrderSource (v INT NOT NULL);
+            GO
+            CREATE FUNCTION dbo.fn_OrderByWithTop (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @c INT;
+                SELECT TOP 1 @c = v FROM dbo.OrderSource ORDER BY v;
+                RETURN @c + @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_OrderByWithTop", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
+    [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
         // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.

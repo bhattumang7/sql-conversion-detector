@@ -156,6 +156,17 @@ public static class ScalarUdfInlineabilityScanner
                 }
             }
 
+            // Oracle-confirmed 2026-08-20 (real Docker probe, otherwise-identical bodies): a
+            // `SELECT ... ORDER BY ...` with no TOP blocks inlining; the identical query with
+            // TOP N added inlines cleanly. Matches the public, documented "OrderByWithoutTop"
+            // reason by name. Checked as bare presence/absence, matching exactly what was
+            // verified - a TOP N/TOP N PERCENT variant's own effect was not separately probed,
+            // so this does not special-case one.
+            if (node.OrderByClause is not null && node.TopRowFilter is null)
+            {
+                Report("ORDER BY without TOP");
+            }
+
             base.ExplicitVisit(node);
         }
 

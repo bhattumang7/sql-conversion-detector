@@ -109,6 +109,26 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @c + @x;
         END;
         GO
+        CREATE TABLE dbo.OrderSource (v INT NOT NULL);
+        GO
+        CREATE FUNCTION dbo.fn_OrderByNoTop (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @c INT;
+            SELECT @c = v FROM dbo.OrderSource ORDER BY v;
+            RETURN @c + @x;
+        END;
+        GO
+        CREATE FUNCTION dbo.fn_OrderByWithTop (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @c INT;
+            SELECT TOP 1 @c = v FROM dbo.OrderSource ORDER BY v;
+            RETURN @c + @x;
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -194,6 +214,26 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Tvp", out var info));
         Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionWithOrderByNoTop_EngineReportsNotInlineable()
+    {
+        // Oracle-confirmed 2026-08-20 (real Docker probe): ORDER BY with no TOP defeats
+        // is_inlineable; the identical query with TOP 1 added (below) inlines cleanly.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_OrderByNoTop", out var info));
+        Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionWithOrderByAndTop_EngineReportsInlineable()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_OrderByWithTop", out var info));
+        Assert.True(info!.EngineIsInlineable);
     }
 
     [Fact]
