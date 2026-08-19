@@ -25,6 +25,34 @@ Competitor tools are referred to generically; real identities are in
       catalog surface (`sys.partition_schemes`, `sys.indexes.data_space_id`,
       `sys.partition_functions`).
 
+- [ ] **Static risk factor: table-typed parameter defeats PSP (Parameter
+      Sensitive Plan, compat 170+).** `sys.dm_xe_map_values('psp_skipped_reason_enum')`
+      (2026-08-20 survey, public/documented — 40 named reasons) lists
+      `TableVariable` as a real, engine-recognized reason PSP optimization is
+      skipped for a statement. A table-valued PARAMETER is visible statically
+      from the parameter list — the same signal `ScalarUdfInlineabilityScanner`'s
+      table-valued-parameter check already uses — so "this proc/function can
+      never get per-value-shape plan variants because one of its parameters is
+      table-typed" is a real, provable-from-code static fact, not a runtime
+      signal, and fits CLAUDE.md's explicit carve-out ("The static risk factors
+      for sniffing ship as their own findings"). Not yet scoped: which existing
+      finding family this belongs in (a new `PspFindingKind`, or an addition to
+      an existing parameter-sniffing-adjacent stream —
+      `LocalVariablePredicateFinding`/`ParameterReassignmentPredicateFinding`
+      are the current members of that family); which of the other 39 reasons
+      are similarly static and provable (`HasLocalVar`(11) and `TableVariable`(8)
+      look promising by name; most others — `LoadStatsFailed`, `SkewnessThresholdNotMet`,
+      `CompilationTimeThresholdExceeded` — read as clearly runtime/data-dependent
+      and out of scope); needs its own oracle probe pair and calibration
+      before shipping, per "For every new stream" below. `sys.dm_xe_map_values('interleaved_execution_disabled_reasons')`
+      surveyed the same day — separately confirmed (oracle-verified directly:
+      a compile-only `SET SHOWPLAN_XML` plan for an MSTVF shows the stale
+      100-row estimate, only a real-executed `SET STATISTICS XML` plan shows
+      the interleaved-execution-corrected estimate) that `TvfFenceVerifier`'s
+      existing plan-SHAPE-only check (never reads `EstimateRows`) is already
+      correctly immune to this — not a bug, a confirmed-safe design, recorded
+      here only so the fact doesn't need re-deriving.
+
 ### Docs
 
 - [ ] **Per-rule pages: fill the remaining ~161/234 rules.** Shipped:
