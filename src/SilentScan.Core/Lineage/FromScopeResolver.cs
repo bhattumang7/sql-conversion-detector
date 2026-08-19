@@ -36,18 +36,29 @@ public static class FromScopeResolver
         IReadOnlyDictionary<string, ResolvedRelation> ResolvedViews,
         string SourcePath,
         SkipLedger? Ledger,
-        IReadOnlyDictionary<string, ResolvedRelation>? CteRelations,
+        IReadOnlyDictionary<string, ResolvedRelation> CteRelations,
         string? ProcScope,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? CallerScopeByCalleeScope = null);
 
+    /// <summary>
+    /// <paramref name="cteRelations"/> has no default - every caller must decide explicitly what
+    /// CTE scope applies, even when the answer is "none" (pass an empty dictionary). A defaulted
+    /// <c>= null</c> here is exactly what let sixteen call sites across eleven scanners silently
+    /// resolve a CTE-shadowed table reference against the catalog instead of declining it
+    /// (2026-08 audit) - the omission compiled cleanly and looked identical to a considered
+    /// decision at every call site. Making it required doesn't fix a caller that still passes an
+    /// explicit empty map without actually having collected real CTE names, but it does make
+    /// "I forgot CTEs exist" impossible to express by accident, which is the failure mode that
+    /// actually happened here.
+    /// </summary>
     public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
         FromClause? fromClause,
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         string sourcePath,
-        SkipLedger? ledger = null,
-        IReadOnlyDictionary<string, ResolvedRelation>? cteRelations = null,
-        string? procScope = null) =>
+        SkipLedger? ledger,
+        IReadOnlyDictionary<string, ResolvedRelation> cteRelations,
+        string? procScope) =>
         Resolve(fromClause, new ResolutionContext(catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope));
 
     /// <summary>

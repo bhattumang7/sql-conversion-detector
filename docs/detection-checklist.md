@@ -155,20 +155,35 @@ per phase (Phase 0 commits per fix).
          the safe direction) since none had per-statement CTE tracking to
          begin with; `NonUniqueUpdateSourceScanner` already threads its own
          statement's `WithCtesAndXmlNamespaces`, so it collects precisely.
-- [ ] **Phase 1 — make naive resolution unrepresentable.** The type system
-      can't tell honest resolution from naive: a `ScopeEntry` from
-      `cteRelations: null` looks identical to one resolved with full scope.
-      Kill the class at compile time: `FromScopeResolver`'s flat overload
-      loses its defaulted `ledger`/`cteRelations`/`procScope` parameters;
-      `ResolutionContext` becomes pipeline-issued only (internal ctor,
-      obtained from the scope walker / `ScopedSqlVisitorBase`, which already
-      holds the CTE stack + proc scope). Migrate the Phase-0.1 scanners onto
-      it; every remaining naive call site then fails to compile and each
-      becomes an explicit decision. Backstop: extend
-      `StatementVariantParityTests`' reflection approach — every visitor that
-      calls `FromScopeResolver` must either subclass `ScopedSqlVisitorBase`
-      or appear on a documented-exception list (same pattern as
-      `DocumentedUnreachableCteBearingTypes`).
+- [x] **Phase 1 — make naive resolution unrepresentable.** Shipped, narrower
+      than originally scoped. The type system couldn't tell honest
+      resolution from naive: a `ScopeEntry` from `cteRelations: null` looked
+      identical to one resolved with full scope. Killed at compile time:
+      `FromScopeResolver`'s flat `Resolve` overload lost its defaulted
+      `ledger`/`cteRelations`/`procScope` parameters (all three now
+      required), and `ResolutionContext.CteRelations` itself is no longer
+      nullable — every construction site across the codebase must supply a
+      real dictionary (possibly empty, never absent). Every call site
+      already passed a real value by the time this landed (all sixteen
+      Phase-0.1 sites fixed first), so the signature change touched zero
+      call sites and needed exactly one real fix
+      (`QueryExpressionResolver.ResolveQuerySpecification`'s own nullable
+      `cteRelations` parameter, coalesced to empty) — the compiler proved
+      the fleet was clean rather than finding new gaps, which is the
+      point: a future call site that forgets `cteRelations` now fails to
+      build instead of silently defaulting.
+      Descoped from the original plan: full migration onto
+      `ScopedSqlVisitorBase` (11 scanners, each with its own FROM/JOIN
+      handling — real architectural work, not a compile-time gate, and
+      belongs with Phase 2's rule harness instead) and the
+      `StatementVariantParityTests`-style reflection backstop (tried;
+      "does this visitor call `FromScopeResolver`" isn't a reflectable
+      signal the way Create/Alter method-pair existence is, and "does it
+      override `ExplicitVisit(QuerySpecification)`" produces mostly noise —
+      dozens of unrelated scanners visit that node for reasons having
+      nothing to do with FROM-clause resolution). The non-nullable
+      parameter is the real gate; a reflection test would have been a
+      weaker, noisier version of what the compiler already enforces.
 - [ ] **Phase 2 — rule harness.** No `IRule` abstraction exists; 64 scanners,
       ad-hoc signatures, hand-wired in `ScanReportBuilder`'s 1,327-line
       method at 3 separate points each (+ SARIF/readable/RuleCatalog = ~9

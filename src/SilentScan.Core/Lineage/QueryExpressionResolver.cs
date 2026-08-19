@@ -10,6 +10,8 @@ namespace SilentScan.Core.Lineage;
 /// </summary>
 public static class QueryExpressionResolver
 {
+    private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
+
     public static List<ResolvedColumn> Resolve(
         QueryExpression queryExpression,
         DatabaseCatalog catalog,
@@ -77,7 +79,7 @@ public static class QueryExpressionResolver
         IReadOnlyDictionary<string, ResolvedRelation>? cteRelations,
         string? procScope)
     {
-        var (byAlias, ordered) = FromScopeResolver.Resolve(spec.FromClause, catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope);
+        var (byAlias, ordered) = FromScopeResolver.Resolve(spec.FromClause, catalog, resolvedViews, sourcePath, ledger, cteRelations ?? EmptyCteRelations, procScope);
         var result = new List<ResolvedColumn>();
 
         foreach (var element in spec.SelectElements)
