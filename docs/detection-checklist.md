@@ -63,46 +63,138 @@ Competitor tools are referred to generically; real identities are in
       subagents - each batch just needs the exact `SarifRuleCatalog` constant
       + current Rationale/FixGuidance text per rule, handed out per family).
 
-### Engineering debt
+### Architecture inversion
 
-Do these when the touched code is being worked on anyway.
+The 2026-08 audit's root cause, one problem behind ~15 findings: the pipeline
+doesn't own the rules — every scanner is a free-standing `static Scan(...)`
+that re-decides pipeline-level questions (name resolution, module identity,
+skip honesty, crash behavior, ordering) for itself, and all the shared
+machinery is opt-in. The inversion: a rule receives an already-resolved world
+and returns findings; the pipeline owns everything else. Phases are ordered by
+value-per-line and are each independently shippable; do them in order, commit
+per phase (Phase 0 commits per fix).
 
-- [ ] **Separate rule decisions from ScriptDom traversal.** What's left is
-      rules decided inline in visitors. Shared traversal is done
-      (`ScopedSqlVisitorBase`, `PredicateTreeWalker`); a generic
+- [ ] **Phase 0 — precision hotfixes.** Straight bugs, no architecture; each
+      needs its fires/clean fixture pair per the working agreements.
+      1. The 16 `cteRelations: null` / `CteRelations: null` call sites across
+         11 scanners (`CatchAllPredicateScanner.cs:85,156`,
+         `IndexHintScanner.cs:63,72`,
+         `TryCastComputedColumnPredicateScanner.cs:98,131`,
+         `ConstrainedColumnStatementVisitor.cs:78,87`,
+         `SelfReferencingDmlScanner.cs:131`,
+         `NotInNullableSubqueryScanner.cs:91`,
+         `PartialCompositeForeignKeyJoinScanner.cs:102`,
+         `PostExpansionJoinWidthScanner.cs:51`,
+         `NonUniqueUpdateSourceScanner.cs:73`, `SelectStarViewScanner.cs:98`,
+         `ParameterReassignmentPredicateScanner.cs:229,240`): a CTE shadowing
+         a base table binds to the table (proven by test — `indexed=True`
+         finding on a column the query never reads). Minimum fix: collect CTE
+         names per statement (`CteNameCollector` exists) and pass them; the
+         real fix is Phase 1.
+      2. `DynamicSqlTransfer.cs:195-199`: a parameter DEFAULT folds to a hard
+         constant with no `WidenForPossibleExternalCallers`, unlike the
+         literal-caller branch at :227 whose comment states why widening is
+         mandatory. One-line reroute.
+      3. `Collation.cs:45-48`: `EndsWith("_BIN2")` misses
+         `*_BIN2_UTF8` collations → `SargabilityClassifier` advises deleting
+         an `UPPER()` wrap that changes results. Match `_BIN`/`_BIN2` as a
+         segment, not a suffix.
+      4. Tuple-keyed sets compare ordinal-case-sensitively (invisible to a
+         `StringComparer` grep): `CompositeIndexLeadingColumnScanner.cs:44/69`,
+         `IndexHintScanner.cs:84/150`,
+         `PartialCompositeForeignKeyJoinScanner.cs:130` (+ its
+         `NormalizedPair` ordering at :304),
+         `NotInNullableSubqueryScanner.cs:134` (mixed Ordinal/IgnoreCase in
+         one expression), `ScanReportBuilder.cs:1420` outputSummaryIndex.
+         These are suppression sets, so a case miss = false positive. Promote
+         `TypedPredicateExtractor.TableColumnKeyComparer` (:236) to shared.
+      5. `EXEC(...) AT linked_server` analyzed against the local catalog —
+         `ExecuteSpecification.LinkedServer` is read nowhere. Decline with a
+         machine-readable reason + count in `DynamicSqlSummary`, mirroring
+         `FromScopeResolver.cs:248`'s four-part-name guard.
+      6. `DuplicationScanner.cs:307` reports `Col = Col` as a tautology at
+         High confidence — it's the idiomatic NULL filter on a nullable
+         column and the advice changes results. Decided (Umang, 2026-08-19):
+         catalog-gated — wire the catalog into `DuplicationScanner` and fire
+         only when the column is provably NOT NULL; stay quiet otherwise.
+      7. `DynamicSqlTransfer.cs:1055,:1095`: two discarded `TryEmitFromValue`
+         returns drop a dynamic-SQL call site from every `DynamicSqlSummary`
+         bucket including `TotalCallSites` — silently counted as clean.
+      8. Seven sorts still missing a total tiebreak under unordered PLINQ
+         (`ScanReportBuilder.cs:1189` tier1 omits `Kind`; `:1194` dynamic-sql
+         omits Column/Outcome; `:529`, `:565`, `:1028`, `:1053`, `:1093`).
+         Same class as commit 849f89f's five.
+      Deferred to their own decision, not forgotten: guard-correlated branch
+      cross-product in `SqlTextValue.Concat`/`ForkAssemblies` (needs guard
+      bookkeeping through concat — design first), `sp_prepare`/`sp_execute`
+      recognition, `SelectIntoColumnResolver` ambiguous-alias poisoning +
+      CTE shadowing (align with `FromScopeResolver.cs:129`'s poison rule).
+- [ ] **Phase 1 — make naive resolution unrepresentable.** The type system
+      can't tell honest resolution from naive: a `ScopeEntry` from
+      `cteRelations: null` looks identical to one resolved with full scope.
+      Kill the class at compile time: `FromScopeResolver`'s flat overload
+      loses its defaulted `ledger`/`cteRelations`/`procScope` parameters;
+      `ResolutionContext` becomes pipeline-issued only (internal ctor,
+      obtained from the scope walker / `ScopedSqlVisitorBase`, which already
+      holds the CTE stack + proc scope). Migrate the Phase-0.1 scanners onto
+      it; every remaining naive call site then fails to compile and each
+      becomes an explicit decision. Backstop: extend
+      `StatementVariantParityTests`' reflection approach — every visitor that
+      calls `FromScopeResolver` must either subclass `ScopedSqlVisitorBase`
+      or appear on a documented-exception list (same pattern as
+      `DocumentedUnreachableCteBearingTypes`).
+- [ ] **Phase 2 — rule harness.** No `IRule` abstraction exists; 64 scanners,
+      ad-hoc signatures, hand-wired in `ScanReportBuilder`'s 1,327-line
+      method at 3 separate points each (+ SARIF/readable/RuleCatalog = ~9
+      files per new rule); nothing enforces a rule is invoked (implemented-
+      but-never-wired compiles green); zero catch blocks in Core, so one
+      scanner throwing on one module kills the whole scan as an
+      `AggregateException` the CLI handler at `ScanDbCommand.cs:132` doesn't
+      match. Harness owns: registration (reflection-enforced: registered ⇔
+      invoked ⇔ in `RuleCatalog`), per-rule×per-object containment (crash →
+      ledgered unanalyzable, scan continues), skip-ledger threading by
+      default (today 1 of 64 scanners records skips;
+      `DirectBaseTableResolver.cs:31` documents its own silent exclusion for
+      7 dependents), module identity (delete the 6 wrong private copies of
+      `Qualify` — `ControlFlowRiskScanner.cs:271`, `CodeMetricScanner.cs:208`,
+      `DuplicationScanner.cs:412`, `DeprecatedSyntaxScanner.cs:149`,
+      `DeadCodeScanner.cs:122`, `FormattingScanner.cs:387` — which report
+      `usp_X` where every other stream reports `dbo.usp_X`), central
+      deterministic ordering (total-order comparator, one place), confidence
+      filtering (the exact drift `ScanReportBuilder.cs:1238-1247` documents
+      shipping once already). Absorbs the old "Separate rule decisions from
+      ScriptDom traversal" item; its settled sub-decision stands: a generic
       `CollectorVisitor<T>` was designed and rejected — the `Flatten*`
-      signatures diverge too much for it to pay. The concrete cost of
-      leaving this: adding one rule still touches ~8 files (scanner,
-      finding record, `ScanReportBuilder` scan block, sort, confidence
-      filter, `ScanReport`'s positional params, SARIF writer, readable
-      writer, `RuleCatalog`), and this exact drift already shipped once —
-      `ScanReportBuilder.cs:1238-1247` documents every stream after the
-      original eight silently bypassing the `--confidence` filter until an
-      audit caught it, fixed with 70 more hand-written lines rather than
-      removing the forgettable step.
-- [ ] **Hand-threaded `(sourcePath, StartLine, StartColumn)` triples, ~84 call
-      sites.** Blocked on a decision, not on effort: a `SourceSpan(node)`
-      helper shortens argument lists only, while having the records carry a
-      `SourceSpan` changes the public JSON shape of every finding type at once.
-      Pick one before writing code.
-- [ ] **Per-instance confidence.** Fixed per rule type today; varying it per
-      finding instance matters for a handful of rules.
-- [ ] **Engine-version sensitivity as a modeled field, and `SchemaVersion`
-      round-trip enforcement.** CLAUDE.md's "every rule states its
-      engine-version sensitivity" is satisfied today only via rationale
-      prose (two rules — `QueryAntiPatternScanner`,
-      `ScalarUdfInfo.EngineIsInlineable` — actually branch on
-      `CompatibilityLevel` at runtime; nothing else can be queried
-      programmatically). Turning it into a structured field on every one of
-      ~234 rules is a schema decision affecting every finding type at once —
-      pick the shape deliberately, same call as the source-span-threading
-      item above, not inline. Related, smaller facts worth folding into
-      whichever design lands: `TypePairMatrix`'s own `ServerVersion`/
-      `ProbedAtUtc` stamp (16.0.4236.2, compat 160) has zero consumers, so a
-      scan of an older/newer target silently gets that build's verdicts at
-      full confidence; and `ScanReport.CurrentSchemaVersion`'s own ~60-entry
-      changelog is serialized but never read back or asserted against in a
-      test, so nothing forces a bump when the finding shape changes.
+      signatures diverge too much for it to pay.
+- [ ] **Phase 3 — one findings schema, one emission path.** `ScanReport` is a
+      76-positional-list record each writer hand-picks from; SARIF (the CI
+      gate) references none of `SkippedConstructs`/`DynamicSqlSummary`/
+      `TypedPredicateSummary`/`ParseHealth`, so "couldn't look" is
+      indistinguishable from "clean" exactly where the contract forbids it;
+      `scan-db` has no stderr warning or exit-code effect for parse failures
+      (`scan-corpus-live` does). Collapse to findings + summaries consumed
+      uniformly; SARIF gets the honesty channels via `invocations`/
+      `notifications`. Decided (Umang, 2026-08-19): always warn on stderr +
+      always carry parse health/skip counts in SARIF notifications; exit code
+      stays 0 unless a new `--strict` flag is passed, so existing pipelines
+      keep passing while the honesty is visible. This is THE one schema change, so the three decisions
+      blocked on "changes every finding type at once" land inside it, not
+      separately: (a) records carry a `SourceSpan` (retires the ~84
+      hand-threaded `(sourcePath, StartLine, StartColumn)` triples), (b)
+      per-instance confidence (fixed per rule type today; matters for a
+      handful of rules), (c) engine-version sensitivity as a modeled field
+      (today rationale prose; only `QueryAntiPatternScanner` and
+      `ScalarUdfInfo.EngineIsInlineable` branch on `CompatibilityLevel` at
+      runtime) — fold in `TypePairMatrix`'s unread `ServerVersion` stamp
+      (16.0.4236.2/compat 160, zero consumers, so older/newer targets
+      silently get that build's verdicts at full confidence) and a
+      `ScanReport.CurrentSchemaVersion` round-trip test so a finding-shape
+      change forces a version bump.
+- [ ] **Phase 4 — terminology rename.** ~384 "corpus" + ~609 "oracle" in
+      `src/`, including namespaces (`SilentScan.Core.Corpus`,
+      `SilentScan.Verify.Oracle`), public types, the `scan-corpus-live` verb,
+      fixture dirs, and docs. Mechanical but touches the CLI contract —
+      ride it on Phase 3's churn, pick replacement terms with Umang first.
 
 ---
 
