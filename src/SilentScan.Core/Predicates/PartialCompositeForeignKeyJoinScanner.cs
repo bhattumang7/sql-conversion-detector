@@ -71,9 +71,28 @@ public static class PartialCompositeForeignKeyJoinScanner
     {
         public List<PartialCompositeForeignKeyJoinFinding> Findings { get; } = [];
 
+        /// <summary>
+        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
+        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
+        /// qualified, so it always shadows a same-named real base table; resolving through the
+        /// catalog instead (cteRelations always null, pre-fix) silently matched a CTE-shadowed
+        /// join side against an unrelated real table sharing its name, which could either
+        /// fabricate a partial-composite-FK finding or produce a wrong TableQualifiedName on a
+        /// real one (2026-08 audit).
+        /// </summary>
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
-            InspectFromClause(node.FromClause, node.WhereClause);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            InspectFromClause(node.FromClause, node.WhereClause, cteRelations);
             base.ExplicitVisit(node);
         }
 
@@ -82,24 +101,26 @@ public static class PartialCompositeForeignKeyJoinScanner
         // intended), so both are in scope alongside the ordinary SELECT case.
         public override void ExplicitVisit(UpdateStatement node)
         {
-            InspectFromClause(node.UpdateSpecification.FromClause, node.UpdateSpecification.WhereClause);
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            InspectFromClause(node.UpdateSpecification.FromClause, node.UpdateSpecification.WhereClause, cteRelations);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
-            InspectFromClause(node.DeleteSpecification.FromClause, node.DeleteSpecification.WhereClause);
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            InspectFromClause(node.DeleteSpecification.FromClause, node.DeleteSpecification.WhereClause, cteRelations);
             base.ExplicitVisit(node);
         }
 
-        private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause)
+        private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)
         {
             if (fromClause is null)
             {
                 return;
             }
 
-            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
             if (byAlias.Count == 0)
             {
                 return;
@@ -137,7 +158,7 @@ public static class PartialCompositeForeignKeyJoinScanner
             var directlyJoinedTablePairs = new HashSet<(string, string)>(TableColumnKeyComparer.Instance);
             foreach (var join in joinNodes)
             {
-                InspectJoin(join, scopeChain, statementWideEqualities, directlyJoinedTablePairs);
+                InspectJoin(join, byAlias, scopeChain, statementWideEqualities, directlyJoinedTablePairs);
             }
 
             InspectCommaJoins(ordered, statementWideEqualities, scopeChain, directlyJoinedTablePairs, fromClause);
@@ -145,6 +166,7 @@ public static class PartialCompositeForeignKeyJoinScanner
 
         private void InspectJoin(
             QualifiedJoin join,
+            IReadOnlyDictionary<string, ScopeEntry> byAlias,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             IReadOnlyList<BooleanComparisonExpression> statementWideEqualities,
             HashSet<(string, string)> directlyJoinedTablePairs)
@@ -153,8 +175,8 @@ public static class PartialCompositeForeignKeyJoinScanner
             // is itself a nested join (a 3+-way join chain), a view/derived table/CTE, or a temp
             // table/table variable (which can never have a real FK), this join is skipped rather
             // than guessed about. A real FK can only ever exist between two persisted base tables.
-            var firstTable = ResolveDirectBaseTable(join.FirstTableReference);
-            var secondTable = ResolveDirectBaseTable(join.SecondTableReference);
+            var firstTable = ResolveDirectBaseTable(join.FirstTableReference, byAlias);
+            var secondTable = ResolveDirectBaseTable(join.SecondTableReference, byAlias);
             if (firstTable is null || secondTable is null)
             {
                 return;
@@ -290,15 +312,28 @@ public static class PartialCompositeForeignKeyJoinScanner
             && string.Equals(r.Table, table, StringComparison.OrdinalIgnoreCase)
             && string.Equals(r.Column, column, StringComparison.OrdinalIgnoreCase);
 
-        private string? ResolveDirectBaseTable(TableReference tableReference)
+        /// <summary>
+        /// Resolved through the ALREADY CTE-aware scope chain (<paramref name="byAlias"/>, built
+        /// by <see cref="FromScopeResolver"/>) rather than an independent
+        /// <c>SchemaObjectNameHelper.Qualify</c> + <c>catalog.Find</c> lookup of its own - the
+        /// independent lookup bypassed CTE shadowing entirely regardless of what cteRelations
+        /// <see cref="InspectFromClause"/> resolved, since a CTE is never schema-qualified and a
+        /// raw re-qualify-and-catalog-lookup can never see it (2026-08 audit).
+        /// </summary>
+        private string? ResolveDirectBaseTable(TableReference tableReference, IReadOnlyDictionary<string, ScopeEntry> byAlias)
         {
             if (tableReference is not NamedTableReference named)
             {
                 return null;
             }
 
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
-            return catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table } ? qualifiedName : null;
+            var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
+            return byAlias.TryGetValue(alias, out var entry)
+                && !entry.IsViewLayer
+                && entry.Relation.QualifiedName is { } qualifiedName
+                && catalog.Find(qualifiedName) is { Kind: CatalogTableKind.Table }
+                ? qualifiedName
+                : null;
         }
 
         private IEnumerable<CompositeForeignKey> FindCandidateForeignKeys(string tableA, string tableB) =>

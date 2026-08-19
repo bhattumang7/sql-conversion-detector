@@ -99,6 +99,28 @@ public sealed class PartialCompositeForeignKeyJoinScannerTests
     }
 
     [Fact]
+    public void CteSharesNameWithReferencedTable_JoinNeverFires()
+    {
+        // 2026-08 audit: the ANSI-JOIN path's own ResolveDirectBaseTable independently re-
+        // qualified and looked up each join side against the CATALOG directly, bypassing
+        // FromScopeResolver's already-CTE-aware scope entirely - so a CTE named the same as
+        // dbo.Orders (built here over dbo.OrderLines instead, meaning it can never have a real
+        // FK relationship with dbo.OrderLines at all) silently resolved as if it WERE dbo.Orders,
+        // firing a partial-composite-FK finding about a join the query never actually performs
+        // against dbo.Orders. A CTE is never schema-qualified, so it always shadows a same-named
+        // real base table - correctly resolved, the join side has no QualifiedName at all (a CTE
+        // relation carries none), so ResolveDirectBaseTable must decline it, same as any other
+        // non-base-table reference (a view, a derived table).
+        var catalog = BuildCatalog();
+        var findings = Scan(
+            "WITH Orders AS (SELECT LineId AS OrderId FROM dbo.OrderLines) " +
+            "SELECT 1 FROM dbo.OrderLines ol JOIN Orders o ON ol.OrderId = o.OrderId;",
+            catalog);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void JoinOnBothCompositeColumns_NeverFires()
     {
         var catalog = BuildCatalog();
