@@ -714,6 +714,32 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Find_TableVariable_ScopeMiss_NeverFallsBackToAnUnrelatedScopesDeclaration()
+    {
+        // The gap this fix closes: DatabaseCatalog.Find(name, scope)'s unscoped fallback applied
+        // to table variables too, even though a table variable is strictly proc-local in real
+        // SQL Server (FromScopeResolver's own doc comment) - a scope MISS (querying from a proc
+        // that never declared its own @t) used to silently match a DIFFERENT proc's @t instead of
+        // staying unresolved.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE PROCEDURE dbo.usp_Declares
+                AS
+                BEGIN
+                    DECLARE @t TABLE (Col INT NOT NULL);
+                END
+                GO
+                CREATE PROCEDURE dbo.usp_NeverDeclares
+                AS
+                BEGIN
+                    SELECT 1;
+                END
+                """)]);
+
+        Assert.Null(catalog.Find("@t", "dbo.usp_NeverDeclares"));
+    }
+
+    [Fact]
     public void Build_MultiStatementTvfReturnVariable_CatalogedUnderFunctionScope()
     {
         // RETURNS @t TABLE(...) is a DeclareTableVariableBody hanging off the return type, not a

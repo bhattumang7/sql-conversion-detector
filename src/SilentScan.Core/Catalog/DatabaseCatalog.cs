@@ -527,6 +527,17 @@ public sealed class DatabaseCatalog
             return scoped;
         }
 
+        // A table variable (@t) is strictly proc-local in real SQL Server - it never crosses a
+        // procedure boundary the way a #temp table can (FromScopeResolver's own doc comment).
+        // Falling back to the unscoped batch-level entry here would match a DIFFERENT proc's own
+        // @t of the same name (or a stale batch-level DECLARE), silently inheriting the wrong
+        // shape - a scope miss for a table variable must stay unresolved, never guessed from an
+        // unrelated declaration that merely happens to share the name.
+        if (qualifiedName.StartsWith('@'))
+        {
+            return null;
+        }
+
         return Find(qualifiedName);
     }
 
