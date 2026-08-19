@@ -796,4 +796,30 @@ public sealed class LineageResolverTests
         var remoteView = lineage.Find("dbo.vw_Remote")!;
         Assert.IsType<ColumnProvenance.Unknown>(remoteView.FindColumn("OrderId")!.Provenance);
     }
+
+    [Fact]
+    public void Resolve_ScalarSubqueryInSelectList_DoesNotAttributeInnerScopeColumnToOuterTable()
+    {
+        // The gap this fix closes: a bare "Amount" reference strictly inside the nested subquery
+        // (dbo.Payments' own column) used to resolve against the OUTER query's FROM scope
+        // instead, since CollectColumnInputs walked the whole expression tree with no subquery
+        // boundary. dbo.Orders also declares its own Amount column specifically so a wrong
+        // attribution would have a real (wrong) base column to land on rather than failing loudly.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Amount DECIMAL(9,2) NOT NULL);",
+            "CREATE TABLE dbo.Payments (PaymentId INT NOT NULL, Amount DECIMAL(9,2) NOT NULL);",
+            "CREATE VIEW dbo.vw_OrdersWithPaymentTotal AS " +
+            "SELECT OrderId, (SELECT SUM(Amount) FROM dbo.Payments) AS Total FROM dbo.Orders;");
+
+        var view = lineage.Find("dbo.vw_OrdersWithPaymentTotal")!;
+        var total = view.FindColumn("Total")!;
+
+        // Never attributes the subquery's own Amount column to dbo.Orders - the whole point of
+        // this fix. Whatever the resulting provenance IS (Unknown, or an Expression with zero
+        // resolved inputs), it must not name dbo.Orders as an underlying base column.
+        var underlyingTables = ColumnProvenanceAnalysis.FindUnderlyingBaseColumns(total.Provenance)
+            .Select(bc => bc.TableQualifiedName)
+            .ToList();
+        Assert.DoesNotContain("dbo.Orders", underlyingTables);
+    }
 }

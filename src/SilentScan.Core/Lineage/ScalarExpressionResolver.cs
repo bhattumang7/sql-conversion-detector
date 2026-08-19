@@ -188,6 +188,23 @@ public static class ScalarExpressionResolver
                 References.Add(node);
             }
         }
+
+        /// <summary>
+        /// Stops descent into a nested subquery's own FROM/WHERE entirely - this pass has no
+        /// outer-scope chain to resolve an inner-scope column against (unlike Pass 3's
+        /// TypedPredicateExtractor, which threads a real ScopeStack), so a column reference
+        /// strictly inside a subquery must never be collected as this outer expression's own
+        /// input. Without this, <c>(SELECT SUM(Amount) FROM dbo.Payments)</c> nested inside a
+        /// view's SELECT list had its inner Amount column resolved against the OUTER query's own
+        /// FROM scope instead - a wrong base-column attribution whenever a same-named column
+        /// happened to exist there, or spurious "not found in FROM scope" ledger noise otherwise.
+        /// Converts the bug from "wrong attribution" to "honestly under-collected": the subquery's
+        /// own scope genuinely isn't reachable here, so Unknown is the correct, conservative
+        /// answer, not a deeper scope-chaining feature this pass was never given the plumbing for.
+        /// </summary>
+        public override void ExplicitVisit(ScalarSubquery node)
+        {
+        }
     }
 
     /// <summary>
