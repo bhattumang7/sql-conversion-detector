@@ -170,4 +170,63 @@ public sealed class ScalarUdfMapTests
 
         Assert.DoesNotContain("dbo.fn_Mstvf", map);
     }
+
+    [Fact]
+    public void CteSharingAScalarUdfCarryingViewsName_DoesNotFalselyInheritTheUdfCarrierFlag()
+    {
+        var (catalog, views) = Build("""
+            CREATE FUNCTION dbo.fn_Compute(@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN @x + 1;
+            END;
+            GO
+            CREATE VIEW dbo.vw_Carrier
+            AS
+            SELECT Id, dbo.fn_Compute(Id) AS Computed FROM dbo.T;
+            GO
+            CREATE VIEW dbo.vw_Coincidence
+            AS
+            WITH vw_Carrier AS (SELECT 1 AS Id)
+            SELECT Id FROM vw_Carrier;
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            """);
+
+        var map = ScalarUdfMap.Build(views, catalog);
+
+        Assert.Contains("dbo.vw_Carrier", map);
+        Assert.DoesNotContain("dbo.vw_Coincidence", map);
+    }
+
+    [Fact]
+    public void ViewSelectingFromInlineTvfThatCallsScalarUdf_InheritsTheCarrierFlag()
+    {
+        // The gap this fix closes: ScalarUdfMap discarded TvfReferenceWalker's own functionRefs
+        // entirely, so a view selecting from an inline TVF (FROM dbo.itvf(1)) never inherited the
+        // carrier flag even when the TVF's own body called a scalar UDF - TvfFenceMap already
+        // recurses through exactly this shape.
+        var (catalog, views) = Build("""
+            CREATE FUNCTION dbo.fn_Compute(@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                RETURN @x + 1;
+            END;
+            GO
+            CREATE FUNCTION dbo.itvf_Wrapper(@x INT)
+            RETURNS TABLE
+            AS
+            RETURN (SELECT dbo.fn_Compute(@x) AS Computed);
+            GO
+            CREATE VIEW dbo.vw_Outer
+            AS
+            SELECT Computed FROM dbo.itvf_Wrapper(1);
+            """);
+
+        var map = ScalarUdfMap.Build(views, catalog);
+
+        Assert.Contains("dbo.vw_Outer", map);
+    }
 }

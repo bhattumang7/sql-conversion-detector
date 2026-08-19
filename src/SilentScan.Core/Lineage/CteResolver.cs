@@ -92,7 +92,12 @@ public static class CteResolver
             AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "recursive CTE",
             $"'{name}' is a recursive CTE - only the anchor member was resolved; T-SQL requires the recursive member's column types to match the anchor's exactly (Msg 240), so the anchor's types are used directly, with any base-table index claim dropped (a recursive CTE materializes through a spool, not a direct index access)");
 
-        if (cte.QueryExpression is not BinaryQueryExpression binary)
+        // WITH c AS ((SELECT ... UNION ALL SELECT ... FROM c)) parses its QueryExpression as
+        // QueryParenthesisExpression wrapping the real BinaryQueryExpression -
+        // QueryExpressionResolver.Resolve already unwraps this exact wrapper one file over; this
+        // check needs the identical unwrap, or an otherwise perfectly ordinary parenthesized
+        // recursive CTE resolves to zero columns instead of its real anchor shape.
+        if (UnwrapParentheses(cte.QueryExpression) is not BinaryQueryExpression binary)
         {
             // Self-referencing but not a top-level UNION/UNION ALL (malformed, or a shape this
             // pass doesn't recognize as a valid recursive CTE) - nothing safe to anchor on.
@@ -122,6 +127,9 @@ public static class CteResolver
     /// mandated recursion mechanism in T-SQL (no separate <c>RECURSIVE</c> keyword). Internal so
     /// <c>Predicates.RecursiveCteMaxRecursionScanner</c> can reuse the exact same detection rather
     /// than re-deriving it - see that scanner's own doc comment.</summary>
+    private static QueryExpression UnwrapParentheses(QueryExpression queryExpression) =>
+        queryExpression is QueryParenthesisExpression parenthesis ? UnwrapParentheses(parenthesis.QueryExpression) : queryExpression;
+
     internal static bool ReferencesSelf(QueryExpression queryExpression, string cteName)
     {
         var collector = new SelfReferenceDetector(cteName);

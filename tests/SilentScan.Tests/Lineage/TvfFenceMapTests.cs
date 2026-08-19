@@ -93,4 +93,36 @@ public sealed class TvfFenceMapTests
         Assert.DoesNotContain("dbo.vw_A", map);
         Assert.DoesNotContain("dbo.vw_B", map);
     }
+
+    [Fact]
+    public void CteSharingATvfFencingViewsName_DoesNotFalselyInheritTheFence()
+    {
+        // The gap this fix closes: a CTE named the same as dbo.vw_Fenced (a real view that
+        // fences an MSTVF) used to be indistinguishable from a genuine reference to that view -
+        // dbo.vw_Coincidence would have falsely inherited the fence via a same-named CTE it
+        // never actually references.
+        var (catalog, views) = Build("""
+            CREATE FUNCTION dbo.fn_Fence()
+            RETURNS @T TABLE (Id INT)
+            AS
+            BEGIN
+                INSERT INTO @T (Id) SELECT 1;
+                RETURN;
+            END;
+            GO
+            CREATE VIEW dbo.vw_Fenced
+            AS
+            SELECT Id FROM dbo.fn_Fence();
+            GO
+            CREATE VIEW dbo.vw_Coincidence
+            AS
+            WITH vw_Fenced AS (SELECT 1 AS Id)
+            SELECT Id FROM vw_Fenced;
+            """);
+
+        var map = TvfFenceMap.Build(views, catalog);
+
+        Assert.Contains("dbo.vw_Fenced", map);
+        Assert.DoesNotContain("dbo.vw_Coincidence", map);
+    }
 }

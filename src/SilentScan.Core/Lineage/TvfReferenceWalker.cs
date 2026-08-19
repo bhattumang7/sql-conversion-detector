@@ -21,14 +21,26 @@ public readonly record struct TvfLeafReference(SchemaObjectFunctionTableReferenc
 /// <summary>Flattens a query's FROM clauses to their leaf table references, keeping only what the MSTVF-as-fence stream needs: function-call references (with APPLY-correlation evidence) and plain named-table references (candidate view/iTVF names for lineage nesting).</summary>
 internal static class TvfReferenceWalker
 {
+    /// <summary>
+    /// CTE names shadow catalog objects of the same name (the same rule FromScopeResolver applies
+    /// during real column resolution) - a CTE is never schema-qualified, so an unqualified
+    /// NamedTableReference matching one can never mean a real view/TVF instead. Filtered out
+    /// here, centrally, since every consumer of this walker (ViewExpansionMap, TvfFenceMap,
+    /// ScalarUdfMap) shares the identical failure mode without it: `WITH Foo AS (...) SELECT *
+    /// FROM Foo` inside `CREATE VIEW dbo.Foo` used to record a self-reference (a false cycle,
+    /// poisoning dbo.Foo to Unknown in ViewExpansionMap and ViewDependencyGraph alike), and a CTE
+    /// coinciding with a real view/TVF/UDF-carrying object elsewhere created a false fence-
+    /// inheritance or scalar-UDF-carrier finding.
+    /// </summary>
     public static (List<TvfLeafReference> FunctionRefs, List<NamedTableReference> NamedRefs) CollectFromClauses(TSqlFragment root)
     {
-        var visitor = new FromClauseVisitor();
+        var cteNames = CteNameCollector.Collect(root);
+        var visitor = new FromClauseVisitor(cteNames);
         root.Accept(visitor);
         return (visitor.FunctionRefs, visitor.NamedRefs);
     }
 
-    private sealed class FromClauseVisitor : TSqlFragmentVisitor
+    private sealed class FromClauseVisitor(IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
     {
         public List<TvfLeafReference> FunctionRefs { get; } = [];
 
@@ -70,6 +82,11 @@ internal static class TvfReferenceWalker
                     break;
 
                 case NamedTableReference named:
+                    if (named.SchemaObject.SchemaIdentifier is null && cteNames.Contains(named.SchemaObject.BaseIdentifier.Value))
+                    {
+                        break;
+                    }
+
                     NamedRefs.Add(named);
                     break;
             }

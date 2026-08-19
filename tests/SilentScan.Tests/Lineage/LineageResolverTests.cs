@@ -822,4 +822,44 @@ public sealed class LineageResolverTests
             .ToList();
         Assert.DoesNotContain("dbo.Orders", underlyingTables);
     }
+
+    [Fact]
+    public void Resolve_CteSharingTheEnclosingViewsOwnName_NeverRecordsAFalseSelfCycle()
+    {
+        // The gap this fix closes: a CTE named identically to the enclosing view used to be
+        // indistinguishable from a genuine self-reference - ViewDependencyGraph.
+        // FindReferencedViewNames recorded a self-edge, poisoning dbo.Foo to a false cycle
+        // (Unknown provenance) even though the view never actually references itself.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
+            "CREATE VIEW dbo.Foo AS WITH Foo AS (SELECT OrderId FROM dbo.Orders) SELECT OrderId FROM Foo;");
+
+        Assert.DoesNotContain("dbo.Foo", lineage.CyclicViews);
+        var view = lineage.Find("dbo.Foo")!;
+        Assert.IsType<ColumnProvenance.BaseColumn>(view.FindColumn("OrderId")!.Provenance);
+    }
+
+    [Fact]
+    public void Resolve_ParenthesizedRecursiveCte_ResolvesAnchorColumnsInsteadOfZero()
+    {
+        // The gap this fix closes: "WITH c AS ((SELECT ... UNION ALL SELECT ... FROM c))" parses
+        // its QueryExpression as QueryParenthesisExpression wrapping the real
+        // BinaryQueryExpression - ResolveRecursiveAnchor's own type check missed this exact
+        // wrapper (QueryExpressionResolver.Resolve already unwraps it one file over), so an
+        // otherwise perfectly ordinary parenthesized recursive CTE resolved to zero columns.
+        var (_, lineage) = Build(
+            "CREATE TABLE dbo.Categories (CategoryCode VARCHAR(20) NOT NULL, ParentCode VARCHAR(20) NULL);",
+            """
+            CREATE VIEW dbo.vw_Tree AS
+            WITH Tree AS (
+                (SELECT CategoryCode, ParentCode FROM dbo.Categories WHERE ParentCode IS NULL
+                UNION ALL
+                SELECT c.CategoryCode, c.ParentCode FROM dbo.Categories c INNER JOIN Tree t ON c.ParentCode = t.CategoryCode)
+            )
+            SELECT CategoryCode FROM Tree;
+            """);
+
+        var view = lineage.Find("dbo.vw_Tree")!;
+        Assert.NotNull(view.FindColumn("CategoryCode"));
+    }
 }

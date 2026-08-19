@@ -57,12 +57,21 @@ public static class ScalarUdfMap
 
         var direct = FindWorstDirectCall(view, context.Catalog);
 
-        var (_, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
-        var inherited = namedRefs
-            .Select(named => TryResolveNamedReference(named, context))
+        // Both named (plain FROM Foo) AND function-call (FROM dbo.itvf(...)) references can
+        // resolve to another inline TVF this map already has an origin for - TvfFenceMap already
+        // recurses through both shapes; this used to discard functionRefs entirely, so a view
+        // selecting from an inline TVF that itself called a scalar UDF never inherited the
+        // carrier flag. Folded through the same Worse combinator used for direct-vs-inherited
+        // below (not FirstOrDefault, which took an arbitrary candidate rather than the worst one).
+        var (functionRefs, namedRefs) = TvfReferenceWalker.CollectFromClauses(view.SelectStatement);
+        ScalarUdfOrigin? inherited = null;
+        foreach (var origin in namedRefs.Select(named => TryResolveNamedReference(named, context))
+            .Concat(functionRefs.Select(function => TryResolveFunctionReference(function, context)))
             .Where(origin => origin is not null)
-            .Select(origin => Inherit(origin!))
-            .FirstOrDefault();
+            .Select(origin => Inherit(origin!)))
+        {
+            inherited = Worse(inherited, origin);
+        }
 
         var found = Worse(direct, inherited);
 
@@ -75,6 +84,15 @@ public static class ScalarUdfMap
     private static ScalarUdfOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedRef.SchemaObject));
+        return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
+            ? Resolve(referencedView, context)
+            : null;
+    }
+
+    /// <summary>Mirrors <see cref="TryResolveNamedReference"/> for a function-call table reference (FROM dbo.itvf(...)) - the referenced object can only ever be an inline TVF this same views dictionary already knows about (a multi-statement/CLR TVF has no body here at all, matching the MSTVF-as-fence stream's own opacity boundary).</summary>
+    private static ScalarUdfOrigin? TryResolveFunctionReference(TvfLeafReference functionRef, ResolutionContext context)
+    {
+        var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(functionRef.Reference.SchemaObject));
         return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
             ? Resolve(referencedView, context)
             : null;

@@ -78,7 +78,7 @@ public static class ViewDependencyGraph
 
     private static HashSet<string> FindReferencedViewNames(SelectStatement selectStatement, IEnumerable<string> knownViewNames, DatabaseCatalog catalog)
     {
-        var collector = new TableReferenceCollector();
+        var collector = new TableReferenceCollector(CteNameCollector.Collect(selectStatement));
         selectStatement.Accept(collector);
 
         // A view defined over a synonym for another view must still get a dependency edge to
@@ -90,12 +90,25 @@ public static class ViewDependencyGraph
         return [.. collector.QualifiedNames.Select(catalog.ResolveSynonymName).Where(known.Contains)];
     }
 
-    private sealed class TableReferenceCollector : TSqlFragmentVisitor
+    private sealed class TableReferenceCollector(IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
     {
         public List<string> QualifiedNames { get; } = [];
 
-        public override void Visit(NamedTableReference node) =>
+        public override void Visit(NamedTableReference node)
+        {
+            // CTE names shadow catalog views of the same name (FromScopeResolver's own rule) - a
+            // CTE is never schema-qualified, so an unqualified reference matching an in-scope CTE
+            // can never mean a real view instead. Without this, `CREATE VIEW dbo.Foo AS WITH Foo
+            // AS (...) SELECT * FROM Foo` created a self-edge (a false cycle, poisoning dbo.Foo to
+            // Unknown), and a CTE coinciding with an unrelated real view elsewhere created a false
+            // dependency edge to it.
+            if (node.SchemaObject.SchemaIdentifier is null && cteNames.Contains(node.SchemaObject.BaseIdentifier.Value))
+            {
+                return;
+            }
+
             QualifiedNames.Add(SchemaObjectNameHelper.Qualify(node.SchemaObject));
+        }
 
         // An inline TVF calling another inline TVF in its own FROM clause (FROM
         // dbo.other_itvf(...)) is a SchemaObjectFunctionTableReference, not a
