@@ -357,57 +357,6 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
-        /// <summary>
-        /// The "always true/false" claim this rule makes is only sound under two-valued logic - a
-        /// nullable operand makes <c>x = x</c> (or any other comparison of <c>x</c> against
-        /// itself) evaluate to UNKNOWN, not TRUE, whenever <c>x</c> is NULL at runtime, and
-        /// <c>Col = Col</c> on a nullable column is the idiomatic defensive NULL filter, not a
-        /// mistake (2026-08 audit: this scanner asserted the tautology unconditionally, including
-        /// on nullable columns, where "remove the redundant comparison" changes the result set).
-        /// Scoped to COLUMN operands specifically, per the decided fix: a non-column operand
-        /// (a local variable, a function call, an arbitrary expression) keeps the prior
-        /// unconditional behavior unchanged - this scanner has never tracked variable nullability
-        /// and extending the same NOT-NULL proof requirement there would silently suppress every
-        /// existing variable-vs-itself finding for a case the audit never flagged. A column this
-        /// shallow scope can't resolve at all (view/CTE/derived-table/ambiguous/no catalog entry)
-        /// is treated the SAME as a nullable one - "never fires without proof", not "fires unless
-        /// disproven".
-        /// </summary>
-        private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
-        {
-            if (expression is not ColumnReferenceExpression columnRef)
-            {
-                return true;
-            }
-
-            return ResolveColumn(columnRef) is { IsNullable: false };
-        }
-
-        private CatalogColumn? ResolveColumn(ColumnReferenceExpression columnRef)
-        {
-            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || _tableScopeStack.Count == 0)
-            {
-                return null;
-            }
-
-            var scope = _tableScopeStack.Peek();
-            var columnName = identifiers[^1].Value;
-
-            if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedTable))
-            {
-                return qualifiedTable.FindColumn(columnName);
-            }
-
-            if (identifiers.Count == 1 && scope.Count == 1)
-            {
-                return scope.Values.Single().FindColumn(columnName);
-            }
-
-            // Unqualified column with more than one table in scope is genuinely ambiguous from
-            // this shallow resolver's own point of view - never guess which table it binds to.
-            return null;
-        }
-
         public override void ExplicitVisit(BooleanBinaryExpression node)
         {
             if (node.BinaryExpressionType is BooleanBinaryExpressionType.And or BooleanBinaryExpressionType.Or
@@ -509,6 +458,59 @@ public static class DuplicationScanner
             name.SchemaIdentifier is { } schema
                 ? $"{schema.Value}.{name.BaseIdentifier.Value}"
                 : name.BaseIdentifier.Value;
+
+        // --- Identical binary operands: column-nullability gate ---
+
+        /// <summary>
+        /// The "always true/false" claim this rule makes is only sound under two-valued logic - a
+        /// nullable operand makes <c>x = x</c> (or any other comparison of <c>x</c> against
+        /// itself) evaluate to UNKNOWN, not TRUE, whenever <c>x</c> is NULL at runtime, and
+        /// <c>Col = Col</c> on a nullable column is the idiomatic defensive NULL filter, not a
+        /// mistake (2026-08 audit: this scanner asserted the tautology unconditionally, including
+        /// on nullable columns, where "remove the redundant comparison" changes the result set).
+        /// Scoped to COLUMN operands specifically, per the decided fix: a non-column operand
+        /// (a local variable, a function call, an arbitrary expression) keeps the prior
+        /// unconditional behavior unchanged - this scanner has never tracked variable nullability
+        /// and extending the same NOT-NULL proof requirement there would silently suppress every
+        /// existing variable-vs-itself finding for a case the audit never flagged. A column this
+        /// shallow scope can't resolve at all (view/CTE/derived-table/ambiguous/no catalog entry)
+        /// is treated the SAME as a nullable one - "never fires without proof", not "fires unless
+        /// disproven".
+        /// </summary>
+        private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
+        {
+            if (expression is not ColumnReferenceExpression columnRef)
+            {
+                return true;
+            }
+
+            return ResolveColumn(columnRef) is { IsNullable: false };
+        }
+
+        private CatalogColumn? ResolveColumn(ColumnReferenceExpression columnRef)
+        {
+            if (columnRef.MultiPartIdentifier is not { Identifiers: { Count: > 0 } identifiers } || _tableScopeStack.Count == 0)
+            {
+                return null;
+            }
+
+            var scope = _tableScopeStack.Peek();
+            var columnName = identifiers[^1].Value;
+
+            if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedTable))
+            {
+                return qualifiedTable.FindColumn(columnName);
+            }
+
+            if (identifiers.Count == 1 && scope.Count == 1)
+            {
+                return scope.Values.Single().FindColumn(columnName);
+            }
+
+            // Unqualified column with more than one table in scope is genuinely ambiguous from
+            // this shallow resolver's own point of view - never guess which table it binds to.
+            return null;
+        }
 
         // --- Single-iteration loop ---
 
