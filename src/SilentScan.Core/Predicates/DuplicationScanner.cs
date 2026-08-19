@@ -35,11 +35,7 @@ public static class DuplicationScanner
 
         ScanComments(parseResult, findings);
 
-        // File-wide, not per-statement - see AggregateDivisionColumnstoreScanner's own comment on
-        // this exact tradeoff (2026-08 audit): only ever causes an extra decline, never a false
-        // positive, and far simpler than per-statement CTE-scope tracking for a scanner with none.
-        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
-        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
         findings.AddRange(visitor.Findings);
 
@@ -155,13 +151,11 @@ public static class DuplicationScanner
     {
         private readonly string sourcePath;
         private readonly DatabaseCatalog catalog;
-        private readonly IReadOnlySet<string> cteNames;
 
-        public Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames)
+        public Visitor(string sourcePath, DatabaseCatalog catalog)
         {
             this.sourcePath = sourcePath;
             this.catalog = catalog;
-            this.cteNames = cteNames;
             _currentModule = sourcePath;
         }
 
@@ -169,17 +163,29 @@ public static class DuplicationScanner
 
         private string _currentModule;
 
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
         /// <summary>
-        /// Nearest-enclosing-statement direct base tables, alias/name to <see cref="CatalogTable"/> -
-        /// pushed on entering a QuerySpecification/UPDATE/DELETE's own FROM scope, popped on exit.
-        /// Deliberately shallow (direct base tables only, no CTE/view/derived-table resolution,
-        /// no outer-scope fallback for a correlated subquery) - see
-        /// <see cref="DirectBaseTableResolver"/>'s own doc comment for why that's the safe v1
-        /// limit every caller of it shares: a reference this can't resolve is left unresolved,
-        /// never guessed at, matching <see cref="CanClaimTautologyOrContradiction"/>'s own "stay
-        /// quiet" contract when nullability can't be proven.
+        /// Real per-statement CTE scope (Phase 1.5 "one binder") - a QuerySpecification has no
+        /// direct access to its enclosing SelectStatement's WithCtesAndXmlNamespaces, so this is
+        /// captured on the way down and consulted from ExplicitVisit(QuerySpecification), matching
+        /// every other migrated scanner's own precedent.
         /// </summary>
-        private readonly Stack<Dictionary<string, CatalogTable>> _tableScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
+
+        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+
+        /// <summary>
+        /// Nearest-enclosing-statement resolved FROM scope, alias to <see cref="ScopeEntry"/> -
+        /// pushed on entering a QuerySpecification/UPDATE/DELETE's own FROM scope (via
+        /// <see cref="Lineage.FromScopeResolver"/>, Phase 1.5 "one binder"), popped on exit.
+        /// Deliberately shallow beyond that (no view/derived-table resolution, no outer-scope
+        /// fallback for a correlated subquery) - a reference this can't resolve is left
+        /// unresolved, never guessed at, matching <see cref="CanClaimTautologyOrContradiction"/>'s
+        /// own "stay quiet" contract when nullability can't be proven.
+        /// </summary>
+        private readonly Stack<IReadOnlyDictionary<string, ScopeEntry>> _tableScopeStack = new();
 
         /// <summary>Tracks every IfStatement reached as a PRIOR IfStatement's own ElseStatement -
         /// the default top-down traversal will visit these nodes again on its own once we recurse
@@ -320,9 +326,18 @@ public static class DuplicationScanner
             base.ExplicitVisit(node);
         }
 
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            _cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            _cteScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
-            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames));
+            var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
+            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations));
+            _tableScopeStack.Push(byAlias);
             base.ExplicitVisit(node);
             _tableScopeStack.Pop();
         }
@@ -330,7 +345,9 @@ public static class DuplicationScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target));
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
+            _tableScopeStack.Push(byAlias);
             base.ExplicitVisit(node);
             _tableScopeStack.Pop();
         }
@@ -338,7 +355,9 @@ public static class DuplicationScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            _tableScopeStack.Push(DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target));
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
+            _tableScopeStack.Push(byAlias);
             base.ExplicitVisit(node);
             _tableScopeStack.Pop();
         }
@@ -497,20 +516,30 @@ public static class DuplicationScanner
             var scope = _tableScopeStack.Peek();
             var columnName = identifiers[^1].Value;
 
-            if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedTable))
+            if (identifiers.Count >= 2 && scope.TryGetValue(identifiers[^2].Value, out var qualifiedEntry))
             {
-                return qualifiedTable.FindColumn(columnName);
+                return CatalogColumnOf(qualifiedEntry, columnName);
             }
 
             if (identifiers.Count == 1 && scope.Count == 1)
             {
-                return scope.Values.Single().FindColumn(columnName);
+                return CatalogColumnOf(scope.Values.Single(), columnName);
             }
 
             // Unqualified column with more than one table in scope is genuinely ambiguous from
             // this shallow resolver's own point of view - never guess which table it binds to.
             return null;
         }
+
+        /// <summary>
+        /// A view/derived-table entry is out of this scanner's shallow scope by design (see
+        /// <see cref="_tableScopeStack"/>'s own doc comment) - CatalogColumn only exists for a real
+        /// base table, never guessed at for anything ScopeEntry.IsViewLayer marks.
+        /// </summary>
+        private CatalogColumn? CatalogColumnOf(ScopeEntry entry, string columnName) =>
+            !entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
+                ? catalog.Find(qualifiedName)?.FindColumn(columnName)
+                : null;
 
         // --- Single-iteration loop ---
 
