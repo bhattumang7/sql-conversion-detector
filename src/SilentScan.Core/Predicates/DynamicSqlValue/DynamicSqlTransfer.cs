@@ -884,7 +884,21 @@ public static class DynamicSqlTransfer
             case ExecutableStringList stringList:
                 if (emit)
                 {
-                    CompileStringList(stringList, node, activeGuards, context, state);
+                    // EXECUTE ('...') AT linked_server runs the string against the LINKED
+                    // SERVER's own catalog, not this scan's local one - analyzing it locally
+                    // fabricates a finding against a local object the statement never touches
+                    // (2026-08 audit; mirrors FromScopeResolver's own four-part linked-server
+                    // guard for the FROM-clause case). Declined with a machine-readable reason
+                    // rather than silently dropped, same as every other declined dynamic-SQL
+                    // shape in this file.
+                    if (node.ExecuteSpecification.LinkedServer is { Value.Length: > 0 })
+                    {
+                        context.Findings.Add(Unanalyzable(node, context, "linked-server-execute-not-modeled"));
+                    }
+                    else
+                    {
+                        CompileStringList(stringList, node, activeGuards, context, state);
+                    }
                 }
 
                 break;

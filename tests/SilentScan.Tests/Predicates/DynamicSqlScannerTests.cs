@@ -968,6 +968,23 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_ExecStringListAtLinkedServer_DeclinesRatherThanAnalyzingAgainstTheLocalCatalog()
+    {
+        // EXECUTE ('...') AT linked_server runs the string against the LINKED SERVER's own
+        // catalog - analyzing it locally fabricated a finding against a local object the
+        // statement never actually touches (2026-08 audit; ExecuteSpecification.LinkedServer was
+        // read nowhere in this file). Mirrors FromScopeResolver's own four-part linked-server
+        // guard for the FROM-clause case: declined with a machine-readable reason, not silently
+        // dropped and not analyzed as if local.
+        var result = Scan("EXEC ('SELECT Id FROM dbo.Orders WHERE CAST(Id AS varchar) = ''7''') AT REMOTE1;");
+
+        var finding = Assert.Single(result.Findings);
+        Assert.Equal(DynamicSqlOutcome.Unanalyzable, finding.Outcome);
+        Assert.Equal("linked-server-execute-not-modeled", finding.Reason);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
     public void Scan_ExecOfVariableAssignedFromColumnReference_ReasonNamesColumnReference()
     {
         // ScriptDom parses an unqualified identifier here as a ColumnReferenceExpression
