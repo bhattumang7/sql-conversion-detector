@@ -44,6 +44,24 @@ public static class NotInNullableSubqueryScanner
     {
         public List<NotInNullableSubqueryFinding> Findings { get; } = [];
 
+        /// <summary>
+        /// The enclosing statement's own CTE scope - a CTE declared on the outer statement's WITH
+        /// clause is visible inside a nested NOT IN subquery too (standard CTE visibility), and a
+        /// QuerySpecification has no direct access to its enclosing SelectStatement's own
+        /// WithCtesAndXmlNamespaces. Resolving the subquery's FROM clause against the catalog
+        /// instead of this scope (cteRelations always null, pre-fix) silently matched a CTE-
+        /// shadowed subquery source against an unrelated real table of the same name (2026-08
+        /// audit).
+        /// </summary>
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
             InspectSearchCondition(node.WhereClause?.SearchCondition);
@@ -52,14 +70,18 @@ public static class NotInNullableSubqueryScanner
 
         public override void ExplicitVisit(UpdateStatement node)
         {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
             InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            cteScopeStack.Pop();
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
             InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition);
             base.ExplicitVisit(node);
+            cteScopeStack.Pop();
         }
 
         private void InspectSearchCondition(BooleanExpression? searchCondition)
@@ -88,7 +110,8 @@ public static class NotInNullableSubqueryScanner
                 return;
             }
 
-            var (innerByAlias, innerOrdered) = FromScopeResolver.Resolve(subquerySpec.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            var (innerByAlias, innerOrdered) = FromScopeResolver.Resolve(subquerySpec.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
             var innerProvenance = ScalarExpressionResolver.ResolveColumnReference(innerColumnRef, [(innerByAlias, innerOrdered)], sourcePath, ledger: null);
             if (innerProvenance is not ColumnProvenance.BaseColumn { Depth: 0 } innerColumn)
             {

@@ -48,6 +48,23 @@ public sealed class NotInNullableSubqueryScannerTests
     }
 
     [Fact]
+    public void SubquerySourceIsACteSharingANameWithANullableRealTable_NeverFires()
+    {
+        // 2026-08 audit: cteRelations was always null when resolving the NOT IN subquery's own
+        // FROM clause, so a CTE named the same as dbo.ChildNullable (built here over the NOT
+        // NULL table instead) silently resolved against the real nullable table by name -
+        // firing on a query whose subquery source is provably not the nullable one at all. A
+        // CTE is never schema-qualified, so it always shadows a same-named base table; resolving
+        // correctly through the CTE yields a non-Depth-0 provenance this scanner's own declared
+        // scope already declines rather than guesses at.
+        var findings = Scan(
+            "WITH ChildNullable AS (SELECT RefId FROM dbo.ChildNotNull) " +
+            "SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM ChildNullable);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void PlainIn_NotNegated_NeverFires()
     {
         var findings = Scan("SELECT Id FROM dbo.Parent WHERE Id IN (SELECT RefId FROM dbo.ChildNullable);");
