@@ -51,7 +51,7 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            if (ResolveDataModificationTarget(spec.Target, spec.FromClause) is { } targetQualifiedName)
+            if (ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
                 var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName)
                     ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName)
@@ -67,7 +67,7 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            if (ResolveDataModificationTarget(spec.Target, spec.FromClause) is { } targetQualifiedName)
+            if (ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
                 var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName)
                     ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName);
@@ -80,7 +80,7 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(MergeStatement node)
         {
             var spec = node.MergeSpecification;
-            if (ResolveMergeTarget(spec) is { } targetQualifiedName)
+            if (ResolveMergeTarget(spec, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
                 var match = FindMatchInFragment(spec.TableReference, targetQualifiedName)
                     ?? FindMatchInFragment(spec.SearchCondition, targetQualifiedName)
@@ -102,7 +102,7 @@ public static class SelfReferencingDmlScanner
         }
 
         /// <summary>Target resolution shared by UPDATE/DELETE - with an extra FROM clause, T-SQL requires the target's own alias to already be one of its entries (<see cref="FromScopeResolver.ResolveForDataModification"/>'s own doc comment); with none, the target IS the whole scope.</summary>
-        private string? ResolveDataModificationTarget(TableReference target, FromClause? fromClause)
+        private string? ResolveDataModificationTarget(TableReference target, FromClause? fromClause, WithCtesAndXmlNamespaces? withClause)
         {
             if (target is not NamedTableReference named)
             {
@@ -110,12 +110,12 @@ public static class SelfReferencingDmlScanner
             }
 
             var alias = named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(target, fromClause, ResolutionContext());
+            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(target, fromClause, ResolutionContext(withClause));
             return byAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
         }
 
         /// <summary>MergeSpecification's own inherited <c>Target</c> is the INTO target; its alias lives separately in <c>TableAlias</c> (see <see cref="FromScopeResolver.ResolveForMerge"/>'s own doc comment on this naming trap).</summary>
-        private string? ResolveMergeTarget(MergeSpecification spec)
+        private string? ResolveMergeTarget(MergeSpecification spec, WithCtesAndXmlNamespaces? withClause)
         {
             if (spec.Target is not NamedTableReference named)
             {
@@ -123,12 +123,18 @@ public static class SelfReferencingDmlScanner
             }
 
             var alias = spec.TableAlias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
-            var (byAlias, _) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext());
+            var (byAlias, _) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(withClause));
             return byAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+        /// <summary>
+        /// A CTE name shadows a same-named base table for its own statement's lifetime, including
+        /// an updatable-CTE write target (<c>WITH cte AS (...) UPDATE cte SET ...</c> is valid
+        /// T-SQL) - resolving through the catalog instead silently matched an unrelated real
+        /// table sharing the CTE's name (2026-08 audit).
+        /// </summary>
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 

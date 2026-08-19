@@ -100,6 +100,21 @@ public sealed class SelfReferencingDmlScannerTests
     }
 
     [Fact]
+    public void UpdateThroughCteNamedLikeARealTable_NeverResolvesTargetAgainstTheRealTable()
+    {
+        // 2026-08 audit: an updatable CTE (WITH T AS (...) UPDATE T SET ...) is valid T-SQL and
+        // writes through to the CTE's own underlying base table - but a CTE is never schema-
+        // qualified, so it always shadows dbo.T for this statement's own lifetime. Resolving
+        // through the catalog instead (cteRelations always null, pre-fix) matched the write
+        // target against the REAL dbo.T by coincidence of name, which is out of this scanner's
+        // own declared scope (base-table write targets only) - the target must resolve to
+        // nothing (a CTE relation carries no QualifiedName), so no finding should ever fire here.
+        var findings = Scan("WITH T AS (SELECT Id, Val, Flag FROM dbo.T) UPDATE T SET Val = (SELECT MAX(Val) FROM dbo.T);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void DeleteWhereExistsSelf_Fires()
     {
         var findings = Scan("DELETE FROM dbo.T WHERE EXISTS (SELECT 1 FROM dbo.T t2 WHERE t2.Id = T.Id - 1);");

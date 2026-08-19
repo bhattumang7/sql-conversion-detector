@@ -74,6 +74,23 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     }
 
     [Fact]
+    public void CteSharesNameWithIndexedBaseTable_NeverBindsToTheBaseTable()
+    {
+        // 2026-08 audit: cteRelations was always null here, so a CTE named the same as a real
+        // indexed base table silently resolved against the CATALOG table instead - firing a
+        // violation about a table the query never actually reads. A CTE is never schema-
+        // qualified, so it always shadows a same-named base table for its statement's lifetime;
+        // resolving through the CTE correctly yields no real base table at all (a CTE relation
+        // has no QualifiedName), so this scanner - which only ever reasons about real base
+        // tables - must decline the whole statement, not report against dbo.Orders.
+        var findings = Scan(
+            "WITH Orders AS (SELECT 1 AS Region, 2 AS Status) SELECT 1 FROM Orders WHERE Status = 5;",
+            CatalogWithComposite());
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void LeadingColumnReferencedOnlyInsideOrBranch_StillSuppresses()
     {
         // Conservative by design: even a weak, OR-reachable reference to the leading column is

@@ -49,8 +49,25 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
 
     protected DatabaseCatalog Catalog { get; } = catalog;
 
+    /// <summary>
+    /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to its
+    /// enclosing SelectStatement's WithCtesAndXmlNamespaces, so this is captured on the way down
+    /// and consulted from <see cref="Inspect(FromClause?, BooleanExpression?, TSqlFragment)"/>.
+    /// A CTE name shadows a same-named base table for the statement's own lifetime - resolving
+    /// against the catalog instead (the previous, always-null cteRelations behavior) silently
+    /// bound a CTE reference to an unrelated real table of the same name (2026-08 audit).
+    /// </summary>
+    private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
     /// <summary>Runs the subclass's rule over one resolved statement. Called once per SELECT/UPDATE/DELETE that resolves to at least one base table.</summary>
     protected abstract void InspectStatement(ConstrainedStatement statement);
+
+    public override void ExplicitVisit(SelectStatement node)
+    {
+        cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null));
+        base.ExplicitVisit(node);
+        cteScopeStack.Pop();
+    }
 
     public override void ExplicitVisit(QuerySpecification node)
     {
@@ -61,7 +78,8 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
     public override void ExplicitVisit(UpdateStatement node)
     {
         var spec = node.UpdateSpecification;
-        var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+        var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
+        var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
         base.ExplicitVisit(node);
     }
@@ -69,13 +87,14 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
     public override void ExplicitVisit(DeleteStatement node)
     {
         var spec = node.DeleteSpecification;
-        var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+        var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, Catalog, EmptyResolvedViews, SourcePath, ledger: null);
+        var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, node);
         base.ExplicitVisit(node);
     }
 
-    private FromScopeResolver.ResolutionContext ResolutionContext() =>
-        new(Catalog, EmptyResolvedViews, SourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+    private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
+        new(Catalog, EmptyResolvedViews, SourcePath, Ledger: null, cteRelations, ProcScope: null);
 
     private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition, TSqlFragment node)
     {
@@ -84,7 +103,8 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
             return;
         }
 
-        var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, Catalog, EmptyResolvedViews, SourcePath, ledger: null, cteRelations: null, procScope: null);
+        var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+        var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, ResolutionContext(cteRelations));
         Inspect(byAlias, ordered, fromClause, whereCondition, node);
     }
 
