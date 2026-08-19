@@ -103,6 +103,29 @@ public sealed class FromScopeResolverUnsupportedTableReferenceTests
     }
 
     [Fact]
+    public void Pivot_OverAJoinSource_ResolvesPassthroughColumnsFromBothSides()
+    {
+        // The gap this fix closes: ResolveTableReference's own switch has no JoinTableReference
+        // case at all (join trees are only ever handled by FlattenJoins/AddResolved at the top of
+        // ordinary FROM-clause resolution) - calling it directly on a join source fell to the
+        // unsupported-table-reference fallback and dropped the WHOLE source, including every
+        // passthrough column from both sides of the join.
+        var lineage = BuildLineage(
+            "CREATE TABLE dbo.Sales (OrderId INT NOT NULL, CustomerId INT NOT NULL, Quarter VARCHAR(2) NOT NULL, Amount TINYINT NOT NULL);",
+            "CREATE TABLE dbo.Customers (CustomerId INT NOT NULL, CustomerName VARCHAR(50) NOT NULL);",
+            """
+            CREATE VIEW dbo.vw_SalesPivotJoin AS
+            SELECT * FROM dbo.Sales s JOIN dbo.Customers c ON c.CustomerId = s.CustomerId
+            PIVOT (SUM(Amount) FOR Quarter IN ([Q1], [Q2], [Q3], [Q4])) AS p;
+            """);
+
+        var view = lineage.Find("dbo.vw_SalesPivotJoin")!;
+        Assert.NotNull(view.FindColumn("OrderId"));
+        Assert.NotNull(view.FindColumn("CustomerName"));
+        Assert.NotNull(view.FindColumn("Q1"));
+    }
+
+    [Fact]
     public void Unpivot_MismatchedInColumnTypes_DeclinesRatherThanGuesses()
     {
         // Oracle-verified: the engine itself refuses to compile a genuine IN-list type mismatch

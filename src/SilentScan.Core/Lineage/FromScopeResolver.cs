@@ -150,6 +150,20 @@ public static class FromScopeResolver
         }
     }
 
+    /// <summary>
+    /// PIVOT/UNPIVOT's own source is typed as a plain <see cref="TableReference"/> in ScriptDOM's
+    /// grammar, which - like any FROM-clause source - can itself be a join tree (<c>FROM A JOIN B
+    /// ON ... PIVOT (...) p</c>). <see cref="ResolveTableReference"/>'s own switch has no
+    /// <see cref="JoinTableReference"/> case at all (join trees are only ever handled by
+    /// <see cref="FlattenJoins"/>/<see cref="AddResolved"/> at the top of ordinary FROM-clause
+    /// resolution), so calling it directly on a join source fell to the unsupported-reference
+    /// case and dropped the whole source's columns. This flattens the same way an ordinary FROM
+    /// clause does and concatenates every leaf's own resolved columns, so a PIVOT/UNPIVOT whose
+    /// source happens to be a join no longer loses every passthrough column from it.
+    /// </summary>
+    private static IReadOnlyList<ResolvedColumn> ResolveFlattenedSourceColumns(TableReference source, ResolutionContext context) =>
+        [.. FlattenJoins(source).SelectMany(leaf => ResolveTableReference(leaf, context, aliasOverride: null).Entry.Relation.Columns)];
+
     private static IEnumerable<TableReference> FlattenJoins(TableReference tableReference)
     {
         switch (tableReference)
@@ -432,8 +446,7 @@ public static class FromScopeResolver
     private static (string? Alias, ScopeEntry Entry) ResolvePivotedTableReference(PivotedTableReference pivot, ResolutionContext context)
     {
         var (_, _, sourcePath, ledger, _, _, _) = context;
-        var (_, innerEntry) = ResolveTableReference(pivot.TableReference, context, aliasOverride: null);
-        var innerColumns = innerEntry.Relation.Columns;
+        var innerColumns = ResolveFlattenedSourceColumns(pivot.TableReference, context);
 
         if (pivot.ValueColumns.Count != 1)
         {
@@ -488,8 +501,7 @@ public static class FromScopeResolver
     private static (string? Alias, ScopeEntry Entry) ResolveUnpivotedTableReference(UnpivotedTableReference unpivot, ResolutionContext context)
     {
         var (_, _, sourcePath, ledger, _, _, _) = context;
-        var (_, innerEntry) = ResolveTableReference(unpivot.TableReference, context, aliasOverride: null);
-        var innerColumns = innerEntry.Relation.Columns;
+        var innerColumns = ResolveFlattenedSourceColumns(unpivot.TableReference, context);
 
         var inColumnNames = unpivot.InColumns
             .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
