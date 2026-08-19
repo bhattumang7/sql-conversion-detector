@@ -82,6 +82,24 @@ public sealed class IndexHintScannerTests
     }
 
     [Fact]
+    public void CteSharesNameWithHintedRealTable_NeverFires()
+    {
+        // 2026-08 audit: InspectNamedTable independently re-qualified and looked the hinted
+        // table up directly against the catalog, bypassing FromScopeResolver's already-CTE-aware
+        // scope entirely - so a CTE named the same as dbo.Orders (projecting only OrderId, never
+        // Status) silently resolved as if it WERE dbo.Orders, validating the hint against the
+        // REAL table's indexes and firing a HintedIndexNotSeekable finding about a statement
+        // that, through the CTE, never references dbo.Orders at all. A CTE is never schema-
+        // qualified, so it always shadows a same-named real base table.
+        var findings = Scan(
+            "WITH Orders AS (SELECT OrderId FROM dbo.Orders) " +
+            "SELECT 1 FROM Orders WITH (INDEX(IX_Orders_Status));",
+            CatalogWithIndex());
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void NoHints_NeverFires()
     {
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE OrderId = 1;", CatalogWithIndex());

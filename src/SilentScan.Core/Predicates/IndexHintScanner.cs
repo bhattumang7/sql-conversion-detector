@@ -37,16 +37,33 @@ public static class IndexHintScanner
     {
         public List<IndexHintFinding> Findings { get; } = [];
 
+        /// <summary>
+        /// The enclosing SELECT's own CTE scope - a QuerySpecification has no direct access to
+        /// its enclosing SelectStatement's WithCtesAndXmlNamespaces. A CTE is never schema-
+        /// qualified, so it always shadows a same-named real base table; resolving through the
+        /// catalog instead (cteRelations always null, pre-fix) silently matched a CTE-shadowed
+        /// hinted table against an unrelated real table sharing its name (2026-08 audit).
+        /// </summary>
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
         public override void ExplicitVisit(QuerySpecification node)
         {
-            Inspect(node.FromClause, node.WhereClause?.SearchCondition);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            Inspect(node.FromClause, node.WhereClause?.SearchCondition, cteRelations);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
             InspectResolved(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, spec.Target);
             base.ExplicitVisit(node);
         }
@@ -54,22 +71,22 @@ public static class IndexHintScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
             InspectResolved(byAlias, ordered, spec.FromClause, spec.WhereClause?.SearchCondition, spec.Target);
             base.ExplicitVisit(node);
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
-        private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition)
+        private void Inspect(FromClause? fromClause, BooleanExpression? whereCondition, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)
         {
             if (fromClause is null)
             {
                 return;
             }
 
-            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations: null, procScope: null);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(fromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
             InspectResolved(byAlias, ordered, fromClause, whereCondition, target: null);
         }
 
@@ -95,11 +112,20 @@ public static class IndexHintScanner
 
             foreach (var namedTable in namedTables)
             {
-                InspectNamedTable(namedTable, anyReferencedColumns);
+                InspectNamedTable(namedTable, byAlias, anyReferencedColumns);
             }
         }
 
-        private void InspectNamedTable(NamedTableReference namedTable, HashSet<(string Table, string Column)> anyReferencedColumns)
+        /// <summary>
+        /// Resolved through the ALREADY CTE-aware <paramref name="byAlias"/> scope (built by
+        /// <see cref="FromScopeResolver"/>) rather than an independent
+        /// <c>SchemaObjectNameHelper.Qualify</c> + <c>catalog.Find</c> lookup of its own - the
+        /// independent lookup bypassed CTE shadowing entirely regardless of what cteRelations the
+        /// caller resolved, since a CTE is never schema-qualified and a raw re-qualify-and-
+        /// catalog-lookup can never see it (2026-08 audit, same shape as
+        /// PartialCompositeForeignKeyJoinScanner's own ResolveDirectBaseTable fix).
+        /// </summary>
+        private void InspectNamedTable(NamedTableReference namedTable, IReadOnlyDictionary<string, ScopeEntry> byAlias, HashSet<(string Table, string Column)> anyReferencedColumns)
         {
             var indexHints = namedTable.TableHints.OfType<IndexTableHint>().ToList();
             if (indexHints.Count == 0)
@@ -107,7 +133,12 @@ public static class IndexHintScanner
                 return;
             }
 
-            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedTable.SchemaObject));
+            var alias = namedTable.Alias?.Value ?? namedTable.SchemaObject.BaseIdentifier.Value;
+            if (!byAlias.TryGetValue(alias, out var entry) || entry.IsViewLayer || entry.Relation.QualifiedName is not { } qualifiedName)
+            {
+                return;
+            }
+
             var table = catalog.Find(qualifiedName);
             if (table is null || table.Kind != CatalogTableKind.Table)
             {
