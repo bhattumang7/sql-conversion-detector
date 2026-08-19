@@ -527,7 +527,7 @@ public static class ScanReportBuilder
                 .ToList();
             unordered.AddRange(UndersizedDeclarationScanner.ScanCatalog(catalog));
             undersizedDeclarationFindings = unordered
-                .OrderBy(f => f.QualifiedOrVariableName, StringComparer.Ordinal).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)
+                .OrderBy(f => f.QualifiedOrVariableName, StringComparer.Ordinal).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
                 .ToList();
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -564,6 +564,8 @@ public static class ScanReportBuilder
                 .ToList();
             unindexedTempTableUsageFindings = unordered
                 .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.DeclarationLine)
+                .ThenBy(f => f.TempTableQualifiedName, StringComparer.Ordinal)
+                .ThenBy(f => f.UsageLine).ThenBy(f => f.UsageColumn).ThenBy(f => f.Kind)
                 .ToList();
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -1026,7 +1028,7 @@ public static class ScanReportBuilder
                 })
                 .ToList();
             multiReferencedCteFindings = unordered
-                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.CteName, StringComparer.Ordinal)
                 .ToList();
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -1054,6 +1056,7 @@ public static class ScanReportBuilder
                 .OrderByDescending(f => f.ExpandedCount - f.WrittenCount)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
+                .ThenBy(f => f.ModuleQualifiedName, StringComparer.Ordinal)
                 .ToList();
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -1094,6 +1097,9 @@ public static class ScanReportBuilder
                 .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerSourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerLine)
+                .ThenBy(f => f.ViewDepth)
+                .ThenBy(f => f.ViewSourcePath, StringComparer.Ordinal)
+                .ThenBy(f => f.ViewLine)
                 .ToList();
         }
         PhaseMemory.ReleaseBetweenPhases();
@@ -1190,8 +1196,13 @@ public static class ScanReportBuilder
             .OrderBy(f => f.Indexed switch { true => 0, null => 1, false => 2 })
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
             .ThenBy(f => f.Line)
-            .ThenBy(f => f.Column)];
-        dynamicSqlFindings = [.. dynamicSqlFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
+            .ThenBy(f => f.Column)
+            .ThenBy(f => f.Kind)];
+        dynamicSqlFindings = [.. dynamicSqlFindings
+            .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
+            .ThenBy(f => f.Line)
+            .ThenBy(f => f.Column)
+            .ThenBy(f => f.Outcome)];
         securityFindings = [.. securityFindings, .. SecurityScanner.FromDynamicSqlFindings(dynamicSqlFindings)];
         securityFindings = [.. securityFindings
             .OrderBy(f => f.Kind).ThenBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)];
