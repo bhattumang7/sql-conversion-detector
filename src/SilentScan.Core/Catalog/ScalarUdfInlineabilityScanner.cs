@@ -123,6 +123,22 @@ public static class ScalarUdfInlineabilityScanner
         }
 
         /// <summary>
+        /// Oracle-confirmed 2026-08-20 (real Docker probe): a scalar UDF body querying a `sys.*`
+        /// catalog view/table blocks inlining, matching the documented "SystemDataAccess" reason -
+        /// calling a system FUNCTION (e.g. SUSER_SNAME()) alone does not, isolated separately, so
+        /// this is scoped to catalog TABLE access specifically, not any system-prefixed construct.
+        /// </summary>
+        public override void ExplicitVisit(NamedTableReference node)
+        {
+            if (string.Equals(node.SchemaObject.SchemaIdentifier?.Value, "sys", StringComparison.OrdinalIgnoreCase))
+            {
+                Report("system catalog access (sys." + node.SchemaObject.BaseIdentifier.Value + ")");
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        /// <summary>
         /// Oracle-confirmed directly (real Docker probe, is_inlineable checked before/after adding
         /// a WITH clause to an otherwise-identical function body): a CTE anywhere in a scalar UDF's
         /// body blocks FROID inlining. Matches the public, documented "CTE" reason in

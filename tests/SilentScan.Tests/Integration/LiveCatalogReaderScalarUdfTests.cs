@@ -146,6 +146,23 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
             RETURN @x + 1;
         END;
         GO
+        CREATE FUNCTION dbo.fn_SysAccess (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @c INT;
+            SELECT @c = COUNT(*) FROM sys.objects WHERE type = 'U';
+            RETURN @c + @x;
+        END;
+        GO
+        CREATE FUNCTION dbo.fn_SuserName (@x INT)
+        RETURNS INT
+        AS
+        BEGIN
+            DECLARE @n SYSNAME = SUSER_SNAME();
+            RETURN @x + LEN(@n);
+        END;
+        GO
         CREATE TABLE dbo.SchemaDependent (
             Id INT NOT NULL,
             Computed AS dbo.fn_ForSchema(Id),
@@ -271,6 +288,26 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlNoMethod", out var info));
+        Assert.True(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionQueryingSystemCatalog_EngineReportsNotInlineable()
+    {
+        // Oracle-confirmed 2026-08-20 (real Docker probe): querying sys.objects defeats
+        // is_inlineable; calling a system function alone (SUSER_SNAME(), below) does not.
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_SysAccess", out var info));
+        Assert.False(info!.EngineIsInlineable);
+    }
+
+    [Fact]
+    public async Task ReadAsync_FunctionCallingSystemFunctionOnly_EngineReportsInlineable()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_SuserName", out var info));
         Assert.True(info!.EngineIsInlineable);
     }
 

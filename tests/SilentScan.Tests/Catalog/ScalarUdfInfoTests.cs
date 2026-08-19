@@ -348,6 +348,47 @@ public sealed class ScalarUdfInfoTests
     }
 
     [Fact]
+    public void Build_FunctionQueryingSystemCatalog_RecordsInlineabilityBlocker()
+    {
+        // Oracle-confirmed 2026-08-20 (LiveCatalogReaderScalarUdfTests.
+        // ReadAsync_FunctionQueryingSystemCatalog_EngineReportsNotInlineable): querying sys.objects
+        // defeats sys.sql_modules.is_inlineable, matching the documented "SystemDataAccess" reason.
+        // Calling a system FUNCTION alone (SUSER_SNAME()) does not - isolated below.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_SysAccess (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @c INT;
+                SELECT @c = COUNT(*) FROM sys.objects WHERE type = 'U';
+                RETURN @c + @x;
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_SysAccess", out var info));
+        Assert.Contains("system catalog access", info!.InlineabilityBlocker, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_FunctionCallingSystemFunctionOnly_NoBlocker()
+    {
+        // Isolates system CATALOG TABLE access as the blocker - a system FUNCTION call alone is a
+        // different, unblocked shape.
+        var catalog = BuildFrom("""
+            CREATE FUNCTION dbo.fn_SuserName (@x INT)
+            RETURNS INT
+            AS
+            BEGIN
+                DECLARE @n SYSNAME = SUSER_SNAME();
+                RETURN @x + LEN(@n);
+            END
+            """);
+
+        Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_SuserName", out var info));
+        Assert.Null(info!.InlineabilityBlocker);
+    }
+
+    [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
         // Oracle-confirmed 2026-08-17 (LiveCatalogReaderScalarUdfTests.
