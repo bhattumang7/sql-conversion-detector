@@ -76,21 +76,24 @@ per phase (Phase 0 commits per fix).
 
 - [ ] **Phase 0 — precision hotfixes.** Straight bugs, no architecture; each
       needs its fires/clean fixture pair per the working agreements.
-      1. The 16 `cteRelations: null` / `CteRelations: null` call sites across
-         11 scanners (`CatchAllPredicateScanner.cs:85,156`,
-         `IndexHintScanner.cs:63,72`,
-         `TryCastComputedColumnPredicateScanner.cs:98,131`,
-         `ConstrainedColumnStatementVisitor.cs:78,87`,
-         `SelfReferencingDmlScanner.cs:131`,
-         `NotInNullableSubqueryScanner.cs:91`,
-         `PartialCompositeForeignKeyJoinScanner.cs:102`,
-         `PostExpansionJoinWidthScanner.cs:51`,
-         `NonUniqueUpdateSourceScanner.cs:73`, `SelectStarViewScanner.cs:98`,
-         `ParameterReassignmentPredicateScanner.cs:229,240`): a CTE shadowing
-         a base table binds to the table (proven by test — `indexed=True`
-         finding on a column the query never reads). Minimum fix: collect CTE
-         names per statement (`CteNameCollector` exists) and pass them; the
-         real fix is Phase 1.
+      1. Shipped: all 16 `cteRelations: null` / `CteRelations: null` call
+         sites across the original 11 scanners now resolve real CTE scope
+         (`CteResolver.Resolve` over each statement's own
+         `WithCtesAndXmlNamespaces`, threaded via a per-visitor CTE-scope
+         stack where a `QuerySpecification` has no direct access to its
+         enclosing `SelectStatement`'s WITH clause). Every fix proven
+         against the pre-fix code with `git stash` before landing — three
+         (`CatchAllPredicateScanner`, `PartialCompositeForeignKeyJoinScanner`,
+         `ParameterReassignmentPredicateScanner`) turned out to be worse
+         than "binds to the wrong table": `PartialCompositeForeignKeyJoinScanner`
+         and `IndexHintScanner` had a SECOND, independent bypass
+         (`DirectBaseTableResolver` re-resolving via the catalog directly,
+         never consulting `FromScopeResolver`'s scope at all — fixed at the
+         shared helper, closing six more callers at once, see item 9).
+         `CatchAllPredicateScanner`/`ParameterReassignmentPredicateScanner`
+         don't just stop misfiring once fixed — they now correctly
+         attribute the finding to the CTE's true underlying column instead
+         of the coincidentally-named real one.
       2. Shipped (decision kept): a parameter DEFAULT seeding is widened like
          a literal argument — but findings from either are GENUINE (the
          omitting caller really executes the default), so widening must never
