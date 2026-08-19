@@ -48,6 +48,24 @@ public sealed class NonUniqueUpdateSourceScannerTests
     }
 
     [Fact]
+    public void UpdateThroughCteNamedLikeTheRealTargetTable_NeverFires()
+    {
+        // 2026-08 audit: cteRelations was always null when resolving the UPDATE's own target
+        // alias, so an updatable CTE named the same as dbo.TargetT (valid T-SQL: WITH TargetT AS
+        // (...) UPDATE t SET ... is a real write-through-CTE pattern) silently resolved against
+        // the REAL dbo.TargetT instead - misattributing a finding derived from the real table's
+        // own identity to a statement whose actual write target is a CTE, out of this scanner's
+        // declared scope. A CTE is never schema-qualified, so it always shadows a same-named real
+        // base table; resolved correctly, the target has no QualifiedName at all (a CTE relation
+        // carries none), so this scanner must decline the whole statement.
+        var findings = Scan(
+            "WITH TargetT AS (SELECT Id, Val FROM dbo.TargetT) " +
+            "UPDATE t SET t.Val = s.Val FROM TargetT t JOIN dbo.SourceNonUnique s ON t.Id = s.TargetId;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void ExactCompositeUniqueMatch_NeverFires()
     {
         var findings = Scan(

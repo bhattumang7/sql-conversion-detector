@@ -42,13 +42,13 @@ public static class NonUniqueUpdateSourceScanner
             var spec = node.UpdateSpecification;
             if (spec.FromClause is not null)
             {
-                Inspect(spec);
+                Inspect(spec, node.WithCtesAndXmlNamespaces);
             }
 
             base.ExplicitVisit(node);
         }
 
-        private void Inspect(UpdateSpecification spec)
+        private void Inspect(UpdateSpecification spec, WithCtesAndXmlNamespaces? withClause)
         {
             if (spec.Target is not NamedTableReference targetRef)
             {
@@ -57,7 +57,7 @@ public static class NonUniqueUpdateSourceScanner
 
             var targetAlias = targetRef.Alias?.Value ?? targetRef.SchemaObject.BaseIdentifier.Value;
 
-            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext());
+            var (byAlias, _) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(withClause));
             if (!byAlias.TryGetValue(targetAlias, out var targetEntry) || targetEntry.Relation.QualifiedName is not { } targetQualifiedName)
             {
                 return;
@@ -69,8 +69,19 @@ public static class NonUniqueUpdateSourceScanner
             }
         }
 
-        private FromScopeResolver.ResolutionContext ResolutionContext() =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteRelations: null, ProcScope: null);
+        /// <summary>
+        /// A CTE is never schema-qualified, so it always shadows a same-named real base table for
+        /// its statement's own lifetime, including an updatable-CTE UPDATE target - resolving
+        /// through the catalog instead (cteRelations always null, pre-fix) silently matched the
+        /// target against an unrelated real table sharing the CTE's name (2026-08 audit).
+        /// <see cref="InspectJoin"/>'s own source-side resolution
+        /// (<see cref="DirectBaseTableResolver.ResolveDirectBaseTableName"/>) has the identical
+        /// gap and is NOT fixed by this - DirectBaseTableResolver is catalog-only by its own
+        /// documented design and is shared by six other scanners; widening it is tracked
+        /// separately in docs/detection-checklist.md rather than folded in here silently.
+        /// </summary>
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 

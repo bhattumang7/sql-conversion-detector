@@ -131,6 +131,26 @@ per phase (Phase 0 commits per fix).
       bookkeeping through concat — design first), `sp_prepare`/`sp_execute`
       recognition, `SelectIntoColumnResolver` ambiguous-alias poisoning +
       CTE shadowing (align with `FromScopeResolver.cs:129`'s poison rule).
+      9. Discovered while landing item 1: `DirectBaseTableResolver`
+         (`ResolveDirectBaseTable`/`ResolveDirectBaseTableName`) is its own,
+         separate instance of the same bug class — it re-qualifies and
+         `catalog.Find`s a table reference directly, never consulting
+         `FromScopeResolver`'s scope at all, so it isn't fixed by any
+         scanner's own `cteRelations` wiring. Proven and fixed at its two
+         direct callers so far (`PartialCompositeForeignKeyJoinScanner`'s
+         `InspectJoin`, `IndexHintScanner`'s `InspectNamedTable` — both
+         rewritten to consult the already-resolved `byAlias` scope instead
+         of re-deriving their own answer). Six more callers still route
+         through the unfixed shared helper and need the same treatment:
+         `FloatEqualityPredicateScanner`, `AggregateDivisionColumnstoreScanner`,
+         `CartesianJoinScanner`, `NonUniqueUpdateSourceScanner`'s own
+         `InspectJoin` (its *target*-side resolution is fixed; the join
+         *source* side still calls `DirectBaseTableResolver` directly),
+         `StringConcatNullScanner`, `QueryAntiPatternScanner`. Fixing the
+         helper's own signature once (thread a `byAlias` scope in, or move
+         callers onto scope-chain lookups the way the two rewritten callers
+         now do) closes all six at once rather than patching each
+         separately.
 - [ ] **Phase 1 — make naive resolution unrepresentable.** The type system
       can't tell honest resolution from naive: a `ScopeEntry` from
       `cteRelations: null` looks identical to one resolved with full scope.
