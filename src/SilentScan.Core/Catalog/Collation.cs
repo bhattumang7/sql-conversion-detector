@@ -36,14 +36,19 @@ public sealed record Collation(string Name, CollationSource Source = CollationSo
     /// <summary>
     /// A collation whose name carries an explicit <c>_CS_</c> (case-sensitive) or <c>_BIN</c>/
     /// <c>_BIN2</c> (binary, which compares byte-for-byte and is therefore also case-sensitive)
-    /// suffix makes identifier comparison in the real engine case-sensitive too - two objects
-    /// named <c>Foo</c> and <c>FOO</c> are distinct. This tool's own catalog dictionaries compare
-    /// names with <see cref="StringComparer.OrdinalIgnoreCase"/> unconditionally (Catalog.
-    /// ExecutionContext's own remarks explain why that plumbing isn't threaded everywhere): this
-    /// property only lets a caller detect the mismatch and report it honestly, not correct it.
+    /// segment makes identifier comparison in the real engine case-sensitive too - two objects
+    /// named <c>Foo</c> and <c>FOO</c> are distinct. <c>_BIN</c>/<c>_BIN2</c> are matched as
+    /// name segments, not suffixes: the 2019+ UTF-8 binary collations
+    /// (<c>Latin1_General_100_BIN2_UTF8</c>) end in <c>_UTF8</c>, and a suffix match reported
+    /// them case-INSENSITIVE - which made <see cref="Rules.SargabilityClassifier"/> advise
+    /// deleting an <c>UPPER()</c> wrap "with zero result-set risk" on a binary column, where
+    /// deleting it changes results (2026-08 audit). This tool's own catalog dictionaries compare
+    /// names with <see cref="StringComparer.OrdinalIgnoreCase"/> unconditionally: this property
+    /// only lets a caller detect the mismatch and report it honestly, not correct it.
     /// </summary>
     public bool IsCaseSensitive =>
         Name.Contains("_CS_", StringComparison.OrdinalIgnoreCase)
         || Name.EndsWith("_BIN", StringComparison.OrdinalIgnoreCase)
-        || Name.EndsWith("_BIN2", StringComparison.OrdinalIgnoreCase);
+        || Name.Contains("_BIN_", StringComparison.OrdinalIgnoreCase)
+        || Name.Contains("_BIN2", StringComparison.OrdinalIgnoreCase);
 }

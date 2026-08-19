@@ -29,6 +29,8 @@ public sealed class CollationTests
     [InlineData("SQL_Latin1_General_CP1_CS_AS")]
     [InlineData("Latin1_General_BIN")]
     [InlineData("Latin1_General_100_BIN2")]
+    [InlineData("Latin1_General_100_BIN2_UTF8")]
+    [InlineData("Japanese_XJIS_100_BIN_UTF8")]
     public void IsCaseSensitive_CsOrBinaryCollation_ReturnsTrue(string name)
     {
         Assert.True(new Collation(name).IsCaseSensitive);
