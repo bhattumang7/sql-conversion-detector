@@ -99,4 +99,33 @@ public sealed class DdlWhitelistDeploymentTests : IAsyncLifetime
 
         Assert.NotNull(result);
     }
+
+    [Fact]
+    public async Task DeployWhitelistedDdlWithRetryAsync_QuotedIdentifierOffInOneFile_DoesNotLeakIntoTheNextFile()
+    {
+        // SET QUOTED_IDENTIFIER/ANSI_NULLS bake into sys.sql_modules at CREATE time from the
+        // SESSION's state at that moment - every file's batches share ONE connection here, so a
+        // SET ... OFF left standing at the end of one file must not silently carry over into a
+        // later file's own CREATE PROCEDURE, which never set anything itself and should compile
+        // exactly like a fresh session would (QUOTED_IDENTIFIER ON, the server default).
+        var scripts = new List<(string Label, string Script)>
+        {
+            ("fileA.sql", "SET QUOTED_IDENTIFIER OFF;"),
+            ("fileB.sql", "CREATE PROCEDURE dbo.usp_FromFileB AS BEGIN SELECT 1; END"),
+        };
+
+        var deployer = new ScriptDeployer(_options);
+        var messages = await deployer.DeployWhitelistedDdlWithRetryAsync(
+            scripts, DatabaseName, allowProcedureAndTriggerDefinitions: true);
+
+        Assert.Empty(messages);
+
+        await using var connection = new SqlConnection(_options.BuildConnectionString(DatabaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT uses_quoted_identifier FROM sys.sql_modules WHERE object_id = OBJECT_ID('dbo.usp_FromFileB');";
+        var usesQuotedIdentifier = (bool)(await command.ExecuteScalarAsync())!;
+
+        Assert.True(usesQuotedIdentifier);
+    }
 }

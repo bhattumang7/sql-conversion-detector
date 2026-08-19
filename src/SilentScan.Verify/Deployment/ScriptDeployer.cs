@@ -133,7 +133,8 @@ public sealed partial class ScriptDeployer
         await connection.OpenAsync(cancellationToken);
 
         var lastFailureByBatch = new Dictionary<(string Label, string BatchText), string>();
-        pending = await RunRetryPassesAsync(connection, pending, maxPasses, lastFailureByBatch, cancellationToken);
+        var connectionState = new SharedConnectionSetState();
+        pending = await RunRetryPassesAsync(connection, pending, maxPasses, lastFailureByBatch, connectionState, cancellationToken);
 
         messages.AddRange(pending.Select(item => $"{item.Label}: {lastFailureByBatch[item]}"));
 
@@ -184,7 +185,7 @@ public sealed partial class ScriptDeployer
     /// <summary>Retries whatever failed in earlier passes (see the type-level doc comment for why) until either everything deploys, a full pass makes no forward progress, or <paramref name="maxPasses"/> is reached. <paramref name="lastFailureByBatch"/> is filled in with each still-pending batch's most recent failure message.</summary>
     private static async Task<List<(string Label, string BatchText)>> RunRetryPassesAsync(
         SqlConnection connection, List<(string Label, string BatchText)> pending, int maxPasses,
-        Dictionary<(string Label, string BatchText), string> lastFailureByBatch, CancellationToken cancellationToken)
+        Dictionary<(string Label, string BatchText), string> lastFailureByBatch, SharedConnectionSetState connectionState, CancellationToken cancellationToken)
     {
         for (var pass = 0; pass < maxPasses && pending.Count > 0; pass++)
         {
@@ -195,6 +196,19 @@ public sealed partial class ScriptDeployer
             {
                 try
                 {
+                    // SET QUOTED_IDENTIFIER/ANSI_NULLS bake into a module's own sys.sql_modules
+                    // row at CREATE/ALTER time from whatever the SESSION's state is at that
+                    // moment - all of `pending`'s batches share ONE connection across every file
+                    // and every retry pass, so a `SET QUOTED_IDENTIFIER OFF` batch from one file
+                    // would otherwise persist into every later file's own CREATE/ALTER, and a
+                    // batch retried in a later pass would compile under whatever the PREVIOUS
+                    // batch (from a different file entirely) last left the connection in, not
+                    // its own file's. Resetting to the server default (ON/ON) at every file
+                    // boundary means each file starts from the same known baseline every real
+                    // deployment (sqlcmd, a fresh session) would - a file that sets its own
+                    // QUOTED_IDENTIFIER/ANSI_NULLS still does so via its own SET batch, which
+                    // simply overrides this reset in file order, exactly like a real session.
+                    await connectionState.ResetToDefaultsIfNewFileAsync(connection, item.Label, cancellationToken);
                     await ExecuteBatchAsync(connection, item.BatchText, cancellationToken);
                     progressed = true;
                 }
@@ -213,6 +227,25 @@ public sealed partial class ScriptDeployer
         }
 
         return pending;
+    }
+
+    /// <summary>Tracks which file's batch last ran on the shared deployment connection, so <see cref="RunRetryPassesAsync"/> can reset QUOTED_IDENTIFIER/ANSI_NULLS to the server default exactly at a file boundary - never mid-file, and never redundantly for consecutive batches from the same file.</summary>
+    private sealed class SharedConnectionSetState
+    {
+        private string? _lastExecutedLabel;
+
+        public async Task ResetToDefaultsIfNewFileAsync(SqlConnection connection, string label, CancellationToken cancellationToken)
+        {
+            if (_lastExecutedLabel == label)
+            {
+                return;
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            _lastExecutedLabel = label;
+        }
     }
 
     private static readonly HashSet<Type> RewritableAlterStatementTypes =
