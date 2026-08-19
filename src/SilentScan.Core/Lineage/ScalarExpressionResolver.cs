@@ -72,27 +72,7 @@ public static class ScalarExpressionResolver
         if (BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
         {
             var argumentType = ColumnProvenanceAnalysis.TryGetScalarType(Resolve(functionCall.Parameters[argumentIndex], context));
-            if (argumentType is not null && BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name))
-            {
-                argumentType = BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
-            }
-            else if (argumentType is not null && BuiltinFunctionTypeResolver.RequiresDateAddResultAdjustment(name))
-            {
-                argumentType = BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
-            }
-            else if (argumentType is not null)
-            {
-                if (BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(name))
-                {
-                    argumentType = BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(argumentType);
-                }
-
-                if (BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
-                {
-                    argumentType = BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
-                }
-            }
-
+            argumentType = BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
             return new ColumnProvenance.Expression(argumentType, inputs, context.SourcePath, functionCall.StartLine);
         }
 
@@ -204,6 +184,8 @@ public static class ScalarExpressionResolver
         /// </summary>
         public override void ExplicitVisit(ScalarSubquery node)
         {
+            // Deliberately empty, no base call - stops descent so this collector never reaches
+            // the subquery's own FROM/WHERE. See this method's own doc comment above.
         }
     }
 

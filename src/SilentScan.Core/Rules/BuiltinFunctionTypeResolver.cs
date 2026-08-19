@@ -206,6 +206,46 @@ public static class BuiltinFunctionTypeResolver
     public static bool RequiresDateAddResultAdjustment(string functionName) =>
         string.Equals(functionName, "DATEADD", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Composes every argument-type-passthrough adjustment this table knows for a single-
+    /// argument-typed builtin (<see cref="TryGetArgumentTypeIndex"/>), so every caller applies
+    /// the exact same rule set rather than re-deriving the branching: SUM/AVG widening and
+    /// DATEADD's own third-argument rule are each function-exclusive (only one can apply to a
+    /// given name); the fixed-width demotion and length-unknown clearing are NOT mutually
+    /// exclusive with each other (LEFT/RIGHT/SUBSTRING/STUFF/REPLACE need both; UPPER/LOWER/
+    /// LTRIM/RTRIM/REVERSE only demote) but never apply alongside the first two. Null input
+    /// (the argument itself never resolved) passes through unchanged.
+    /// </summary>
+    public static SqlType? AdjustArgumentTypeFunctionResult(string functionName, SqlType? argumentType)
+    {
+        if (argumentType is null)
+        {
+            return null;
+        }
+
+        if (WidensIntegerAggregateArgument(functionName))
+        {
+            return WidenIntegerAggregateResult(argumentType);
+        }
+
+        if (RequiresDateAddResultAdjustment(functionName))
+        {
+            return ResolveDateAddResult(argumentType);
+        }
+
+        if (DemotesFixedWidthArgumentCategory(functionName))
+        {
+            argumentType = DemoteFixedWidthCategory(argumentType);
+        }
+
+        if (ResultLengthDiffersFromArgument(functionName))
+        {
+            argumentType = ClearLengthIfUnknown(argumentType);
+        }
+
+        return argumentType;
+    }
+
     /// <summary>Applies DATEADD's result-type rule to its already-resolved third argument: date/time-family types pass through unchanged; every other category (the engine implicitly converts a numeric or string date argument) resolves to plain <c>datetime</c>, oracle-verified.</summary>
     public static SqlType ResolveDateAddResult(SqlType thirdArgumentType) =>
         thirdArgumentType.IsDateTimeFamily

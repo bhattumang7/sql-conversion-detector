@@ -1507,31 +1507,7 @@ public static class TypedPredicateExtractor
             if (Rules.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
             {
                 var argumentType = OperandType(ResolveOperand(functionCall.Parameters[argumentIndex], scopeChain));
-                if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.WidensIntegerAggregateArgument(name))
-                {
-                    argumentType = Rules.BuiltinFunctionTypeResolver.WidenIntegerAggregateResult(argumentType);
-                }
-                else if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.RequiresDateAddResultAdjustment(name))
-                {
-                    argumentType = Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
-                }
-                else if (argumentType is not null)
-                {
-                    // Both can apply to the same function (LEFT/RIGHT/SUBSTRING/STUFF/REPLACE
-                    // demote AND lose their declared length; UPPER/LOWER/LTRIM/RTRIM/REVERSE only
-                    // demote) - never mutually exclusive with each other, only with the widen/
-                    // DATEADD branches above.
-                    if (Rules.BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(name))
-                    {
-                        argumentType = Rules.BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(argumentType);
-                    }
-
-                    if (Rules.BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
-                    {
-                        argumentType = Rules.BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
-                    }
-                }
-
+                argumentType = Rules.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
                 return new PredicateOperand.Value(argumentType);
             }
 
