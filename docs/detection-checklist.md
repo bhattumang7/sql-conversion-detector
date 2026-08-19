@@ -173,8 +173,15 @@ per phase (Phase 0 commits per fix).
       Deferred to their own decision, not forgotten: guard-correlated branch
       cross-product in `SqlTextValue.Concat`/`ForkAssemblies` (needs guard
       bookkeeping through concat — design first), `sp_prepare`/`sp_execute`
-      recognition, `SelectIntoColumnResolver` ambiguous-alias poisoning +
-      CTE shadowing (align with `FromScopeResolver.cs:129`'s poison rule).
+      recognition (checked 2026-08-20: zero occurrences across the local test
+      database's ~5,000-module real corpus — `sys.sql_modules.definition LIKE
+      '%sp_prepare%'`/`'%sp_execute%'` both return 0; this driver-generated,
+      ODBC-prepared-statement pattern essentially never appears in hand-written
+      T-SQL, so a rule for it would ship unexercised, same reasoning as the
+      partitioned-index item above — stays deferred, now with real evidence
+      rather than only a stated design gap), `SelectIntoColumnResolver`
+      ambiguous-alias poisoning + CTE shadowing (align with
+      `FromScopeResolver.cs:129`'s poison rule).
       9. Shipped: `DirectBaseTableResolver` (`ResolveDirectBaseTable`/
          `ResolveDirectBaseTables`/`ResolveDirectBaseTableName`) was its own,
          separate instance of the same bug class — it re-qualified and
