@@ -67,6 +67,20 @@ public static class QueryAntiPatternScanner
 
         private readonly HashSet<string> _tableVariableNames = new(StringComparer.OrdinalIgnoreCase);
 
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+        // Real per-statement CTE scope (Phase 1.5 "one binder"), for InspectDistinctJoinFanout's
+        // own base-table resolution only - unrelated to cteNames above, which stays a deliberately
+        // name-only, file-wide pre-pass for a different check (forward-reference safety, see Scan's
+        // own comment) and is not itself a resolution bypass.
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
+
+        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+
+        private static string? AliasOf(TableReference reference) =>
+            reference is NamedTableReference named ? named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value : null;
+
         private readonly HashSet<BinaryQueryExpression> _consumedUnionChainNodes = [];
 
         public override void ExplicitVisit(DeclareTableVariableStatement node)
@@ -147,7 +161,9 @@ public static class QueryAntiPatternScanner
         public override void ExplicitVisit(SelectStatement node)
         {
             InspectRecursiveCteMaxRecursion(node);
+            _cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
             base.ExplicitVisit(node);
+            _cteScopeStack.Pop();
         }
 
         public override void ExplicitVisit(WhileStatement node)
@@ -200,7 +216,11 @@ public static class QueryAntiPatternScanner
         public override void ExplicitVisit(QuerySpecification node)
         {
             InspectHaving(node);
-            InspectDistinctJoinFanout(node);
+
+            var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
+            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations));
+            InspectDistinctJoinFanout(node, byAlias);
+
             base.ExplicitVisit(node);
         }
 
@@ -844,7 +864,7 @@ public static class QueryAntiPatternScanner
         // --- DISTINCT masking a join fan-out (kind 8, reuses NonUniqueUpdateSourceScanner's
         // composite-uniqueness catalog check) ---------------------------------------------------
 
-        private void InspectDistinctJoinFanout(QuerySpecification node)
+        private void InspectDistinctJoinFanout(QuerySpecification node, IReadOnlyDictionary<string, ScopeEntry> byAlias)
         {
             if (node.UniqueRowFilter != UniqueRowFilter.Distinct || node.FromClause is null)
             {
@@ -853,8 +873,9 @@ public static class QueryAntiPatternScanner
 
             foreach (var join in node.FromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes))
             {
-                var (joinedAlias, joinedQualifiedName) = DirectBaseTableResolver.ResolveDirectBaseTableName(catalog, join.SecondTableReference, cteNames);
-                if (joinedAlias is null || joinedQualifiedName is null)
+                var joinedAlias = AliasOf(join.SecondTableReference);
+                if (joinedAlias is null || !byAlias.TryGetValue(joinedAlias, out var joinedEntry)
+                    || joinedEntry.IsViewLayer || joinedEntry.Relation.QualifiedName is not { } joinedQualifiedName)
                 {
                     continue;
                 }
@@ -1020,6 +1041,8 @@ public static class QueryAntiPatternScanner
             _ => null,
         };
 
-        // --- Shared join/predicate flattening helpers live in DirectBaseTableResolver -
+        // --- Shared syntax-only helpers (RawColumnReferenceCollector, ColumnNameIfQualifiedByAlias)
+        // live in DirectBaseTableResolver - base-table resolution itself goes through
+        // FromScopeResolver (Phase 1.5 "one binder"), above.
     }
 }
