@@ -1515,9 +1515,21 @@ public static class TypedPredicateExtractor
                 {
                     argumentType = Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
                 }
-                else if (argumentType is not null && Rules.BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
+                else if (argumentType is not null)
                 {
-                    argumentType = Rules.BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
+                    // Both can apply to the same function (LEFT/RIGHT/SUBSTRING/STUFF/REPLACE
+                    // demote AND lose their declared length; UPPER/LOWER/LTRIM/RTRIM/REVERSE only
+                    // demote) - never mutually exclusive with each other, only with the widen/
+                    // DATEADD branches above.
+                    if (Rules.BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(name))
+                    {
+                        argumentType = Rules.BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(argumentType);
+                    }
+
+                    if (Rules.BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
+                    {
+                        argumentType = Rules.BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
+                    }
                 }
 
                 return new PredicateOperand.Value(argumentType);

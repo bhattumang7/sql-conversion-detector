@@ -125,9 +125,14 @@ internal static class ComputedColumnTypeResolver
                 return Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(argumentType);
             }
 
+            if (Rules.BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(name))
+            {
+                argumentType = Rules.BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(argumentType);
+            }
+
             if (Rules.BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(name))
             {
-                return Rules.BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
+                argumentType = Rules.BuiltinFunctionTypeResolver.ClearLengthIfUnknown(argumentType);
             }
 
             return argumentType;

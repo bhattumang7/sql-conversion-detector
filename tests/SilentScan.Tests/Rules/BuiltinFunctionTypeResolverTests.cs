@@ -49,4 +49,51 @@ public sealed class BuiltinFunctionTypeResolverTests
         Assert.Equal(SqlTypeCategory.VarChar, result.Category);
         Assert.NotNull(result.Collation);
     }
+
+    [Theory]
+    [InlineData("UPPER")]
+    [InlineData("LOWER")]
+    [InlineData("LTRIM")]
+    [InlineData("RTRIM")]
+    [InlineData("REVERSE")]
+    [InlineData("REPLACE")]
+    [InlineData("LEFT")]
+    [InlineData("RIGHT")]
+    [InlineData("SUBSTRING")]
+    [InlineData("STUFF")]
+    public void DemotesFixedWidthArgumentCategory_TrueForEveryStringTransformBuiltin(string functionName)
+    {
+        Assert.True(BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(functionName));
+    }
+
+    [Theory]
+    [InlineData("ISNULL")]
+    [InlineData("MIN")]
+    [InlineData("MAX")]
+    public void DemotesFixedWidthArgumentCategory_FalseForNonTransformFunctions(string functionName)
+    {
+        // MIN/MAX/ISNULL preserve their argument's exact type unmodified - oracle-verified per
+        // this class's own doc comment, unaffected by this fix.
+        Assert.False(BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(functionName));
+    }
+
+    [Theory]
+    [InlineData(SqlTypeCategory.Char, SqlTypeCategory.VarChar)]
+    [InlineData(SqlTypeCategory.NChar, SqlTypeCategory.NVarChar)]
+    [InlineData(SqlTypeCategory.Binary, SqlTypeCategory.VarBinary)]
+    public void DemoteFixedWidthCategory_DemotesFixedWidthCategories(SqlTypeCategory source, SqlTypeCategory expected)
+    {
+        var result = BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(new SqlType(source, Length: 10));
+
+        Assert.Equal(expected, result.Category);
+        Assert.Equal(10, result.Length);
+    }
+
+    [Fact]
+    public void DemoteFixedWidthCategory_AlreadyVariableWidth_PassesThroughUnchanged()
+    {
+        var source = new SqlType(SqlTypeCategory.VarChar, Length: 10);
+
+        Assert.Equal(source, BuiltinFunctionTypeResolver.DemoteFixedWidthCategory(source));
+    }
 }

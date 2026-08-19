@@ -92,16 +92,20 @@ public static class BuiltinFunctionTypeResolver
     ///
     /// Roadmap Phase B: the common string-transform builtins (UPPER/LOWER/LTRIM/RTRIM/REVERSE/
     /// REPLACE/LEFT/RIGHT/SUBSTRING/STUFF) verified the same way - each preserves its first
-    /// (the source string) argument's own category AND collation exactly (probed:
+    /// (the source string) argument's own UNICODE-ness and collation exactly (probed:
     /// LOWER(nvarcharCol) returns nvarchar with the source's own collation; UPPER(varcharCol)
-    /// returns varchar, collation unchanged). Length/precision facets are NOT preserved
-    /// faithfully here (SQL Server computes a real per-function result length; this class
-    /// returns the first argument's OWN declared length) - an accepted approximation, since
-    /// <see cref="VerdictClassifier"/> never consults length/precision in a cross-category
-    /// decision, only category and collation. CONCAT is deliberately NOT included - its return
-    /// type depends on ALL arguments (nvarchar if any is unicode, varchar otherwise), a
-    /// genuinely different, multi-argument rule this single-argument mechanism can't express;
-    /// left as a documented gap rather than force-fit.
+    /// returns varchar, collation unchanged), but demotes a fixed-width source category
+    /// (char/nchar/binary) to its variable-width counterpart - see
+    /// <see cref="DemotesFixedWidthArgumentCategory"/>/<see cref="DemoteFixedWidthCategory"/>.
+    /// Length/precision facets are not otherwise computed faithfully (SQL Server computes a real
+    /// per-function result length; LEFT/RIGHT/SUBSTRING/STUFF/REPLACE instead clear Length/
+    /// LengthKnown via <see cref="ResultLengthDiffersFromArgument"/>/<see cref="ClearLengthIfUnknown"/>
+    /// rather than assert the source's own declared length, which is provably wrong for these -
+    /// UPPER/LOWER/LTRIM/RTRIM/REVERSE keep the source's declared length exactly, since only the
+    /// runtime content, never the declared max length, changes for those). CONCAT is deliberately
+    /// NOT included - its return type depends on ALL arguments (nvarchar if any is unicode,
+    /// varchar otherwise), a genuinely different, multi-argument rule this single-argument
+    /// mechanism can't express; left as a documented gap rather than force-fit.
     ///
     /// MIN/MAX preserve their (only) argument's exact type unmodified - oracle-verified
     /// (MIN(TinyIntCol) returns tinyint, MAX(MoneyCol) returns money; unlike SUM/AVG below,
@@ -168,6 +172,35 @@ public static class BuiltinFunctionTypeResolver
     /// <summary>Nulls an already-resolved argument type's Length/LengthKnown - see <see cref="LengthUnknownAfterArgumentType"/>'s own doc comment for why the source argument's length can't just be reused.</summary>
     public static SqlType ClearLengthIfUnknown(SqlType argumentType) =>
         argumentType with { Length = null, LengthKnown = false };
+
+    /// <summary>
+    /// Every string-transform builtin this class models demotes a FIXED-width source category
+    /// (char/nchar/binary) to its VARIABLE-width counterpart in the result - oracle-verified
+    /// directly (Docker, sys.columns.TYPE_NAME off a SELECT ... INTO probe): <c>LEFT(charCol,
+    /// 3)</c>, <c>UPPER(charCol)</c>, <c>SUBSTRING(charCol,1,2)</c>, <c>LTRIM/RTRIM(charCol)</c>,
+    /// <c>REVERSE(charCol)</c>, <c>REPLACE(charCol,...)</c>, <c>RIGHT(charCol,3)</c>,
+    /// <c>STUFF(charCol,...)</c> and <c>SUBSTRING(binaryCol,1,2)</c> all resolve varchar/
+    /// varbinary, never char/binary - only the UNICODE-ness dimension (n-prefix) was previously
+    /// verified for this table (this class's own remarks), the fixed-vs-variable-width dimension
+    /// was simply never checked and silently passed the source category through unmodified.
+    /// </summary>
+    private static readonly HashSet<string> DemotesFixedWidthSourceCategory = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "UPPER", "LOWER", "LTRIM", "RTRIM", "REVERSE", "REPLACE", "LEFT", "RIGHT", "SUBSTRING", "STUFF",
+    };
+
+    /// <summary>True for the string-transform builtins in <see cref="DemotesFixedWidthSourceCategory"/> - the caller must pass the resolved argument type through <see cref="DemoteFixedWidthCategory"/> rather than using its category unmodified.</summary>
+    public static bool DemotesFixedWidthArgumentCategory(string functionName) =>
+        DemotesFixedWidthSourceCategory.Contains(functionName);
+
+    /// <summary>Demotes char/nchar/binary to varchar/nvarchar/varbinary on an already-resolved argument type; every other category passes through unchanged.</summary>
+    public static SqlType DemoteFixedWidthCategory(SqlType argumentType) => argumentType.Category switch
+    {
+        SqlTypeCategory.Char => argumentType with { Category = SqlTypeCategory.VarChar },
+        SqlTypeCategory.NChar => argumentType with { Category = SqlTypeCategory.NVarChar },
+        SqlTypeCategory.Binary => argumentType with { Category = SqlTypeCategory.VarBinary },
+        _ => argumentType,
+    };
 
     /// <summary>True for DATEADD - the caller must resolve its third argument's type and pass it through <see cref="ResolveDateAddResult"/> rather than using it unmodified, since the passthrough only holds when that argument is already date/time-family.</summary>
     public static bool RequiresDateAddResultAdjustment(string functionName) =>
