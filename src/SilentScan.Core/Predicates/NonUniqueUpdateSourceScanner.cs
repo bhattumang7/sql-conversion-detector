@@ -93,7 +93,7 @@ public static class NonUniqueUpdateSourceScanner
 
         private void InspectJoin(
             QualifiedJoin join, string targetAlias, string targetQualifiedName,
-            IList<SetClause> setClauses, IReadOnlyDictionary<string, ScopeEntry> byAlias)
+            IList<SetClause> setClauses, Dictionary<string, ScopeEntry> byAlias)
         {
             var firstAlias = AliasOf(join.FirstTableReference);
             var secondAlias = AliasOf(join.SecondTableReference);

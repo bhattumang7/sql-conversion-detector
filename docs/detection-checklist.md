@@ -249,6 +249,14 @@ per phase (Phase 0 commits per fix).
 * **The incumbent survey is closed.** `detection-reference.md` §7.9–7.11.
 * **Killed candidates stay killed.** Each has its measurement in
   `detection-reference.md` Appendix 9; re-read it before re-proposing one.
+* **"One binder" shipped.** `FromScopeResolver`/`CteResolver`/`BaseColumnResolver`
+  are now the only name-resolution path predicates go through;
+  `DirectBaseTableResolver` (the second, independent bypass) is deleted.
+  `SelectIntoColumnResolver` was deliberately excluded, not missed — it runs
+  at catalog-build time, before Lineage exists, and CLAUDE.md's pass-ordering
+  rule ("catalog building resolves against tables only, never views... because
+  view resolution is Lineage's job") forbids folding a catalog-time resolver
+  into a Lineage-time binder. Do not re-propose merging it in.
 
 ---
 

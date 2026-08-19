@@ -864,7 +864,7 @@ public static class QueryAntiPatternScanner
         // --- DISTINCT masking a join fan-out (kind 8, reuses NonUniqueUpdateSourceScanner's
         // composite-uniqueness catalog check) ---------------------------------------------------
 
-        private void InspectDistinctJoinFanout(QuerySpecification node, IReadOnlyDictionary<string, ScopeEntry> byAlias)
+        private void InspectDistinctJoinFanout(QuerySpecification node, Dictionary<string, ScopeEntry> byAlias)
         {
             if (node.UniqueRowFilter != UniqueRowFilter.Distinct || node.FromClause is null)
             {
