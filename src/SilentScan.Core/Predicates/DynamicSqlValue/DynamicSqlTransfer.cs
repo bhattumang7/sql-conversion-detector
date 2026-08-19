@@ -183,18 +183,25 @@ public static class DynamicSqlTransfer
             var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
             if (argument is null)
             {
-                // No matching actual argument - the formal's own DEFAULT value applies (T-SQL
-                // requires a parameter default to be a constant expression, never referencing
-                // another parameter, so folding it against the state built so far is exact, not
-                // an approximation). Previously left the key OUT of `seed` entirely ("nothing to
-                // seed") - which reads as "never declared" to every later reference, a real bug
-                // (surfaced as spurious "variable-not-in-scope" findings for a genuinely-declared,
-                // just not literally-passed, parameter) - every other unresolved-but-real
-                // parameter in this file always seeds SOMETHING (a typed Hole or Tainted), never
-                // leaves the key absent, and a defaulted parameter deserves the same treatment.
+                // No matching actual argument - the formal's own DEFAULT value applies for THIS
+                // edge (T-SQL requires a parameter default to be a constant expression, never
+                // referencing another parameter, so folding it against the state built so far is
+                // exact, not an approximation). Previously left the key OUT of `seed` entirely
+                // ("nothing to seed") - which reads as "never declared" to every later reference,
+                // a real bug (surfaced as spurious "variable-not-in-scope" findings for a
+                // genuinely-declared, just not literally-passed, parameter) - every other
+                // unresolved-but-real parameter in this file always seeds SOMETHING (a typed Hole
+                // or Tainted), never leaves the key absent, and a defaulted parameter deserves
+                // the same treatment. The fold is widened exactly like the literal-argument
+                // branch below: "the one in-scan caller omitted the argument" is not "the default
+                // always applies" - an external caller this scan can't see may pass anything, so
+                // asserting the default as ground truth was an unsound fold (2026-08 audit).
                 var declaredType = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
                 seed[paramName] = formal.Value is { } defaultExpression
-                    ? ExpressionEvaluator.Fold(defaultExpression, seed, context.SourcePath, context.Cap, context.Catalog) with { DeclaredType = declaredType }
+                    ? WidenForPossibleExternalCallers(
+                        ExpressionEvaluator.Fold(defaultExpression, seed, context.SourcePath, context.Cap, context.Catalog) with { DeclaredType = declaredType },
+                        formal,
+                        context)
                     : SeedSymbolicOrTaint(formal, "parameter-not-seeded:default-value-applies", context);
                 continue;
             }

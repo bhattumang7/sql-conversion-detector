@@ -91,10 +91,12 @@ per phase (Phase 0 commits per fix).
          finding on a column the query never reads). Minimum fix: collect CTE
          names per statement (`CteNameCollector` exists) and pass them; the
          real fix is Phase 1.
-      2. `DynamicSqlTransfer.cs:195-199`: a parameter DEFAULT folds to a hard
-         constant with no `WidenForPossibleExternalCallers`, unlike the
-         literal-caller branch at :227 whose comment states why widening is
-         mandatory. One-line reroute.
+      2. Shipped (decision kept): a parameter DEFAULT seeding is widened like
+         a literal argument — but findings from either are GENUINE (the
+         omitting caller really executes the default), so widening must never
+         suppress them; it only adds the external-caller placeholder
+         accounting. Do not re-propose "suppress findings from
+         corpus-observed parameter values" as a false-positive fix.
       3. `Collation.cs:45-48`: `EndsWith("_BIN2")` misses
          `*_BIN2_UTF8` collations → `SargabilityClassifier` advises deleting
          an `UPPER()` wrap that changes results. Match `_BIN`/`_BIN2` as a

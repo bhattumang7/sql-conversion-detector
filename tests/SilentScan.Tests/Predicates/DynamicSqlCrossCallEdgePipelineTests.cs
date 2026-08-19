@@ -303,4 +303,52 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
         Assert.Contains(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
         Assert.Empty(report.TypedFindings);
     }
+
+    [Fact]
+    public async Task SingleCallerOmitsArgument_DefaultBehavesExactlyLikeALiteralArgument()
+    {
+        // The one in-scan caller omits @Table, so @Table's own DEFAULT applies for that edge -
+        // which makes the default exactly as trustworthy as a literal ARGUMENT from a single
+        // caller: a genuinely-executed value (the finding against dbo.Small is real - usp_Caller
+        // really does query it), but never the parameter's COMPLETE value space (a stored
+        // procedure is a public surface; external callers this scan can't see may pass
+        // anything). The literal-argument branch widens via WidenForPossibleExternalCallers;
+        // the default branch didn't (2026-08 audit), so the default path silently skipped the
+        // external-caller placeholder assembly the literal path surfaces. Pinned as a parity
+        // test: same proc body, value supplied by default vs by literal argument, must produce
+        // identical typed findings and identical dynamic-SQL outcome/reason accounting.
+        const string body = """
+            CREATE TABLE dbo.Small (Code varchar(20) NOT NULL, INDEX IX_Small_Code (Code));
+            GO
+            CREATE PROCEDURE dbo.usp_Report @Table SYSNAME{0} AS
+            BEGIN
+                DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM ' + @Table + N' WHERE Code = N''1''';
+                EXEC(@sql);
+            END;
+            GO
+            CREATE PROCEDURE dbo.usp_Caller AS
+            BEGIN
+                EXEC dbo.usp_Report{1};
+            END;
+            """;
+
+        var viaDefault = await Scan(
+            body.Replace("{0}", " = N'dbo.Small'", StringComparison.Ordinal).Replace("{1}", string.Empty, StringComparison.Ordinal),
+            minimumConfidence: FindingConfidence.Low);
+        var viaLiteralArgument = await Scan(
+            body.Replace("{0}", string.Empty, StringComparison.Ordinal).Replace("{1}", " @Table = N'dbo.Small'", StringComparison.Ordinal),
+            minimumConfidence: FindingConfidence.Low);
+
+        static IReadOnlyList<string> TypedShape(Core.Reporting.ScanReport report) =>
+            [.. report.TypedFindings.Select(f => $"{f.Column.TableQualifiedName}.{f.Column.ColumnName}:{f.Verdict}:{f.Confidence}")];
+
+        static IReadOnlyList<string> DynamicShape(Core.Reporting.ScanReport report) =>
+            [.. report.DynamicSqlFindings.Select(f => $"{f.Outcome}:{f.Reason}").OrderBy(s => s, StringComparer.Ordinal)];
+
+        // The genuinely-executed shape must still be reported - widening the default must not
+        // suppress the real dbo.Small finding, only add the honest external-caller accounting.
+        Assert.Contains(viaDefault.TypedFindings, f => f.Column.TableQualifiedName == "dbo.Small");
+        Assert.Equal(TypedShape(viaLiteralArgument), TypedShape(viaDefault));
+        Assert.Equal(DynamicShape(viaLiteralArgument), DynamicShape(viaDefault));
+    }
 }
