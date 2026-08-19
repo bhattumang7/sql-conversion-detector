@@ -1200,10 +1200,11 @@ public static class ScanReportBuilder
             .ThenBy(f => f.Column.Indexed switch { true => 0, null => 1, false => 2 })
             .ThenByDescending(f => f.Column.Depth)
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
-            .ThenBy(f => f.Line)];
-        expressionDerivedFindings = [.. expressionDerivedFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
-        collationConflictFindings = [.. collationConflictFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
-        writeLossFindings = [.. writeLossFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line)];
+            .ThenBy(f => f.Line)
+            .ThenBy(f => f.ColumnPosition)];
+        expressionDerivedFindings = [.. expressionDerivedFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.ColumnPosition)];
+        collationConflictFindings = [.. collationConflictFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.ColumnPosition)];
+        writeLossFindings = [.. writeLossFindings.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.ColumnPosition)];
 
         // docs/detection-checklist.md's own rank for this stream: correlated APPLY first (no
         // engine version rescues it), then a fence inherited invisibly through a view/TVF layer
@@ -1215,7 +1216,8 @@ public static class ScanReportBuilder
             .OrderBy(f => f.Kind)
             .ThenByDescending(f => f.Depth)
             .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
-            .ThenBy(f => f.Line)];
+            .ThenBy(f => f.Line)
+            .ThenBy(f => f.Column)];
 
         // docs/detection-checklist.md's own rank for this stream: predicate-context invocation
         // first (the maximal claim - non-sargable AND per-row AND, pre-2019 or non-inlineable,
