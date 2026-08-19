@@ -58,17 +58,38 @@ public sealed class StringConcatNullScannerTests
     }
 
     [Fact]
-    public void CteSharesNameWithRealTable_NeverFires()
+    public void CteSharesNameWithRealTable_ResolvesThroughCteToRealColumn_Fires()
     {
-        // 2026-08 audit: DirectBaseTableResolver never consulted CTE scope at all - a CTE named
-        // the same as dbo.Person silently resolved against the REAL table instead, matching
-        // MiddleName against its real (nullable) column and firing on a statement that, through
-        // the CTE, never reads the real table's MiddleName. A CTE is never schema-qualified, so
-        // it always shadows a same-named real base table; DirectBaseTableResolver now declines a
-        // CTE-shadowed reference entirely rather than mismatching it.
+        // Phase 1.5 "one binder": this scanner now resolves through FromScopeResolver's real
+        // per-statement CTE scope instead of DirectBaseTableResolver's file-wide CTE-name decline
+        // set, which could only ever decline a shadowed reference wholesale, never resolve it (a
+        // real corpus regression check found the decline set was itself too coarse in the other
+        // direction too - a CTE declared ANYWHERE in the file silently suppressed findings on an
+        // unrelated real table of the same name elsewhere). A CTE is never schema-qualified, so it
+        // always shadows a same-named real base table for its own statement's lifetime, but a CTE
+        // passthrough column carries the real underlying table's own nullability - a WHERE filter
+        // inside the CTE's own definition (MiddleName IS NOT NULL, below) does not change the
+        // catalog's declared nullability, and CLAUDE.md's precision rule never infers "provably not
+        // null" from a filter condition, only from a catalog fact - so this correctly still fires,
+        // attributed to the CTE's real underlying table and column.
         var findings = Scan(
             "WITH Person AS (SELECT FirstName, MiddleName FROM dbo.Person WHERE MiddleName IS NOT NULL) " +
             "SELECT FirstName + ' ' + MiddleName FROM Person;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Person", finding.TableQualifiedName);
+        Assert.Equal("MiddleName", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CteSharesNameWithRealTable_ButUnderlyingColumnNotNullable_NeverFires()
+    {
+        // Precision companion to the fire case above: shadowing a real table by name is not itself
+        // what makes this fire - only a genuinely nullable underlying catalog column does. Proves
+        // the CTE-resolution fix does not turn CTE shadowing into a new source of over-firing.
+        var findings = Scan(
+            "WITH Person AS (SELECT FirstName, LastName FROM dbo.Person) " +
+            "SELECT FirstName + ' ' + LastName FROM Person;");
 
         Assert.Empty(findings);
     }
@@ -137,6 +158,23 @@ public sealed class StringConcatNullScannerTests
 
         var finding = Assert.Single(findings);
         Assert.Equal("MiddleName", finding.ColumnName);
+    }
+
+    [Fact]
+    public void FromClauseCasingDiffersFromDdl_ReportsFromClauseCasing()
+    {
+        // A real corpus check found this delta directly (traced to FromScopeResolver.ToResolvedRelation,
+        // which builds TableQualifiedName from the FROM clause's own SchemaObject text, not
+        // CatalogTable.QualifiedName): DirectBaseTableResolver.TryResolveColumn returned the
+        // catalog's own DDL-declared casing, but BaseColumnResolver's identity now reports whatever
+        // casing the referencing statement itself used. Cosmetic, not a correctness change - every
+        // comparison against this value is ordinal-ignore-case throughout Catalog/Lineage/Predicates
+        // (TableColumnKeyComparer's own doc comment) - but worth pinning down as the real, current
+        // behavior rather than assumed.
+        var findings = Scan("SELECT FirstName + ' ' + MiddleName FROM DBO.PERSON;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("DBO.PERSON", finding.TableQualifiedName);
     }
 
     [Fact]

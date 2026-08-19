@@ -10,14 +10,16 @@ namespace SilentScan.Core.Predicates;
 /// via the + operator silently nulls the entire result when any operand is NULL" - see <see
 /// cref="StringConcatNullFinding"/> for the full scope/precision story and oracle evidence.
 ///
-/// Reuses the same "flatten the join tree to its direct base-table leaves, matched by alias" shape
-/// <see cref="FloatEqualityPredicateScanner"/>/<see cref="NonUniqueUpdateSourceScanner"/> already
-/// established, rather than the full <see cref="Lineage.FromScopeResolver"/> scope-chain/lineage
-/// machinery - a real, known v1 scope limit, matching those scanners' own precedent. Inspects the
-/// SELECT list of every <see cref="QuerySpecification"/> and the SET clause of every UPDATE - the
-/// two real-world sites this gotcha actually appears at (building a display string/composite key) -
-/// deliberately not every possible scalar-expression position (RETURN, computed columns, etc.), a
-/// stated v1 scope limit rather than a silent gap.
+/// Resolves through <see cref="Lineage.FromScopeResolver"/>'s real per-statement scope chain
+/// (Phase 1.5 "one binder") rather than a direct-base-table-only shortcut, matching <see
+/// cref="FloatEqualityPredicateScanner"/>'s own precedent - a leaf reached through a view/derived
+/// table is still left Unknown (declines the whole chain, never guessed at), but a CTE-shadowed
+/// reference now resolves against the CTE's real underlying column instead of being declined or
+/// mismatched against an unrelated same-named real table. Inspects the SELECT list of every <see
+/// cref="QuerySpecification"/> and the SET clause of every UPDATE - the two real-world sites this
+/// gotcha actually appears at (building a display string/composite key) - deliberately not every
+/// possible scalar-expression position (RETURN, computed columns, etc.), a stated v1 scope limit
+/// rather than a silent gap.
 /// </summary>
 public static class StringConcatNullScanner
 {
@@ -29,11 +31,7 @@ public static class StringConcatNullScanner
 
     public static IReadOnlyList<StringConcatNullFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
-        // File-wide, not per-statement - see AggregateDivisionColumnstoreScanner's own comment on
-        // this exact tradeoff (2026-08 audit): only ever causes an extra decline, never a false
-        // positive, and far simpler than per-statement CTE-scope tracking for a scanner with none.
-        var cteNames = CteNameCollector.Collect(parseResult.Fragment);
-        var visitor = new Visitor(parseResult.SourcePath, catalog, cteNames);
+        var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);
         return
         [
@@ -61,19 +59,36 @@ public static class StringConcatNullScanner
 
     private readonly record struct Leaf(LeafKind Kind, bool IsNullableColumn, string? TableQualifiedName, string? ColumnName);
 
-    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlySet<string> cteNames) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
+        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
+
+        // Real per-statement CTE scope (Phase 1.5 "one binder") - see FloatEqualityPredicateScanner's
+        // own identical field for the full rationale.
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+
         public List<StringConcatNullFinding> Findings { get; } = [];
+
+        public override void ExplicitVisit(SelectStatement node)
+        {
+            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            base.ExplicitVisit(node);
+            cteScopeStack.Pop();
+        }
+
+        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+
+        private static List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChainOf(
+            (IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered) resolved) => [resolved];
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, node.FromClause?.TableReferences, cteNames);
-            if (tables.Count > 0)
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            var scopeChain = ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations)));
+            foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
             {
-                foreach (var element in node.SelectElements.OfType<SelectScalarExpression>())
-                {
-                    InspectTopLevel(element.Expression, tables);
-                }
+                InspectTopLevel(element.Expression, scopeChain);
             }
 
             base.ExplicitVisit(node);
@@ -82,15 +97,13 @@ public static class StringConcatNullScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var tables = DirectBaseTableResolver.ResolveDirectBaseTables(catalog, spec.FromClause?.TableReferences, cteNames, spec.Target);
-            if (tables.Count > 0)
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
+            var scopeChain = ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
+            foreach (var setClause in spec.SetClauses.OfType<AssignmentSetClause>())
             {
-                foreach (var setClause in spec.SetClauses.OfType<AssignmentSetClause>())
+                if (setClause.NewValue is ScalarExpression newValue)
                 {
-                    if (setClause.NewValue is ScalarExpression newValue)
-                    {
-                        InspectTopLevel(newValue, tables);
-                    }
+                    InspectTopLevel(newValue, scopeChain);
                 }
             }
 
@@ -104,20 +117,24 @@ public static class StringConcatNullScanner
         /// <see cref="ExplicitVisit(QuerySpecification)"/> traversal gets there, matching <see
         /// cref="FloatEqualityPredicateScanner"/>'s own EqualityCollector precedent.
         /// </summary>
-        private void InspectTopLevel(ScalarExpression root, Dictionary<string, CatalogTable> tables)
+        private void InspectTopLevel(
+            ScalarExpression root,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             var collector = new ConcatChainRootCollector();
             root.Accept(collector);
             foreach (var chainRoot in collector.Roots)
             {
-                InspectChain(chainRoot, tables);
+                InspectChain(chainRoot, scopeChain);
             }
         }
 
-        private void InspectChain(BinaryExpression chainRoot, Dictionary<string, CatalogTable> tables)
+        private void InspectChain(
+            BinaryExpression chainRoot,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             var leaves = new List<Leaf>();
-            FlattenAddChain(chainRoot, tables, leaves);
+            FlattenAddChain(chainRoot, scopeChain, leaves);
 
             if (leaves.Any(l => l.Kind == LeafKind.Unknown))
             {
@@ -150,20 +167,25 @@ public static class StringConcatNullScanner
         /// classifying each one. A leaf that is itself a nested <c>+</c> BinaryExpression is
         /// flattened further rather than classified directly.
         /// </summary>
-        private static void FlattenAddChain(ScalarExpression expression, Dictionary<string, CatalogTable> tables, List<Leaf> sink)
+        private void FlattenAddChain(
+            ScalarExpression expression,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            List<Leaf> sink)
         {
             var unwrapped = Unwrap(expression);
             if (unwrapped is BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } add)
             {
-                FlattenAddChain(add.FirstExpression, tables, sink);
-                FlattenAddChain(add.SecondExpression, tables, sink);
+                FlattenAddChain(add.FirstExpression, scopeChain, sink);
+                FlattenAddChain(add.SecondExpression, scopeChain, sink);
                 return;
             }
 
-            sink.Add(ClassifyLeaf(unwrapped, tables));
+            sink.Add(ClassifyLeaf(unwrapped, scopeChain));
         }
 
-        private static Leaf ClassifyLeaf(ScalarExpression expression, Dictionary<string, CatalogTable> tables)
+        private Leaf ClassifyLeaf(
+            ScalarExpression expression,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             switch (expression)
             {
@@ -171,8 +193,8 @@ public static class StringConcatNullScanner
                     return new Leaf(LeafKind.String, IsNullableColumn: false, TableQualifiedName: null, ColumnName: null);
 
                 case ColumnReferenceExpression columnRef:
-                    var resolved = DirectBaseTableResolver.TryResolveColumn(columnRef, tables);
-                    if (resolved is not { } r || r.Column.Type is not { } columnType || !StringCategories.Contains(columnType.Category))
+                    var resolved = BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain);
+                    if (resolved is not { } r || r.Type is not { } columnType || !StringCategories.Contains(columnType.Category))
                     {
                         // Unresolvable, or resolved to a non-string catalog type - either way this
                         // is not a confirmed string leaf, and a confirmed non-string leaf means the
@@ -181,13 +203,18 @@ public static class StringConcatNullScanner
                         return new Leaf(LeafKind.Unknown, false, null, null);
                     }
 
-                    return new Leaf(LeafKind.String, r.Column.IsNullable, r.Table.QualifiedName, r.Column.Name);
+                    // ColumnProvenance.BaseColumn carries no nullability flag - that is catalog-only
+                    // information (Lineage's own provenance model deliberately stays independent of
+                    // it, since a view/CTE column has no catalog row at all), so a second, explicit
+                    // lookup back into the catalog is the correct place for it, not a gap.
+                    var isNullable = catalog.Find(r.TableQualifiedName)?.FindColumn(r.ColumnName)?.IsNullable ?? false;
+                    return new Leaf(LeafKind.String, isNullable, r.TableQualifiedName, r.ColumnName);
 
                 case FunctionCall { FunctionName.Value: var name } call
                     when string.Equals(name, "ISNULL", StringComparison.OrdinalIgnoreCase):
                     foreach (var arg in call.Parameters)
                     {
-                        var argLeaf = ClassifyLeaf(Unwrap(arg), tables);
+                        var argLeaf = ClassifyLeaf(Unwrap(arg), scopeChain);
                         if (argLeaf.Kind == LeafKind.Unknown)
                         {
                             return new Leaf(LeafKind.Unknown, false, null, null);
@@ -204,7 +231,7 @@ public static class StringConcatNullScanner
                 case CoalesceExpression coalesce:
                     foreach (var arg in coalesce.Expressions)
                     {
-                        var argLeaf = ClassifyLeaf(Unwrap(arg), tables);
+                        var argLeaf = ClassifyLeaf(Unwrap(arg), scopeChain);
                         if (argLeaf.Kind == LeafKind.Unknown)
                         {
                             return new Leaf(LeafKind.Unknown, false, null, null);
