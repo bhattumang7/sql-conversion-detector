@@ -54,5 +54,6 @@ public sealed record SelectStarViewFinding(
     int ViewDepth,
     string ConsumerSourcePath,
     int ConsumerLine,
+    int ConsumerColumn,
     IReadOnlyList<string> ConsumerSelectedColumns,
     FindingConfidence Confidence = FindingConfidence.High);

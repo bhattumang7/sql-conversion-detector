@@ -74,7 +74,8 @@ public static class SelectStarViewScanner
             .. visitor.Findings
                 .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerSourcePath, StringComparer.Ordinal)
-                .ThenBy(f => f.ConsumerLine),
+                .ThenBy(f => f.ConsumerLine)
+                .ThenBy(f => f.ConsumerColumn),
         ];
     }
 
@@ -140,7 +141,7 @@ public static class SelectStarViewScanner
 
                 Findings.Add(new SelectStarViewFinding(
                     qualifiedName, candidate.ViewSourcePath, candidate.StarLine, candidate.FullColumns, candidate.Depth,
-                    sourcePath, node.StartLine, selected));
+                    sourcePath, node.StartLine, node.StartColumn, selected));
             }
         }
 

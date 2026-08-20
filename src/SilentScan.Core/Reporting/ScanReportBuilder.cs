@@ -624,6 +624,7 @@ public static class ScanReportBuilder
             tryCastComputedColumnPredicateFindings = unordered
                 .OrderBy(f => f.TableQualifiedName, StringComparer.Ordinal).ThenBy(f => f.ColumnName, StringComparer.Ordinal)
                 .ThenBy(f => f.PredicateSourcePath, StringComparer.Ordinal).ThenBy(f => f.PredicateLine)
+                .ThenBy(f => f.PredicateColumn)
                 .ToList();
             tryCastStage.Complete($"{tryCastComputedColumnPredicateFindings.Count:N0} findings");
         }
@@ -1098,6 +1099,7 @@ public static class ScanReportBuilder
                 .OrderBy(f => f.ViewQualifiedName, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerSourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.ConsumerLine)
+                .ThenBy(f => f.ConsumerColumn)
                 .ThenBy(f => f.ViewDepth)
                 .ThenBy(f => f.ViewSourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.ViewLine)
@@ -1162,6 +1164,7 @@ public static class ScanReportBuilder
             .Where(f => f.Confidence <= minimumConfidence)
             .OrderBy(f => f.SourcePath, StringComparer.Ordinal)
             .ThenBy(f => f.Line)
+            .ThenBy(f => f.Column)
             .ThenBy(f => f.Kind)
             .ToList();
 

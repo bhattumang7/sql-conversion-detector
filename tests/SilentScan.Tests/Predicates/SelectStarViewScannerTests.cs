@@ -165,4 +165,18 @@ public sealed class SelectStarViewScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void TwoConsumersOfTheSameViewOnOneLine_HaveDistinctColumns()
+    {
+        // Two sibling QuerySpecifications sharing the same ConsumerSourcePath, ConsumerLine and
+        // ViewQualifiedName (a UNION ALL of two narrowing consumers) - the exact shape that made
+        // ScanReportBuilder's OrderBy chain nondeterministic before ConsumerColumn joined it,
+        // since Line alone can't tell these two findings apart.
+        var findings = Scan(TwoLevelStarViewDdl, "SELECT v1.A FROM dbo.vOuter v1 UNION ALL SELECT v2.B FROM dbo.vOuter v2;");
+
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(2, findings.Select(f => f.ConsumerColumn).Distinct().Count());
+        Assert.All(findings, f => Assert.Equal(1, f.ConsumerLine));
+    }
 }
