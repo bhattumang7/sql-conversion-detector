@@ -1334,6 +1334,20 @@ object keyed on a different column) - a fixture built by simply omitting the
 `ON` clause is a false near-miss, not a true one, and was caught only by an
 end-to-end run against the real engine rather than by unit tests alone.
 
+**`DBCC TRACEON(11034)`, set session-scoped (not `,-1`/global), defeats the
+compat<150 table-variable fixed-1-row estimate.** Confirmed directly against
+the standing Docker instance (2026-08-21, compat level 140, 16.0.4236.2): a
+table variable populated with 5,000 rows and immediately read in the same
+batch shows `EstimateRows="1"` on its Clustered Index Scan normally, but
+`EstimateRows="5000"` (the real count) under a session-scoped
+`DBCC TRACEON(11034)` — global scope (`DBCC TRACEON(11034, -1)`) did **not**
+reproduce this in the same test, only session scope did
+(`DBCC TRACESTATUS(11034)` confirmed `Session=1, Global=0`). Consequence:
+`QueryAntiPatternTableVariableLowCompatEstimateRuleId`
+carries this as a documented exception (`RuleCatalog.cs`,
+`RuleDocs/QueryAntiPattern/TableVariableLowCompatEstimate.cs`) rather than a
+code change - a session trace flag isn't a static-analysis-visible signal.
+
 ---
 
 ## Appendix 9 — Candidates probed and killed (do not re-propose)

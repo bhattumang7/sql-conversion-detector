@@ -34,6 +34,14 @@ internal static class TableVariableLowCompatEstimate
             gets a real row count for that read, the same way it already did for #temp tables. This
             finding only fires below that compatibility level, where deferred compilation isn't
             available and the fixed-1-row estimate is unavoidable for any table variable read.
+
+            One documented exception: a session running under DBCC TRACEON(11034) gets a real
+            cardinality estimate for a table variable read at any compatibility level, oracle-
+            confirmed (compat level 140, 5,000-row table variable: EstimateRows goes from 1 without
+            the trace flag to 5000 with it, session-scoped). A session trace flag isn't visible to
+            static analysis, so this rule can false-positive for a query that only ever runs under
+            that trace flag - a narrow, deliberate exception rather than something typical code
+            relies on.
             """,
         HowToFixIt: """
             Where raising the database's compatibility level to 150 or higher is possible, that
