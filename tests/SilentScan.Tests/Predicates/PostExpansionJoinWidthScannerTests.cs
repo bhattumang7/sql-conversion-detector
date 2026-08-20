@@ -99,4 +99,18 @@ public sealed class PostExpansionJoinWidthScannerTests
         var finding = Assert.Single(findings);
         Assert.Contains("dbo.vWide", finding.InflatingSources);
     }
+
+    [Fact]
+    public void TwoWideningQueriesOnTheSameLine_HaveDistinctColumns()
+    {
+        // Two sibling FROM clauses sharing the same SourcePath, Line and ModuleQualifiedName
+        // (top-level batch, no enclosing module) - the exact shape that made
+        // ScanReportBuilder's OrderBy chain nondeterministic before Column joined it, since
+        // Line alone can't tell these two findings apart.
+        var findings = Scan(FiveTableFanOutDdl, "SELECT Id FROM dbo.vWide UNION ALL SELECT Id FROM dbo.vWide;");
+
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(2, findings.Select(f => f.Column).Distinct().Count());
+        Assert.All(findings, f => Assert.Equal(1, f.Line));
+    }
 }

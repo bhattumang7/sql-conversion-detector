@@ -141,45 +141,34 @@ per phase (Phase 0 commits per fix).
          suppress them; it only adds the external-caller placeholder
          accounting. Do not re-propose "suppress findings from
          corpus-observed parameter values" as a false-positive fix.
-      3. `Collation.cs:45-48`: `EndsWith("_BIN2")` misses
-         `*_BIN2_UTF8` collations → `SargabilityClassifier` advises deleting
-         an `UPPER()` wrap that changes results. Match `_BIN`/`_BIN2` as a
-         segment, not a suffix.
-      4. Tuple-keyed sets compare ordinal-case-sensitively (invisible to a
-         `StringComparer` grep): `CompositeIndexLeadingColumnScanner.cs:44/69`,
-         `IndexHintScanner.cs:84/150`,
-         `PartialCompositeForeignKeyJoinScanner.cs:130` (+ its
-         `NormalizedPair` ordering at :304),
-         `NotInNullableSubqueryScanner.cs:134` (mixed Ordinal/IgnoreCase in
-         one expression), `ScanReportBuilder.cs:1420` outputSummaryIndex.
-         These are suppression sets, so a case miss = false positive. Promote
-         `TypedPredicateExtractor.TableColumnKeyComparer` (:236) to shared.
-      5. `EXEC(...) AT linked_server` analyzed against the local catalog —
-         `ExecuteSpecification.LinkedServer` is read nowhere. Decline with a
-         machine-readable reason + count in `DynamicSqlSummary`, mirroring
-         `FromScopeResolver.cs:248`'s four-part-name guard.
-      6. `DuplicationScanner.cs:307` reports `Col = Col` as a tautology at
-         High confidence — it's the idiomatic NULL filter on a nullable
-         column and the advice changes results. Decided (Umang, 2026-08-19):
-         catalog-gated — wire the catalog into `DuplicationScanner` and fire
-         only when the column is provably NOT NULL; stay quiet otherwise.
-      7. `DynamicSqlTransfer.cs:1055,:1095`: two discarded `TryEmitFromValue`
-         returns drop a dynamic-SQL call site from every `DynamicSqlSummary`
-         bucket including `TotalCallSites` — silently counted as clean.
-      8. Seven sorts still missing a total tiebreak under unordered PLINQ
-         (`ScanReportBuilder.cs:1189` tier1 omits `Kind`; `:1194` dynamic-sql
-         omits Column/Outcome; `:529`, `:565`, `:1028`, `:1053`, `:1093`).
-         Same class as commit 849f89f's five.
       Deferred to their own decision, not forgotten: guard-correlated branch
-      cross-product in `SqlTextValue.Concat`/`ForkAssemblies` (needs guard
-      bookkeeping through concat — design first), `sp_prepare`/`sp_execute`
-      recognition (checked 2026-08-20: zero occurrences across the local test
-      database's ~5,000-module real corpus — `sys.sql_modules.definition LIKE
+      cross-product in `SqlTextValue.Concat`/`ForkAssemblies` — confirmed real
+      (2026-08-20): `Concat` (`SqlTextValue.cs:151`) juxtaposes two Templates'
+      `Pieces` with no correlation, so two variables each built by an
+      `IF`/`ELSE` under the textually-identical guard (e.g. two separate
+      `IF @Mode = 'A' ... ELSE ...` blocks assigning different variables,
+      later concatenated) land in one Template as two separate
+      `TemplatePiece.Choice`s sharing a `GuardText`; `ForkAssemblies` (:611)
+      then cross-products them as independent, producing assemblies pairing
+      one Choice's guard-true alternative with the other's guard-false
+      alternative — combinations that can never occur at runtime. Still
+      design-first, not a scoped fix: the obvious repair (correlate
+      equal-`GuardText` Choices to the same alternative index) is itself
+      unsound, because `GuardText` is rendered predicate text, not value
+      identity — if the guarded variable is reassigned between the two
+      `IF`s, two textually-identical guards are not the same runtime
+      condition, and index-correlating them would silently drop a real
+      reachable assembly (a false negative) to remove a false positive. A
+      real fix needs guard identity (has anything the guard reads changed
+      since its first occurrence), not `GuardText` string equality — no fix
+      is scoped until that's designed. `sp_prepare`/`sp_execute` recognition
+      (checked 2026-08-20: zero occurrences across the local test database's
+      ~5,000-module real sample set — `sys.sql_modules.definition LIKE
       '%sp_prepare%'`/`'%sp_execute%'` both return 0; this driver-generated,
-      ODBC-prepared-statement pattern essentially never appears in hand-written
-      T-SQL, so a rule for it would ship unexercised, same reasoning as the
-      partitioned-index item above — stays deferred, now with real evidence
-      rather than only a stated design gap).
+      ODBC-prepared-statement pattern essentially never appears in
+      hand-written T-SQL, so a rule for it would ship unexercised, same
+      reasoning as the partitioned-index item above — stays deferred, now
+      with real evidence rather than only a stated design gap).
       9. Shipped: `DirectBaseTableResolver` (`ResolveDirectBaseTable`/
          `ResolveDirectBaseTables`/`ResolveDirectBaseTableName`) was its own,
          separate instance of the same bug class — it re-qualified and

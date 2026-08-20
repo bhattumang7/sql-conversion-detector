@@ -1056,6 +1056,7 @@ public static class ScanReportBuilder
                 .OrderByDescending(f => f.ExpandedCount - f.WrittenCount)
                 .ThenBy(f => f.SourcePath, StringComparer.Ordinal)
                 .ThenBy(f => f.Line)
+                .ThenBy(f => f.Column)
                 .ThenBy(f => f.ModuleQualifiedName, StringComparer.Ordinal)
                 .ToList();
         }

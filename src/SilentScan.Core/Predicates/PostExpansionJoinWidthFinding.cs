@@ -42,8 +42,9 @@ public sealed record PostExpansionJoinWidthFinding(
     bool PartiallyUnexpanded,
     [property: JsonIgnore] string SourcePath,
     [property: JsonIgnore] int Line,
+    [property: JsonIgnore] int Column,
     FindingConfidence Confidence = FindingConfidence.High)
 {
-    public SourceSpan Location => new(SourcePath, Line, 1);
+    public SourceSpan Location => new(SourcePath, Line, Column);
 }
 

@@ -112,7 +112,7 @@ public static class PostExpansionJoinWidthScanner
 
             Findings.Add(new PostExpansionJoinWidthFinding(
                 sourcePath, written, expanded, [.. expandedBaseTables.OrderBy(t => t, StringComparer.Ordinal)],
-                inflatingSources, partiallyUnexpanded, sourcePath, fromClause.StartLine));
+                inflatingSources, partiallyUnexpanded, sourcePath, fromClause.StartLine, fromClause.StartColumn));
         }
     }
 }
