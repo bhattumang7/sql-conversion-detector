@@ -182,5 +182,12 @@ public static class RuleDocCatalog
         [Database.AutoCreateStatisticsOff.RuleId] = Database.AutoCreateStatisticsOff.Content,
         [Database.AutoUpdateStatisticsOff.RuleId] = Database.AutoUpdateStatisticsOff.Content,
         [Database.CompatibilityLevelBehindEngineDefault.RuleId] = Database.CompatibilityLevelBehindEngineDefault.Content,
+
+        // Lineage
+        [Lineage.ExpressionDerivedColumn.RuleId] = Lineage.ExpressionDerivedColumn.Content,
+        [Lineage.MultiReferencedCte.RuleId] = Lineage.MultiReferencedCte.Content,
+        [Lineage.NestedViewDepth.RuleId] = Lineage.NestedViewDepth.Content,
+        [Lineage.PostExpansionJoinWidth.RuleId] = Lineage.PostExpansionJoinWidth.Content,
+        [Lineage.SelectStarView.RuleId] = Lineage.SelectStarView.Content,
     };
 }
