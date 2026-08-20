@@ -163,5 +163,13 @@ public static class RuleDocCatalog
         [ControlFlow.TransactionHygiene.RuleId] = ControlFlow.TransactionHygiene.Content,
         [ControlFlow.TruncateSwallowed.RuleId] = ControlFlow.TruncateSwallowed.Content,
         [ControlFlow.OutputParameter.RuleId] = ControlFlow.OutputParameter.Content,
+
+        // StatementShape
+        [StatementShape.InsertWithoutColumnList.RuleId] = StatementShape.InsertWithoutColumnList.Content,
+        [StatementShape.OrdinalOrderBy.RuleId] = StatementShape.OrdinalOrderBy.Content,
+        [StatementShape.TopWithoutOrderBy.RuleId] = StatementShape.TopWithoutOrderBy.Content,
+        [StatementShape.TableWithNoPrimaryKey.RuleId] = StatementShape.TableWithNoPrimaryKey.Content,
+        [StatementShape.MissingSetNocountOn.RuleId] = StatementShape.MissingSetNocountOn.Content,
+        [StatementShape.BareSelectStar.RuleId] = StatementShape.BareSelectStar.Content,
     };
 }
