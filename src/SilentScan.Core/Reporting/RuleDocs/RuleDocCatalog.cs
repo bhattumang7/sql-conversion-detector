@@ -171,5 +171,16 @@ public static class RuleDocCatalog
         [StatementShape.TableWithNoPrimaryKey.RuleId] = StatementShape.TableWithNoPrimaryKey.Content,
         [StatementShape.MissingSetNocountOn.RuleId] = StatementShape.MissingSetNocountOn.Content,
         [StatementShape.BareSelectStar.RuleId] = StatementShape.BareSelectStar.Content,
+
+        // Database
+        [Database.PageVerifyNotChecksum.RuleId] = Database.PageVerifyNotChecksum.Content,
+        [Database.AutoShrinkOn.RuleId] = Database.AutoShrinkOn.Content,
+        [Database.AutoCloseOn.RuleId] = Database.AutoCloseOn.Content,
+        [Database.TargetRecoveryTimeUnset.RuleId] = Database.TargetRecoveryTimeUnset.Content,
+        [Database.QueryStoreNotReadWrite.RuleId] = Database.QueryStoreNotReadWrite.Content,
+        [Database.QueryStoreCaptureModeNotAuto.RuleId] = Database.QueryStoreCaptureModeNotAuto.Content,
+        [Database.AutoCreateStatisticsOff.RuleId] = Database.AutoCreateStatisticsOff.Content,
+        [Database.AutoUpdateStatisticsOff.RuleId] = Database.AutoUpdateStatisticsOff.Content,
+        [Database.CompatibilityLevelBehindEngineDefault.RuleId] = Database.CompatibilityLevelBehindEngineDefault.Content,
     };
 }
