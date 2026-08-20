@@ -208,5 +208,19 @@ public static class RuleDocCatalog
         [Catalog.SecurityPredicateIndex.RuleId] = Catalog.SecurityPredicateIndex.Content,
         [Predicate.TryCastComputedColumn.RuleId] = Predicate.TryCastComputedColumn.Content,
         [Predicate.AggregateDivisionColumnstore.RuleId] = Predicate.AggregateDivisionColumnstore.Content,
+
+        // IndexDesign (batch 1 of 2)
+        [IndexDesign.HeapWithNonclusteredIndexes.RuleId] = IndexDesign.HeapWithNonclusteredIndexes.Content,
+        [IndexDesign.HeapWithNonclusteredPrimaryKey.RuleId] = IndexDesign.HeapWithNonclusteredPrimaryKey.Content,
+        [IndexDesign.NonUniqueClusteredIndex.RuleId] = IndexDesign.NonUniqueClusteredIndex.Content,
+        [IndexDesign.WideClusteredKey.RuleId] = IndexDesign.WideClusteredKey.Content,
+        [IndexDesign.RandomClusteredKeyGuidDefault.RuleId] = IndexDesign.RandomClusteredKeyGuidDefault.Content,
+        [IndexDesign.DuplicateIndex.RuleId] = IndexDesign.DuplicateIndex.Content,
+        [IndexDesign.SubsumedIndex.RuleId] = IndexDesign.SubsumedIndex.Content,
+        [IndexDesign.UnindexedForeignKey.RuleId] = IndexDesign.UnindexedForeignKey.Content,
+        [IndexDesign.DisabledIndex.RuleId] = IndexDesign.DisabledIndex.Content,
+        [IndexDesign.HypotheticalIndex.RuleId] = IndexDesign.HypotheticalIndex.Content,
+        [IndexDesign.ManyNonclusteredIndexes.RuleId] = IndexDesign.ManyNonclusteredIndexes.Content,
+        [IndexDesign.ManyKeyColumnsIndex.RuleId] = IndexDesign.ManyKeyColumnsIndex.Content,
     };
 }
