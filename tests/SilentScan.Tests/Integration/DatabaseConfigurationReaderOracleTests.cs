@@ -64,6 +64,8 @@ public sealed class DatabaseConfigurationReaderUnhealthyFlagsOracleTests : Oracl
     {
         var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
+        Assert.Equal(4, findings.Count);
+
         var kinds = findings.Select(f => f.Kind).ToHashSet();
         Assert.Contains(DatabaseConfigurationFindingKind.PageVerifyNotChecksum, kinds);
         Assert.Contains(DatabaseConfigurationFindingKind.AutoShrinkOn, kinds);
@@ -96,9 +98,8 @@ public sealed class DatabaseConfigurationReaderQueryStoreCaptureModeOracleTests 
     {
         var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
-        var kinds = findings.Select(f => f.Kind).ToHashSet();
-        Assert.Contains(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto, kinds);
-        Assert.DoesNotContain(DatabaseConfigurationFindingKind.QueryStoreNotReadWrite, kinds);
+        var finding = Assert.Single(findings);
+        Assert.Equal(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto, finding.Kind);
     }
 }
 
@@ -136,6 +137,8 @@ public sealed class DatabaseConfigurationReaderStatisticsFlagsOracleTests : Orac
     protected override string Ddl => """
         CREATE TABLE dbo.T (Id INT NOT NULL PRIMARY KEY);
         GO
+        ALTER DATABASE CURRENT SET QUERY_STORE = ON;
+        GO
         ALTER DATABASE CURRENT SET AUTO_CREATE_STATISTICS OFF;
         GO
         ALTER DATABASE CURRENT SET AUTO_UPDATE_STATISTICS OFF;
@@ -146,6 +149,8 @@ public sealed class DatabaseConfigurationReaderStatisticsFlagsOracleTests : Orac
     public async Task BothStatisticsFlagsOff_EachFiresItsOwnKind()
     {
         var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        Assert.Equal(2, findings.Count);
 
         var kinds = findings.Select(f => f.Kind).ToHashSet();
         Assert.Contains(DatabaseConfigurationFindingKind.AutoCreateStatisticsOff, kinds);

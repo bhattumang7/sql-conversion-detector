@@ -37,7 +37,7 @@ public sealed class CharindexLeftRewritePipelineTests : OracleTestFixture
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
 
-        Assert.DoesNotContain("PhysicalOp=\"Index Seek\"", planXml);
+        Assert.Contains("PhysicalOp=\"Index Scan\"", planXml);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class CharindexLeftRewritePipelineTests : OracleTestFixture
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
 
-        Assert.DoesNotContain("PhysicalOp=\"Index Seek\"", planXml);
+        Assert.Contains("PhysicalOp=\"Index Scan\"", planXml);
     }
 
     [Fact]

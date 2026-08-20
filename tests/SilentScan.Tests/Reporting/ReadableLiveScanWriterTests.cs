@@ -48,13 +48,19 @@ public sealed class ReadableLiveScanWriterTests
         var rendered = ReadableLiveScanWriter.Write(
             await Result([new LiveLineageParityMismatch("dbo.vw_Orders", "OrderCode", "type", "varchar(20)", "nvarchar(20)")]),
             "srv/shop",
-            ReadableStyle.Text);
+            ReadableStyle.Text).ReplaceLineEndings("\n");
 
         Assert.Contains("Column types this tool got wrong (1)", rendered, StringComparison.Ordinal);
         Assert.Contains("dbo.vw_Orders.OrderCode", rendered, StringComparison.Ordinal);
         Assert.Contains("a genuine inference bug in this tool", rendered, StringComparison.Ordinal);
+
+        // "Summary" alone is too generic an anchor - anchor on the rendered heading itself (the
+        // text immediately followed by its underline rule), which only the findings-summary
+        // section's own heading produces, rather than a bare word that could recur in prose.
+        var summaryHeading = "Summary\n" + new string('-', "Summary".Length);
         Assert.True(
-            rendered.IndexOf("Column types this tool got wrong", StringComparison.Ordinal) < rendered.IndexOf("Summary", StringComparison.Ordinal),
+            rendered.IndexOf("Column types this tool got wrong", StringComparison.Ordinal) <
+            rendered.IndexOf(summaryHeading, StringComparison.Ordinal),
             "the parity warning must come before the findings it casts doubt on");
     }
 

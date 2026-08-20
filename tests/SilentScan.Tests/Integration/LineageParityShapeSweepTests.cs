@@ -1,4 +1,10 @@
+using SilentScan.Core.Catalog;
+using SilentScan.Core.Diagnostics;
+using SilentScan.Core.Lineage;
+using SilentScan.Live.Catalog;
 using SilentScan.Tests.Support;
+using SilentScan.Verify;
+using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Integration;
 
@@ -710,5 +716,60 @@ public sealed class LineageParityShapeSweepTests
             """);
 
         Assert.Empty(result.LineageParity.Mismatches);
+    }
+
+    // ---- Control case: the mismatch mechanism itself --------------------------------------
+
+    /// <summary>
+    /// Every other test in this file asserts <c>Assert.Empty(result.LineageParity.Mismatches)</c>
+    /// on a deliberately-benign shape - proving the mismatch detector stays quiet where it should,
+    /// never that it can fire at all. A detector always returning an empty list (a broken key
+    /// match, a swallowed exception, a query that reads nothing) would pass every one of those 25
+    /// tests. <see cref="EngineAuthoritativeScan"/> has no seam to inject a deliberately-wrong
+    /// inferred type into the real pipeline's own lineage (it runs the unchanged, real inference),
+    /// so this builds a hand-crafted <see cref="LineageCatalog"/> claiming a genuinely INT column
+    /// is VarChar and calls <see cref="LiveLineageParityChecker"/> directly against the same
+    /// deployed-database path - the pattern <see cref="LiveLineageParityCheckerBatchingTests"/>
+    /// already uses for exactly this reason.
+    /// </summary>
+    [Fact]
+    public async Task DeliberatelyWrongInferredType_IsReportedAsAMismatch()
+    {
+        const string sql = """
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL);
+            GO
+            CREATE VIEW dbo.vw_Orders AS SELECT OrderId FROM dbo.Orders;
+            """;
+
+        var qualifiedName = "dbo.vw_Orders";
+        var relation = new ResolvedRelation(
+            qualifiedName,
+            [new ResolvedColumn("OrderId", new ColumnProvenance.Declared(new SqlType(SqlTypeCategory.VarChar, Length: 50), qualifiedName))]);
+        var lineage = new LineageCatalog(
+            new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase) { [qualifiedName] = relation },
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new SkipLedger());
+
+        var options = SqlServerOptions.LocalDocker;
+        var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
+        var provisioner = new DatabaseProvisioner(options);
+        await provisioner.CreateFreshAsync(databaseName);
+        LiveLineageParityReport report;
+        try
+        {
+            await new ScriptDeployer(options).DeployAsync(sql, databaseName);
+            report = await new LiveLineageParityChecker(options.BuildConnectionString(databaseName)).CheckAsync(lineage);
+        }
+        finally
+        {
+            await provisioner.DropIfExistsAsync(databaseName);
+        }
+
+        var mismatch = Assert.Single(report.Mismatches);
+        Assert.Equal(qualifiedName, mismatch.QualifiedViewName);
+        Assert.Equal("OrderId", mismatch.ColumnName);
+        Assert.Equal("category", mismatch.Facet);
+        Assert.Equal("VarChar", mismatch.InferredValue);
+        Assert.Equal("int", mismatch.ActualValue);
     }
 }

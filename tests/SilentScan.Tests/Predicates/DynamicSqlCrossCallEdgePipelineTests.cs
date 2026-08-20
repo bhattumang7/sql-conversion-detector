@@ -99,7 +99,21 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
         // procedure is still a public surface, though - external code this scan's own call graph
         // can't see may call it too - so a third, unresolved assembly is also analyzed for that
         // case rather than the seed collapsing to just the two known-caller literals.
-        var report = await Scan("""
+        //
+        // DynamicSqlFinding (SourcePath/Line/Column/Outcome/Reason only) carries no per-caller or
+        // per-literal detail - every assembly reparsed from this one EXEC(@sql) site reports at
+        // the SAME coordinates regardless of which caller's literal seeded it, and
+        // TypedPredicateFindingIdentity.ComputeKey deliberately excludes a literal's own text from
+        // its dedup key (CLAUDE.md: "the same defect surfacing in more than one assembly is one
+        // finding, not one per assembly") - so no assertion against a single scan's own findings
+        // can distinguish "both callers' distinct literals were genuinely, independently threaded
+        // through" from "a bug fed both callers the same literal". The only way to observe that
+        // distinction through this codebase's public API is DIFFERENTIALLY: scan with only
+        // CallerA present, then scan again with CallerB added, and confirm the analyzed-literal
+        // count increases by exactly one. If CallerB's own call edge were dropped, miscounted, or
+        // silently merged into CallerA's, the count would NOT increase - a bug fully invisible to
+        // a single-scan assertion is directly caught here.
+        const string SharedDdl = """
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
                 DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 FROM dbo.Orders WHERE Status = ''' + @Status + N'''';
@@ -107,15 +121,24 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
             END;
             GO
             CREATE PROCEDURE dbo.usp_CallerA AS BEGIN EXEC dbo.usp_FindByStatus @Status = N'Active'; END;
+            """;
+
+        var withOnlyCallerA = await Scan(SharedDdl);
+        var withBothCallers = await Scan(SharedDdl + """
+
             GO
             CREATE PROCEDURE dbo.usp_CallerB AS BEGIN EXEC dbo.usp_FindByStatus @Status = N'Closed'; END;
             """);
 
-        Assert.Equal(3, report.DynamicSqlFindings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral));
-        Assert.DoesNotContain(report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+        var onlyCallerACount = withOnlyCallerA.DynamicSqlFindings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
+        var bothCallersCount = withBothCallers.DynamicSqlFindings.Count(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral);
+
+        Assert.Equal(onlyCallerACount + 1, bothCallersCount);
+        Assert.DoesNotContain(withBothCallers.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
+
         // dbo.Orders is never declared in this test's own DDL, so the reparsed predicate's column
         // never resolves to a real catalog table either way - unrelated to the seeding change.
-        Assert.Empty(report.TypedFindings);
+        Assert.Empty(withBothCallers.TypedFindings);
     }
 
     [Fact]

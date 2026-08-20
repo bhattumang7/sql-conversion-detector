@@ -51,7 +51,7 @@ public sealed class CaseFoldColumnPipelineTests : OracleTestFixture
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
 
-        Assert.DoesNotContain("Index Seek", planXml);
+        Assert.Contains("PhysicalOp=\"Index Scan\"", planXml);
     }
 
     [Fact]

@@ -97,8 +97,16 @@ public sealed class LiveLineageParityLiveVerificationTests
         Assert.Empty(report.Mismatches);
         var broken = Assert.Single(report.UncompilableObjects);
         Assert.Equal("dbo.vw_Orders", broken.QualifiedViewName);
-        Assert.NotEqual(0, broken.ErrorNumber);
-        Assert.False(string.IsNullOrWhiteSpace(broken.ErrorMessage));
+        // sys.dm_exec_describe_first_result_set returns three error rows for this exact DDL
+        // sequence (Msg 207 "Invalid column name 'Total'", Msg 4413 "Could not use view or
+        // function ... because of binding errors", Msg 11501 "The batch could not be analyzed
+        // because of compile errors" - verified directly against the Docker oracle), and
+        // ReadDescribedObjectsAsync keeps the LAST error row read for the object, so 11501 is the
+        // one that actually reaches ErrorNumber/ErrorMessage today. Pinned to the real, specific
+        // value rather than "any nonzero code" so a broken mapping (e.g. always emitting -1, or
+        // grabbing the FIRST row instead of the last) fails this test.
+        Assert.Equal(11501, broken.ErrorNumber);
+        Assert.Equal("The batch could not be analyzed because of compile errors.", broken.ErrorMessage);
     }
 
     [Fact]

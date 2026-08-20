@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
 using SilentScan.Verify.Catalog;
@@ -141,8 +142,14 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
     {
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
+        await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CAST(DATABASEPROPERTYEX(DB_NAME(), 'Collation') AS NVARCHAR(128));";
+        var realCollation = (string)(await command.ExecuteScalarAsync())!;
+
         Assert.NotNull(catalog.DefaultCollation);
-        Assert.False(string.IsNullOrWhiteSpace(catalog.DefaultCollation!.Name));
+        Assert.Equal(realCollation, catalog.DefaultCollation!.Name);
     }
 
     [Fact]

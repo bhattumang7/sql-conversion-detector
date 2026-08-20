@@ -73,7 +73,11 @@ public sealed class TryCastComputedColumnPredicateScannerTests
             END
             """);
 
-        Assert.NotEmpty(findings);
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Events", finding.TableQualifiedName);
+        Assert.Equal("ParsedDate", finding.ColumnName);
+        Assert.Contains("TRY_CAST", finding.DefinitionText, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
     }
 
     [Fact]

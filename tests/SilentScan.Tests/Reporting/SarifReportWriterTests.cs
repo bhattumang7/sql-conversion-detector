@@ -866,6 +866,10 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.DynamicSqlRuleId(outcome);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<DynamicSqlOutcome>().Length,
+            Enum.GetValues<DynamicSqlOutcome>().Select(SarifRuleCatalog.DynamicSqlRuleId).Distinct().Count());
     }
 
     [Fact]
@@ -876,6 +880,10 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.Tier1RuleId(kind);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<SargabilityFindingKind>().Length,
+            Enum.GetValues<SargabilityFindingKind>().Select(SarifRuleCatalog.Tier1RuleId).Distinct().Count());
     }
 
     [Fact]
@@ -886,6 +894,10 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.VerdictRuleId(verdict);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<Verdict>().Length,
+            Enum.GetValues<Verdict>().Select(SarifRuleCatalog.VerdictRuleId).Distinct().Count());
     }
 
     [Fact]
@@ -896,6 +908,10 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.IndexDesignRuleId(kind);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<IndexDesignFindingKind>().Length,
+            Enum.GetValues<IndexDesignFindingKind>().Select(SarifRuleCatalog.IndexDesignRuleId).Distinct().Count());
     }
 
     [Fact]
@@ -906,6 +922,10 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.IdentityRangeRuleId(kind);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<IdentityRangeFindingKind>().Length,
+            Enum.GetValues<IdentityRangeFindingKind>().Select(SarifRuleCatalog.IdentityRangeRuleId).Distinct().Count());
     }
 
     [Fact]
@@ -922,6 +942,10 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.TriggerCorrectnessRuleId(kind);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<TriggerCorrectnessFindingKind>().Length,
+            Enum.GetValues<TriggerCorrectnessFindingKind>().Select(SarifRuleCatalog.TriggerCorrectnessRuleId).Distinct().Count());
     }
 
     [Fact]
@@ -938,5 +962,9 @@ public sealed class SarifReportWriterTests
             var ruleId = SarifRuleCatalog.CheckConstraintRuleId(kind);
             Assert.Contains(SarifRuleCatalog.AllRules, r => r.Id == ruleId);
         }
+
+        Assert.Equal(
+            Enum.GetValues<CheckConstraintFindingKind>().Length,
+            Enum.GetValues<CheckConstraintFindingKind>().Select(SarifRuleCatalog.CheckConstraintRuleId).Distinct().Count());
     }
 }

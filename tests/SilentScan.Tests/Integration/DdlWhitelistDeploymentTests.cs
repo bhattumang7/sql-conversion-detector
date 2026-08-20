@@ -70,12 +70,21 @@ public sealed class DdlWhitelistDeploymentTests : IAsyncLifetime
         await using var connection = new SqlConnection(_options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT OBJECT_ID('dbo.T'), OBJECT_ID('dbo.V'), OBJECT_ID('dbo.IX_T_Code');";
+        // OBJECT_ID() only resolves real objects (tables/views/procs/...) - an index has no
+        // object_id of its own, so OBJECT_ID('dbo.IX_T_Code') would be NULL regardless of whether
+        // the index actually deployed. The third column instead looks the index up in
+        // sys.indexes by name against dbo.T's own object_id, which genuinely reflects whether
+        // CREATE INDEX ran.
+        command.CommandText = """
+            SELECT OBJECT_ID('dbo.T'), OBJECT_ID('dbo.V'),
+                (SELECT index_id FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.T') AND name = 'IX_T_Code');
+            """;
         await using var reader = await command.ExecuteReaderAsync();
         await reader.ReadAsync();
 
         Assert.False(await reader.IsDBNullAsync(0), "table should have deployed");
         Assert.False(await reader.IsDBNullAsync(1), "view should have deployed");
+        Assert.False(await reader.IsDBNullAsync(2), "index should have deployed");
     }
 
     [Fact]

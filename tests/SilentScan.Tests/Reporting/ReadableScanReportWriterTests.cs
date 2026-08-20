@@ -223,13 +223,14 @@ public sealed class ReadableScanReportWriterTests
     [Fact]
     public void ExpressionDerivedFindings_TheOnesWithARealIndexUnderneathComeFirst()
     {
-        // Both findings sort later than each other by SourcePath alone (b before a) - if the
-        // section were still just SourcePath/Line ordered, "b.sql" (no index underneath) would
-        // print first. Indexed-first must override that.
+        // The indexed finding's path sorts AFTER the non-indexed one alphabetically - if the
+        // section were still just SourcePath/Line ordered, "a_notindexed.sql" would print first.
+        // Indexed-first must override that path ordering for the test to actually prove the sort
+        // is indexed-first rather than merely reproducing alphabetical path order.
         var indexed = new ExpressionDerivedFinding(
-            "Col", "a.sql", 10, 1, [], [new UnderlyingBaseColumn("dbo.T1", "Col1", Indexed: true)]);
+            "Col", "z_indexed.sql", 10, 1, [], [new UnderlyingBaseColumn("dbo.T1", "Col1", Indexed: true)]);
         var notIndexed = new ExpressionDerivedFinding(
-            "Col", "b.sql", 5, 1, [], [new UnderlyingBaseColumn("dbo.T2", "Col2", Indexed: false)]);
+            "Col", "a_notindexed.sql", 5, 1, [], [new UnderlyingBaseColumn("dbo.T2", "Col2", Indexed: false)]);
 
         var report = new ScanReport(
             new ParseHealthReport([]), [], [], [], [notIndexed, indexed], [], [],
@@ -302,8 +303,8 @@ public sealed class ReadableScanReportWriterTests
         var rendered = ReadableScanReportWriter.Write(report, "t", ReadableStyle.Text);
 
         Assert.True(
-            rendered.IndexOf("a.sql:10", StringComparison.Ordinal) < rendered.IndexOf("b.sql:5", StringComparison.Ordinal),
-            "the finding with a real index underneath its expression must print before the one with none, regardless of source order");
+            rendered.IndexOf("z_indexed.sql:10", StringComparison.Ordinal) < rendered.IndexOf("a_notindexed.sql:5", StringComparison.Ordinal),
+            "the finding with a real index underneath its expression must print before the one with none, regardless of source path order");
     }
 
     /// <summary>

@@ -68,4 +68,30 @@ public sealed class VerifyCorpusCommandDialectSniffingTests : IDisposable
         Assert.False(summary.GetProperty("PassesDialectSniffing").GetBoolean());
         Assert.Equal(0.5, summary.GetProperty("ParseSuccessRate").GetDouble());
     }
+
+    [Fact]
+    public async Task RunAsync_RepoAtOrAboveDialectSniffingThreshold_NoWarningAndReturnsZero()
+    {
+        // Same repo shape as the below-threshold sibling above, but with the one non-T-SQL file
+        // removed - every file in this repo parses, a 100% ParseSuccessRate, comfortably at/above
+        // CLAUDE.md's 90% bar. Proves the warning path is conditional on the real threshold check,
+        // not merely always/never firing regardless of the actual parse success rate.
+        var cloneDir = Path.Combine(_root, "clones", "example");
+        File.Delete(Path.Combine(cloneDir, "not_tsql.sql"));
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        var exitCode = await VerifyCorpusCommand.RunAsync(
+            new VerifyCorpusCommand.VerifyCorpusOptions(_manifestPath, Path.Combine(_root, "clones"), RepoFilter: null, "high"),
+            SqlServerOptions.LocalDocker, stdout, stderr, CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("dialect-sniffing threshold", stderr.ToString(), StringComparison.Ordinal);
+
+        using var document = System.Text.Json.JsonDocument.Parse(stdout.ToString());
+        var summary = document.RootElement.GetProperty("dialect-sniff-example");
+        Assert.True(summary.GetProperty("PassesDialectSniffing").GetBoolean());
+        Assert.Equal(1.0, summary.GetProperty("ParseSuccessRate").GetDouble());
+    }
 }

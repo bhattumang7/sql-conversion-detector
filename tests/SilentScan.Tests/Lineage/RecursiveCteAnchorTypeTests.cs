@@ -77,7 +77,22 @@ public sealed class RecursiveCteAnchorTypeTests
             SELECT 1 FROM Tree WHERE CategoryCode = N'X';
             """);
 
-        Assert.True(report.TypedPredicateSummary.TotalClassified >= 2);
+        // Exactly three comparisons exist in this fixture: the outer WHERE CategoryCode = N'X'
+        // (ScanForced, asserted separately above in the sibling test's identical fixture shape),
+        // the anchor member's own WHERE ParentCode IS NULL, and the recursion's own join
+        // predicate c.ParentCode = t.CategoryCode - the latter two both resolve SeekPreserved
+        // (confirmed directly: TypedFindings only lists actionable, non-SeekPreserved predicates,
+        // which is why only the ScanForced one appears there). Asserting the full verdict
+        // breakdown - not just a >= threshold on the total - pins down that the join predicate
+        // specifically resolved to SeekPreserved: if the old Union[BaseColumn, Unknown] wrapper
+        // regressed, that predicate would count as Unknown instead (still present in
+        // TotalClassified, since Unknown findings are counted too - see TypedPredicateSummary),
+        // so UnknownCount would go to 1 and SeekPreservedCount would drop to 1, failing this
+        // assertion even though a bare >= 3 threshold on TotalClassified alone would still pass.
+        Assert.Equal(3, report.TypedPredicateSummary.TotalClassified);
+        Assert.Equal(1, report.TypedPredicateSummary.ScanForcedCount);
+        Assert.Equal(2, report.TypedPredicateSummary.SeekPreservedCount);
+        Assert.Equal(0, report.TypedPredicateSummary.UnknownCount);
     }
 
     [Fact]

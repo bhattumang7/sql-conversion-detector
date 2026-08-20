@@ -68,7 +68,7 @@ public sealed class JsonComputedColumnSuppressionTests : OracleTestFixture
     {
         var report = await EngineAuthoritativeScan.ScanAsync(Ddl);
 
-        Assert.DoesNotContain(report.Tier1Findings, f => f.ColumnName == "Payload");
+        Assert.Empty(report.Tier1Findings);
     }
 
     [Fact]
