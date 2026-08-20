@@ -131,5 +131,9 @@ public static class RuleDocCatalog
         // TempTable
         [TempTable.UnindexedJoinOperand.RuleId] = TempTable.UnindexedJoinOperand.Content,
         [TempTable.UnindexedWhereFilter.RuleId] = TempTable.UnindexedWhereFilter.Content,
+
+        // Identity
+        [Identity.RangeNearExhaustion.RuleId] = Identity.RangeNearExhaustion.Content,
+        [Identity.SeedOrIncrementAnomaly.RuleId] = Identity.SeedOrIncrementAnomaly.Content,
     };
 }
