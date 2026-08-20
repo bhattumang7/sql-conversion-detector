@@ -35,13 +35,15 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
         await _provisioner.CreateFreshAsync(DatabaseName);
         await new ScriptDeployer(_options).DeployAsync(
             """
-            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Attribute SQL_VARIANT NULL);
             GO
             CREATE VIEW dbo.vw_Orders AS SELECT OrderCode FROM dbo.Orders;
             GO
             CREATE VIEW dbo.vw_CastOrders AS SELECT CAST(OrderCode AS NVARCHAR(50)) AS OrderCode FROM dbo.Orders;
             GO
             CREATE VIEW dbo.vw_ExprOrders AS SELECT UPPER(OrderCode) AS OrderCode FROM dbo.Orders;
+            GO
+            CREATE VIEW dbo.vw_VariantOrders AS SELECT Attribute FROM dbo.Orders;
             GO
             """,
             DatabaseName);
@@ -121,6 +123,24 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
         Assert.Equal("category", mismatch.Facet);
         Assert.Equal("Int", mismatch.InferredValue);
         Assert.Equal("nvarchar", mismatch.ActualValue);
+    }
+
+    [Fact]
+    public async Task CheckAsync_SqlVariantBaseColumnMatchesRealCatalog_NoMismatch()
+    {
+        // sys.types.name for SQL_VARIANT is "sql_variant" (with an underscore) - the checker's
+        // own category comparison previously compared against SqlTypeCategory.SqlVariant's bare
+        // enum name ("SqlVariant"), which can never match "sql_variant" case-insensitively (the
+        // underscore is a real character difference, not a casing one) - a false "category"
+        // mismatch on every real SQL_VARIANT column, exactly the false-positive class this
+        // gate's own doc comment warns about.
+        var lineage = Catalog(
+            "dbo.vw_VariantOrders", "Attribute",
+            new ColumnProvenance.BaseColumn("dbo.Orders", "Attribute", new SqlType(SqlTypeCategory.SqlVariant)));
+
+        var mismatches = await _checker.CheckAsync(DatabaseName, lineage);
+
+        Assert.Empty(mismatches);
     }
 
     [Fact]

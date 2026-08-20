@@ -79,7 +79,7 @@ public sealed class LineageParityChecker
 
     private static void CheckColumn(string qualifiedName, string columnName, SqlType type, CatalogColumnInfo oracleColumn, List<LineageParityMismatch> mismatches)
     {
-        if (!string.Equals(oracleColumn.TypeName, type.Category.ToString(), StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(oracleColumn.TypeName, CategoryTypeName(type.Category), StringComparison.OrdinalIgnoreCase))
         {
             mismatches.Add(new LineageParityMismatch(qualifiedName, columnName, "category", type.Category.ToString(), oracleColumn.TypeName));
             return;
@@ -117,6 +117,20 @@ public sealed class LineageParityChecker
             mismatches.Add(new LineageParityMismatch(qualifiedName, columnName, "scale", scale.ToString(System.Globalization.CultureInfo.InvariantCulture), oracleColumn.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
     }
+
+    /// <summary>
+    /// <c>sys.types.name</c> for almost every category is just the C# enum member's own name
+    /// lowercased (comparison here is already <see cref="StringComparison.OrdinalIgnoreCase"/>,
+    /// so the two need not even agree on casing) - except <see cref="SqlTypeCategory.SqlVariant"/>,
+    /// whose real engine type name is <c>sql_variant</c> (an underscore, not merely a casing
+    /// difference from the bare enum name "SqlVariant"), which no case-insensitive comparison
+    /// against <c>ToString()</c> can ever bridge. Oracle-confirmed directly: a real SQL_VARIANT
+    /// column reported a false "category" mismatch (SqlVariant vs sql_variant) before this fix -
+    /// exactly the false-positive class this checker's own doc comment warns burying a real bug
+    /// under (the DNN Platform collation-facet incident).
+    /// </summary>
+    private static string CategoryTypeName(SqlTypeCategory category) =>
+        category == SqlTypeCategory.SqlVariant ? "sql_variant" : category.ToString();
 
     private static bool IsStringOrBinaryFamily(SqlTypeCategory category) =>
         category is SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
