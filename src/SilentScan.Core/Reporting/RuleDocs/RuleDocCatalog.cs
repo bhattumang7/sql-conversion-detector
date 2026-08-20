@@ -139,5 +139,12 @@ public static class RuleDocCatalog
         // Declaration
         [Declaration.UndersizedColumn.RuleId] = Declaration.UndersizedColumn.Content,
         [Declaration.UndersizedVariableOrParameter.RuleId] = Declaration.UndersizedVariableOrParameter.Content,
+
+        // Security
+        [Security.HardCodedCredential.RuleId] = Security.HardCodedCredential.Content,
+        [Security.HardCodedIpAddress.RuleId] = Security.HardCodedIpAddress.Content,
+        [Security.WeakHashAlgorithm.RuleId] = Security.WeakHashAlgorithm.Content,
+        [Security.WeakHashAlgorithmInSensitiveContext.RuleId] = Security.WeakHashAlgorithmInSensitiveContext.Content,
+        [Security.UnprovableDynamicSqlText.RuleId] = Security.UnprovableDynamicSqlText.Content,
     };
 }
