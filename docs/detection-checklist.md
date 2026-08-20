@@ -179,11 +179,7 @@ per phase (Phase 0 commits per fix).
       ODBC-prepared-statement pattern essentially never appears in hand-written
       T-SQL, so a rule for it would ship unexercised, same reasoning as the
       partitioned-index item above — stays deferred, now with real evidence
-      rather than only a stated design gap), `SelectIntoColumnResolver`
-      ambiguous-alias poisoning (align with `FromScopeResolver.cs:129`'s
-      poison rule — the claim itself still needs a concrete repro before
-      it's clear what shape it means; CTE shadowing, the other half of this
-      item, shipped 2026-08-20 as a name-only decline).
+      rather than only a stated design gap).
       9. Shipped: `DirectBaseTableResolver` (`ResolveDirectBaseTable`/
          `ResolveDirectBaseTables`/`ResolveDirectBaseTableName`) was its own,
          separate instance of the same bug class — it re-qualified and
