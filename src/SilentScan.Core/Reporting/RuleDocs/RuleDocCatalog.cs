@@ -148,5 +148,16 @@ public static class RuleDocCatalog
         [Security.WeakHashAlgorithm.RuleId] = Security.WeakHashAlgorithm.Content,
         [Security.WeakHashAlgorithmInSensitiveContext.RuleId] = Security.WeakHashAlgorithmInSensitiveContext.Content,
         [Security.UnprovableDynamicSqlText.RuleId] = Security.UnprovableDynamicSqlText.Content,
+
+        // ControlFlow
+        [ControlFlow.CursorFetchColumnCountMismatch.RuleId] = ControlFlow.CursorFetchColumnCountMismatch.Content,
+        [ControlFlow.EmptyCatchBlock.RuleId] = ControlFlow.EmptyCatchBlock.Content,
+        [ControlFlow.TriggerEmitsOutput.RuleId] = ControlFlow.TriggerEmitsOutput.Content,
+        [ControlFlow.DirtyReadIsolationHint.RuleId] = ControlFlow.DirtyReadIsolationHint.Content,
+        [ControlFlow.DuplicatedCallArgument.RuleId] = ControlFlow.DuplicatedCallArgument.Content,
+        [ControlFlow.LegacyIdentityIntrinsic.RuleId] = ControlFlow.LegacyIdentityIntrinsic.Content,
+        [ControlFlow.GotoUsage.RuleId] = ControlFlow.GotoUsage.Content,
+        [ControlFlow.CaseExpressionMissingElse.RuleId] = ControlFlow.CaseExpressionMissingElse.Content,
+        [ControlFlow.NonDeterministicCaseInput.RuleId] = ControlFlow.NonDeterministicCaseInput.Content,
     };
 }
