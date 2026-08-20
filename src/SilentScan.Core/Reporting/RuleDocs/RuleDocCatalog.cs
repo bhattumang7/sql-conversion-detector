@@ -127,5 +127,9 @@ public static class RuleDocCatalog
         // View
         [View.TopPercentOrderByNeverLimits.RuleId] = View.TopPercentOrderByNeverLimits.Content,
         [View.OrderByNotGuaranteedToConsumer.RuleId] = View.OrderByNotGuaranteedToConsumer.Content,
+
+        // TempTable
+        [TempTable.UnindexedJoinOperand.RuleId] = TempTable.UnindexedJoinOperand.Content,
+        [TempTable.UnindexedWhereFilter.RuleId] = TempTable.UnindexedWhereFilter.Content,
     };
 }
