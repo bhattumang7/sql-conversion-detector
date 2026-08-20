@@ -92,21 +92,32 @@ public static class CteResolver
             AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "recursive CTE",
             $"'{name}' is a recursive CTE - only the anchor member was resolved; T-SQL requires the recursive member's column types to match the anchor's exactly (Msg 240), so the anchor's types are used directly, with any base-table index claim dropped (a recursive CTE materializes through a spool, not a direct index access)");
 
-        // WITH c AS ((SELECT ... UNION ALL SELECT ... FROM c)) parses its QueryExpression as
-        // QueryParenthesisExpression wrapping the real BinaryQueryExpression -
-        // QueryExpressionResolver.Resolve already unwraps this exact wrapper one file over; this
-        // check needs the identical unwrap, or an otherwise perfectly ordinary parenthesized
-        // recursive CTE resolves to zero columns instead of its real anchor shape.
-        if (UnwrapParentheses(cte.QueryExpression) is not BinaryQueryExpression binary)
+        // A chain of two or more recursive members (WITH c AS (anchor UNION ALL r1 UNION ALL r2 ...))
+        // parses left-associatively - ((anchor UNION ALL r1) UNION ALL r2) - so the anchor can sit
+        // arbitrarily deep inside nested BinaryQueryExpressions, not just as one of the outermost
+        // node's two direct children. Flattening the whole chain into its written-order branch list
+        // (also unwraps the QueryParenthesisExpression a parenthesized CTE body wraps every branch
+        // in, the same unwrap QueryExpressionResolver.Resolve already does one file over) finds the
+        // true anchor regardless of how many recursive members follow it.
+        var branches = FlattenUnionBranches(cte.QueryExpression);
+        if (branches.Count < 2 || ReferencesSelf(branches[0], name))
         {
-            // Self-referencing but not a top-level UNION/UNION ALL (malformed, or a shape this
-            // pass doesn't recognize as a valid recursive CTE) - nothing safe to anchor on.
+            // Not a top-level UNION/UNION ALL chain at all, or the very first branch already
+            // references the CTE (malformed, or a shape this pass doesn't recognize as a valid
+            // recursive CTE) - nothing safe to anchor on.
             return [];
         }
 
-        var anchorIsFirst = !ReferencesSelf(binary.FirstQueryExpression, name);
-        var anchorExpression = anchorIsFirst ? binary.FirstQueryExpression : binary.SecondQueryExpression;
+        var anchorCount = branches.TakeWhile(b => !ReferencesSelf(b, name)).Count();
+        if (anchorCount != 1 || !branches.Skip(1).All(b => ReferencesSelf(b, name)))
+        {
+            // A valid recursive CTE unions exactly one anchor member first, then one or more
+            // recursive members - anything else (multiple anchor members, or a non-contiguous mix)
+            // is declined rather than guessed at.
+            return [];
+        }
 
+        var anchorExpression = branches[0];
         var anchorColumns = QueryExpressionResolver.Resolve(anchorExpression, catalog, resolvedViews, sourcePath, ledger, priorCtes, procScope);
         return [.. anchorColumns.Select(c => c with
         {
@@ -121,6 +132,24 @@ public static class CteResolver
                 _ => c.Provenance,
             },
         })];
+    }
+
+    /// <summary>Flattens a left-associative chain of <see cref="BinaryQueryExpression"/> nodes
+    /// (and the <see cref="QueryParenthesisExpression"/> wrapper each branch/the whole chain may
+    /// carry) into its written-order list of leaf branches - <c>A UNION ALL B UNION ALL C</c>
+    /// parses as <c>(A UNION ALL B) UNION ALL C</c>, so this recurses through the FIRST side
+    /// before the SECOND to preserve that order.</summary>
+    private static List<QueryExpression> FlattenUnionBranches(QueryExpression queryExpression)
+    {
+        var unwrapped = UnwrapParentheses(queryExpression);
+        if (unwrapped is not BinaryQueryExpression binary)
+        {
+            return [unwrapped];
+        }
+
+        var branches = FlattenUnionBranches(binary.FirstQueryExpression);
+        branches.AddRange(FlattenUnionBranches(binary.SecondQueryExpression));
+        return branches;
     }
 
     /// <summary>Whether a CTE's own defining query references its own name - the sole, engine-
