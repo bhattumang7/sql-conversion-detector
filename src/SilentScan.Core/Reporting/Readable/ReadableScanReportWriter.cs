@@ -97,6 +97,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
+        blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
         blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
@@ -147,6 +148,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ForcedParameterization(report, headingLevel, pathBase));
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
+        blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
         blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
@@ -210,6 +212,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
+        AddCount(counts, "SQL_VARIANT columns participating in a columnstore index (does not deploy)", report.ColumnstoreUnsupportedColumnTypeFindings.Count);
         AddCount(counts, "Non-persisted computed columns", report.NonPersistedComputedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.UnderLengthParameterFindings.Count);
@@ -231,6 +234,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Forced-parameterization-defeating query shapes", report.ForcedParameterizationFindings.Count);
         AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
+        AddCount(counts, "Always Encrypted ORDER BY", report.AlwaysEncryptedOrderByFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
         AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
         AddCount(counts, "Trigger correctness", report.TriggerCorrectnessFindings.Count);
@@ -702,6 +706,28 @@ public static class ReadableScanReportWriter
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ColumnstoreUnsupportedColumnType(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ColumnstoreUnsupportedColumnTypeFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"SQL_VARIANT columns in a columnstore index ({report.ColumnstoreUnsupportedColumnTypeFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact, not a plan-shape claim: a SQL_VARIANT column participating in a columnstore index does not deploy at all - oracle-confirmed real DDL execution fails with Msg 35343 (\"a data type that cannot participate in a columnstore index\").");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type", "Index"],
+            [.. report.ColumnstoreUnsupportedColumnTypeFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+                f.IndexName,
             })]);
     }
 
@@ -1181,6 +1207,28 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
                 $"Compared with = at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> AlwaysEncryptedOrderBy(ScanReport report, int level, string? pathBase)
+    {
+        if (report.AlwaysEncryptedOrderByFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Always Encrypted ORDER BY ({report.AlwaysEncryptedOrderByFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An ORDER BY clause references an Always Encrypted column - the statement does not compile at all (Msg 33277), for both DETERMINISTIC and RANDOMIZED encryption types, regardless of whether the connecting client is itself Always-Encrypted-enabled. Direct base-table columns in the immediate statement's own top-level ORDER BY only - a window function's own OVER (... ORDER BY ...) and an encrypted column reached only through a view/CTE/derived table are not analyzed by this v1.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Encryption type", DetailHeader],
+            [.. report.AlwaysEncryptedOrderByFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.EncryptionTypeDisplay,
+                $"Referenced in ORDER BY at line {f.Line}, column {f.Column}.",
             })]);
     }
 

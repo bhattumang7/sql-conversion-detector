@@ -263,6 +263,13 @@ public static class ScanReportBuilder
             maxTypedColumnStage.Complete($"{maxTypedColumnFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding> columnstoreBatchModeDisqualifyingTypeFindings;
+        using (var columnstoreBatchModeStage = progress.Begin("scanning columnstore batch-mode-disqualifying types"))
+        {
+            columnstoreBatchModeDisqualifyingTypeFindings = ColumnstoreUnsupportedColumnTypeScanner.Scan(catalog);
+            columnstoreBatchModeStage.Complete($"{columnstoreBatchModeDisqualifyingTypeFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<NonPersistedComputedColumnFinding> nonPersistedComputedColumnFindings;
         using (var nonPersistedComputedColumnStage = progress.Begin("scanning non-persisted computed columns"))
         {
@@ -922,6 +929,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<AlwaysEncryptedOrderByFinding> alwaysEncryptedOrderByFindings;
+        using (var alwaysEncryptedOrderByStage = progress.Begin("scanning ORDER BY against Always Encrypted columns", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = AlwaysEncryptedOrderByScanner.Scan(r, catalog);
+                    alwaysEncryptedOrderByStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            alwaysEncryptedOrderByFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<QueryAntiPatternFinding> queryAntiPatternFindings;
         using (var queryAntiPatternStage = progress.Begin("scanning query anti-patterns", usableCount))
         {
@@ -1316,6 +1341,7 @@ public static class ScanReportBuilder
         controlFlowRiskFindings = [.. controlFlowRiskFindings.Where(f => f.Confidence <= minimumConfidence)];
         securityFindings = [.. securityFindings.Where(f => f.Confidence <= minimumConfidence)];
         floatEqualityFindings = [.. floatEqualityFindings.Where(f => f.Confidence <= minimumConfidence)];
+        alwaysEncryptedOrderByFindings = [.. alwaysEncryptedOrderByFindings.Where(f => f.Confidence <= minimumConfidence)];
         queryAntiPatternFindings = [.. queryAntiPatternFindings.Where(f => f.Confidence <= minimumConfidence)];
         indexCoverageFindings = [.. indexCoverageFindings.Where(f => f.Confidence <= minimumConfidence)];
         triggerCorrectnessFindings = [.. triggerCorrectnessFindings.Where(f => f.Confidence <= minimumConfidence)];
@@ -1400,6 +1426,8 @@ public static class ScanReportBuilder
             // here; LiveScanRunner merges the real result in afterward, same pattern as the other
             // live-only streams above.
             [],
+            columnstoreBatchModeDisqualifyingTypeFindings,
+            alwaysEncryptedOrderByFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -52,6 +52,7 @@ public static class SarifReportWriter
         results.AddRange(report.ProcCallArgumentMismatchFindings.Select(ToResult));
         results.AddRange(report.TemporalBoundaryFindings.Select(ToResult));
         results.AddRange(report.MaxTypedColumnFindings.Select(ToResult));
+        results.AddRange(report.ColumnstoreUnsupportedColumnTypeFindings.Select(ToResult));
         results.AddRange(report.OversizedParameterFindings.Select(ToResult));
         results.AddRange(report.UnderLengthParameterFindings.Select(ToResult));
         results.AddRange(report.AnsiPaddingMismatchFindings.Select(ToResult));
@@ -102,6 +103,7 @@ public static class SarifReportWriter
         results.AddRange(report.ForcedParameterizationFindings.Select(ToResult));
         results.AddRange(report.IdentityRangeFindings.Select(ToResult));
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
+        results.AddRange(report.AlwaysEncryptedOrderByFindings.Select(ToResult));
         results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
         results.AddRange(report.IndexCoverageFindings.Select(ToResult));
         results.AddRange(report.TriggerCorrectnessFindings.Select(ToResult));
@@ -263,6 +265,17 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MaxTypedColumnRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - MAX-typed columns can never be an index key column, so no predicate/join on it can ever seek.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(ColumnstoreUnsupportedColumnTypeFinding finding)
+    {
+        // Error, not warning - oracle-confirmed this does not deploy at all (Msg 35343), not a
+        // perf/plan-shape claim.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnstoreUnsupportedColumnTypeRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} and participates in columnstore index '{finding.IndexName}' - this does not deploy (Msg 35343: a SQL_VARIANT column cannot participate in a columnstore index).";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }
@@ -1195,6 +1208,17 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is compared with = in this predicate - IEEE-754 floating-point representation error means two values a person would call the same number can compare unequal, silently returning the wrong rows.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(AlwaysEncryptedOrderByFinding finding)
+    {
+        // A hard compile failure (Msg 33277), the same certainty tier CollationConflictFinding/
+        // Verdict.OperandClash use - always Error, never confidence-floored, since there is no
+        // "maybe" about whether the statement compiles.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(QueryAntiPatternFinding finding)

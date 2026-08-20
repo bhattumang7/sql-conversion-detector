@@ -816,7 +816,7 @@ public sealed class LiveCatalogReader
                    ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name,
                    c.is_nullable, c.is_identity, c.is_computed, cc.is_persisted, c.is_ansi_padded,
                    CONVERT(decimal(38,0), idc.seed_value), CONVERT(decimal(38,0), idc.increment_value),
-                   CONVERT(decimal(38,0), idc.last_value)
+                   CONVERT(decimal(38,0), idc.last_value), c.encryption_type
             FROM sys.columns c
             JOIN sys.types ty ON ty.user_type_id = c.user_type_id
             JOIN sys.tables t ON t.object_id = c.object_id
@@ -850,6 +850,14 @@ public sealed class LiveCatalogReader
             var identitySeed = await reader.IsDBNullAsync(14, cancellationToken) ? (decimal?)null : reader.GetDecimal(14);
             var identityIncrement = await reader.IsDBNullAsync(15, cancellationToken) ? (decimal?)null : reader.GetDecimal(15);
             var identityCurrentValue = await reader.IsDBNullAsync(16, cancellationToken) ? (decimal?)null : reader.GetDecimal(16);
+            var encryptionType = await reader.IsDBNullAsync(17, cancellationToken)
+                ? SilentScan.Core.Catalog.ColumnEncryptionType.None
+                : reader.GetInt32(17) switch
+                {
+                    1 => SilentScan.Core.Catalog.ColumnEncryptionType.Deterministic,
+                    2 => SilentScan.Core.Catalog.ColumnEncryptionType.Randomized,
+                    _ => SilentScan.Core.Catalog.ColumnEncryptionType.None,
+                };
 
             var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName);
             if (type is null)
@@ -871,7 +879,7 @@ public sealed class LiveCatalogReader
 
             columns.Add(new CatalogColumn(
                 columnName, type, isNullable, isIdentity, isComputed, isPersisted, isAnsiPadded,
-                identitySeed, identityIncrement, identityCurrentValue));
+                identitySeed, identityIncrement, identityCurrentValue, encryptionType));
         }
 
         return columnsByTable;

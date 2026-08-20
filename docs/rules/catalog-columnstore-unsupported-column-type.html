@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Columnstore Unsupported Column Type - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Columnstore Unsupported Column Type</h1>
+  <p class="rule-key"><code>silentscan/catalog/columnstore-unsupported-column-type</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">A SQL_VARIANT column participates in a columnstore index on the same table - oracle-confirmed this does not deploy at all (Msg 35343: &quot;Column &#x27;...&#x27; has a data type that cannot participate in a columnstore index&quot;), whether the column sits on a table carrying a whole-table clustered columnstore index or is explicitly named in a nonclustered columnstore index&#x27;s own column list. Catalog-only structural fact.</p>
+  <p class="rationale">`SQL_VARIANT` is on SQL Server&#x27;s own documented list of data types that cannot participate in a columnstore index at all, and this isn&#x27;t a soft restriction the optimizer works around quietly - it&#x27;s a hard DDL failure. Oracle-confirmed directly (real execution, not a documentation claim taken on faith): `CREATE CLUSTERED COLUMNSTORE INDEX` takes no column list at all - it implicitly covers every column on the table - so the statement fails the instant any one of those columns is `SQL_VARIANT`, with `Msg 35343: The statement failed. Column &#x27;...&#x27; has a data type that cannot participate in a columnstore index.` The identical failure reproduces for `ALTER TABLE ... ADD` a `SQL_VARIANT` column onto a table that already carries a clustered columnstore index - order doesn&#x27;t matter, only the combination does.</p>
+  <p class="rationale">A nonclustered columnstore index is narrower: `CREATE NONCLUSTERED COLUMNSTORE INDEX` always takes an explicit column list, so it only fails if that list actually names the `SQL_VARIANT` column - a nonclustered columnstore index that simply leaves the `SQL_VARIANT` column out of its own list is a real, legal shape, and this finding does not fire on it.</p>
+  <p class="rationale">This is exactly the class of bug static analysis exists to catch before it reaches a deployment pipeline: the DDL parses fine, reads fine, and looks completely ordinary - the failure only appears the moment someone actually tries to run it, by which point it&#x27;s a production deployment blocked on a schema-file combination that could have been caught by reading the two statements side by side.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Remove the `SQL_VARIANT` column from the columnstore index&#x27;s scope. For a clustered columnstore index (which always covers every column), retype the `SQL_VARIANT` column to a concrete type, or move it to a separate table that isn&#x27;t columnstore-indexed and join to it. For a nonclustered columnstore index, the column list is explicit - simply drop the `SQL_VARIANT` column from it; the column still exists on the table, it just doesn&#x27;t participate in this particular index.</p>
+  <h3>A SQL_VARIANT audit column blocking a clustered columnstore index from deploying</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Sales&#xA;(&#xA;    SaleId      INT             NOT NULL,&#xA;    Amount      INT             NOT NULL,&#xA;    LegacyTag   SQL_VARIANT     NULL&#xA;);&#xA;CREATE CLUSTERED COLUMNSTORE INDEX CCI_Sales ON dbo.Sales;&#xA;-- Fails to deploy: Msg 35343, &quot;LegacyTag has a data type that cannot&#xA;-- participate in a columnstore index&quot; - CREATE CLUSTERED COLUMNSTORE INDEX&#xA;-- takes no column list, so every column on the table is in scope.</code></pre></div>
+  <p class="example-explanation">LegacyTag&#x27;s mere presence on dbo.Sales - not its use in any query - is enough: a clustered columnstore index implicitly covers every column on the table, so it fails to deploy the moment any one of them is SQL_VARIANT, oracle-confirmed against a real instance.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>CREATE TABLE dbo.Sales&#xA;(&#xA;    SaleId  INT NOT NULL,&#xA;    Amount  INT NOT NULL&#xA;);&#xA;CREATE CLUSTERED COLUMNSTORE INDEX CCI_Sales ON dbo.Sales;&#xA;&#xA;CREATE TABLE dbo.SalesLegacyTag&#xA;(&#xA;    SaleId    INT             NOT NULL PRIMARY KEY,&#xA;    LegacyTag SQL_VARIANT     NULL&#xA;);</code></pre></div>
+  <p class="example-explanation">With LegacyTag moved to a separate, non-columnstore-indexed table, CCI_Sales deploys cleanly - every column it implicitly covers is columnstore-eligible, and LegacyTag can still be joined in whenever it&#x27;s actually needed.</p>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

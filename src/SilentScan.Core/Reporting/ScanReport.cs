@@ -85,6 +85,8 @@ public sealed record ScanReport(
     // sys.databases.is_parameterization_forced precondition this stream is gated on is itself a
     // live-only read, so this is always empty in a file-mode scan (ScanReportBuilder passes []).
     IReadOnlyList<Predicates.ForcedParameterizationFinding> ForcedParameterizationFindings,
+    IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding> ColumnstoreUnsupportedColumnTypeFindings,
+    IReadOnlyList<AlwaysEncryptedOrderByFinding> AlwaysEncryptedOrderByFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -405,5 +407,12 @@ public sealed record ScanReport(
     /// <see cref="ForcedParameterizationFindings"/> stays live-mode only, same reasoning as
     /// <see cref="DanglingObjectReferenceFindings"/> - the <c>is_parameterization_forced</c>
     /// precondition it's gated on is itself a live-only read.
-    public const int CurrentSchemaVersion = 62;
+    /// Bumped to 63 for the new <see cref="ColumnstoreUnsupportedColumnTypeFindings"/>
+    /// stream (docs/detection-reference.md Appendix 8 - a SQL_VARIANT column participating in a
+    /// columnstore index does not deploy at all, oracle-confirmed real DDL execution: Msg 35343).
+    /// Bumped to 64 for the new <see cref="AlwaysEncryptedOrderByFindings"/> stream (an
+    /// ORDER BY clause referencing an Always Encrypted column - oracle-confirmed the statement
+    /// never compiles at all, Msg 33277, for both DETERMINISTIC and RANDOMIZED encryption types,
+    /// regardless of whether the connecting client is itself Always-Encrypted-enabled).
+    public const int CurrentSchemaVersion = 64;
 }

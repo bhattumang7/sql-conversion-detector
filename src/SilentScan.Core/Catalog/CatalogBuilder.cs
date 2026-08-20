@@ -1474,8 +1474,25 @@ public static class CatalogBuilder
             isNullable,
             IsIdentity: columnDefinition.IdentityOptions is not null,
             IsComputed: columnDefinition.ComputedColumnExpression is not null,
-            IsPersisted: columnDefinition.IsPersisted);
+            IsPersisted: columnDefinition.IsPersisted,
+            EncryptionType: ResolveEncryptionType(columnDefinition.Encryption));
     }
+
+    /// <summary>
+    /// A column's own <c>ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ..., ENCRYPTION_TYPE = ...,
+    /// ALGORITHM = ...)</c> clause - purely syntactic (no <c>CREATE COLUMN ENCRYPTION KEY</c>
+    /// needs to exist for this to parse, matching every other file-mode fact this builder resolves
+    /// without a real engine). Absent entirely when the column carries no such clause.
+    /// </summary>
+    private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefinition? encryption) =>
+        encryption?.Parameters.OfType<ColumnEncryptionTypeParameter>().FirstOrDefault() is { } typeParameter
+            ? typeParameter.EncryptionType switch
+            {
+                Microsoft.SqlServer.TransactSql.ScriptDom.ColumnEncryptionType.Deterministic => ColumnEncryptionType.Deterministic,
+                Microsoft.SqlServer.TransactSql.ScriptDom.ColumnEncryptionType.Randomized => ColumnEncryptionType.Randomized,
+                _ => ColumnEncryptionType.None,
+            }
+            : ColumnEncryptionType.None;
 
     /// <summary>Infers computed columns' types (<see cref="ComputedColumnTypeResolver"/>), applies the default-collation fallback to any newly-resolved string type, and ledgers whichever computed columns are still untyped afterward - the same honesty policy <see cref="BuildColumn"/> applies to an unresolvable declared type.</summary>
     private static List<CatalogColumn> ResolveComputedColumnTypes(

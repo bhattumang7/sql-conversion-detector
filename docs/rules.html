@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">248 rules. 156 carry fix guidance; 18 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">250 rules. 158 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -102,6 +102,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-check-constraint-null-not-handled.html">Check Constraint Null Not Handled</a> <code class="rule-key">silentscan/catalog/check-constraint-null-not-handled</code><span class="snippet">A nullable column&#x27;s own CHECK constraint predicate has no IS NULL/IS NOT NULL test against that column anywhere in the predicate.</span></li>
       <li><a class="id" href="rules/catalog-check-constraint-on-identity-column.html">Check Constraint On Identity Column</a> <code class="rule-key">silentscan/catalog/check-constraint-on-identity-column</code><span class="snippet">A CHECK constraint&#x27;s own definition directly references an IDENTITY column.</span></li>
       <li><a class="id" href="rules/catalog-column-collation-drift.html">Column Collation Drift</a> <code class="rule-key">silentscan/catalog/column-collation-drift</code><span class="snippet">A string-family column&#x27;s own collation differs from the database&#x27;s default collation (or, for a temp table/table variable, from tempdb&#x27;s effective collation).</span></li>
+      <li><a class="id" href="rules/catalog-columnstore-unsupported-column-type.html">Columnstore Unsupported Column Type</a> <code class="rule-key">silentscan/catalog/columnstore-unsupported-column-type</code><span class="snippet">A SQL_VARIANT column participates in a columnstore index on the same table.</span></li>
       <li><a class="id" href="rules/catalog-cross-table-fk-type-drift.html">Cross Table FK Type Drift</a> <code class="rule-key">silentscan/catalog/cross-table-fk-type-drift</code><span class="snippet">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ.</span></li>
       <li><a class="id" href="rules/catalog-dangling-object-reference.html">Dangling Object Reference</a> <code class="rule-key">silentscan/catalog/dangling-object-reference</code><span class="snippet">A stored procedure, view, function, or trigger names a table/view/synonym the engine&#x27;s own binder cannot resolve to a real object right now.</span></li>
       <li><a class="id" href="rules/catalog-default-constraint-on-nullable-column.html">Default Constraint On Nullable Column</a> <code class="rule-key">silentscan/catalog/default-constraint-on-nullable-column</code><span class="snippet">A column carries a DEFAULT constraint but is still nullable.</span></li>
@@ -406,6 +407,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>predicates</h2>
     <ul class="rule-list">
+      <li><a class="id" href="rules/predicates-always-encrypted-order-by.html">Always Encrypted Order By</a> <code class="rule-key">silentscan/predicates/always-encrypted-order-by</code><span class="snippet">An ORDER BY clause references an Always Encrypted column.</span></li>
       <li><a class="id" href="rules/predicates-ansi-padding-mismatch.html">ANSI Padding Mismatch</a> <code class="rule-key">silentscan/predicates/ansi-padding-mismatch</code><span class="snippet">A LIKE predicate compares a non-ANSI-padded varchar/varbinary column against a literal pattern with significant trailing whitespace.</span></li>
       <li><a class="id" href="rules/predicates-catch-all-parameter.html">Catch All Parameter</a> <code class="rule-key">silentscan/predicates/catch-all-parameter</code><span class="snippet">A predicate of the shape (Col = @p OR @p IS NULL).</span></li>
       <li><a class="id" href="rules/predicates-filtered-index-parameter-mismatch.html">Filtered Index Parameter Mismatch</a> <code class="rule-key">silentscan/predicates/filtered-index-parameter-mismatch</code><span class="snippet">A predicate compares a column against a parameter or local variable, but that same column carries a filtered index whose own filter is a literal-equality restatement of this exact comparison.</span></li>

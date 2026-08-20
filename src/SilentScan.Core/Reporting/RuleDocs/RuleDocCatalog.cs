@@ -108,10 +108,12 @@ public static class RuleDocCatalog
         [Catalog.CrossTableFkTypeDrift.RuleId] = Catalog.CrossTableFkTypeDrift.Content,
         [CallGraph.ArgumentTypeMismatch.RuleId] = CallGraph.ArgumentTypeMismatch.Content,
         [Catalog.MaxTypedColumn.RuleId] = Catalog.MaxTypedColumn.Content,
+        [Catalog.ColumnstoreUnsupportedColumnType.RuleId] = Catalog.ColumnstoreUnsupportedColumnType.Content,
         [Catalog.RecompilesEveryCall.RuleId] = Catalog.RecompilesEveryCall.Content,
         [Catalog.TableValuedFunctionReturnUsesDatabaseCollation.RuleId] = Catalog.TableValuedFunctionReturnUsesDatabaseCollation.Content,
         [Catalog.DanglingObjectReference.RuleId] = Catalog.DanglingObjectReference.Content,
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
+        [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
 
         // Catalog constraints / Predicates estimate family
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,

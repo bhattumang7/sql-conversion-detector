@@ -34,6 +34,11 @@ namespace SilentScan.Core.Catalog;
 /// low-value development database (<c>IdentityRangeScanner</c>'s own doc comment enforces this).
 /// <paramref name="IdentitySeed"/>/<paramref name="IdentityIncrement"/> are ordinary schema facts,
 /// decidable identically on a dev or production copy of the same schema.
+///
+/// <paramref name="EncryptionType"/> is <c>sys.columns.encryption_type</c> (live mode) or parsed
+/// from a <c>CREATE</c>/<c>ALTER TABLE</c> column's own <c>ENCRYPTED WITH (...)</c> clause (file
+/// mode) - an Always Encrypted column's per-column encryption scheme, a schema fact independent of
+/// whether the connecting client is itself Always-Encrypted-enabled.
 /// </summary>
 public sealed record CatalogColumn(
     string Name,
@@ -45,4 +50,5 @@ public sealed record CatalogColumn(
     bool IsAnsiPadded = true,
     decimal? IdentitySeed = null,
     decimal? IdentityIncrement = null,
-    decimal? IdentityCurrentValue = null);
+    decimal? IdentityCurrentValue = null,
+    ColumnEncryptionType EncryptionType = ColumnEncryptionType.None);
