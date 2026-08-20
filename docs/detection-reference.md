@@ -1247,6 +1247,37 @@ does not defeat a seek at all: `WHERE indexed_col = NEWID()` compiles to an
 Index Seek with `newid()` as the seek predicate. Both findings together killed
 a proposed rule; see Appendix 9.
 
+**A `MAX`-length operand against a bounded indexed column does not cost the
+seek either — the engine takes a visibly different path to keep it.** Compared
+to the plain "under-length costs nothing" case above, this one is not just
+absent cost: `WHERE nvarchar(50)Col = @v` with `@v NVARCHAR(MAX)` compiles to a
+plan with a `ComputeScalar` node whose `ScalarOperator` is a named intrinsic —
+`GetRangeWithMismatchedTypes([@v],[@v],(62))` — feeding a dynamic
+`StartRange`/`EndRange` into a genuine Index Seek on the column, wrapped in a
+residual `Filter` that re-checks true equality afterward (needed because the
+computed range is an approximation once the compared value's real length isn't
+known at compile time). No `CONVERT_IMPLICIT` marker appears at all — this
+mechanism is invisible to any check keyed purely on that marker. Traced from
+the decompiled engine binary: `GetRangeWithMismatchedTypes` and its gating
+predicate `FGetRangeWithMismatchedTypesNeeded` (both in `sqltses.dll`) are
+real, named functions — this plan is the confirmation that the decompiled
+function is actually invoked, and by exactly this name, not a hypothesis.
+Contrast with an **explicit** `COLLATE` on the compared literal
+(`= N'x' COLLATE Latin1_General_CS_AS` or similar): every explicit-COLLATE
+mismatch probed (Windows-vs-Windows case-only difference, Windows-vs-legacy,
+legacy-vs-legacy) forced a plain Index Scan with no dynamic-range attempt at
+all — that predicate shape gets none of this mechanism's benefit, regardless
+of collation family. The coercible-default literal-vs-column collation
+question the current `VerdictClassifier.cs` matrix encodes (`SQL_*` scans,
+Windows range-seeks) was **not** validated by this round of probing — the
+obvious construction (comparing a plain literal against a column, varying the
+containing database's default collation) turned out to be vacuous, because a
+coercible-default literal always silently adopts the compared column's
+collation with no conflict to resolve; a real test needs a different
+construction (most likely a genuine `VARCHAR`, code-page-sensitive case, since
+`NVARCHAR` has no storage code page for collation to act on) and hasn't been
+run yet.
+
 ---
 
 ## Appendix 9 — Candidates probed and killed (do not re-propose)
