@@ -41,6 +41,7 @@ public static class RuleDocCatalog
         [Join.CartesianCommaJoin.RuleId] = Join.CartesianCommaJoin.Content,
         [Join.CartesianCrossJoin.RuleId] = Join.CartesianCrossJoin.Content,
         [Dml.SelfReferencingDml.RuleId] = Dml.SelfReferencingDml.Content,
+        [Index.KeyLookupProneIndex.RuleId] = Index.KeyLookupProneIndex.Content,
         [Predicate.StringConcatNull.RuleId] = Predicate.StringConcatNull.Content,
         [Query.BareTopNoOrderBy.RuleId] = Query.BareTopNoOrderBy.Content,
 
