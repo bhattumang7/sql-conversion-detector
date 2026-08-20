@@ -189,5 +189,15 @@ public static class RuleDocCatalog
         [Lineage.NestedViewDepth.RuleId] = Lineage.NestedViewDepth.Content,
         [Lineage.PostExpansionJoinWidth.RuleId] = Lineage.PostExpansionJoinWidth.Content,
         [Lineage.SelectStarView.RuleId] = Lineage.SelectStarView.Content,
+
+        // DynamicSql
+        [DynamicSql.Analyzed.RuleId] = DynamicSql.Analyzed.Content,
+        [DynamicSql.Unanalyzable.RuleId] = DynamicSql.Unanalyzable.Content,
+        [DynamicSql.InnerParseFailed.RuleId] = DynamicSql.InnerParseFailed.Content,
+        [DynamicSql.PartiallyAnalyzed.RuleId] = DynamicSql.PartiallyAnalyzed.Content,
+        [DynamicSql.ConcatenatedValueInConstantSql.RuleId] = DynamicSql.ConcatenatedValueInConstantSql.Content,
+        [DynamicSql.ExecStringConcatenatesParameterizableValue.RuleId] = DynamicSql.ExecStringConcatenatesParameterizableValue.Content,
+        [DynamicSql.TempTableExecShapeColumnCountMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnCountMismatch.Content,
+        [DynamicSql.TempTableExecShapeColumnTypeMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnTypeMismatch.Content,
     };
 }
