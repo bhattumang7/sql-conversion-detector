@@ -215,6 +215,22 @@ public sealed class ForcedParameterizationScannerTests
     }
 
     [Fact]
+    public void GroupByCompoundExpressionLiteral_Fires()
+    {
+        var findings = Scan("SELECT Id + 1, COUNT(*) FROM dbo.T WHERE Id > 5 GROUP BY (Id + 1);");
+
+        Assert.Contains(findings, f => f.Kind == ForcedParameterizationFindingKind.GroupByExpressionLiteral);
+    }
+
+    [Fact]
+    public void GroupByPlainColumn_NeverFires()
+    {
+        var findings = Scan("SELECT Id, COUNT(*) FROM dbo.T GROUP BY Id;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == ForcedParameterizationFindingKind.GroupByExpressionLiteral);
+    }
+
+    [Fact]
     public void ModuleQualifiedName_ReflectsEnclosingProcedure()
     {
         var findings = Scan("CREATE PROCEDURE dbo.SearchOrders AS SELECT * FROM dbo.T WHERE Name LIKE 'abc%';");

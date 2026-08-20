@@ -247,5 +247,6 @@ public static class RuleDocCatalog
         [ForcedParameterization.ConvertStyleCodeLiteral.RuleId] = ForcedParameterization.ConvertStyleCodeLiteral.Content,
         [ForcedParameterization.CheckSumArgumentLiteral.RuleId] = ForcedParameterization.CheckSumArgumentLiteral.Content,
         [ForcedParameterization.ConstantFoldableExpressionLiteral.RuleId] = ForcedParameterization.ConstantFoldableExpressionLiteral.Content,
+        [ForcedParameterization.GroupByExpressionLiteral.RuleId] = ForcedParameterization.GroupByExpressionLiteral.Content,
     };
 }

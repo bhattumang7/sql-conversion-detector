@@ -297,6 +297,7 @@ public static class SarifRuleCatalog
         ForcedParameterizationFindingKind.ConvertStyleCodeLiteral => "silentscan/forced-parameterization/convert-style-code-literal",
         ForcedParameterizationFindingKind.CheckSumArgumentLiteral => "silentscan/forced-parameterization/checksum-argument-literal",
         ForcedParameterizationFindingKind.ConstantFoldableExpressionLiteral => "silentscan/forced-parameterization/constant-foldable-expression-literal",
+        ForcedParameterizationFindingKind.GroupByExpressionLiteral => "silentscan/forced-parameterization/group-by-expression-literal",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 

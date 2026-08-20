@@ -86,6 +86,15 @@ public enum ForcedParameterizationFindingKind
     /// less optimally folded - shipped at <see cref="Predicates.FindingConfidence.Low"/> as an
     /// informational curiosity, not a plan-cache-bloat claim.</summary>
     ConstantFoldableExpressionLiteral,
+
+    /// <summary>A literal appears inside a <c>GROUP BY</c> expression - e.g.
+    /// <c>GROUP BY (Id + 1)</c>, confirmed directly to keep the <c>1</c> literal in the cached
+    /// plan while an unrelated <c>WHERE</c>-clause equality in the same statement parameterizes
+    /// normally. Unlike <see cref="OrderByExpressionLiteral"/>, there is no bare-literal ordinal
+    /// idiom to exclude: <c>GROUP BY 1</c> is not a valid ordinal reference in T-SQL at all (the
+    /// engine rejects it, "Each GROUP BY expression must contain at least one column that is not
+    /// an outer reference") - every literal-bearing GROUP BY expression is this one shape.</summary>
+    GroupByExpressionLiteral,
 }
 
 /// <summary>

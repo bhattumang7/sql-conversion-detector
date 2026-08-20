@@ -5,7 +5,7 @@ using SilentScan.Core.Parsing;
 namespace SilentScan.Core.Predicates;
 
 /// <summary>
-/// docs/detection-reference.md Appendix 8 - the ten <see cref="ForcedParameterizationFindingKind"/>
+/// docs/detection-reference.md Appendix 8 - the eleven <see cref="ForcedParameterizationFindingKind"/>
 /// clause shapes, each independently oracle-confirmed. Syntax-only, no catalog: the live
 /// precondition (<c>sys.databases.is_parameterization_forced</c>) is read and gated entirely by the
 /// caller (<c>SilentScan.Live</c>) - see <see cref="ForcedParameterizationFinding"/>'s own doc
@@ -156,6 +156,22 @@ public static class ForcedParameterizationScanner
                 {
                     Add(ForcedParameterizationFindingKind.OrderByExpressionLiteral, element,
                         $"ORDER BY expression contains literal '{LiteralText(literal)}' - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.");
+                }
+            }
+
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(GroupByClause node)
+        {
+            foreach (var specification in node.GroupingSpecifications.OfType<ExpressionGroupingSpecification>())
+            {
+                var finder = new LiteralFinder();
+                specification.Expression.Accept(finder);
+                if (finder.Found is { } literal)
+                {
+                    Add(ForcedParameterizationFindingKind.GroupByExpressionLiteral, specification,
+                        $"GROUP BY expression contains literal '{LiteralText(literal)}' - the engine leaves it unparameterized even under PARAMETERIZATION FORCED.");
                 }
             }
 
