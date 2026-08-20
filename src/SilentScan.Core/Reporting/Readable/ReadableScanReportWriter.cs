@@ -26,6 +26,9 @@ public static class ReadableScanReportWriter
     /// <summary>Shared across every finding table that has one - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string ColumnHeader = "Column";
 
+    /// <summary>Shared across every finding table with a module column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
+    private const string ModuleHeader = "Module";
+
     /// <summary>Shared across every finding table with an index-existence column - avoids a repeated literal Sonar flags at 4+ occurrences.</summary>
     private const string IndexedHeader = "Indexed";
 
@@ -1353,7 +1356,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{ForcedSerialTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ForcedSerialRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Module", DetailHeader],
+                [WhereHeader, ModuleHeader, DetailHeader],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1581,7 +1584,7 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DanglingObjectReferenceRuleId));
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Module", "Referenced object"],
+            [WhereHeader, ModuleHeader, "Referenced object"],
             [.. report.DanglingObjectReferenceFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -1807,7 +1810,7 @@ public static class ReadableScanReportWriter
             "Two independent sys.sql_modules catalog flags, each baked in wholesale at CREATE/ALTER time: WITH RECOMPILE (every call compiles a fresh plan and discards it, invisible to any plan-cache-based monitoring), and a non-schema-bound table-valued function's own RETURNS TABLE declaring a character column with no explicit COLLATE (its collation was resolved against the database's default at CREATE/ALTER time and silently disagrees with the database's collation after any later ALTER DATABASE ... COLLATE). Schema-bound modules are deliberately excluded from the second kind - oracle-confirmed that schema-binding sets the underlying flag unconditionally, string data or not, so it carries no differentiating signal there.");
 
         yield return new ReadableBlock.Table(
-            [WhereHeader, "Module", "Flag"],
+            [WhereHeader, ModuleHeader, "Flag"],
             [.. report.ModuleCompileFlagFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
@@ -2147,7 +2150,7 @@ public static class ReadableScanReportWriter
             yield return new ReadableBlock.Heading(level + 1, $"{SetOptionTitle(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SetOptionRuleId(group.Key)));
             yield return new ReadableBlock.Table(
-                [WhereHeader, "Module", "Touched object", "Kind"],
+                [WhereHeader, ModuleHeader, "Touched object", "Kind"],
                 [.. ordered.Select(f => new List<string>
                 {
                     Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
