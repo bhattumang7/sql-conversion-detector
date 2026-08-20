@@ -7,7 +7,7 @@ using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates.DynamicSqlValue;
-using SilentScan.Core.Reporting;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 

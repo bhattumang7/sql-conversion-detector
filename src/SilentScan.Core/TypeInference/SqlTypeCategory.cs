@@ -1,4 +1,4 @@
-namespace SilentScan.Core.Catalog;
+namespace SilentScan.Core.TypeInference;
 
 /// <summary>
 /// The base T-SQL data type categories, ordered by the official data type precedence

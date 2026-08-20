@@ -1,5 +1,6 @@
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates.DynamicSqlValue;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 

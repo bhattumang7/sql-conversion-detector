@@ -1,6 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
-namespace SilentScan.Core.Catalog;
+namespace SilentScan.Core.Common;
 
 public static class SchemaObjectNameHelper
 {

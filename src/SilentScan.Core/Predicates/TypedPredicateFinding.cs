@@ -23,7 +23,7 @@ namespace SilentScan.Core.Predicates;
 /// and <see cref="SargabilityFinding.PredicateFragmentText"/> already are. <c>Fingerprint</c> is a
 /// short, stable hash (<see cref="TypedPredicateFindingIdentity.ComputeFingerprint"/>) of this
 /// finding's table/column/operator/other-operand shape - the same identity <see
-/// cref="Reporting.TypedFindingDeduplicator"/> already uses to collapse repeated occurrences, now
+/// cref="TypedFindingDeduplicator"/> already uses to collapse repeated occurrences, now
 /// exposed so a consumer can track "the same defect" across two separate scans of the same repo
 /// at the same commit without re-deriving the shape itself, independent of source location so an
 /// unrelated edit elsewhere in the repo never changes it.

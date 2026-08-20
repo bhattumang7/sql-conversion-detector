@@ -1,6 +1,7 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Verify.Catalog;
 using SilentScan.Verify.Oracle;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Live.Catalog;
 

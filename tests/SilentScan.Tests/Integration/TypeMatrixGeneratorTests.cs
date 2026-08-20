@@ -1,6 +1,7 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Verify;
 using SilentScan.Verify.Oracle;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 

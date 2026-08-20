@@ -1,4 +1,5 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Lineage;
 
@@ -102,7 +103,7 @@ public static class ColumnProvenanceAnalysis
     /// A UNION of same-category, same-collation-status string branches of differing length takes
     /// the WIDER of the two (oracle-verified: <c>sys.dm_exec_describe_first_result_set</c> off a
     /// real deployed <c>varchar(10) UNION ALL varchar(200)</c> view reports <c>max_length 200</c>) -
-    /// the identical rule <see cref="Rules.ExpressionTypeInferencer"/>'s own CASE/COALESCE merge
+    /// the identical rule <see cref="TypeInference.ExpressionTypeInferencer"/>'s own CASE/COALESCE merge
     /// already uses (<c>Math.Max</c>), previously applied only there; a union column silently kept
     /// whichever branch happened to be first instead. MAX-ness widens the same way a CASE/COALESCE
     /// merge's own MAX handling already does.
@@ -130,7 +131,7 @@ public static class ColumnProvenanceAnalysis
     /// MAX(5-3, 10-1) = MAX(2,9) = 9; precision = 9+3 = 12) - NOT simply <c>Math.Max</c> of each
     /// facet independently (that would give the wrong DECIMAL(10,3)), and not the "keep the
     /// winning branch's own declared facets" approximation
-    /// <see cref="Rules.ExpressionTypeInferencer"/>'s own remarks document as accepted there for
+    /// <see cref="TypeInference.ExpressionTypeInferencer"/>'s own remarks document as accepted there for
     /// CASE/COALESCE - this is a real widening, not an approximation, because a union's own
     /// column-parity check (<c>LiveLineageParityChecker</c>) compares directly against the live
     /// engine's own answer for this exact shape.

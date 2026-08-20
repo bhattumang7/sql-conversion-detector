@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -63,7 +64,7 @@ namespace SilentScan.Core.Predicates;
 /// interleaved execution's reach. Empty for every other kind.
 /// </param>
 /// <param name="ReferenceFragmentText">
-/// The reference's own source text, re-rendered to valid T-SQL (<see cref="Rules.FragmentTextRenderer"/>),
+/// The reference's own source text, re-rendered to valid T-SQL (<see cref="Common.FragmentTextRenderer"/>),
 /// so the oracle can build a probe from the finding rather than trusting the classifier that
 /// produced it - the same role this field plays on <see cref="SargabilityFinding"/>.
 /// </param>

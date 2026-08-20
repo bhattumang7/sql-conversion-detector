@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
@@ -26,7 +27,7 @@ namespace SilentScan.Core.Predicates;
 /// reference resolved through the immediate statement's own FROM-clause alias scope (direct base
 /// table only - the same "known v1 scope limit" restraint <see cref="FloatEqualityPredicateScanner"/>
 /// and <see cref="NonUniqueUpdateSourceScanner"/> already established, never a view/CTE/derived-
-/// table/lineage-resolved column) to a catalog column whose <see cref="Catalog.SqlTypeCategory"/> is
+/// table/lineage-resolved column) to a catalog column whose <see cref="TypeInference.SqlTypeCategory"/> is
 /// one of the char-family types (<c>char</c>/<c>varchar</c>/<c>nchar</c>/<c>nvarchar</c>/
 /// <c>text</c>/<c>ntext</c>); or an <c>ISNULL</c>/<c>COALESCE</c> call whose own arguments are
 /// themselves each one of these same shapes, recursively - a guarded leaf never counts as the

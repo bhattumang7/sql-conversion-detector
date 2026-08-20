@@ -3,6 +3,8 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -529,7 +531,7 @@ public static class NonSargablePredicateScanner
             var (tableQualifiedName, indexed, _) = ResolveIndexInfo(columnRef);
             Findings.Add(new SargabilityFinding(
                 kind, columnName, detail, sourcePath, node.StartLine, node.StartColumn,
-                TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Rules.FragmentTextRenderer.Render(node)));
+                TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Common.FragmentTextRenderer.Render(node)));
         }
 
         /// <summary>
@@ -673,7 +675,7 @@ public static class NonSargablePredicateScanner
 
             Findings.Add(new SargabilityFinding(
                 SargabilityFindingKind.CaseFoldOnColumn, named.Name, detail, sourcePath, functionCall.StartLine, functionCall.StartColumn,
-                TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Rules.FragmentTextRenderer.Render(functionCall)));
+                TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Common.FragmentTextRenderer.Render(functionCall)));
         }
 
         /// <summary>

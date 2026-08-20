@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
@@ -373,7 +374,7 @@ public abstract record SqlTextValue
     /// default <see cref="List{T}"/>/array backing store implements no structural equality of its
     /// own), so two independently-built values with identical content would otherwise compare
     /// unequal. Every other field on every record here (strings, <see cref="SourceSpan"/>,
-    /// <see cref="Catalog.SqlType"/>, enums) IS safe under the compiler-generated equality, so
+    /// <see cref="TypeInference.SqlType"/>, enums) IS safe under the compiler-generated equality, so
     /// only the list-valued hops need this explicit recursion.
     /// </summary>
     public static bool StructurallyEqual(SqlTextValue a, SqlTextValue b) => (a, b) switch

@@ -1,4 +1,4 @@
-namespace SilentScan.Core.Catalog;
+namespace SilentScan.Core.TypeInference;
 
 /// <summary>
 /// Where a resolved column's <see cref="Collation"/> came from - surfaced on every finding that

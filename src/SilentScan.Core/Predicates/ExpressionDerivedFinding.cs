@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.Lineage;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -21,7 +22,7 @@ namespace SilentScan.Core.Predicates;
 /// <param name="DynamicSqlCallSite">Set when this finding was found inside a reparsed dynamic SQL script - where the EXEC/sp_executesql call site lives.</param>
 /// <param name="PredicateFragmentText">
 /// Roadmap Phase E3: the whole enclosing predicate (e.g. <c>v.ComputedCol = 5</c>), re-rendered
-/// to valid T-SQL text via <see cref="Rules.FragmentTextRenderer"/> at the moment this finding
+/// to valid T-SQL text via <see cref="Common.FragmentTextRenderer"/> at the moment this finding
 /// was recorded - null when the column was found outside any comparison this pass tracks the
 /// enclosing fragment for. Lets the corpus oracle actually probe this finding instead of only
 /// trusting the lineage classifier that detected it.

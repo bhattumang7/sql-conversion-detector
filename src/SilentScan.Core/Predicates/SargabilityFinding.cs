@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -27,7 +28,7 @@ namespace SilentScan.Core.Predicates;
 /// </param>
 /// <param name="PredicateFragmentText">
 /// Roadmap Phase E3: the exact fragment <see cref="NonSargablePredicateScanner"/> matched on,
-/// re-rendered to valid T-SQL text via <see cref="Rules.FragmentTextRenderer"/> - for
+/// re-rendered to valid T-SQL text via <see cref="Common.FragmentTextRenderer"/> - for
 /// <see cref="SargabilityFindingKind.LeadingWildcardLike"/>/<see
 /// cref="SargabilityFindingKind.LikePatternNotLiteral"/> this is the WHOLE LIKE predicate
 /// (already a complete, probeable boolean expression); for the other three kinds it is the bare

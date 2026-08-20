@@ -1,6 +1,7 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
 using SilentScan.Live.Catalog;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Catalog;
 

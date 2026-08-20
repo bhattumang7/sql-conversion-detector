@@ -5,6 +5,7 @@ using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Verify.Commands;
 using SilentScan.Verify.Oracle;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Verify;
 

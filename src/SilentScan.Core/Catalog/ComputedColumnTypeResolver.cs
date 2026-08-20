@@ -1,6 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Catalog;
 
@@ -8,7 +8,7 @@ namespace SilentScan.Core.Catalog;
 /// Infers a computed column's type from its defining expression (<c>Total AS (Price * Qty)</c>)
 /// - previously never attempted, so every computed column stayed Unknown forever regardless of
 /// how trivially inferable its expression was. Sibling column references, literals, CAST/
-/// CONVERT, arithmetic, and (via the shared <see cref="Rules.ExpressionTypeInferencer"/>, roadmap
+/// CONVERT, arithmetic, and (via the shared <see cref="TypeInference.ExpressionTypeInferencer"/>, roadmap
 /// Phase B) CASE/COALESCE/NULLIF/IIF are all resolved; an ordinary function call still resolves
 /// null (Unknown) here - a scalar UDF's return-type registry isn't built yet at this point in
 /// CatalogBuilder's pass ordering, and this pass never guesses.
@@ -79,10 +79,10 @@ internal static class ComputedColumnTypeResolver
     }
 
     /// <summary>
-    /// Delegates to the shared <see cref="Rules.ExpressionTypeInferencer"/> (roadmap Phase B) for
+    /// Delegates to the shared <see cref="TypeInference.ExpressionTypeInferencer"/> (roadmap Phase B) for
     /// every expression shape it owns (arithmetic, CASE/COALESCE/NULLIF/IIF, CAST/CONVERT,
     /// parenthesis/unary) - the leaf callback resolves a bare sibling-column reference or a
-    /// built-in function call via the same curated <see cref="Rules.BuiltinFunctionTypeResolver"/>
+    /// built-in function call via the same curated <see cref="TypeInference.BuiltinFunctionTypeResolver"/>
     /// table predicates and lineage both consult, so `Total AS (ISNULL(Price, 0) * Qty)` types
     /// identically to the same expression appearing in a view's SELECT list or a WHERE clause.
     /// A scalar UDF call still resolves Unknown here (never guessed): the return-type registry
@@ -91,7 +91,7 @@ internal static class ComputedColumnTypeResolver
     /// </summary>
     private static SqlType? Resolve(
         ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
-        Rules.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes, typeAliases), typeAliases);
+        TypeInference.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes, typeAliases), typeAliases);
 
     private static SqlType? ResolveLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) => expression switch
     {
@@ -107,12 +107,12 @@ internal static class ComputedColumnTypeResolver
     {
         var name = functionCall.FunctionName.Value;
 
-        if (Rules.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
+        if (TypeInference.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
         {
             var argumentType = Resolve(functionCall.Parameters[argumentIndex], columnTypes, typeAliases);
-            return argumentType is null ? null : Rules.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
+            return argumentType is null ? null : TypeInference.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
         }
 
-        return Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
+        return TypeInference.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
     }
 }

@@ -5,6 +5,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Reporting.Sarif;
 

@@ -1,3 +1,5 @@
+using SilentScan.Core.TypeInference;
+
 namespace SilentScan.Core.Catalog;
 
 /// <summary>

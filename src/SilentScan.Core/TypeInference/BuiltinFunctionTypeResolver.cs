@@ -1,6 +1,7 @@
 using SilentScan.Core.Catalog;
+using SilentScan.Core.TypeInference;
 
-namespace SilentScan.Core.Rules;
+namespace SilentScan.Core.TypeInference;
 
 /// <summary>
 /// Return types for a curated set of built-in T-SQL scalar functions and <c>@@</c> global

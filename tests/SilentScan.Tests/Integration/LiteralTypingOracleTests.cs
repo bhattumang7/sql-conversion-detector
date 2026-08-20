@@ -5,7 +5,7 @@ namespace SilentScan.Tests.Integration;
 
 /// <summary>
 /// docs/audit-remediation-plan.md Phase 5.3, audit finding C4: "Confirm each against the
-/// oracle before encoding." Locks in the exact facts <see cref="Rules.LiteralTypeResolver"/>
+/// oracle before encoding." Locks in the exact facts <see cref="TypeInference.LiteralTypeResolver"/>
 /// relies on, queried via sys.dm_exec_describe_first_result_set (no deployed schema needed -
 /// it type-checks a literal SELECT without executing it against any table).
 /// </summary>

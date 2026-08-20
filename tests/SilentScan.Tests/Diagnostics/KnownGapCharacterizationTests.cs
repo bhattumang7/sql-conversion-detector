@@ -2,6 +2,7 @@ using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Diagnostics;
 

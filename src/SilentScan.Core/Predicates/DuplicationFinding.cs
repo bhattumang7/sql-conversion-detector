@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 

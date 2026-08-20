@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
@@ -8,7 +9,7 @@ namespace SilentScan.Core.Predicates;
 /// (table + column name), HOW it's compared (operator), and WHAT it's compared against, described
 /// at the level of detail that actually decides the verdict (a type category and, for
 /// string-family operands, the collation) rather than incidental facts like the literal's exact
-/// text or source location. Deliberately excludes source position: <see cref="Reporting.TypedFindingDeduplicator"/>
+/// text or source location. Deliberately excludes source position: <see cref="TypedFindingDeduplicator"/>
 /// needs two textually-identical occurrences of the same defect (the same CREATE re-issued across
 /// several incremental upgrade scripts) to collapse to one, and <see cref="TypedPredicateFinding.Fingerprint"/>
 /// needs to stay stable across two scans of the same repo at the same commit even if an

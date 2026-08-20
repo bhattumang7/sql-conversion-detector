@@ -5,6 +5,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Rules;
 using SilentScan.Verify;
 using SilentScan.Verify.Deployment;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Bench.Execution;
 

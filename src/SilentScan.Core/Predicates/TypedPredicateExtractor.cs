@@ -4,6 +4,8 @@ using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -1206,7 +1208,7 @@ public static class TypedPredicateExtractor
             Findings.Add(new TypedPredicateFinding(
                 verdict, column, other, operatorText, sourcePath, node.StartLine, node.StartColumn,
                 UnknownReason: unknownReason,
-                PredicateFragmentText: _currentPredicateFragment is { } fragment ? Rules.FragmentTextRenderer.Render(fragment) : null,
+                PredicateFragmentText: _currentPredicateFragment is { } fragment ? Common.FragmentTextRenderer.Render(fragment) : null,
                 Fingerprint: TypedPredicateFindingIdentity.ComputeFingerprint(column, other, operatorText)));
 
             TryAddOversizedParameterFinding(column, other, otherIsLiteral, node);
@@ -1406,7 +1408,7 @@ public static class TypedPredicateExtractor
                         IsFormalParameter: _formalParameterNames.Contains(variableRef.Name));
 
                 case Literal literal:
-                    return new PredicateOperand.Value(Rules.LiteralTypeResolver.Resolve(literal), IsLiteral: true, Rules.LiteralTextRenderer.Render(literal));
+                    return new PredicateOperand.Value(TypeInference.LiteralTypeResolver.Resolve(literal), IsLiteral: true, Rules.LiteralTextRenderer.Render(literal));
 
                 case GlobalVariableExpression globalVariable:
                     return ResolveGlobalVariableOperand(globalVariable);
@@ -1463,11 +1465,11 @@ public static class TypedPredicateExtractor
 
         /// <summary>
         /// <c>@@SPID</c>, <c>@@ROWCOUNT</c>, etc. - typed from the curated, oracle-verified
-        /// table (<see cref="Rules.BuiltinFunctionTypeResolver"/>), never guessed.
+        /// table (<see cref="TypeInference.BuiltinFunctionTypeResolver"/>), never guessed.
         /// </summary>
         private PredicateOperand.Value ResolveGlobalVariableOperand(GlobalVariableExpression globalVariable)
         {
-            var type = Rules.BuiltinFunctionTypeResolver.ResolveGlobalVariable(globalVariable.Name);
+            var type = TypeInference.BuiltinFunctionTypeResolver.ResolveGlobalVariable(globalVariable.Name);
             if (type is null)
             {
                 ledger.Record(
@@ -1480,7 +1482,7 @@ public static class TypedPredicateExtractor
 
         /// <summary>
         /// A built-in scalar function call - typed from the curated, oracle-verified table
-        /// (<see cref="Rules.BuiltinFunctionTypeResolver"/>). ISNULL is the one function in that
+        /// (<see cref="TypeInference.BuiltinFunctionTypeResolver"/>). ISNULL is the one function in that
         /// table whose return type is its own first argument's type rather than a fixed type
         /// (oracle-verified: ISNULL never applies data type precedence across its arguments the
         /// way COALESCE does), so it recurses into that argument through the same operand
@@ -1493,14 +1495,14 @@ public static class TypedPredicateExtractor
         {
             var name = functionCall.FunctionName.Value;
 
-            if (Rules.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
+            if (TypeInference.BuiltinFunctionTypeResolver.TryGetArgumentTypeIndex(name) is { } argumentIndex && functionCall.Parameters.Count > argumentIndex)
             {
                 var argumentType = OperandType(ResolveOperand(functionCall.Parameters[argumentIndex], scopeChain));
-                argumentType = Rules.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
+                argumentType = TypeInference.BuiltinFunctionTypeResolver.AdjustArgumentTypeFunctionResult(name, argumentType);
                 return new PredicateOperand.Value(argumentType);
             }
 
-            var fixedType = Rules.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
+            var fixedType = TypeInference.BuiltinFunctionTypeResolver.ResolveFixedReturnType(name);
             if (fixedType is not null)
             {
                 return new PredicateOperand.Value(fixedType);
@@ -1745,7 +1747,7 @@ public static class TypedPredicateExtractor
 
             ExpressionDerivedFindings.Add(new ExpressionDerivedFinding(
                 columnName, sourcePath, columnRef.StartLine, columnRef.StartColumn, transformationChain, underlyingBaseColumns,
-                PredicateFragmentText: _currentPredicateFragment is { } fragment ? Rules.FragmentTextRenderer.Render(fragment) : null,
+                PredicateFragmentText: _currentPredicateFragment is { } fragment ? Common.FragmentTextRenderer.Render(fragment) : null,
                 ImmediateRelationQualifiedName: immediateRelation?.RelationQualifiedName,
                 ImmediateRelationAlias: immediateRelation is not null ? alias : null));
         }

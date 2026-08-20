@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
@@ -168,7 +169,7 @@ public enum QueryAntiPatternFindingKind
     /// <c>FROM dbo.Orders</c>) at a real query site - a <c>FROM</c>/<c>JOIN</c> table source, or an
     /// <c>INSERT</c>/<c>UPDATE</c>/<c>DELETE</c>/<c>MERGE</c> target/source - that genuinely
     /// resolves to a real base table via the catalog (default-schema resolution, the same
-    /// <see cref="Catalog.SchemaObjectNameHelper.Qualify"/> every other catalog-aware scanner in
+    /// <see cref="Common.SchemaObjectNameHelper.Qualify"/> every other catalog-aware scanner in
     /// this codebase already uses). Distinct from the already-shipped <see
     /// cref="NamingFindingKind.UnqualifiedCreate"/>, which is about the DEFINING statement
     /// (<c>CREATE PROCEDURE Foo</c>) picking an owning schema, not a query site referencing an

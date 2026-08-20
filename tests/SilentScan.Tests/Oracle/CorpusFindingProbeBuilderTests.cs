@@ -3,6 +3,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 using SilentScan.Verify.Oracle;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Oracle;
 

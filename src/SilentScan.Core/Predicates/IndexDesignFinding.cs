@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
@@ -164,7 +165,7 @@ public enum IndexDesignFindingKind
 
     /// <summary>
     /// A table with at least <see cref="Predicates.IndexDesignScanner.RatioChecksMinColumns"/>
-    /// columns has a string-family-column fraction (<see cref="Catalog.SqlType.IsStringFamily"/>)
+    /// columns has a string-family-column fraction (<see cref="TypeInference.SqlType.IsStringFamily"/>)
     /// at or above <see cref="Predicates.IndexDesignScanner.HighStringColumnRatioThreshold"/>. The
     /// same "listed for completeness" framing as <see cref="WideTable"/>: often correlates with
     /// under-typed data (dates/numbers/enums stored as text with no CHECK/FK narrowing) but this
@@ -273,8 +274,8 @@ public enum IndexDesignFindingKind
     /// key, both exact engine-stated ceilings reproduced verbatim from the oracle's own warning
     /// text. Catalog-only: reuses <see cref="Predicates.IndexDesignScanner.EstimateColumnKeyBytes"/>
     /// against each active (non-disabled) index's own key columns, restricted to
-    /// <see cref="Catalog.SqlTypeCategory.VarChar"/>/<see cref="Catalog.SqlTypeCategory.NVarChar"/>/
-    /// <see cref="Catalog.SqlTypeCategory.VarBinary"/> (non-MAX, since MAX already estimates
+    /// <see cref="TypeInference.SqlTypeCategory.VarChar"/>/<see cref="TypeInference.SqlTypeCategory.NVarChar"/>/
+    /// <see cref="TypeInference.SqlTypeCategory.VarBinary"/> (non-MAX, since MAX already estimates
     /// <see langword="null"/> and SQL Server refuses a MAX column as a key column outright - a
     /// separate, already-engine-blocked case, not this one).
     /// </summary>

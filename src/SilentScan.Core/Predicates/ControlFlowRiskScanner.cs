@@ -1,6 +1,7 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 

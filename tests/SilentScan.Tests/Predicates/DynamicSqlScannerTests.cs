@@ -3,6 +3,8 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Predicates.DynamicSqlValue;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Tests.Predicates;
 

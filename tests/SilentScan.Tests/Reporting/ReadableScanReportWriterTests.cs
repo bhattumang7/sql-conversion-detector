@@ -6,6 +6,7 @@ using SilentScan.Core.Reporting;
 using SilentScan.Core.Reporting.Readable;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Reporting;
 

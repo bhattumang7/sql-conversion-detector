@@ -1,5 +1,6 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Rules;
 
@@ -59,7 +60,7 @@ public static class WriteLossClassifier
 
     // Truncation toward zero, oracle-verified for both a genuinely approximate source
     // (REAL/FLOAT) and a NumericLiteral like `7.9` - which itself types as DECIMAL(2,1), not
-    // FLOAT (LiteralTypeResolver: only scientific notation types as float) - into any exact
+    // FLOAT (TypeInference.LiteralTypeResolver: only scientific notation types as float) - into any exact
     // integer target. IsWithinScaleLiteral(literal, 0) is "is this literal a whole number".
     private static bool IsApproximateTruncationRisk(SqlType target, SqlType source, Literal? literal) =>
         IsApproximateNumeric(source.Category) && IsExactIntegerCategory(target.Category) && !IsWithinScaleLiteral(literal, 0);
@@ -81,7 +82,7 @@ public static class WriteLossClassifier
 
     // A DATE/DATETIME/... source column resolves to a genuine temporal SqlType, but a string
     // literal used in a temporal context stays VARCHAR-typed by this tool's own convention
-    // (LiteralTypeResolver: "date literals stay strings until compared") - so the source-side
+    // (TypeInference.LiteralTypeResolver: "date literals stay strings until compared") - so the source-side
     // check has to accept a string family too, not just a widertemporal one, or every literal
     // DATE/DATETIME assignment would be invisible to this rule entirely.
     private static bool IsTemporalPrecisionLossRisk(SqlType target, SqlType source, Literal? literal) =>

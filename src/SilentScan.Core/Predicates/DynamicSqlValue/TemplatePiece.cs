@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
@@ -19,7 +20,7 @@ public abstract record TemplatePiece
     public sealed record Lit(string Text, SourceSpan Origin, int PrefixLength) : TemplatePiece;
 
     /// <summary>
-    /// A value with a known <see cref="Catalog.SqlType"/> but unknown content - never an untyped
+    /// A value with a known <see cref="TypeInference.SqlType"/> but unknown content - never an untyped
     /// unknown; if no type can be proven, the containing value becomes
     /// <see cref="SqlTextValue.Tainted"/> instead of a Hole. This mirrors
     /// <see cref="PlaceholderOccurrence"/>'s own non-nullable <c>Type</c>: only a typed unknown

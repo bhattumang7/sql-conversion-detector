@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
@@ -26,7 +27,7 @@ public abstract record BuiltinArgument
     /// <summary>
     /// Could not resolve to EITHER a concrete value or a typed hole - the containing call
     /// declines with this reason, unless its own spec can still use <paramref name="Type"/> (the
-    /// ORIGINATING <see cref="Catalog.SqlType"/>-typed variable's own declared type, when the
+    /// ORIGINATING <see cref="TypeInference.SqlType"/>-typed variable's own declared type, when the
     /// unresolved value came from one - e.g. a mixed literal+hole template built from a variable
     /// DECLAREd VARCHAR(200), or a Tainted value carrying its own <c>DeclaredType</c>). A builtin
     /// whose result type only depends on the source's TYPE, never its content (CAST/CONVERT's

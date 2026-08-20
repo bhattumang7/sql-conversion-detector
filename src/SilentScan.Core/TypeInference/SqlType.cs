@@ -1,4 +1,4 @@
-namespace SilentScan.Core.Catalog;
+namespace SilentScan.Core.TypeInference;
 
 /// <summary>
 /// A fully-resolved T-SQL scalar type: category plus the facets that affect

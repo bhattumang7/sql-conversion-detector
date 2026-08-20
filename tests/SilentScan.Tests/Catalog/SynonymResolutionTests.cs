@@ -3,6 +3,7 @@ using SilentScan.Core.Parsing;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
 using SilentScan.Tests.Support;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Tests.Catalog;
 

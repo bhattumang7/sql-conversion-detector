@@ -1,10 +1,10 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
-using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
 
-namespace SilentScan.Tests.Reporting;
+namespace SilentScan.Tests.Predicates;
 
 public sealed class TypedFindingDeduplicatorTests
 {

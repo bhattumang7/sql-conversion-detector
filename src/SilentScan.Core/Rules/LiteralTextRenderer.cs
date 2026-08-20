@@ -1,4 +1,5 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Rules;
 
@@ -9,7 +10,7 @@ namespace SilentScan.Core.Rules;
 /// can constant-fold differently than a literal (confirmed against the real engine: a bare
 /// string literal like N'x' types as nvarchar(8000) rather than the parameterized probe's
 /// content-length nvarchar(n), a real fidelity gap this exists to close). Covers exactly the
-/// literal kinds <see cref="LiteralTypeResolver.Resolve"/> types - kept in sync deliberately, so
+/// literal kinds <see cref="TypeInference.LiteralTypeResolver.Resolve"/> types - kept in sync deliberately, so
 /// "the type resolved" and "the text rendered" can never diverge for a supported literal kind.
 /// </summary>
 public static class LiteralTextRenderer

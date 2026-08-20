@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Verify.Oracle;
 

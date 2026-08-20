@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Verify.Oracle;
 

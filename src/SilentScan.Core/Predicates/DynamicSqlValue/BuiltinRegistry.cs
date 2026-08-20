@@ -1,5 +1,6 @@
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Predicates;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
@@ -219,7 +220,7 @@ public static class BuiltinRegistry
 
     /// <summary>
     /// DATEADD's result type is NOT argument-independent like the others above: oracle-verified
-    /// (same rule <see cref="Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult"/> already
+    /// (same rule <see cref="TypeInference.BuiltinFunctionTypeResolver.ResolveDateAddResult"/> already
     /// applies for typed-predicate purposes, reused here for consistency) - passes through the
     /// third argument's own type when it's already date/time-family, else resolves to plain
     /// datetime (the engine implicitly converts a numeric/string date argument). When the third
@@ -233,7 +234,7 @@ public static class BuiltinRegistry
         Evaluate: null,
         HoleTransfer: call => BuiltinFoldResult.OkHole(
             call.Arguments is [_, _, BuiltinArgument.Hole { Type: { } thirdArgumentType }]
-                ? Rules.BuiltinFunctionTypeResolver.ResolveDateAddResult(thirdArgumentType)
+                ? TypeInference.BuiltinFunctionTypeResolver.ResolveDateAddResult(thirdArgumentType)
                 : new SqlType(SqlTypeCategory.DateTime),
             call.Site,
             HoleKind.ArgumentIndependentReturnType),
@@ -299,7 +300,7 @@ public static class BuiltinRegistry
     /// <summary>
     /// A clean <see cref="BuiltinArgument.Hole"/> passes through directly. When the source isn't
     /// a Hole but IS an <see cref="BuiltinArgument.Unresolved"/> that still carries its
-    /// originating variable's own declared <see cref="Catalog.SqlType"/> (e.g. a VARCHAR(200)
+    /// originating variable's own declared <see cref="TypeInference.SqlType"/> (e.g. a VARCHAR(200)
     /// variable whose CONTENT is a mixed literal+hole template, or fully Tainted, but whose own
     /// DECLARE type is a hard fact regardless) - a builtin whose result type depends only on the
     /// source's TYPE, never its content, can still resolve from that type alone.

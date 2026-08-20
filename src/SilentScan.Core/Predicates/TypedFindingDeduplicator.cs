@@ -1,6 +1,4 @@
-using SilentScan.Core.Predicates;
-
-namespace SilentScan.Core.Reporting;
+namespace SilentScan.Core.Predicates;
 
 /// <summary>
 /// Collapses <see cref="TypedPredicateFinding"/>s that describe the SAME underlying defect -

@@ -3,6 +3,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Tests.Support;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Predicates;
 

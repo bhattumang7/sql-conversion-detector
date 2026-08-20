@@ -1,8 +1,8 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
-using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
 
-namespace SilentScan.Tests.Rules;
+namespace SilentScan.Tests.TypeInference;
 
 /// <summary>
 /// Direct unit tests against the shared expression engine, isolated from any pass-specific

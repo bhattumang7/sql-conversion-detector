@@ -5,6 +5,7 @@ using SilentScan.Live.Catalog;
 using SilentScan.Tests.Support;
 using SilentScan.Verify;
 using SilentScan.Verify.Deployment;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 

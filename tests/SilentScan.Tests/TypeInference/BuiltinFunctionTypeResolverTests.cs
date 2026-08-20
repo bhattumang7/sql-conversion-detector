@@ -1,7 +1,7 @@
 using SilentScan.Core.Catalog;
-using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
 
-namespace SilentScan.Tests.Rules;
+namespace SilentScan.Tests.TypeInference;
 
 /// <summary>
 /// The gap this fix closes: LEFT/RIGHT/SUBSTRING/STUFF/REPLACE genuinely change their result's

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Lineage;
 

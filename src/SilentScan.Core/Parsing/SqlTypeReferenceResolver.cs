@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
-using SilentScan.Core.Catalog;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Parsing;
 
@@ -12,8 +13,7 @@ public static class SqlTypeReferenceResolver
     /// <param name="dataType">The type as written in DDL.</param>
     /// <param name="columnCollation">The COLUMN's own COLLATE clause, if any is present on the declaration.</param>
     /// <param name="typeAliases">
-    /// CREATE TYPE ... FROM aliases discovered elsewhere in the scan (<see
-    /// cref="Catalog.DatabaseCatalog.TypeAliases"/>), keyed by qualified name - resolves
+    /// CREATE TYPE ... FROM aliases discovered elsewhere in the scan, keyed by qualified name - resolves
     /// <paramref name="dataType"/> through to its underlying built-in type when it references
     /// one (docs/audit-remediation-plan.md Phase 6.2). Null when the caller has no catalog
     /// available at this point in the pipeline (an alias reference there still resolves via the
@@ -29,7 +29,7 @@ public static class SqlTypeReferenceResolver
     /// "Explicit-length audit of CAST/CONVERT to a string type": an unsized
     /// <c>CAST(x AS VARCHAR)</c>/<c>CONVERT(VARCHAR, x)</c> silently means 30 characters, oracle-
     /// confirmed directly (all six string/binary-family types: CHAR/VARCHAR/NCHAR/NVARCHAR/
-    /// BINARY/VARBINARY), never length 1 - <see cref="Rules.ExpressionTypeInferencer"/> passes 30
+    /// BINARY/VARBINARY), never length 1 - <see cref="TypeInference.ExpressionTypeInferencer"/> passes 30
     /// here specifically for <c>CastCall</c>/<c>ConvertCall</c>, so the existing under-length/
     /// oversized-parameter comparison logic picks up the real effective length automatically,
     /// with no new finding type needed.

@@ -2,7 +2,6 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Parsing;
-using SilentScan.Core.Rules;
 
 namespace SilentScan.Core.Lineage;
 

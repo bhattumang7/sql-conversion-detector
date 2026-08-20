@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Rules;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 

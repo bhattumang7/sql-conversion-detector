@@ -4,6 +4,7 @@ using SilentScan.Core.Lineage;
 using SilentScan.Verify;
 using SilentScan.Verify.Deployment;
 using SilentScan.Verify.Oracle;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Tests.Integration;
 

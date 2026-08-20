@@ -1,4 +1,6 @@
 using SilentScan.Core.Diagnostics;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Catalog;
 

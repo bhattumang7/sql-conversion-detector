@@ -2,6 +2,8 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
@@ -1074,7 +1076,7 @@ public sealed class DynamicSqlCfg
     /// resolves, seeded as a typed <see cref="HoleKind.TryOnlyDeclaration"/> placeholder the
     /// moment CATCH's own state doesn't already have an entry for that name - i.e. only when
     /// nothing outside TRY (a pre-TRY DECLARE, or an outer-scope formal parameter) already
-    /// provides one. An untyped DECLARE (its <see cref="Catalog.SqlType"/> didn't resolve) is left
+    /// provides one. An untyped DECLARE (its <see cref="TypeInference.SqlType"/> didn't resolve) is left
     /// exactly as unseeded as it always was; this only recovers the case the old scanner recovered.
     /// </summary>
     private Action<Dictionary<string, SqlTextValue>, bool> SeedTryOnlyDeclarations(TryCatchStatement tryCatch)
@@ -1105,7 +1107,7 @@ public sealed class DynamicSqlCfg
 
     private sealed class DeclareVariableCollector : TSqlFragmentVisitor
     {
-        public List<(string Name, Catalog.SqlType Type)> Declarations { get; } = [];
+        public List<(string Name, TypeInference.SqlType Type)> Declarations { get; } = [];
 
         public override void ExplicitVisit(DeclareVariableStatement node)
         {

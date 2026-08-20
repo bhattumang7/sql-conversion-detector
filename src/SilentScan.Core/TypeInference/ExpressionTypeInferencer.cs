@@ -1,8 +1,9 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.TypeInference;
 
-namespace SilentScan.Core.Rules;
+namespace SilentScan.Core.TypeInference;
 
 /// <summary>
 /// Roadmap Phase B: the single shared authority for typing the scalar-expression shapes that
@@ -30,7 +31,7 @@ namespace SilentScan.Core.Rules;
 /// 1=1 THEN IntCol ELSE Decimal(9,2)Col END</c> resolves DECIMAL(12,2), not DECIMAL(9,2)) - this
 /// class returns the precedence winner's OWN declared facets unchanged, matching the identical
 /// simplification arithmetic combination already made before this class existed. This is safe
-/// for this tool's purposes: <see cref="VerdictClassifier"/> never consults precision/length in
+/// for this tool's purposes: <see cref="Rules.VerdictClassifier"/> never consults precision/length in
 /// a cross-category decision, only category and collation, so an imprecise facet never produces
 /// a wrong verdict - only a wrong facet display if one were ever surfaced literally (not
 /// currently done anywhere).
@@ -208,7 +209,7 @@ public static class ExpressionTypeInferencer
     /// precedence operand converts to the higher one's category (the same direction <see
     /// cref="SqlTypeCategory"/>'s ordinal already encodes). Same category with differing,
     /// both-resolved string collations is left null (Unknown) rather than guessed - the
-    /// identical coercibility gap <see cref="VerdictClassifier.ClassifySameCategory"/> already
+    /// identical coercibility gap <see cref="Rules.VerdictClassifier.ClassifySameCategory"/> already
     /// declines to resolve.
     /// </summary>
     private static SqlType? Combine(SqlType? left, SqlType? right)

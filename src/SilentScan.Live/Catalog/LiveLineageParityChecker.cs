@@ -2,6 +2,8 @@ using Microsoft.Data.SqlClient;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Verify.Catalog;
+using SilentScan.Core.TypeInference;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Live.Catalog;
 

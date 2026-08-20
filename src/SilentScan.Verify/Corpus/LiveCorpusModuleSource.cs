@@ -4,6 +4,7 @@ using SilentScan.Core.Corpus;
 using SilentScan.Core.Parsing;
 using SilentScan.Verify.Catalog;
 using SilentScan.Verify.Deployment;
+using SilentScan.Core.Common;
 
 namespace SilentScan.Verify.Corpus;
 

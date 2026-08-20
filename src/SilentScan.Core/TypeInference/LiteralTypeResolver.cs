@@ -1,7 +1,8 @@
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
+using SilentScan.Core.TypeInference;
 
-namespace SilentScan.Core.Rules;
+namespace SilentScan.Core.TypeInference;
 
 /// <summary>
 /// T-SQL literal typing rules (CLAUDE.md): N'x' = nvarchar, 'x' = varchar, integer literal =
