@@ -115,8 +115,10 @@ and returns findings; the pipeline owns everything else. Phases are ordered by
 value-per-line and are each independently shippable; do them in order, commit
 per phase (Phase 0 commits per fix).
 
-- [ ] **Phase 0 — precision hotfixes.** Straight bugs, no architecture; each
-      needs its fires/clean fixture pair per the working agreements.
+- [x] **Phase 0 — precision hotfixes.** Straight bugs, no architecture; each
+      needs its fires/clean fixture pair per the working agreements. Shipped —
+      every numbered item below landed; only the "deferred to their own
+      decision" trailer remains genuinely open.
       1. Shipped: all 16 `cteRelations: null` / `CteRelations: null` call
          sites across the original 11 scanners now resolve real CTE scope
          (`CteResolver.Resolve` over each statement's own
