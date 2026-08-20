@@ -112,7 +112,16 @@ internal static class SelectIntoColumnResolver
                 var qualifiedName = SchemaObjectNameHelper.Qualify(named.SchemaObject);
                 var table = catalog.Find(qualifiedName, scope);
                 var alias = named.Alias?.Value ?? SchemaObjectNameHelper.Resolve(named.SchemaObject).Name;
-                byAlias[alias] = table;
+
+                // A legal, if unusual, query - `FROM dbo.T JOIN audit.T ON ...` exposes two leaves
+                // under the same unqualified name (T), both unaliased. Silently last-wins here (the
+                // previous behavior) would make a later qualified reference like T.Col resolve
+                // against whichever leaf happened to be flattened last, attributing the column's
+                // type to the wrong table - the same poison rule FromScopeResolver.cs already
+                // applies for the identical ambiguity at the Lineage layer (its own doc comment:
+                // "poison the entry rather than guess which one a bare reference meant"). Poisoned
+                // to null - this resolver's own existing convention for "declined, never guessed."
+                byAlias[alias] = byAlias.ContainsKey(alias) ? null : table;
                 ordered.Add(table);
             }
         }

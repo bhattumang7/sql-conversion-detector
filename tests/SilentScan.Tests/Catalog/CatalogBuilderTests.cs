@@ -1035,6 +1035,56 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_SelectIntoWithAmbiguousUnaliasedJoinTables_QualifiedReferenceHasNoGuessedType()
+    {
+        // `FROM dbo.T JOIN audit.T ON ...` - two different tables sharing the same unqualified
+        // bare name T, neither aliased - exposes the identical alias ambiguity
+        // FromScopeResolver.cs's own poison rule already guards against at the Lineage layer.
+        // Silently last-wins (the previous behavior) would attribute Code's type to whichever of
+        // the two happened to be flattened last, regardless of which T.Code the query author meant.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(10) NOT NULL);
+                GO
+                CREATE TABLE audit.T (Id INT NOT NULL, Code INT NOT NULL);
+                GO
+                CREATE PROCEDURE dbo.usp_Snapshot
+                AS
+                BEGIN
+                    SELECT dbo.T.Code INTO #snapshot FROM dbo.T JOIN audit.T ON dbo.T.Id = audit.T.Id;
+                END
+                """)]);
+
+        var snapshot = catalog.Find("#snapshot", "dbo.usp_Snapshot")!;
+
+        Assert.Null(snapshot.FindColumn("Code")!.Type);
+    }
+
+    [Fact]
+    public void Build_SelectIntoWithDistinctAliases_StillResolvesQualifiedReference()
+    {
+        // Control: the same two-table join, but with real, distinct aliases - proves the fix
+        // above is scoped to the genuine ambiguity (an unaliased bare-name collision), not to
+        // joins in general.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(10) NOT NULL);
+                GO
+                CREATE TABLE audit.T (Id INT NOT NULL, Code INT NOT NULL);
+                GO
+                CREATE PROCEDURE dbo.usp_Snapshot
+                AS
+                BEGIN
+                    SELECT t1.Code INTO #snapshot FROM dbo.T t1 JOIN audit.T t2 ON t1.Id = t2.Id;
+                END
+                """)]);
+
+        var snapshot = catalog.Find("#snapshot", "dbo.usp_Snapshot")!;
+
+        Assert.Equal(SqlTypeCategory.VarChar, snapshot.FindColumn("Code")!.Type!.Category);
+    }
+
+    [Fact]
     public void Build_SelectIntoWithNonColumnExpression_TargetColumnHasNoGuessedType()
     {
         var catalog = CatalogBuilder.Build(
