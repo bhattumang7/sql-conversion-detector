@@ -1,5 +1,6 @@
 using Microsoft.Data.SqlClient;
 using SilentScan.Core.Predicates;
+using SilentScan.Verify.Catalog;
 
 namespace SilentScan.Live.Catalog;
 
@@ -34,14 +35,14 @@ public sealed class DatabaseConfigurationReader
         bool isAutoUpdateStatsOn;
         int compatibilityLevel;
 
-        await using (var command = new SqlCommand(
+        await using (var command = connection.CreateReadOnlyCommand(
             """
             SELECT name, page_verify_option_desc, is_auto_shrink_on, is_auto_close_on,
                    target_recovery_time_in_seconds, is_auto_create_stats_on, is_auto_update_stats_on,
                    compatibility_level
             FROM sys.databases
             WHERE database_id = DB_ID();
-            """, connection))
+            """))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken))
@@ -99,8 +100,8 @@ public sealed class DatabaseConfigurationReader
         // an unqualified, server-scoped sys.databases row visible from any database's connection,
         // no USE/context switch required, and is exactly what the engine itself clones every newly
         // created database from.
-        await using (var modelCommand = new SqlCommand(
-            "SELECT compatibility_level FROM sys.databases WHERE name = 'model';", connection))
+        await using (var modelCommand = connection.CreateReadOnlyCommand(
+            "SELECT compatibility_level FROM sys.databases WHERE name = 'model';"))
         await using (var modelReader = await modelCommand.ExecuteReaderAsync(cancellationToken))
         {
             if (await modelReader.ReadAsync(cancellationToken))
@@ -122,9 +123,8 @@ public sealed class DatabaseConfigurationReader
         // returns zero rows on an edition/engine that lacks Query Store entirely (Azure SQL DB
         // vs. on-prem SKUs historically differed here), which this query treats the same as "not
         // read-write" rather than erroring.
-        await using (var queryStoreCommand = new SqlCommand(
-            "SELECT actual_state_desc, query_capture_mode_desc FROM sys.database_query_store_options;",
-            connection))
+        await using (var queryStoreCommand = connection.CreateReadOnlyCommand(
+            "SELECT actual_state_desc, query_capture_mode_desc FROM sys.database_query_store_options;"))
         await using (var reader = await queryStoreCommand.ExecuteReaderAsync(cancellationToken))
         {
             var isReadWrite = false;
