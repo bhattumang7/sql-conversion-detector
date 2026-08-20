@@ -68,7 +68,7 @@ Competitor tools are referred to generically; real identities are in
 
 ### Docs
 
-- [ ] **Per-rule pages: fill the remaining ~161/234 rules.** Shipped:
+- [ ] **Per-rule pages: fill the remaining ~159/234 rules.** Shipped:
       `RuleDocSite` (`helpUri` scheme, wired into SARIF `rules[].helpUri` and
       `driver.informationUri`, plus `HumanizeTitle` so the index/page never
       show a raw `silentscan/family/name` id as the display label) with its
@@ -81,17 +81,17 @@ Competitor tools are referred to generically; real identities are in
       RuleDocs/RuleDocContent.cs`) — one hand-authored file per rule under
       `RuleDocs/<Family>/<RuleName>.cs`, wired into `RuleDocCatalog.ByRuleId`;
       `rules-doc` prunes orphaned pages; a docs-are-current regeneration test
-      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 73/234 rules
+      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 75/234 rules
       have a `RuleDocContent` entry today (tier1, verdict/scan-forced+range-
       seek, write-loss, tvf-fence, scalar-udf, a chunk of catalog/predicates/
       call-graph, query-anti-pattern, trigger-correctness, forced-serial,
-      cross-module, correctness/dml/join/query singles) — a rule with no
-      entry still renders (short rationale only, humanized title, no
-      fabricated fix/example section), just thinner. Remaining backlog:
-      index-design (~20), formatting/naming/dead-code/duplication/deprecated-
-      syntax/code-metrics (~50, lower value - mostly self-evident from their
-      name), statement-shape, control-flow-risk, security, database-
-      configuration, hint, session-date-setting, cartesian-join, undersized-
+      cross-module, correctness/dml/join/query singles, cartesian-join) — a
+      rule with no entry still renders (short rationale only, humanized
+      title, no fabricated fix/example section), just thinner. Remaining
+      backlog: index-design (~20), formatting/naming/dead-code/duplication/
+      deprecated-syntax/code-metrics (~50, lower value - mostly self-evident
+      from their name), statement-shape, control-flow-risk, security,
+      database-configuration, hint, session-date-setting, undersized-
       declaration, window-frame, view-ordering, module-compile-flag,
       dynamic-sql, lineage, and the rest of catalog (temporal-table-history-
       index-gap, cascading-fk, multi-referenced-cte, nested-view-depth,
