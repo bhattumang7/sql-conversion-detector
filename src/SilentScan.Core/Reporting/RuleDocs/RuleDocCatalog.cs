@@ -123,5 +123,9 @@ public static class RuleDocCatalog
         [Predicates.OversizedParameter.RuleId] = Predicates.OversizedParameter.Content,
         [Predicates.UnderLengthParameter.RuleId] = Predicates.UnderLengthParameter.Content,
         [Predicates.AnsiPaddingMismatch.RuleId] = Predicates.AnsiPaddingMismatch.Content,
+
+        // View
+        [View.TopPercentOrderByNeverLimits.RuleId] = View.TopPercentOrderByNeverLimits.Content,
+        [View.OrderByNotGuaranteedToConsumer.RuleId] = View.OrderByNotGuaranteedToConsumer.Content,
     };
 }
