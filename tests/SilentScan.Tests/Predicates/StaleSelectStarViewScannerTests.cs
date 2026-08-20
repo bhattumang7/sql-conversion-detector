@@ -87,6 +87,22 @@ public sealed class StaleSelectStarViewScannerTests
     }
 
     [Fact]
+    public void ViewSelectsFromOwnCteSharingNameWithUnrelatedRealTable_NeverMisattributed()
+    {
+        // The view's own "FROM Base" refers to its own CTE (itself sourced from dbo.Other), not
+        // the unrelated real dbo.Base - FindSingleBaseTable only inspects the outermost
+        // QueryExpression (never the separate WithCtesAndXmlNamespaces), so a CTE sharing a real
+        // table's bare name must be declined, not resolved against the catalog as if it were that
+        // real table.
+        var view = View("CREATE VIEW dbo.V AS WITH Base AS (SELECT Id, X FROM dbo.Other) SELECT * FROM Base;");
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
+        catalog.AddViewCompiledColumns("dbo.V", ["Id", "X"]);
+
+        Assert.Empty(StaleSelectStarViewScanner.Scan([view], catalog));
+    }
+
+    [Fact]
     public void ViewWithExplicitColumnList_NeverFires()
     {
         var view = View("CREATE VIEW dbo.V AS SELECT Id, A FROM dbo.Base;");

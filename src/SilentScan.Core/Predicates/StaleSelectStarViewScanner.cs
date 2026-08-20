@@ -27,7 +27,8 @@ public static class StaleSelectStarViewScanner
                 continue;
             }
 
-            if (FindSingleBaseTable(view.SelectStatement.QueryExpression) is not { } baseTableQualifiedName)
+            var cteNames = CteNamesOf(view.SelectStatement.WithCtesAndXmlNamespaces);
+            if (FindSingleBaseTable(view.SelectStatement.QueryExpression, cteNames) is not { } baseTableQualifiedName)
             {
                 continue;
             }
@@ -71,13 +72,29 @@ public static class StaleSelectStarViewScanner
             _ => null,
         };
 
-    /// <summary>Only a single, real, named base table (no join, no derived table, no CTE) qualifies - a documented v1 scope limit, matching <see cref="StaleSelectStarViewFinding"/>'s own doc comment.</summary>
-    private static string? FindSingleBaseTable(QueryExpression queryExpression) =>
+    /// <summary>
+    /// Only a single, real, named base table (no join, no derived table, no CTE) qualifies - a
+    /// documented v1 scope limit, matching <see cref="StaleSelectStarViewFinding"/>'s own doc
+    /// comment. An unqualified reference sharing one of the view's OWN CTE names is declined
+    /// rather than resolved against the catalog as if it were a real table sharing that name - a
+    /// CTE is never schema-qualified, so it always shadows a same-named real base table for the
+    /// view's own body (the same bug class fixed across every other FROM-clause resolver in this
+    /// codebase); this scanner inspects only <c>QueryExpression</c>, never the separate
+    /// <c>WithCtesAndXmlNamespaces</c> the CTE itself is declared on, so the check has to be
+    /// threaded in explicitly rather than falling out of the AST walk.
+    /// </summary>
+    private static string? FindSingleBaseTable(QueryExpression queryExpression, HashSet<string> cteNames) =>
         queryExpression switch
         {
-            QueryParenthesisExpression parenthesis => FindSingleBaseTable(parenthesis.QueryExpression),
-            QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } =>
+            QueryParenthesisExpression parenthesis => FindSingleBaseTable(parenthesis.QueryExpression, cteNames),
+            QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] }
+                when namedTable.SchemaObject.SchemaIdentifier is not null || !cteNames.Contains(namedTable.SchemaObject.BaseIdentifier.Value) =>
                 SchemaObjectNameHelper.Qualify(namedTable.SchemaObject),
             _ => null,
         };
+
+    private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
+        withClause is { CommonTableExpressions: { } ctes }
+            ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
+            : [];
 }
