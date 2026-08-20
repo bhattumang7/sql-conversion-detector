@@ -108,6 +108,8 @@ public static class RuleDocCatalog
         [Catalog.CrossTableFkTypeDrift.RuleId] = Catalog.CrossTableFkTypeDrift.Content,
         [CallGraph.ArgumentTypeMismatch.RuleId] = CallGraph.ArgumentTypeMismatch.Content,
         [Catalog.MaxTypedColumn.RuleId] = Catalog.MaxTypedColumn.Content,
+        [Catalog.RecompilesEveryCall.RuleId] = Catalog.RecompilesEveryCall.Content,
+        [Catalog.TableValuedFunctionReturnUsesDatabaseCollation.RuleId] = Catalog.TableValuedFunctionReturnUsesDatabaseCollation.Content,
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
 
         // Catalog constraints / Predicates estimate family
