@@ -4,6 +4,7 @@ using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
+using SilentScan.Core.Reporting.Sarif;
 
 namespace SilentScan.Core.Reporting.Readable;
 
@@ -449,6 +450,7 @@ public static class ReadableScanReportWriter
 
             yield return new ReadableBlock.Heading(level + 1, $"{Tier1Title(group.Key)} ({ordered.Count})");
             yield return new ReadableBlock.Paragraph(Tier1Explanation(group.Key));
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.Tier1RuleId(group.Key)));
             yield return new ReadableBlock.Table(
                 [WhereHeader, ColumnHeader, IndexedHeader, DetailHeader],
                 [.. ordered.Select(f => new List<string>
@@ -516,6 +518,7 @@ public static class ReadableScanReportWriter
                 .ToList();
 
             yield return new ReadableBlock.Heading(level + 1, $"{TvfFenceTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.TvfFenceRuleId(group.Key)));
             yield return new ReadableBlock.Table(
                 [WhereHeader, "Referenced", "Fence function", "Depth", "Origin", DetailHeader],
                 [.. ordered.Select(f => new List<string>
@@ -564,6 +567,7 @@ public static class ReadableScanReportWriter
                 .ToList();
 
             yield return new ReadableBlock.Heading(level + 1, $"{ScalarUdfTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ScalarUdfRuleId(group.Key)));
             yield return new ReadableBlock.Table(
                 [WhereHeader, "Function", "Context", "Inlineable", "Depth", "Origin", DetailHeader],
                 [.. ordered.Select(f => new List<string>
@@ -1322,6 +1326,7 @@ public static class ReadableScanReportWriter
             var ordered = group.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
 
             yield return new ReadableBlock.Heading(level + 1, $"{ForcedSerialTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.ForcedSerialRuleId(group.Key)));
             yield return new ReadableBlock.Table(
                 [WhereHeader, "Module", DetailHeader],
                 [.. ordered.Select(f => new List<string>
@@ -2093,6 +2098,7 @@ public static class ReadableScanReportWriter
             var ordered = group.OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column).ToList();
 
             yield return new ReadableBlock.Heading(level + 1, $"{SetOptionTitle(group.Key)} ({ordered.Count})");
+            yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.SetOptionRuleId(group.Key)));
             yield return new ReadableBlock.Table(
                 [WhereHeader, "Module", "Touched object", "Kind"],
                 [.. ordered.Select(f => new List<string>

@@ -19,6 +19,26 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
+- [ ] **Static risk factor: persisted computed column on a spatial expression,
+      disabled by a future compat-level change.** `sys.dm_db_objects_disabled_on_compatibility_level_change(@level)`
+      (real, documented: Microsoft Learn confirms it flags indexes/constraints
+      containing a persisted computed column whose expression uses a spatial
+      UDT method — dropping/disabling on a compat-level change) would be a
+      genuine, catalog-detectable static fact if it can be reproduced.
+      **Not yet confirmed real — 3 honest oracle attempts against the local
+      instance (2026-08-20) all returned zero rows**: a persisted computed
+      column calling `geography::STDistance()` with a supporting non-spatial
+      index, tested across two real compat-level downgrades (160→100,
+      160→120), never appeared in the DMV's own output, despite matching the
+      documented general shape. Either the real trigger needs a genuine
+      spatial index specifically (not a plain index on the computed column),
+      a different spatial method whose result actually differs across compat
+      levels, or a specific historical compat-level boundary this instance's
+      version range doesn't span. Do not build this rule until a real,
+      reproducing positive case is found — the DMV's existence and general
+      documented purpose are confirmed, but the exact firing condition isn't,
+      and this project ships nothing it can't oracle-confirm.
+
 - [ ] **Non-aligned index on a partitioned table.** Deferred for want of data,
       not design: the local test database has zero partitioned tables, so the
       rule would ship unexercised. Needs a partitioned-table corpus, plus new
@@ -94,12 +114,21 @@ Competitor tools are referred to generically; real identities are in
       title, no fabricated fix/example section), just thinner. Remaining
       backlog: formatting/dead-code/duplication/deprecated-syntax/
       code-metrics (~50, lower value - mostly self-evident from their name).
-      Also open: linking the rule
-      page from the readable/console report per finding group; `helpUri` on
-      the JSON findings schema. Do family-by-family, each its own commit (the
-      per-rule-file-in-its-own-class pattern parallelizes well across
-      subagents - each batch just needs the exact `SarifRuleCatalog` constant
-      + current Rationale/FixGuidance text per rule, handed out per family).
+      Also open: `helpUri` on the JSON findings schema (deliberately deferred
+      behind the later findings-schema-unification pass, not piecemeal). Do
+      family-by-family, each its own commit (the per-rule-file-in-its-own-class
+      pattern parallelizes well across subagents - each batch just needs the
+      exact `SarifRuleCatalog` constant + current Rationale/FixGuidance text
+      per rule, handed out per family).
+
+      Linking the rule page from the readable/console report: shipped for the
+      5 finding-group headings that carry a real `Kind`-driven rule ID at
+      their own call site (`Tier1Title`/`TvfFenceTitle`/`ScalarUdfTitle`/
+      `ForcedSerialTitle`/`SetOptionTitle` in `ReadableScanReportWriter.cs`),
+      via `RuleDocSite.Url(SarifRuleCatalog.*RuleId(group.Key))`. The other
+      ~79 group headings aggregate multiple rule IDs under one heading with
+      no single ID to hang a link on - linking those needs a real per-heading
+      rule-id redesign, not attempted here.
 
 ### Architecture inversion
 
