@@ -135,5 +135,9 @@ public static class RuleDocCatalog
         // Identity
         [Identity.RangeNearExhaustion.RuleId] = Identity.RangeNearExhaustion.Content,
         [Identity.SeedOrIncrementAnomaly.RuleId] = Identity.SeedOrIncrementAnomaly.Content,
+
+        // Declaration
+        [Declaration.UndersizedColumn.RuleId] = Declaration.UndersizedColumn.Content,
+        [Declaration.UndersizedVariableOrParameter.RuleId] = Declaration.UndersizedVariableOrParameter.Content,
     };
 }
