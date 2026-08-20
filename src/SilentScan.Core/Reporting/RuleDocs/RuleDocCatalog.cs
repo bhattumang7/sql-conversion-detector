@@ -222,5 +222,17 @@ public static class RuleDocCatalog
         [IndexDesign.HypotheticalIndex.RuleId] = IndexDesign.HypotheticalIndex.Content,
         [IndexDesign.ManyNonclusteredIndexes.RuleId] = IndexDesign.ManyNonclusteredIndexes.Content,
         [IndexDesign.ManyKeyColumnsIndex.RuleId] = IndexDesign.ManyKeyColumnsIndex.Content,
+        [IndexDesign.WideTable.RuleId] = IndexDesign.WideTable.Content,
+        [IndexDesign.HighNullableColumnRatio.RuleId] = IndexDesign.HighNullableColumnRatio.Content,
+        [IndexDesign.HighStringColumnRatio.RuleId] = IndexDesign.HighStringColumnRatio.Content,
+        [IndexDesign.FilterColumnNotInIndex.RuleId] = IndexDesign.FilterColumnNotInIndex.Content,
+        [IndexDesign.DeprecatedLobColumnType.RuleId] = IndexDesign.DeprecatedLobColumnType.Content,
+        [IndexDesign.TimestampColumnNaming.RuleId] = IndexDesign.TimestampColumnNaming.Content,
+        [IndexDesign.FloatOrRealIndexKeyColumn.RuleId] = IndexDesign.FloatOrRealIndexKeyColumn.Content,
+        [IndexDesign.NoRecomputeStatistics.RuleId] = IndexDesign.NoRecomputeStatistics.Content,
+        [IndexDesign.VariableLengthKeyColumnExceedsKeyLimit.RuleId] = IndexDesign.VariableLengthKeyColumnExceedsKeyLimit.Content,
+        [IndexDesign.MergeableIndexesDifferingIncludeOnly.RuleId] = IndexDesign.MergeableIndexesDifferingIncludeOnly.Content,
+        [IndexDesign.ColumnstoreIndexOnDmlTargetTable.RuleId] = IndexDesign.ColumnstoreIndexOnDmlTargetTable.Content,
+        [IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.RuleId] = IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.Content,
     };
 }
