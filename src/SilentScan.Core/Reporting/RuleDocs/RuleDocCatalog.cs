@@ -37,6 +37,8 @@ public static class RuleDocCatalog
         [Correctness.NotInNullableSubquery.RuleId] = Correctness.NotInNullableSubquery.Content,
         [Correctness.NonUniqueUpdateSource.RuleId] = Correctness.NonUniqueUpdateSource.Content,
         [Join.PartialCompositeForeignKeyJoin.RuleId] = Join.PartialCompositeForeignKeyJoin.Content,
+        [Join.CartesianCommaJoin.RuleId] = Join.CartesianCommaJoin.Content,
+        [Join.CartesianCrossJoin.RuleId] = Join.CartesianCrossJoin.Content,
         [Dml.SelfReferencingDml.RuleId] = Dml.SelfReferencingDml.Content,
         [Predicate.StringConcatNull.RuleId] = Predicate.StringConcatNull.Content,
         [Query.BareTopNoOrderBy.RuleId] = Query.BareTopNoOrderBy.Content,
