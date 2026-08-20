@@ -68,7 +68,7 @@ Competitor tools are referred to generically; real identities are in
 
 ### Docs
 
-- [ ] **Per-rule pages: fill the remaining ~91/234 rules.** Shipped:
+- [ ] **Per-rule pages: fill the remaining ~84/234 rules.** Shipped:
       `RuleDocSite` (`helpUri` scheme, wired into SARIF `rules[].helpUri` and
       `driver.informationUri`, plus `HumanizeTitle` so the index/page never
       show a raw `silentscan/family/name` id as the display label) with its
@@ -81,7 +81,7 @@ Competitor tools are referred to generically; real identities are in
       RuleDocs/RuleDocContent.cs`) — one hand-authored file per rule under
       `RuleDocs/<Family>/<RuleName>.cs`, wired into `RuleDocCatalog.ByRuleId`;
       `rules-doc` prunes orphaned pages; a docs-are-current regeneration test
-      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 143/234 rules
+      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 150/234 rules
       have a `RuleDocContent` entry today (tier1, verdict/scan-forced+range-
       seek, write-loss, tvf-fence, scalar-udf, a chunk of catalog/predicates/
       call-graph, query-anti-pattern, trigger-correctness, forced-serial,
@@ -89,15 +89,12 @@ Competitor tools are referred to generically; real identities are in
       naming, session-date-setting, hint, window-frame, view-ordering,
       temp-table, identity, declaration, security, module-compile-flag,
       control-flow-risk, statement-shape, database-configuration, lineage,
-      dynamic-sql) — a rule with no entry still renders (short rationale
-      only, humanized title, no fabricated fix/example section), just
-      thinner. Remaining backlog: index-design (~20), formatting/dead-code/
-      duplication/deprecated-syntax/code-metrics (~50, lower value - mostly
-      self-evident from their name), and the rest of catalog
-      (temporal-table-history-
-      index-gap, cascading-fk, select-star-view/stale variant, try-cast-
-      computed-column, non-persisted-computed-column, security-predicate-
-      index, aggregate-division-columnstore). Also open: linking the rule
+      dynamic-sql, the rest of catalog/predicate singles) — a rule with no
+      entry still renders (short rationale only, humanized title, no
+      fabricated fix/example section), just thinner. Remaining backlog:
+      index-design (~20), formatting/dead-code/duplication/deprecated-syntax/
+      code-metrics (~50, lower value - mostly self-evident from their
+      name). Also open: linking the rule
       page from the readable/console report per finding group; `helpUri` on
       the JSON findings schema. Do family-by-family, each its own commit (the
       per-rule-file-in-its-own-class pattern parallelizes well across
