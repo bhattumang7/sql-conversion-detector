@@ -194,4 +194,22 @@ public sealed class SelfReferencingDmlScannerTests
 
         Assert.Single(findings);
     }
+
+    [Fact]
+    public void ReadSideReferenceIsACteSharingTheTargetsOwnBareName_NeverFires()
+    {
+        // The SET clause's subquery references "T" - inside this statement's own WITH clause,
+        // that name is shadowed by the CTE (itself sourced from dbo.Other, never dbo.T), so the
+        // subquery never actually re-reads the real target dbo.T at all. A CTE is never schema-
+        // qualified, so an unqualified read-side reference whose bare name happens to match the
+        // target's own base identifier must be checked against the statement's own CTE names
+        // before being treated as a same-table match.
+        var findings = Scan(
+            """
+            ;WITH T AS (SELECT Id FROM dbo.Other)
+            UPDATE dbo.T SET Val = (SELECT COUNT(*) FROM T);
+            """);
+
+        Assert.Empty(findings);
+    }
 }

@@ -38,10 +38,11 @@ public static class SelfReferencingDmlScanner
             if (spec.Target is NamedTableReference targetRef)
             {
                 var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(targetRef.SchemaObject));
+                var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
 
                 // ValuesInsertSource/ExecuteInsertSource carry no table reference of their own to
                 // re-read the target through - only a SELECT-sourced INSERT can self-reference.
-                var match = spec.InsertSource is SelectInsertSource select ? FindMatchInFragment(select.Select, targetQualifiedName) : null;
+                var match = spec.InsertSource is SelectInsertSource select ? FindMatchInFragment(select.Select, targetQualifiedName, cteNames) : null;
                 Report(match, "INSERT", targetQualifiedName, node);
             }
 
@@ -53,10 +54,11 @@ public static class SelfReferencingDmlScanner
             var spec = node.UpdateSpecification;
             if (ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
-                var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName)
-                    ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName)
+                var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
+                var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName, cteNames)
+                    ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName, cteNames)
                     ?? spec.SetClauses.OfType<AssignmentSetClause>()
-                        .Select(sc => FindMatchInFragment(sc.NewValue, targetQualifiedName))
+                        .Select(sc => FindMatchInFragment(sc.NewValue, targetQualifiedName, cteNames))
                         .FirstOrDefault(m => m is not null);
                 Report(match, "UPDATE", targetQualifiedName, node);
             }
@@ -69,8 +71,9 @@ public static class SelfReferencingDmlScanner
             var spec = node.DeleteSpecification;
             if (ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
-                var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName)
-                    ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName);
+                var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
+                var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName, cteNames)
+                    ?? FindMatchInFragment(spec.WhereClause, targetQualifiedName, cteNames);
                 Report(match, "DELETE", targetQualifiedName, node);
             }
 
@@ -82,16 +85,29 @@ public static class SelfReferencingDmlScanner
             var spec = node.MergeSpecification;
             if (ResolveMergeTarget(spec, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
-                var match = FindMatchInFragment(spec.TableReference, targetQualifiedName)
-                    ?? FindMatchInFragment(spec.SearchCondition, targetQualifiedName)
+                var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
+                var match = FindMatchInFragment(spec.TableReference, targetQualifiedName, cteNames)
+                    ?? FindMatchInFragment(spec.SearchCondition, targetQualifiedName, cteNames)
                     ?? spec.ActionClauses
-                        .Select(actionClause => FindMatchInFragment(actionClause, targetQualifiedName))
+                        .Select(actionClause => FindMatchInFragment(actionClause, targetQualifiedName, cteNames))
                         .FirstOrDefault(m => m is not null);
                 Report(match, "MERGE", targetQualifiedName, node);
             }
 
             base.ExplicitVisit(node);
         }
+
+        /// <summary>
+        /// The statement's own declared CTE names, name-only (mirrors <c>ResolutionContext</c>'s
+        /// own CTE-shadowing doc comment above, applied to the READ side rather than the target).
+        /// An unqualified read-side reference sharing a CTE's bare name is never the same table as
+        /// an identically-named real one - <see cref="TryClassify"/> declines it rather than
+        /// resolving through the catalog.
+        /// </summary>
+        private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
+            withClause is { CommonTableExpressions: { } ctes }
+                ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
+                : [];
 
         private void Report(SelfReferencingDmlFinding? match, string statementKind, string targetQualifiedName, TSqlFragment locationNode)
         {
@@ -144,7 +160,7 @@ public static class SelfReferencingDmlScanner
         /// duplicating within one FROM clause) is skipped exactly once so it is never mistaken for
         /// a re-read of itself; every other entry is a genuine extra read.
         /// </summary>
-        private SelfReferencingDmlFinding? FindMatchInFromClauseExtras(FromClause? fromClause, TableReference target, string targetQualifiedName)
+        private SelfReferencingDmlFinding? FindMatchInFromClauseExtras(FromClause? fromClause, TableReference target, string targetQualifiedName, HashSet<string> cteNames)
         {
             if (fromClause is null)
             {
@@ -166,7 +182,7 @@ public static class SelfReferencingDmlScanner
                     continue;
                 }
 
-                if (TryClassify(reference, targetQualifiedName) is { } finding)
+                if (TryClassify(reference, targetQualifiedName, cteNames) is { } finding)
                 {
                     return finding;
                 }
@@ -176,7 +192,7 @@ public static class SelfReferencingDmlScanner
         }
 
         /// <summary>Walks an arbitrary read-side fragment (a subquery, a SET-clause new value, a MERGE action body) with no skip logic at all - the write target's own reference is never part of any of these fragments, so every match found here is a genuine, unambiguous extra read.</summary>
-        private SelfReferencingDmlFinding? FindMatchInFragment(TSqlFragment? fragment, string targetQualifiedName)
+        private SelfReferencingDmlFinding? FindMatchInFragment(TSqlFragment? fragment, string targetQualifiedName, HashSet<string> cteNames)
         {
             if (fragment is null)
             {
@@ -187,12 +203,24 @@ public static class SelfReferencingDmlScanner
             fragment.Accept(collector);
 
             return collector.References
-                .Select(reference => TryClassify(reference, targetQualifiedName))
+                .Select(reference => TryClassify(reference, targetQualifiedName, cteNames))
                 .FirstOrDefault(finding => finding is not null);
         }
 
-        private SelfReferencingDmlFinding? TryClassify(NamedTableReference reference, string targetQualifiedName)
+        /// <summary>
+        /// A read-side reference whose bare name is unqualified and matches one of the
+        /// statement's own CTEs is never a real re-read of an identically-named base table - a
+        /// CTE is never schema-qualified, so it always shadows a same-named real table for this
+        /// statement's own lifetime (mirrors <see cref="ResolutionContext"/>'s own doc comment,
+        /// applied to the read side rather than the target).
+        /// </summary>
+        private SelfReferencingDmlFinding? TryClassify(NamedTableReference reference, string targetQualifiedName, HashSet<string> cteNames)
         {
+            if (reference.SchemaObject.SchemaIdentifier is null && cteNames.Contains(reference.SchemaObject.BaseIdentifier.Value))
+            {
+                return null;
+            }
+
             var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(reference.SchemaObject));
 
             if (string.Equals(qualifiedName, targetQualifiedName, StringComparison.OrdinalIgnoreCase))
