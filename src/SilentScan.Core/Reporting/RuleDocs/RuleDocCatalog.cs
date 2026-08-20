@@ -43,6 +43,24 @@ public static class RuleDocCatalog
         [Dml.SelfReferencingDml.RuleId] = Dml.SelfReferencingDml.Content,
         [Index.KeyLookupProneIndex.RuleId] = Index.KeyLookupProneIndex.Content,
         [Predicate.StringConcatNull.RuleId] = Predicate.StringConcatNull.Content,
+
+        // Naming
+        [Naming.ReservedKeywordAsIdentifier.RuleId] = Naming.ReservedKeywordAsIdentifier.Content,
+        [Naming.SpPrefixOnUserRoutine.RuleId] = Naming.SpPrefixOnUserRoutine.Content,
+        [Naming.UnqualifiedCreate.RuleId] = Naming.UnqualifiedCreate.Content,
+        [Naming.RedundantTypeQualifier.RuleId] = Naming.RedundantTypeQualifier.Content,
+
+        // SessionDate
+        [SessionDate.SetDateFormat.RuleId] = SessionDate.SetDateFormat.Content,
+        [SessionDate.SetDateFirst.RuleId] = SessionDate.SetDateFirst.Content,
+
+        // Hint
+        [Hint.IndexDoesNotExist.RuleId] = Hint.IndexDoesNotExist.Content,
+        [Hint.HintedIndexNotSeekable.RuleId] = Hint.HintedIndexNotSeekable.Content,
+
+        // WindowFrame
+        [WindowFrame.ExplicitRangeFrame.RuleId] = WindowFrame.ExplicitRangeFrame.Content,
+        [WindowFrame.ImplicitDefaultRangeFrame.RuleId] = WindowFrame.ImplicitDefaultRangeFrame.Content,
         [Query.BareTopNoOrderBy.RuleId] = Query.BareTopNoOrderBy.Content,
 
         // QueryAntiPattern
