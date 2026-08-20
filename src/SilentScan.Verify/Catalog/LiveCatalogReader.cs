@@ -887,16 +887,29 @@ public sealed class LiveCatalogReader
         // only clustering is a CCI must never be misread as a heap because its one clustered
         // index vanished from this list. ic.index_column_id/c.name are null for such a row - the
         // loop below guards both.
+        // ds/pc join for docs/detection-checklist.md "Non-aligned index on a partitioned table" -
+        // ds.name only counts as a partition scheme when ds.type = 'PS' (a plain single-filegroup
+        // index's own data_space_id points at an 'FG' row instead, deliberately read as no scheme
+        // name at all rather than the filegroup's own name - see CatalogIndex.PartitionSchemeName's
+        // own doc comment); pc.name is the column at partition_ordinal = 1 for THIS index's own
+        // sys.index_columns rows, confirmed directly against the standing Docker instance
+        // (2026-08-20) to differ from the table's own partitioning column even when two indexes
+        // share the identical partition scheme object.
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
                    i.is_hypothetical, i.filter_definition, i.optimize_for_sequential_key,
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name,
-                   ic.is_descending_key
+                   ic.is_descending_key,
+                   CASE WHEN ds.type = 'PS' THEN ds.name ELSE NULL END AS partition_scheme_name,
+                   pc.name AS partitioning_column_name
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
             LEFT JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
             LEFT JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            LEFT JOIN sys.data_spaces ds ON ds.data_space_id = i.data_space_id
+            LEFT JOIN sys.index_columns pic ON pic.object_id = i.object_id AND pic.index_id = i.index_id AND pic.partition_ordinal = 1
+            LEFT JOIN sys.columns pc ON pc.object_id = pic.object_id AND pc.column_id = pic.column_id
             WHERE t.is_ms_shipped = 0 AND i.type_desc <> 'HEAP'
             ORDER BY i.object_id, i.index_id, ic.index_column_id;
             """;
@@ -926,6 +939,8 @@ public sealed class LiveCatalogReader
         {
             var indexName = await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetString(2);
             var filterDefinition = await reader.IsDBNullAsync(10, cancellationToken) ? null : reader.GetString(10);
+            var partitionSchemeName = await reader.IsDBNullAsync(17, cancellationToken) ? null : reader.GetString(17);
+            var partitioningColumnName = await reader.IsDBNullAsync(18, cancellationToken) ? null : reader.GetString(18);
             row = new IndexRow(
                 Name: indexName,
                 TypeDesc: reader.GetString(3),
@@ -938,7 +953,9 @@ public sealed class LiveCatalogReader
                 KeyColumns: [],
                 IncludedColumns: [],
                 FilterDefinition: filterDefinition,
-                OptimizeForSequentialKey: reader.GetBoolean(11));
+                OptimizeForSequentialKey: reader.GetBoolean(11),
+                PartitionSchemeName: partitionSchemeName,
+                PartitioningColumnName: partitioningColumnName);
             rowsByIndex[key] = row;
         }
 
@@ -990,7 +1007,9 @@ public sealed class LiveCatalogReader
                 IsHypothetical: row.IsHypothetical,
                 FilterDefinition: row.FilterDefinition,
                 KeyColumnIsDescendingRaw: orderedKeyColumns.Count > 0 ? orderedDescendingFlags : [],
-                OptimizeForSequentialKey: row.OptimizeForSequentialKey);
+                OptimizeForSequentialKey: row.OptimizeForSequentialKey,
+                PartitionSchemeName: row.PartitionSchemeName,
+                PartitioningColumnName: row.PartitioningColumnName);
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -1078,7 +1097,12 @@ public sealed class LiveCatalogReader
         // Same reasoning again - only ReadIndexesAsync's own query reads
         // optimize_for_sequential_key; ReadIndexedViewsAsync never sets it (an indexed view's own
         // clustered index is never the "monotonic clustered key" shape this field exists for).
-        bool OptimizeForSequentialKey = false);
+        bool OptimizeForSequentialKey = false,
+        // Same reasoning again - only ReadIndexesAsync's own query reads the partition-scheme/
+        // partitioning-column pair; ReadIndexedViewsAsync never sets either (an indexed view is
+        // never itself a partitioned base table).
+        string? PartitionSchemeName = null,
+        string? PartitioningColumnName = null);
 
     /// <summary>
     /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead

@@ -235,5 +235,6 @@ public static class RuleDocCatalog
         [IndexDesign.MergeableIndexesDifferingIncludeOnly.RuleId] = IndexDesign.MergeableIndexesDifferingIncludeOnly.Content,
         [IndexDesign.ColumnstoreIndexOnDmlTargetTable.RuleId] = IndexDesign.ColumnstoreIndexOnDmlTargetTable.Content,
         [IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.RuleId] = IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.Content,
+        [IndexDesign.NonAlignedPartitionedIndex.RuleId] = IndexDesign.NonAlignedPartitionedIndex.Content,
     };
 }

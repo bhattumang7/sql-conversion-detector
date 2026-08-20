@@ -82,6 +82,22 @@ namespace SilentScan.Core.Catalog;
 /// to <see langword="false"/> so file mode (which never sets it) reads as "not yet on" rather than
 /// crashing; file mode never invokes the scanner that reads this field at all (see that scanner's
 /// own doc comment).
+///
+/// <paramref name="PartitionSchemeName"/>/<paramref name="PartitioningColumnName"/>
+/// (docs/detection-checklist.md "Non-aligned index on a partitioned table") are
+/// <c>sys.data_spaces.name</c> (only when <c>sys.data_spaces.type = 'PS'</c> - a plain single-
+/// filegroup index reads <see langword="null"/> here, not the filegroup's own name) and the column
+/// name at <c>sys.index_columns.partition_ordinal = 1</c> for this exact index, joined off this
+/// index's own <c>data_space_id</c> - confirmed directly against the standing Docker instance
+/// (2026-08-20): a nonclustered index left on <c>[PRIMARY]</c> while its base table is partitioned
+/// reads a real, different <c>data_space_id</c> (type <c>FG</c>) from the table's own partitioned
+/// storage (type <c>PS</c>), and a nonclustered index built on the SAME partition scheme object but
+/// keyed on a different column than the table's own partitioning column also reads a different
+/// <see cref="PartitioningColumnName"/> despite sharing <see cref="PartitionSchemeName"/> - both are
+/// genuine non-alignment, so <see cref="Predicates.IndexDesignScanner"/> checks both fields, never
+/// scheme identity alone. Live-only, same discipline as <see cref="IsClustered"/>; both default to
+/// <see langword="null"/> so file mode (which never sets either) never misreads a partitioned table
+/// at all - it degrades to "no partitioning claim" rather than a false "this is non-aligned".
 /// </summary>
 public sealed record CatalogIndex(
     string? Name,
@@ -96,7 +112,9 @@ public sealed record CatalogIndex(
     bool IsHypothetical = false,
     string? FilterDefinition = null,
     IReadOnlyList<bool>? KeyColumnIsDescendingRaw = null,
-    bool OptimizeForSequentialKey = false)
+    bool OptimizeForSequentialKey = false,
+    string? PartitionSchemeName = null,
+    string? PartitioningColumnName = null)
 {
     /// <summary>
     /// Positional parameter is nullable (<see cref="KeyColumnIsDescendingRaw"/>) purely so every

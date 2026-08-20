@@ -280,6 +280,7 @@ public static class SarifRuleCatalog
         IndexDesignFindingKind.MergeableIndexesDifferingIncludeOnly => "silentscan/index-design/mergeable-indexes-differing-include-only",
         IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable => "silentscan/index-design/columnstore-index-on-dml-target-table",
         IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization => "silentscan/index-design/monotonic-clustered-key-missing-sequential-optimization",
+        IndexDesignFindingKind.NonAlignedPartitionedIndex => "silentscan/index-design/non-aligned-partitioned-index",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 

@@ -23,6 +23,7 @@ public sealed class IndexDesignScannerTests
         new(name, type, isNullable, IsIdentity: false, IsComputed: false, IsPersisted: false);
 
     private static readonly SqlType IntType = new(SqlTypeCategory.Int);
+    private static readonly SqlType DateType = new(SqlTypeCategory.Date);
     private static readonly SqlType GuidType = new(SqlTypeCategory.UniqueIdentifier);
 
     [Fact]
@@ -1139,5 +1140,95 @@ public sealed class IndexDesignScannerTests
         var findings = IndexDesignScanner.Scan(catalog);
 
         Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization);
+    }
+
+    // docs/detection-checklist.md "Non-aligned index on a partitioned table" - NonAlignedPartitionedIndex.
+    [Fact]
+    public void NonclusteredIndexOnSingleFilegroup_WhileTablePartitioned_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        var clustered = new CatalogIndex(
+            "PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderDate", "OrderId"], [],
+            IsClustered: true, PartitionSchemeName: "PsOrderDate", PartitioningColumnName: "OrderDate");
+        var nonAligned = new CatalogIndex(
+            "IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], [],
+            PartitionSchemeName: null, PartitioningColumnName: null);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderDate", DateType), Column("OrderId", IntType), Column("Region", IntType)], [clustered, nonAligned]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndexDesignFindingKind.NonAlignedPartitionedIndex, finding.Kind);
+        Assert.Equal("IX_Orders_Region", finding.IndexName);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void NonclusteredIndexOnSamePartitionScheme_KeyedOnDifferentColumn_Fires()
+    {
+        // Confirmed directly against a real engine (2026-08-20): sharing the same partition
+        // scheme OBJECT is not enough - the index's own partitioning column must match the
+        // table's, or its partitions don't actually line up with the table's data.
+        var catalog = new DatabaseCatalog();
+        var clustered = new CatalogIndex(
+            "PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderDate", "OrderId"], [],
+            IsClustered: true, PartitionSchemeName: "PsOrderDate", PartitioningColumnName: "OrderDate");
+        var nonAligned = new CatalogIndex(
+            "IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], [],
+            PartitionSchemeName: "PsOrderDate", PartitioningColumnName: "Region");
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderDate", DateType), Column("OrderId", IntType), Column("Region", IntType)], [clustered, nonAligned]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(IndexDesignFindingKind.NonAlignedPartitionedIndex, finding.Kind);
+    }
+
+    [Fact]
+    public void NonclusteredIndexAlignedOnSameSchemeAndColumn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        var clustered = new CatalogIndex(
+            "PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderDate", "OrderId"], [],
+            IsClustered: true, PartitionSchemeName: "PsOrderDate", PartitioningColumnName: "OrderDate");
+        var aligned = new CatalogIndex(
+            "IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], [],
+            PartitionSchemeName: "PsOrderDate", PartitioningColumnName: "OrderDate");
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderDate", DateType), Column("OrderId", IntType), Column("Region", IntType)], [clustered, aligned]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.NonAlignedPartitionedIndex);
+    }
+
+    [Fact]
+    public void UnpartitionedTable_NeverFiresNonAligned()
+    {
+        // The table's own clustered index carries no partition scheme at all - nothing to check
+        // alignment against, never guessed at.
+        var catalog = new DatabaseCatalog();
+        var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderId"], [], IsClustered: true);
+        var nonclustered = new CatalogIndex("IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], []);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderId", IntType), Column("Region", IntType)], [clustered, nonclustered]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.NonAlignedPartitionedIndex);
+    }
+
+    [Fact]
+    public void PartitionedHeap_NeverFiresNonAligned()
+    {
+        // No clustered index at all - a partitioned heap is out of scope for this alignment
+        // check, since it has no anchor to compare other indexes against.
+        var catalog = new DatabaseCatalog();
+        var nonAligned = new CatalogIndex(
+            "IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], [],
+            PartitionSchemeName: null, PartitioningColumnName: null);
+        catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderId", IntType), Column("Region", IntType)], [nonAligned]));
+
+        var findings = IndexDesignScanner.Scan(catalog);
+
+        Assert.DoesNotContain(findings, f => f.Kind == IndexDesignFindingKind.NonAlignedPartitionedIndex);
     }
 }

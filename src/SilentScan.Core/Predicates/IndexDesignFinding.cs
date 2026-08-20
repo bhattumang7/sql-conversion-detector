@@ -350,6 +350,30 @@ public enum IndexDesignFindingKind
     /// non-IDENTITY column is monotonic from the catalog alone without risking a false positive.
     /// </summary>
     MonotonicClusteredKeyMissingSequentialOptimization,
+
+    /// <summary>
+    /// docs/detection-checklist.md "Non-aligned index on a partitioned table". The base table is
+    /// genuinely partitioned - its own clustered (non-columnstore) index carries a real
+    /// <see cref="Catalog.CatalogIndex.PartitionSchemeName"/> - but another active index on the
+    /// same table is NOT aligned with it: either that index sits on a plain, unpartitioned
+    /// filegroup while the table itself is partitioned, or it shares the identical partition
+    /// scheme object but is keyed on a different column than the table's own partitioning column.
+    /// Both shapes confirmed as real, catalog-visible, distinct <c>sys.data_spaces</c> facts
+    /// directly against the standing Docker instance (2026-08-20; see
+    /// <see cref="Catalog.CatalogIndex.PartitionSchemeName"/>'s own doc comment for the exact
+    /// probe). This is documented, standard SQL Server terminology ("aligned"/"non-aligned"
+    /// index) - Microsoft's own documentation states a non-aligned index cannot participate in a
+    /// partition SWITCH against the table at all, and per-partition maintenance (rebuild/
+    /// reorganize one partition) degrades to a full-index operation for a non-aligned index
+    /// specifically, since the engine has no per-partition boundary to act on for it; only the
+    /// catalog shape (not the SWITCH failure itself) was independently confirmed here. Scoped to
+    /// the table's own CLUSTERED, non-columnstore index as the alignment reference only - a
+    /// partitioned heap (no clustered index at all) is out of scope, the same "never guess without
+    /// an anchor" limit this scanner's clustering-key-quality checks already apply elsewhere; a
+    /// columnstore candidate index is excluded from the comparison for the same reason columnstore
+    /// is excluded from every other structural key-shape check in this file.
+    /// </summary>
+    NonAlignedPartitionedIndex,
 }
 
 /// <summary>
@@ -402,7 +426,7 @@ public enum IndexDesignFindingKind
 /// Catalog-only, no AST walk of any kind except <see cref="IndexDesignFindingKind.FilterColumnNotInIndex"/>'s
 /// own throwaway reparse of a filter's stored definition TEXT (not a query-site AST - the
 /// distinction <see cref="SchemaDependencyScanner"/> already draws for CHECK constraints) - every
-/// other one of these eighteen kinds is a structural fact about
+/// other one of these nineteen kinds is a structural fact about
 /// about <see cref="Catalog.DatabaseCatalog.Tables"/>/<see cref="Catalog.DatabaseCatalog.ForeignKeys"/>
 /// alone, computed once by <see cref="IndexDesignScanner"/>. Live-mode only by construction: <see
 /// cref="Catalog.CatalogIndex.IsClustered"/>/<see cref="Catalog.CatalogIndex.IsHypothetical"/>/<see
@@ -455,9 +479,12 @@ public enum IndexDesignFindingKind
 /// parses) and <see cref="IndexDesignFindingKind.DeprecatedLobColumnType"/>/<see
 /// cref="IndexDesignFindingKind.FloatOrRealIndexKeyColumn"/> (plain declared-type facts). <see
 /// cref="FindingConfidence.Low"/> for <see cref="IndexDesignFindingKind.TimestampColumnNaming"/> -
-/// a naming-only recommendation, not a defect.
+/// a naming-only recommendation, not a defect. <see cref="FindingConfidence.High"/> again for
+/// <see cref="IndexDesignFindingKind.NonAlignedPartitionedIndex"/> - the partition-scheme/
+/// partitioning-column mismatch is a deterministic <c>sys.data_spaces</c>/<c>sys.index_columns</c>
+/// catalog fact, not an estimation.
 ///
-/// Engine-version sensitivity: none of these eighteen kinds depends on compat level or CE mode -
+/// Engine-version sensitivity: none of these nineteen kinds depends on compat level or CE mode -
 /// clustered index mechanics (the hidden uniquifier, RID-based nonclustered lookups on a heap,
 /// GUID-vs-sequential insert locality), duplicate/subsumed/disabled/hypothetical/filtered index
 /// catalog state, foreign-key/index catalog shape, table column-shape statistics, and declared

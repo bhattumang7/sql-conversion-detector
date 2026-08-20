@@ -1278,6 +1278,22 @@ construction (most likely a genuine `VARCHAR`, code-page-sensitive case, since
 `NVARCHAR` has no storage code page for collation to act on) and hasn't been
 run yet.
 
+**A `CREATE INDEX` with no `ON` clause on a partitioned table auto-aligns
+itself — it is not left on `[PRIMARY]`.** Confirmed directly against the
+standing Docker instance (2026-08-20): a nonclustered index created with no
+explicit `ON <partition_scheme>(...)`/`ON <filegroup>` clause on a table
+that's already partitioned inherits the table's own partition scheme
+automatically, with the table's own partitioning column silently added as an
+extra, non-key partitioning column of the index (visible in
+`sys.index_columns` at `key_ordinal = 0`) — the engine's own real default,
+not a documentation claim taken on faith. Consequence for
+`NonAlignedPartitionedIndex`: real non-alignment only reproduces when an
+index's `ON` clause is explicit and names something other than the table's
+own scheme/column (a bare `[PRIMARY]`/other filegroup, or the same scheme
+object keyed on a different column) - a fixture built by simply omitting the
+`ON` clause is a false near-miss, not a true one, and was caught only by an
+end-to-end run against the real engine rather than by unit tests alone.
+
 ---
 
 ## Appendix 9 — Candidates probed and killed (do not re-propose)

@@ -127,6 +127,7 @@ public static class IndexDesignScanner
             ScanMergeableIncludeOnlyIndexes(table, findings);
             ScanColumnstoreOnDmlTargetTable(table, dmlTargetTables, findings);
             ScanMonotonicClusteredKeyMissingSequentialOptimization(table, findings);
+            ScanNonAlignedPartitionedIndex(table, findings);
         }
 
         ScanUnindexedForeignKeys(catalog, findings);
@@ -977,6 +978,49 @@ public static class IndexDesignScanner
             table.SourcePath,
             table.SourceLine,
             FindingConfidence.Medium));
+    }
+
+    /// <summary>
+    /// docs/detection-checklist.md "Non-aligned index on a partitioned table" - see
+    /// <see cref="IndexDesignFindingKind.NonAlignedPartitionedIndex"/>'s own doc comment for the
+    /// oracle-confirmed catalog shape. The table's own CLUSTERED, non-columnstore index is the only
+    /// alignment reference used - a partitioned heap is out of scope, never guessed at.
+    /// </summary>
+    private static void ScanNonAlignedPartitionedIndex(CatalogTable table, List<IndexDesignFinding> findings)
+    {
+        var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore);
+        if (clusteredIndex?.PartitionSchemeName is not { } tablePartitionScheme)
+        {
+            // Either no clustered index at all (a partitioned heap - out of scope, see this
+            // method's own doc comment) or the table itself isn't partitioned - nothing to check.
+            return;
+        }
+
+        foreach (var index in table.Indexes)
+        {
+            if (ReferenceEquals(index, clusteredIndex) || index.IsDisabled || index.IsColumnstore)
+            {
+                continue;
+            }
+
+            var isAligned = string.Equals(index.PartitionSchemeName, tablePartitionScheme, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(index.PartitioningColumnName, clusteredIndex.PartitioningColumnName, StringComparison.OrdinalIgnoreCase);
+            if (isAligned)
+            {
+                continue;
+            }
+
+            var whereText = index.PartitionSchemeName is { } indexScheme
+                ? $"is itself partitioned on scheme '{indexScheme}' keyed on '{index.PartitioningColumnName ?? "<unresolved>"}'"
+                : "sits on a single, unpartitioned filegroup";
+            findings.Add(new IndexDesignFinding(
+                IndexDesignFindingKind.NonAlignedPartitionedIndex,
+                table.QualifiedName,
+                index.Name,
+                $"'{table.QualifiedName}' is partitioned on scheme '{tablePartitionScheme}' keyed on '{clusteredIndex.PartitioningColumnName ?? "<unresolved>"}', but index '{index.Name ?? UnnamedIndexPlaceholder}' {whereText} - not aligned with the table. A non-aligned index cannot participate in a partition SWITCH against this table, and per-partition maintenance on it degrades to a full-index operation.",
+                table.SourcePath,
+                table.SourceLine));
+        }
     }
 
     /// <summary>

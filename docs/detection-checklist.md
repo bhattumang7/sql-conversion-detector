@@ -39,12 +39,6 @@ Competitor tools are referred to generically; real identities are in
       documented purpose are confirmed, but the exact firing condition isn't,
       and this project ships nothing it can't oracle-confirm.
 
-- [ ] **Non-aligned index on a partitioned table.** Deferred for want of data,
-      not design: the local test database has zero partitioned tables, so the
-      rule would ship unexercised. Needs a partitioned-table corpus, plus new
-      catalog surface (`sys.partition_schemes`, `sys.indexes.data_space_id`,
-      `sys.partition_functions`).
-
 - [ ] **Static risk factor: table-typed parameter defeats PSP (Parameter
       Sensitive Plan, compat 170+).** `sys.dm_xe_map_values('psp_skipped_reason_enum')`
       (2026-08-20 survey, public/documented — 40 named reasons) lists
