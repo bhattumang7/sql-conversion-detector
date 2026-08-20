@@ -36,6 +36,7 @@ public static class RuleDocCatalog
         // Correctness / DML / Join / Predicate (single-rule families)
         [Correctness.NotInNullableSubquery.RuleId] = Correctness.NotInNullableSubquery.Content,
         [Correctness.NonUniqueUpdateSource.RuleId] = Correctness.NonUniqueUpdateSource.Content,
+        [Correctness.TemporalBoundaryPrecision.RuleId] = Correctness.TemporalBoundaryPrecision.Content,
         [Join.PartialCompositeForeignKeyJoin.RuleId] = Join.PartialCompositeForeignKeyJoin.Content,
         [Join.CartesianCommaJoin.RuleId] = Join.CartesianCommaJoin.Content,
         [Join.CartesianCrossJoin.RuleId] = Join.CartesianCrossJoin.Content,
