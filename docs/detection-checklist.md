@@ -68,7 +68,7 @@ Competitor tools are referred to generically; real identities are in
 
 ### Docs
 
-- [ ] **Per-rule pages: fill the remaining ~145/234 rules.** Shipped:
+- [ ] **Per-rule pages: fill the remaining ~143/234 rules.** Shipped:
       `RuleDocSite` (`helpUri` scheme, wired into SARIF `rules[].helpUri` and
       `driver.informationUri`, plus `HumanizeTitle` so the index/page never
       show a raw `silentscan/family/name` id as the display label) with its
@@ -81,7 +81,7 @@ Competitor tools are referred to generically; real identities are in
       RuleDocs/RuleDocContent.cs`) — one hand-authored file per rule under
       `RuleDocs/<Family>/<RuleName>.cs`, wired into `RuleDocCatalog.ByRuleId`;
       `rules-doc` prunes orphaned pages; a docs-are-current regeneration test
-      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 89/234 rules
+      (`RulesDocGeneratorTests`) byte-compares against `docs/`. 91/234 rules
       have a `RuleDocContent` entry today (tier1, verdict/scan-forced+range-
       seek, write-loss, tvf-fence, scalar-udf, a chunk of catalog/predicates/
       call-graph, query-anti-pattern, trigger-correctness, forced-serial,
