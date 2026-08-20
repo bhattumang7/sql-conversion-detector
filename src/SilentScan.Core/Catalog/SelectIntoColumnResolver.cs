@@ -25,7 +25,8 @@ internal static class SelectIntoColumnResolver
             return [];
         }
 
-        var fromScope = ResolveFromScope(spec.FromClause, catalog, scope);
+        var cteNames = CteNamesOf(select);
+        var fromScope = ResolveFromScope(spec.FromClause, catalog, scope, cteNames);
         var columns = new List<CatalogColumn>();
 
         foreach (var element in spec.SelectElements)
@@ -58,8 +59,22 @@ internal static class SelectIntoColumnResolver
         return columns;
     }
 
+    /// <summary>
+    /// The statement's own declared CTE names, name-only (no Lineage-level resolution - CLAUDE.md's
+    /// pass-ordering rule forbids catalog-building from depending on Lineage/view resolution, so
+    /// this can only ever ask "is this name syntactically a CTE here," never "what does the CTE
+    /// actually select"). Mirrors the same decline-set shape <c>DirectBaseTableResolver</c> used
+    /// before Phase 1.5 migrated its callers onto real Lineage-level CTE resolution - that upgrade
+    /// isn't available to this pass, so the decline-only shape is the correct, permanent answer
+    /// here, not a stepping stone.
+    /// </summary>
+    private static HashSet<string> CteNamesOf(SelectStatement select) =>
+        select.WithCtesAndXmlNamespaces is { CommonTableExpressions: { } ctes }
+            ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
+            : [];
+
     private static (Dictionary<string, CatalogTable?> ByAlias, List<CatalogTable?> Ordered) ResolveFromScope(
-        FromClause? fromClause, DatabaseCatalog catalog, string? scope)
+        FromClause? fromClause, DatabaseCatalog catalog, string? scope, HashSet<string> cteNames)
     {
         var byAlias = new Dictionary<string, CatalogTable?>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<CatalogTable?>();
@@ -77,6 +92,19 @@ internal static class SelectIntoColumnResolver
                 {
                     // A derived table, CTE, or table-valued source - not a base table this pass
                     // can resolve without Lineage-level query resolution; left unresolved.
+                    ordered.Add(null);
+                    continue;
+                }
+
+                // A CTE reference parses as an ordinary NamedTableReference, identical in shape to
+                // a real base table - and a CTE is never schema-qualified, so it always shadows a
+                // same-named real base table for this statement's own lifetime. Resolving against
+                // the catalog anyway (the previous behavior) would silently attribute a SELECT
+                // INTO target column's type to an unrelated real table sharing the CTE's name -
+                // the exact bug class fixed across seven Predicates-layer scanners in Phase 1.5,
+                // present here too until this fix. Declined (left unresolved), never guessed at.
+                if (named.SchemaObject.SchemaIdentifier is null && cteNames.Contains(named.SchemaObject.BaseIdentifier.Value))
+                {
                     ordered.Add(null);
                     continue;
                 }

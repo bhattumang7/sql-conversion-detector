@@ -1006,6 +1006,35 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_SelectIntoFromCteSharingNameWithRealTable_TargetColumnHasNoGuessedType()
+    {
+        // A CTE is never schema-qualified, so it always shadows a same-named real base table for
+        // its own statement's lifetime - resolving against the catalog instead (the previous
+        // behavior) would have silently attributed #snapshot.Id's type to the REAL dbo.Orders
+        // table's Id column, even though the CTE's own Id here is a different type entirely. The
+        // same bug class Phase 1.5 fixed across seven Predicates-layer scanners, present in
+        // SelectIntoColumnResolver (Catalog layer) too until this fix - correctly declined here
+        // rather than resolved against the wrong table, per CLAUDE.md's pass-ordering rule
+        // (catalog-building cannot depend on Lineage-level CTE resolution the way Predicates now
+        // does, so the fix here is a name-only decline, not a full resolution upgrade).
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerName VARCHAR(40) NOT NULL);
+                GO
+                CREATE PROCEDURE dbo.usp_Snapshot
+                AS
+                BEGIN
+                    WITH Orders AS (SELECT CAST(1 AS BIGINT) AS Id)
+                    SELECT Id INTO #snapshot FROM Orders;
+                END
+                """)]);
+
+        var snapshot = catalog.Find("#snapshot", "dbo.usp_Snapshot")!;
+
+        Assert.Null(snapshot.FindColumn("Id")!.Type);
+    }
+
+    [Fact]
     public void Build_SelectIntoWithNonColumnExpression_TargetColumnHasNoGuessedType()
     {
         var catalog = CatalogBuilder.Build(
