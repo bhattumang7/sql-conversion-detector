@@ -159,5 +159,9 @@ public static class RuleDocCatalog
         [ControlFlow.GotoUsage.RuleId] = ControlFlow.GotoUsage.Content,
         [ControlFlow.CaseExpressionMissingElse.RuleId] = ControlFlow.CaseExpressionMissingElse.Content,
         [ControlFlow.NonDeterministicCaseInput.RuleId] = ControlFlow.NonDeterministicCaseInput.Content,
+        [ControlFlow.WaitFor.RuleId] = ControlFlow.WaitFor.Content,
+        [ControlFlow.TransactionHygiene.RuleId] = ControlFlow.TransactionHygiene.Content,
+        [ControlFlow.TruncateSwallowed.RuleId] = ControlFlow.TruncateSwallowed.Content,
+        [ControlFlow.OutputParameter.RuleId] = ControlFlow.OutputParameter.Content,
     };
 }
