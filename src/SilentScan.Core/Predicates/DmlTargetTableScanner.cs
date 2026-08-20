@@ -35,32 +35,48 @@ public static class DmlTargetTableScanner
     {
         public override void ExplicitVisit(InsertStatement node)
         {
-            RecordWrite(node.InsertSpecification.Target);
+            RecordWrite(node.InsertSpecification.Target, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
-            RecordWrite(node.UpdateSpecification.Target);
+            RecordWrite(node.UpdateSpecification.Target, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
-            RecordWrite(node.DeleteSpecification.Target);
+            RecordWrite(node.DeleteSpecification.Target, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(MergeStatement node)
         {
-            RecordWrite(node.MergeSpecification.Target);
+            RecordWrite(node.MergeSpecification.Target, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
-        /// <summary>Only a direct <see cref="NamedTableReference"/> target resolving to a real base table counts - see this type's own doc comment.</summary>
-        private void RecordWrite(TableReference? target)
+        /// <summary>
+        /// Only a direct <see cref="NamedTableReference"/> target resolving to a real base table
+        /// counts - see this type's own doc comment. An unqualified target sharing its name with
+        /// one of the statement's own CTEs (legal for UPDATE/DELETE/MERGE against a simple,
+        /// updatable CTE) is declined rather than resolved against the catalog - a CTE is never
+        /// schema-qualified, so it always shadows a same-named real base table for this
+        /// statement's own lifetime, and resolving anyway would misattribute the write to an
+        /// unrelated real table (the same bug class fixed across the Predicates layer's FROM-
+        /// clause resolvers - this scanner has its own independent target-resolution path that
+        /// needed the identical fix).
+        /// </summary>
+        private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
         {
             if (target is not NamedTableReference named)
+            {
+                return;
+            }
+
+            if (named.SchemaObject.SchemaIdentifier is null && withCtes is { CommonTableExpressions: { } ctes }
+                && ctes.Any(cte => string.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
