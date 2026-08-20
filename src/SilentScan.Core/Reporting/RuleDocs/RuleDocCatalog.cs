@@ -199,5 +199,14 @@ public static class RuleDocCatalog
         [DynamicSql.ExecStringConcatenatesParameterizableValue.RuleId] = DynamicSql.ExecStringConcatenatesParameterizableValue.Content,
         [DynamicSql.TempTableExecShapeColumnCountMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnCountMismatch.Content,
         [DynamicSql.TempTableExecShapeColumnTypeMismatch.RuleId] = DynamicSql.TempTableExecShapeColumnTypeMismatch.Content,
+
+        // Rest of catalog / predicate singles
+        [Catalog.CascadingForeignKey.RuleId] = Catalog.CascadingForeignKey.Content,
+        [Catalog.NonPersistedComputedColumn.RuleId] = Catalog.NonPersistedComputedColumn.Content,
+        [Catalog.TemporalTableHistoryIndexGap.RuleId] = Catalog.TemporalTableHistoryIndexGap.Content,
+        [Catalog.StaleSelectStarView.RuleId] = Catalog.StaleSelectStarView.Content,
+        [Catalog.SecurityPredicateIndex.RuleId] = Catalog.SecurityPredicateIndex.Content,
+        [Predicate.TryCastComputedColumn.RuleId] = Predicate.TryCastComputedColumn.Content,
+        [Predicate.AggregateDivisionColumnstore.RuleId] = Predicate.AggregateDivisionColumnstore.Content,
     };
 }
