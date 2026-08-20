@@ -179,25 +179,25 @@ public static class CrossModuleLockOrderScanner
 
         public override void ExplicitVisit(InsertStatement node)
         {
-            RecordWrite(node.InsertSpecification.Target, node.StartLine);
+            RecordWrite(node.InsertSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
-            RecordWrite(node.UpdateSpecification.Target, node.StartLine);
+            RecordWrite(node.UpdateSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(DeleteStatement node)
         {
-            RecordWrite(node.DeleteSpecification.Target, node.StartLine);
+            RecordWrite(node.DeleteSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(MergeStatement node)
         {
-            RecordWrite(node.MergeSpecification.Target, node.StartLine);
+            RecordWrite(node.MergeSpecification.Target, node.StartLine, node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
         }
 
@@ -232,11 +232,22 @@ public static class CrossModuleLockOrderScanner
         /// prove locks the underlying table the same way), never a temp table/table variable
         /// (private per session, cannot deadlock across sessions), and only while inside an
         /// explicit transaction the procedure's own body opened. First occurrence per table wins -
-        /// a later re-write of the same table doesn't change which table was locked FIRST.
+        /// a later re-write of the same table doesn't change which table was locked FIRST. An
+        /// unqualified target sharing its name with one of the statement's own CTEs (legal for
+        /// UPDATE/DELETE/MERGE against a simple, updatable CTE) is declined rather than resolved
+        /// against the catalog - see <see cref="DmlTargetTableScanner"/>'s own identical fix for
+        /// why: a CTE is never schema-qualified, so it always shadows a same-named real base table
+        /// for this statement's own lifetime.
         /// </summary>
-        private void RecordWrite(TableReference? target, int line)
+        private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
         {
             if (_writes is null || _openTransactionDepth == 0 || target is not NamedTableReference named)
+            {
+                return;
+            }
+
+            if (named.SchemaObject.SchemaIdentifier is null && withCtes is { CommonTableExpressions: { } ctes }
+                && ctes.Any(cte => string.Equals(cte.ExpressionName.Value, named.SchemaObject.BaseIdentifier.Value, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }

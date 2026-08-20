@@ -73,6 +73,32 @@ public sealed class CrossModuleLockOrderScannerTests
     }
 
     [Fact]
+    public void ProcedureWritesRealTableThenAWriteableCteSharingAnotherTablesName_NeverMisattributedAsConflict()
+    {
+        // ProcA's second write targets a CTE literally named "T1" (built over dbo.T2's own data) -
+        // a CTE is never schema-qualified, so it always shadows a same-named real base table.
+        // Misattributing it to real dbo.T1 would make ProcA look like it writes T2-then-T1, which
+        // conflicts with ProcB's real T1-then-T2 order - a false ordering conflict, since ProcA
+        // never actually writes real dbo.T1 at all.
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.ProcA AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + ";WITH T1 AS (SELECT Id FROM dbo.T2) UPDATE T1 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END; "
+            + "\nGO\n"
+            + "CREATE PROCEDURE dbo.ProcB AS BEGIN "
+            + "BEGIN TRANSACTION; "
+            + "UPDATE dbo.T1 SET Id = Id; "
+            + "UPDATE dbo.T2 SET Id = Id; "
+            + "COMMIT TRANSACTION; "
+            + "END;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void OppositeOrderWrites_OutsideAnyExplicitTransaction_NeverFires()
     {
         // Writes outside an explicit transaction commit individually - they cannot hold T1's lock
