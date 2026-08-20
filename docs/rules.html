@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">234 rules. 145 carry fix guidance; 18 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">235 rules. 145 carry fix guidance; 18 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -103,6 +103,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-check-constraint-on-identity-column.html">Check Constraint On Identity Column</a> <code class="rule-key">silentscan/catalog/check-constraint-on-identity-column</code><span class="snippet">A CHECK constraint&#x27;s own definition directly references an IDENTITY column.</span></li>
       <li><a class="id" href="rules/catalog-column-collation-drift.html">Column Collation Drift</a> <code class="rule-key">silentscan/catalog/column-collation-drift</code><span class="snippet">A string-family column&#x27;s own collation differs from the database&#x27;s default collation (or, for a temp table/table variable, from tempdb&#x27;s effective collation).</span></li>
       <li><a class="id" href="rules/catalog-cross-table-fk-type-drift.html">Cross Table FK Type Drift</a> <code class="rule-key">silentscan/catalog/cross-table-fk-type-drift</code><span class="snippet">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ.</span></li>
+      <li><a class="id" href="rules/catalog-dangling-object-reference.html">Dangling Object Reference</a> <code class="rule-key">silentscan/catalog/dangling-object-reference</code><span class="snippet">A stored procedure, view, function, or trigger names a table/view/synonym the engine&#x27;s own binder cannot resolve to a real object right now.</span></li>
       <li><a class="id" href="rules/catalog-default-constraint-on-nullable-column.html">Default Constraint On Nullable Column</a> <code class="rule-key">silentscan/catalog/default-constraint-on-nullable-column</code><span class="snippet">A column carries a DEFAULT constraint but is still nullable.</span></li>
       <li><a class="id" href="rules/catalog-max-typed-column.html">Max Typed Column</a> <code class="rule-key">silentscan/catalog/max-typed-column</code><span class="snippet">A string/binary column is declared MAX-typed.</span></li>
       <li><a class="id" href="rules/catalog-non-persisted-computed-column.html">Non Persisted Computed Column</a> <code class="rule-key">silentscan/catalog/non-persisted-computed-column</code><span class="snippet">A computed column with is_persisted = 0 (sys.computed_columns).</span></li>

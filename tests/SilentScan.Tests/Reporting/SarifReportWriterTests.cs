@@ -142,6 +142,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -246,6 +247,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -273,6 +275,7 @@ public sealed class SarifReportWriterTests
                 5,
                 [new TransformationSite("vw_outer.sql", 3, "CAST/CONVERT to Int"), new TransformationSite("vw_inner.sql", 2, "CAST/CONVERT to VarChar(20)")],
                 [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)])],
+            [],
             [],
             [],
             [],
@@ -447,6 +450,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -467,6 +471,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.AnalyzedLiteral, Reason: null)],
+            [],
             [],
             [],
             [],
@@ -561,6 +566,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [new DynamicSqlFinding("test.sql", 3, 5, DynamicSqlOutcome.Unanalyzable, "non-literal-argument")],
+            [],
             [],
             [],
             [],
@@ -729,6 +735,7 @@ public sealed class SarifReportWriterTests
             [],
             [],
             [],
+            [],
             SkippedConstructSummary.From([]),
             TypedPredicateSummary.From([]),
             DynamicSqlSummary.From([]));
@@ -757,6 +764,7 @@ public sealed class SarifReportWriterTests
                 5,
                 7,
                 new SourceSpan("test.sql", 4, 10))],
+            [],
             [],
             [],
             [],

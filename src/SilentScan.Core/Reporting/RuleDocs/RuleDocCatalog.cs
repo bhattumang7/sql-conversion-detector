@@ -110,6 +110,7 @@ public static class RuleDocCatalog
         [Catalog.MaxTypedColumn.RuleId] = Catalog.MaxTypedColumn.Content,
         [Catalog.RecompilesEveryCall.RuleId] = Catalog.RecompilesEveryCall.Content,
         [Catalog.TableValuedFunctionReturnUsesDatabaseCollation.RuleId] = Catalog.TableValuedFunctionReturnUsesDatabaseCollation.Content,
+        [Catalog.DanglingObjectReference.RuleId] = Catalog.DanglingObjectReference.Content,
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
 
         // Catalog constraints / Predicates estimate family

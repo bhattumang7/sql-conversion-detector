@@ -113,6 +113,7 @@ public static class SarifReportWriter
         results.AddRange(report.StringConcatNullFindings.Select(ToResult));
         results.AddRange(report.AggregateDivisionColumnstoreFindings.Select(ToResult));
         results.AddRange(report.SecurityPredicateIndexFindings.Select(ToResult));
+        results.AddRange(report.DanglingObjectReferenceFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -795,6 +796,21 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}' is secured by RLS policy '{finding.PolicyQualifiedName}''s FILTER predicate '{finding.PredicateFunctionQualifiedName}', bound to column(s) {columns} - none of them leads an active index on this table, so this predicate is silently applied to every SELECT/UPDATE/DELETE against this table as a residual, per-row filter over a full scan rather than a seek.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: null);
+    }
+
+    private static SarifResult ToResult(DanglingObjectReferenceFinding finding)
+    {
+        // Error, not warning: this is not a workload-dependent structural risk, it's a proven
+        // future runtime failure - the referenced object does not exist right now, and Msg 208 is
+        // guaranteed the moment any caller reaches the statement that names it, exactly like
+        // IndexHintFindingKind.IndexDoesNotExist's identical "compiles clean, hard-errors at
+        // runtime" tier.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DanglingObjectReferenceRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var referencedName = finding.ReferencedSchemaName is { } schema ? $"{schema}.{finding.ReferencedEntityName}" : finding.ReferencedEntityName;
+        var message = $"{finding.ModuleTypeDescription} '{finding.ModuleQualifiedName}' references '{referencedName}', which does not exist in the database right now - CREATE/ALTER succeeded because SQL Server defers name resolution, but any call that reaches this reference fails with Msg 208 (\"Invalid object name\").";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }
 
     private static SarifResult ToResult(CascadingForeignKeyFinding finding)

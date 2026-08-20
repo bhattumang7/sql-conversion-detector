@@ -163,6 +163,7 @@ public static class SarifRuleCatalog
     public const string StringConcatNullRuleId = "silentscan/predicate/plus-operator-null-propagation";
     public const string AggregateDivisionColumnstoreRuleId = "silentscan/predicate/aggregate-division-columnstore-batch-mode";
     public const string SecurityPredicateIndexRuleId = "silentscan/catalog/rls-predicate-unindexed-column";
+    public const string DanglingObjectReferenceRuleId = "silentscan/catalog/dangling-object-reference";
 
     public static string ModuleCompileFlagRuleId(ModuleCompileFlagFindingKind kind) => kind switch
     {

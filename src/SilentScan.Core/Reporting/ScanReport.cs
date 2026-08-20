@@ -80,6 +80,7 @@ public sealed record ScanReport(
     IReadOnlyList<StringConcatNullFinding> StringConcatNullFindings,
     IReadOnlyList<AggregateDivisionColumnstoreFinding> AggregateDivisionColumnstoreFindings,
     IReadOnlyList<SecurityPredicateIndexFinding> SecurityPredicateIndexFindings,
+    IReadOnlyList<DanglingObjectReferenceFinding> DanglingObjectReferenceFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -390,5 +391,5 @@ public sealed record ScanReport(
     /// Bumped 60: every finding type's flat SourcePath/Line/Column(orColumnPosition) fields are no
     /// longer serialized directly - each now carries one Location field (a SourceSpan: SourcePath/
     /// Line/Column) instead. A real breaking change to the JSON output shape, not additive.
-    public const int CurrentSchemaVersion = 60;
+    public const int CurrentSchemaVersion = 61;
 }

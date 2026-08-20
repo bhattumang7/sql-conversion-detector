@@ -211,6 +211,16 @@ public static class LiveScanRunner
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
 
+        // A module that names an object the engine's own binder cannot resolve right now -
+        // live-only by construction, same merge pattern as DatabaseConfigurationFindings above.
+        using (var danglingReferenceStage = progress.Begin("checking for references to nonexistent objects"))
+        {
+            var danglingObjectReferenceFindings = (await new DanglingObjectReferenceChecker(connectionString).CheckAsync(cancellationToken))
+                .Where(f => f.Confidence <= minimumConfidence).ToList();
+            report = report with { DanglingObjectReferenceFindings = danglingObjectReferenceFindings };
+            danglingReferenceStage.Complete($"{danglingObjectReferenceFindings.Count:N0} findings");
+        }
+
         // docs/detection-checklist.md "DBA-script family sweep (2026-08-17)" §A "Physical/schema
         // design" - catalog-only (no live round trip of its own needed here; CatalogIndex.IsClustered
         // was already populated by the LiveCatalogReader read above), but merged in the same

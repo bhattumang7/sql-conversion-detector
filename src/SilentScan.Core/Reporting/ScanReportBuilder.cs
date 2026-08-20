@@ -1389,6 +1389,12 @@ public static class ScanReportBuilder
             stringConcatNullFindings,
             aggregateDivisionColumnstoreFindings,
             securityPredicateIndexFindings,
+            // DanglingObjectReferenceFindings needs a live database round trip against
+            // sys.sql_expression_dependencies/sys.dm_sql_referenced_entities, which this builder
+            // never issues - always empty here; LiveScanRunner merges the real result in
+            // afterward, same pattern TempTableExecShapeFindings/DatabaseConfigurationFindings
+            // already established.
+            [],
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

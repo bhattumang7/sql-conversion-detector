@@ -155,6 +155,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(StringConcatNull(report, headingLevel, pathBase));
         blocks.AddRange(AggregateDivisionColumnstore(report, headingLevel, pathBase));
         blocks.AddRange(SecurityPredicateIndex(report, headingLevel, pathBase));
+        blocks.AddRange(DanglingObjectReference(report, headingLevel, pathBase));
         blocks.AddRange(TypedSection(
             report, Verdict.Unknown, headingLevel, pathBase,
             "Comparisons that could not be classified",
@@ -237,6 +238,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "+ concatenation of a nullable string column with no NULL guard", report.StringConcatNullFindings.Count);
         AddCount(counts, "CASE-guarded aggregate division on a columnstore-backed table", report.AggregateDivisionColumnstoreFindings.Count);
         AddCount(counts, "RLS predicate with no supporting index", report.SecurityPredicateIndexFindings.Count);
+        AddCount(counts, "Reference to a nonexistent object", report.DanglingObjectReferenceFindings.Count);
         AddCount(counts, "NOT IN predicates over a nullable subquery column (correctness trap)", report.NotInNullableSubqueryFindings.Count);
         AddCount(counts, "UPDATE...FROM joins whose source carries no uniqueness guarantee", report.NonUniqueUpdateSourceFindings.Count);
         AddCount(counts, "Constructs that force a statement/query plan serial", report.ForcedSerialFindings.Count);
@@ -1540,6 +1542,28 @@ public static class ReadableScanReportWriter
                 f.PolicyQualifiedName,
                 f.PredicateFunctionQualifiedName,
                 string.Join(", ", f.FilteredColumns),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> DanglingObjectReference(ScanReport report, int level, string? pathBase)
+    {
+        if (report.DanglingObjectReferenceFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Reference to a nonexistent object ({report.DanglingObjectReferenceFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A stored procedure, view, function, or trigger names a table/view/synonym the engine's own binder cannot resolve to a real object right now - CREATE/ALTER succeeded anyway because SQL Server defers name resolution for a module body until it actually runs, so this looked completely clean until the first call that reaches it, which fails with Msg 208 (\"Invalid object name\").");
+        yield return new ReadableBlock.Paragraph(RuleDocSite.Url(SarifRuleCatalog.DanglingObjectReferenceRuleId));
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Module", "Referenced object"],
+            [.. report.DanglingObjectReferenceFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.ModuleTypeDescription} {f.ModuleQualifiedName}",
+                f.ReferencedSchemaName is { } schema ? $"{schema}.{f.ReferencedEntityName}" : f.ReferencedEntityName,
             })]);
     }
 
