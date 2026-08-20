@@ -81,6 +81,10 @@ public sealed record ScanReport(
     IReadOnlyList<AggregateDivisionColumnstoreFinding> AggregateDivisionColumnstoreFindings,
     IReadOnlyList<SecurityPredicateIndexFinding> SecurityPredicateIndexFindings,
     IReadOnlyList<DanglingObjectReferenceFinding> DanglingObjectReferenceFindings,
+    // Live-mode only, same reasoning as DanglingObjectReferenceFindings just above - the
+    // sys.databases.is_parameterization_forced precondition this stream is gated on is itself a
+    // live-only read, so this is always empty in a file-mode scan (ScanReportBuilder passes []).
+    IReadOnlyList<Predicates.ForcedParameterizationFinding> ForcedParameterizationFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -391,5 +395,15 @@ public sealed record ScanReport(
     /// Bumped 60: every finding type's flat SourcePath/Line/Column(orColumnPosition) fields are no
     /// longer serialized directly - each now carries one Location field (a SourceSpan: SourcePath/
     /// Line/Column) instead. A real breaking change to the JSON output shape, not additive.
-    public const int CurrentSchemaVersion = 61;
+    /// Bumped to 62 for two additive changes: a new <see cref="Predicates.IndexDesignFindingKind.NonAlignedPartitionedIndex"/>
+    /// member on the existing <see cref="IndexDesignFindings"/> stream (docs/detection-checklist.md
+    /// "Non-aligned index on a partitioned table" - a nonclustered index not built on its
+    /// partitioned table's own partition scheme/column), and the new
+    /// <see cref="ForcedParameterizationFindings"/> stream (docs/detection-reference.md Appendix 8 -
+    /// ten query-text clause shapes, e.g. a LIKE pattern or TOP/paging count, that silently escape
+    /// PARAMETERIZATION FORCED even while the rest of the same statement parameterizes correctly).
+    /// <see cref="ForcedParameterizationFindings"/> stays live-mode only, same reasoning as
+    /// <see cref="DanglingObjectReferenceFindings"/> - the <c>is_parameterization_forced</c>
+    /// precondition it's gated on is itself a live-only read.
+    public const int CurrentSchemaVersion = 62;
 }

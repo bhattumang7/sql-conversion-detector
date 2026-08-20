@@ -140,6 +140,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ControlFlowRisk(report, headingLevel, pathBase));
         blocks.AddRange(Security(report, headingLevel, pathBase));
         blocks.AddRange(IndexDesign(report, headingLevel, pathBase));
+        blocks.AddRange(ForcedParameterization(report, headingLevel, pathBase));
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
@@ -223,6 +224,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Cursor and control-flow risks", report.ControlFlowRiskFindings.Count);
         AddCount(counts, "Security", report.SecurityFindings.Count);
         AddCount(counts, "Physical/schema index design (heap/clustered-key quality)", report.IndexDesignFindings.Count);
+        AddCount(counts, "Forced-parameterization-defeating query shapes", report.ForcedParameterizationFindings.Count);
         AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
@@ -942,6 +944,27 @@ public static class ReadableScanReportWriter
         yield return new ReadableBlock.Table(
             [WhereHeader, "Kind", DetailHeader],
             [.. report.NamingFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.Kind.ToString(),
+                f.DetailText,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> ForcedParameterization(ScanReport report, int level, string? pathBase)
+    {
+        if (report.ForcedParameterizationFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Forced-parameterization-defeating query shapes ({report.ForcedParameterizationFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Live-mode only, reported only when the target database has PARAMETERIZATION FORCED on. Ten query-text clause shapes - a LIKE pattern, a TOP/OFFSET-FETCH row count, a select-list/HAVING/ORDER-BY/OUTPUT-clause literal, a TABLESAMPLE size, a literal argument to a TypeName::Method(...) static call/CONVERT style code/CHECKSUM(...), and a constant-foldable arithmetic expression - each independently oracle-confirmed (docs/detection-reference.md Appendix 8) to stay unparameterized even while the rest of the same statement correctly shares one plan, silently defeating the setting for exactly the values an app's own workload varies most.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", DetailHeader],
+            [.. report.ForcedParameterizationFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 f.Kind.ToString(),

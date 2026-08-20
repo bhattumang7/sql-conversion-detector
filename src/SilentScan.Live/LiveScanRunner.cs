@@ -211,6 +211,21 @@ public static class LiveScanRunner
             databaseConfigStage.Complete($"{databaseConfigFindings.Count:N0} findings");
         }
 
+        // docs/detection-reference.md Appendix 8 - a query-text clause shape (LIKE pattern, TOP/
+        // paging count, etc.) that stays unparameterized even under PARAMETERIZATION FORCED is
+        // only a real finding when the target database actually has that setting on; a syntax
+        // scan over every module's own AST is otherwise wasted work with nothing to report.
+        using (var forcedParamStage = progress.Begin("checking forced-parameterization-defeating query shapes"))
+        {
+            var isParameterizationForced = await new DatabaseConfigurationReader(connectionString)
+                .ReadIsParameterizationForcedAsync(cancellationToken);
+            var forcedParameterizationFindings = isParameterizationForced
+                ? ForcedParameterizationScanner.Scan(parseResultSource()).Where(f => f.Confidence <= minimumConfidence).ToList()
+                : [];
+            report = report with { ForcedParameterizationFindings = forcedParameterizationFindings };
+            forcedParamStage.Complete($"{forcedParameterizationFindings.Count:N0} findings");
+        }
+
         // A module that names an object the engine's own binder cannot resolve right now -
         // live-only by construction, same merge pattern as DatabaseConfigurationFindings above.
         using (var danglingReferenceStage = progress.Begin("checking for references to nonexistent objects"))

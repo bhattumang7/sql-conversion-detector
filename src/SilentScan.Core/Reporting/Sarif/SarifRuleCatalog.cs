@@ -284,6 +284,22 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
+    public static string ForcedParameterizationRuleId(ForcedParameterizationFindingKind kind) => kind switch
+    {
+        ForcedParameterizationFindingKind.LikePatternLiteral => "silentscan/forced-parameterization/like-pattern-literal",
+        ForcedParameterizationFindingKind.TopOrPagingLiteral => "silentscan/forced-parameterization/top-or-paging-literal",
+        ForcedParameterizationFindingKind.SelectListLiteral => "silentscan/forced-parameterization/select-list-literal",
+        ForcedParameterizationFindingKind.HavingLiteral => "silentscan/forced-parameterization/having-literal",
+        ForcedParameterizationFindingKind.OrderByExpressionLiteral => "silentscan/forced-parameterization/order-by-expression-literal",
+        ForcedParameterizationFindingKind.DoubleColonCallArgumentLiteral => "silentscan/forced-parameterization/double-colon-call-argument-literal",
+        ForcedParameterizationFindingKind.TableSampleSizeLiteral => "silentscan/forced-parameterization/table-sample-size-literal",
+        ForcedParameterizationFindingKind.DmlOutputListLiteral => "silentscan/forced-parameterization/dml-output-list-literal",
+        ForcedParameterizationFindingKind.ConvertStyleCodeLiteral => "silentscan/forced-parameterization/convert-style-code-literal",
+        ForcedParameterizationFindingKind.CheckSumArgumentLiteral => "silentscan/forced-parameterization/checksum-argument-literal",
+        ForcedParameterizationFindingKind.ConstantFoldableExpressionLiteral => "silentscan/forced-parameterization/constant-foldable-expression-literal",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
     public static string IdentityRangeRuleId(IdentityRangeFindingKind kind) => kind switch
     {
         IdentityRangeFindingKind.IdentitySeedOrIncrementAnomaly => "silentscan/identity/seed-or-increment-anomaly",

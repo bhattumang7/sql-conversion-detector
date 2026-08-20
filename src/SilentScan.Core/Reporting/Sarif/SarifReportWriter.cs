@@ -98,6 +98,7 @@ public static class SarifReportWriter
         results.AddRange(report.ControlFlowRiskFindings.Select(ToResult));
         results.AddRange(report.SecurityFindings.Select(ToResult));
         results.AddRange(report.IndexDesignFindings.Select(ToResult));
+        results.AddRange(report.ForcedParameterizationFindings.Select(ToResult));
         results.AddRange(report.IdentityRangeFindings.Select(ToResult));
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
         results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
@@ -469,6 +470,17 @@ public static class SarifReportWriter
         };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(ForcedParameterizationFinding finding)
+    {
+        // Warning, not error - a plan-cache/compile-cost risk (a fresh compile per distinct
+        // literal, defeating the setting the database was explicitly configured for), not itself
+        // a proof of a wrong result - the same tier ColumnstoreIndexOnDmlTargetTable uses for its
+        // own oracle-confirmed structural mechanism.
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForcedParameterizationRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }
 
     private static SarifResult ToResult(NamingFinding finding)

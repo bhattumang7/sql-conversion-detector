@@ -1395,6 +1395,11 @@ public static class ScanReportBuilder
             // afterward, same pattern TempTableExecShapeFindings/DatabaseConfigurationFindings
             // already established.
             [],
+            // ForcedParameterizationFindings needs a live database round trip
+            // (sys.databases.is_parameterization_forced) this builder never issues - always empty
+            // here; LiveScanRunner merges the real result in afterward, same pattern as the other
+            // live-only streams above.
+            [],
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

@@ -1278,6 +1278,46 @@ construction (most likely a genuine `VARCHAR`, code-page-sensitive case, since
 `NVARCHAR` has no storage code page for collation to act on) and hasn't been
 run yet.
 
+**`sys.dm_xe_map_values('forced_param_clause_skipped_reason_enum')` names ten real,
+oracle-confirmed clause shapes that silently escape `PARAMETERIZATION FORCED`.**
+Surveyed 2026-08-20 by inspecting real cached PREPARED plan text (not the DMV's
+name alone) after each probe statement, with `DBCC FREEPROCCACHE` between
+probes: under `ALTER DATABASE ... SET PARAMETERIZATION FORCED`, a plain
+equality predicate in a statement correctly compiles to a shared
+`(@0 int) ...` plan, but a literal sitting in any of these ten clause
+positions stays untouched in the SAME statement's own cached plan text -
+confirmed per-clause, not whole-statement (e.g. `WHERE Id = 42 AND Name LIKE
+'abc%'` parameterizes the equality and leaves the LIKE pattern literal, in
+one plan): a `LIKE` pattern, a `TOP`/`OFFSET`-`FETCH` row count, a
+select-list literal, a `HAVING` comparand, a literal inside a compound
+`ORDER BY` expression, a literal argument to a `TypeName::Method(...)` static
+call (CLR/spatial types), a `TABLESAMPLE` size, a literal in a DML
+`OUTPUT` clause's select list, a `CONVERT` style-code argument, and a
+`CHECKSUM(...)` argument. Shipped as `ForcedParameterizationScanner`'s ten
+`ForcedParameterizationFindingKind` members, live-mode only, gated on
+`sys.databases.is_parameterization_forced`. One genuine parameter-workaround
+exception: `TABLESAMPLE`/`REPEATABLE` reject a variable outright (confirmed:
+Msg 497, "Variables are not allowed in the TABLESAMPLE or REPEATABLE
+clauses") - a varying sample size cannot be fixed by parameterizing it, only
+documented as unavoidable.
+
+**Three more `forced_param_*` reason names surveyed the same day and NOT
+shipped, with a real (not assumed) disposition each:**
+`XvtDate`/`XvtGuid` (the DMV's naming suggested "a date/GUID literal is
+excluded") did not reproduce - a plain `WHERE EventDate = '2025-06-15'`/
+`WHERE EventGuid = '...'` equality parameterized normally (as `varchar(8000)`,
+the engine's own default auto-param type - a different, established behavior,
+not a skip). `ConstFoldableExpr` reproduces but means something milder than
+"skipped": `WHERE Id = 1 + 1008` parameterizes as TWO separate parameters
+(`WHERE [Id]=(@1+@2)`) instead of the one folded `@0` a plain `Id = 1009`
+equality would produce - the statement stays fully parameterized, just less
+optimally folded, so it shipped as its own kind
+(`ConstantFoldableExpressionLiteral`) at `FindingConfidence.Low` rather than
+grouped with the genuine skip-and-recompile kinds.
+`EcOpenRowset` (needs ad hoc distributed queries enabled - infrastructure
+gap, not attempted) and `EcTSEqualCall` (full-text-search-specific, untested)
+remain unsurveyed - not claimed either way.
+
 **A `CREATE INDEX` with no `ON` clause on a partitioned table auto-aligns
 itself — it is not left on `[PRIMARY]`.** Confirmed directly against the
 standing Docker instance (2026-08-20): a nonclustered index created with no

@@ -236,5 +236,16 @@ public static class RuleDocCatalog
         [IndexDesign.ColumnstoreIndexOnDmlTargetTable.RuleId] = IndexDesign.ColumnstoreIndexOnDmlTargetTable.Content,
         [IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.RuleId] = IndexDesign.MonotonicClusteredKeyMissingSequentialOptimization.Content,
         [IndexDesign.NonAlignedPartitionedIndex.RuleId] = IndexDesign.NonAlignedPartitionedIndex.Content,
+        [ForcedParameterization.LikePatternLiteral.RuleId] = ForcedParameterization.LikePatternLiteral.Content,
+        [ForcedParameterization.TopOrPagingLiteral.RuleId] = ForcedParameterization.TopOrPagingLiteral.Content,
+        [ForcedParameterization.SelectListLiteral.RuleId] = ForcedParameterization.SelectListLiteral.Content,
+        [ForcedParameterization.HavingLiteral.RuleId] = ForcedParameterization.HavingLiteral.Content,
+        [ForcedParameterization.OrderByExpressionLiteral.RuleId] = ForcedParameterization.OrderByExpressionLiteral.Content,
+        [ForcedParameterization.DoubleColonCallArgumentLiteral.RuleId] = ForcedParameterization.DoubleColonCallArgumentLiteral.Content,
+        [ForcedParameterization.TableSampleSizeLiteral.RuleId] = ForcedParameterization.TableSampleSizeLiteral.Content,
+        [ForcedParameterization.DmlOutputListLiteral.RuleId] = ForcedParameterization.DmlOutputListLiteral.Content,
+        [ForcedParameterization.ConvertStyleCodeLiteral.RuleId] = ForcedParameterization.ConvertStyleCodeLiteral.Content,
+        [ForcedParameterization.CheckSumArgumentLiteral.RuleId] = ForcedParameterization.CheckSumArgumentLiteral.Content,
+        [ForcedParameterization.ConstantFoldableExpressionLiteral.RuleId] = ForcedParameterization.ConstantFoldableExpressionLiteral.Content,
     };
 }

@@ -153,4 +153,29 @@ public sealed class DatabaseConfigurationReader
 
         return findings;
     }
+
+    /// <summary>
+    /// docs/detection-reference.md Appendix 8's forced-parameterization clause-skip entry - the
+    /// single live precondition <see cref="ForcedParameterizationScanner"/>'s own AST
+    /// findings are gated on. A separate, tiny round trip rather than folded into
+    /// <see cref="ReadAsync"/>'s own query: it isn't a <see cref="DatabaseConfigurationFinding"/>
+    /// itself (a database explicitly turning this ON is a deliberate choice, not a misconfiguration -
+    /// see docs/detection-reference.md's "Forced plans / plan guides / forced parameterization"
+    /// survey entry, correctly skipped), only a fact another stream needs to know before it can
+    /// report anything at all.
+    /// </summary>
+    public async Task<bool> ReadIsParameterizationForcedAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateReadOnlyCommand(
+            "SELECT is_parameterization_forced FROM sys.databases WHERE database_id = DB_ID();");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        // No visible row at all (an unusually locked-down permission set) - never guess; treat
+        // as "not forced" so the gated scanner stays silent rather than assuming a state it
+        // can't confirm.
+        return await reader.ReadAsync(cancellationToken) && reader.GetBoolean(0);
+    }
 }
