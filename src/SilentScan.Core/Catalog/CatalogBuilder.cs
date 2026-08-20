@@ -825,7 +825,7 @@ public static class CatalogBuilder
             }
 
             var qualifiedName = SchemaObjectNameHelper.Qualify(alterIndex.OnName);
-            var existing = catalog.Find(qualifiedName, _currentScope);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER INDEX", qualifiedName, alterIndex);
@@ -841,7 +841,7 @@ public static class CatalogBuilder
                     : i)
                 .ToList();
 
-            catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, writeScope);
         }
 
         private void VisitDropTable(DropTableStatement dropTable)
@@ -849,7 +849,7 @@ public static class CatalogBuilder
             foreach (var target in dropTable.Objects)
             {
                 var qualifiedName = SchemaObjectNameHelper.Qualify(target);
-                if (catalog.Find(qualifiedName, _currentScope) is not { } existing)
+                if (catalog.Find(qualifiedName, _currentScope) is null)
                 {
                     // IF EXISTS or a target outside this scan's file set - nothing to remove, but
                     // still worth an honest ledger entry: a caller diffing the ledger for "why did
@@ -858,7 +858,11 @@ public static class CatalogBuilder
                     continue;
                 }
 
-                catalog.Remove(qualifiedName, WriteScopeFor(existing));
+                // Remove always clears both the scope-qualified key (if scope is non-null) AND
+                // the bare unscoped key unconditionally, so passing the statement's own current
+                // scope here is safe regardless of which key the entry actually lives under -
+                // unlike AddOrReplace, Remove has no way to leave a stale duplicate behind.
+                catalog.Remove(qualifiedName, _currentScope);
             }
         }
 
@@ -886,7 +890,7 @@ public static class CatalogBuilder
                 }
 
                 var qualifiedName = SchemaObjectNameHelper.Qualify(tableName);
-                var existing = catalog.Find(qualifiedName, _currentScope);
+                var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
                 if (existing is null)
                 {
                     RecordUnresolvedTarget("DROP INDEX", qualifiedName, dropIndex);
@@ -905,7 +909,7 @@ public static class CatalogBuilder
                     continue;
                 }
 
-                catalog.AddOrReplace(existing with { Indexes = remainingIndexes }, WriteScopeFor(existing));
+                catalog.AddOrReplace(existing with { Indexes = remainingIndexes }, writeScope);
             }
         }
 
@@ -988,13 +992,13 @@ public static class CatalogBuilder
                 return;
             }
 
-            if (catalog.Find(oldQualifiedName, _currentScope) is not { } existing)
+            var (existing, writeScope) = catalog.FindForMutation(oldQualifiedName, _currentScope);
+            if (existing is null)
             {
                 RecordUnresolvedTarget(SpRenameConstructKind, oldQualifiedName, node);
                 return;
             }
 
-            var writeScope = WriteScopeFor(existing);
             catalog.Remove(oldQualifiedName, writeScope);
             catalog.AddOrReplace(existing with { SchemaName = schema, Name = newName }, writeScope);
         }
@@ -1003,7 +1007,8 @@ public static class CatalogBuilder
         {
             var (containerName, oldColumnName) = SplitLastSegment(objName);
             var (schema, tableQualifiedName) = SplitTableTarget(containerName);
-            if (schema is UnresolvableSchema || catalog.Find(tableQualifiedName, _currentScope) is not { } existing)
+            var (existing, writeScope) = catalog.FindForMutation(tableQualifiedName, _currentScope);
+            if (schema is UnresolvableSchema || existing is null)
             {
                 RecordUnresolvedTarget("sp_rename (COLUMN)", tableQualifiedName, node);
                 return;
@@ -1013,14 +1018,15 @@ public static class CatalogBuilder
                 .Select(c => string.Equals(c.Name, oldColumnName, StringComparison.OrdinalIgnoreCase) ? c with { Name = newName } : c)
                 .ToList();
 
-            catalog.AddOrReplace(existing with { Columns = updatedColumns }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Columns = updatedColumns }, writeScope);
         }
 
         private void RenameIndex(string objName, string newName, TSqlFragment node)
         {
             var (containerName, oldIndexName) = SplitLastSegment(objName);
             var (schema, tableQualifiedName) = SplitTableTarget(containerName);
-            if (schema is UnresolvableSchema || catalog.Find(tableQualifiedName, _currentScope) is not { } existing)
+            var (existing, writeScope) = catalog.FindForMutation(tableQualifiedName, _currentScope);
+            if (schema is UnresolvableSchema || existing is null)
             {
                 RecordUnresolvedTarget("sp_rename (INDEX)", tableQualifiedName, node);
                 return;
@@ -1030,7 +1036,7 @@ public static class CatalogBuilder
                 .Select(i => string.Equals(i.Name, oldIndexName, StringComparison.OrdinalIgnoreCase) ? i with { Name = newName } : i)
                 .ToList();
 
-            catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, writeScope);
         }
 
         /// <summary>Sentinel schema value <see cref="SplitTableTarget"/> returns for a three-part (database-qualified) target - cross-database rename resolution is out of scope, matching every other cross-database simplification in this pass.</summary>
@@ -1117,7 +1123,7 @@ public static class CatalogBuilder
         private void VisitAlterTableAdd(AlterTableAddTableElementStatement alterTable)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(alterTable.SchemaObjectName);
-            var existing = catalog.Find(qualifiedName, _currentScope);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER TABLE ADD", qualifiedName, alterTable);
@@ -1134,18 +1140,18 @@ public static class CatalogBuilder
             // INDEX targeting a #temp table or table variable must find AND re-store it under the
             // same scoped key it was declared with, or the update either silently misses a scoped
             // entry (unscoped Find) or creates a stray unscoped duplicate while leaving the real,
-            // scoped entry stale (unscoped AddOrReplace). Find is always safe with a scope - a
-            // real table falls through to the unscoped lookup automatically - but AddOrReplace's
-            // write-back scope must match how the row was ORIGINALLY stored (see WriteScopeFor),
-            // or a real table altered from inside a proc body would get wrongly re-stored under a
-            // scoped key of its own, orphaning its real unscoped entry.
+            // scoped entry stale (unscoped AddOrReplace). FindForMutation reports which scope the
+            // match was ACTUALLY found under (not necessarily _currentScope - a #temp table
+            // declared at batch level and altered from inside a proc is found via the unscoped
+            // fallback even though the ALTER statement's own scope is non-null), so the write-back
+            // targets the one true entry instead of creating a stray duplicate.
             catalog.AddOrReplace(
                 existing with
                 {
                     Columns = ApplyPrimaryKeyNotNull(mergedColumns, mergedIndexes),
                     Indexes = mergedIndexes,
                 },
-                WriteScopeFor(existing));
+                writeScope);
 
             if (existing.Kind == CatalogTableKind.Table)
             {
@@ -1156,14 +1162,10 @@ public static class CatalogBuilder
             }
         }
 
-        /// <summary>The scope key an already-cataloged table must be re-stored under after an in-place update - only a temp table/table variable was ever stored scoped; a real table always lives at the unscoped key regardless of where the statement altering it appears.</summary>
-        private string? WriteScopeFor(CatalogTable table) =>
-            table.Kind is CatalogTableKind.TemporaryTable or CatalogTableKind.TableVariable ? _currentScope : null;
-
         private void VisitAlterColumn(AlterTableAlterColumnStatement alterColumn)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(alterColumn.SchemaObjectName);
-            var existing = catalog.Find(qualifiedName, _currentScope);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER TABLE ALTER COLUMN", qualifiedName, alterColumn);
@@ -1197,13 +1199,13 @@ public static class CatalogBuilder
                 .Select(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase) ? c with { Type = newType } : c)
                 .ToList();
 
-            catalog.AddOrReplace(existing with { Columns = updatedColumns }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Columns = updatedColumns }, writeScope);
         }
 
         private void VisitDropTableElements(AlterTableDropTableElementStatement dropStatement)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(dropStatement.SchemaObjectName);
-            var existing = catalog.Find(qualifiedName, _currentScope);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("ALTER TABLE DROP", qualifiedName, dropStatement);
@@ -1239,13 +1241,13 @@ public static class CatalogBuilder
                 ? existing.Indexes
                 : existing.Indexes.Where(i => i.Name is null || !droppedConstraintOrIndexNames.Contains(i.Name)).ToList();
 
-            catalog.AddOrReplace(existing with { Columns = remainingColumns, Indexes = remainingIndexes }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Columns = remainingColumns, Indexes = remainingIndexes }, writeScope);
         }
 
         private void VisitCreateIndex(CreateIndexStatement createIndex)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
-            var existing = catalog.Find(qualifiedName, _currentScope);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("CREATE INDEX", qualifiedName, createIndex);
@@ -1260,13 +1262,13 @@ public static class CatalogBuilder
                 [.. createIndex.IncludeColumns.Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)],
                 IsFiltered: createIndex.FilterPredicate is not null);
 
-            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
         }
 
         private void VisitCreateColumnStoreIndex(CreateColumnStoreIndexStatement createIndex)
         {
             var qualifiedName = SchemaObjectNameHelper.Qualify(createIndex.OnName);
-            var existing = catalog.Find(qualifiedName, _currentScope);
+            var (existing, writeScope) = catalog.FindForMutation(qualifiedName, _currentScope);
             if (existing is null)
             {
                 RecordUnresolvedTarget("CREATE COLUMNSTORE INDEX", qualifiedName, createIndex);
@@ -1281,7 +1283,7 @@ public static class CatalogBuilder
                 IncludedColumns: [],
                 IsColumnstore: true);
 
-            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, WriteScopeFor(existing));
+            catalog.AddOrReplace(existing with { Indexes = [.. existing.Indexes, index] }, writeScope);
         }
 
         private void VisitDeclareTableVariable(DeclareTableVariableStatement declareTableVar)

@@ -1563,6 +1563,50 @@ public sealed class CatalogBuilderTests
         Assert.Equal(SqlTypeCategory.Int, parameters[1].Type!.Category);
     }
 
+    [Fact]
+    public void Build_AlterTableAddFromInsideProcOnBatchLevelTempTable_UpdatesTheOneTrueUnscopedEntry()
+    {
+        // A #temp table created at BATCH level (outside any procedure) is visible to a
+        // subsequently-called procedure in the same session - a real, common pattern (a script
+        // builds #t, then calls a proc that further alters/populates it). ALTER TABLE ADD from
+        // inside that proc's body finds #t via Find's own scoped-then-unscoped-fallback (there is
+        // no "dbo.usp_Test"-scoped entry, only the bare batch-level one), but the write-back scope
+        // was computed from the ALTER statement's OWN current scope ("dbo.usp_Test") rather than
+        // the scope the entry was actually found under (none) - creating a stray
+        // "dbo.usp_Test"::#t duplicate carrying the ALTER's new column, while the real, bare #t
+        // entry every OTHER scope (including plain batch-level code, or another unrelated
+        // procedure's own fallback lookup) resolves through stayed stale, missing Col2 entirely.
+        var catalog = CatalogBuilder.Build(
+            [Parse("""
+                CREATE TABLE #t (Col1 INT NOT NULL);
+                GO
+                CREATE PROCEDURE dbo.usp_Test
+                AS
+                BEGIN
+                    ALTER TABLE #t ADD Col2 VARCHAR(20) NOT NULL;
+                END
+                GO
+                CREATE PROCEDURE dbo.usp_Unrelated
+                AS
+                BEGIN
+                    SELECT Col1 FROM #t;
+                END
+                """)]);
+
+        var batchLevel = catalog.Find("#t");
+        // dbo.usp_Unrelated never declares its own #t, so this resolves through the SAME
+        // scoped-then-unscoped-fallback path as the ALTER statement itself did - if the ALTER's
+        // write-back had gone to a stray "dbo.usp_Test"::#t key instead of the one true unscoped
+        // entry, this would see the pre-ALTER, Col2-less shape instead.
+        var seenFromUnrelatedScope = catalog.Find("#t", "dbo.usp_Unrelated");
+
+        Assert.NotNull(batchLevel);
+        Assert.NotNull(batchLevel!.FindColumn("Col2"));
+        Assert.NotNull(seenFromUnrelatedScope);
+        Assert.NotNull(seenFromUnrelatedScope!.FindColumn("Col2"));
+        Assert.Same(batchLevel, seenFromUnrelatedScope);
+    }
+
     private static SqlParseResult Parse(string sql)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);

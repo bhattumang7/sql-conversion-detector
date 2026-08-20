@@ -541,6 +541,29 @@ public sealed class DatabaseCatalog
         return Find(qualifiedName);
     }
 
+    /// <summary>
+    /// Same lookup as <see cref="Find(string, string?)"/>, but for a caller that's about to
+    /// mutate the result and write it back (ALTER TABLE ADD/ALTER/DROP COLUMN, CREATE/DROP/ALTER
+    /// INDEX, sp_rename) - it also reports the scope the match was ACTUALLY found under, which is
+    /// not always <paramref name="scope"/> itself. A #temp table declared outside any procedure
+    /// and later altered from inside one (a real, common pattern - a batch builds #t, then calls a
+    /// procedure that further mutates it) is found via the unscoped fallback even though the
+    /// caller's own current scope is non-null; writing the mutation back under that caller's scope
+    /// instead of the scope it was actually stored under creates a stray, wrongly-scoped duplicate
+    /// while leaving the one true entry silently stale. The caller must always re-store using
+    /// <c>ActualScope</c>, never <paramref name="scope"/> or a value re-derived from the table's
+    /// own <see cref="CatalogTable.Kind"/> alone.
+    /// </summary>
+    public (CatalogTable? Table, string? ActualScope) FindForMutation(string qualifiedName, string? scope)
+    {
+        if (scope is not null && _tablesByQualifiedName.TryGetValue(Key(qualifiedName, scope), out var scoped))
+        {
+            return (scoped, scope);
+        }
+
+        return (Find(qualifiedName, scope: null), null);
+    }
+
     private string? TryStripSelfReferencingDatabasePrefix(string qualifiedName)
     {
         if (CurrentDatabaseName is not { Length: > 0 } currentDatabaseName)
