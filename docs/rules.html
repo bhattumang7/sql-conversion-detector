@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">263 rules. 171 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">264 rules. 172 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -503,6 +503,13 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/statement-shape-ordinal-order-by.html">Ordinal Order By</a> <code class="rule-key">silentscan/statement-shape/ordinal-order-by</code><span class="snippet">An ORDER BY references a SELECT-list position by ordinal number.</span></li>
       <li><a class="id" href="rules/statement-shape-table-with-no-primary-key.html">Table With No Primary Key</a> <code class="rule-key">silentscan/statement-shape/table-with-no-primary-key</code><span class="snippet">A base table has no PRIMARY KEY constraint.</span></li>
       <li><a class="id" href="rules/statement-shape-top-without-order-by.html">TOP Without Order By</a> <code class="rule-key">silentscan/statement-shape/top-without-order-by</code><span class="snippet">A TOP row-limiting clause has no ORDER BY anywhere in the query.</span></li>
+    </ul>
+  </section>
+
+  <section class="family-section">
+    <h2>statistics</h2>
+    <ul class="rule-list">
+      <li><a class="id" href="rules/statistics-no-applicable-statistic-auto-create-disabled.html">No Applicable Statistic Auto Create Disabled</a> <code class="rule-key">silentscan/statistics/no-applicable-statistic-auto-create-disabled</code><span class="snippet">A predicate resolves to a real base table column that no statistic (single-column, or a multi-column statistic with this column as its own leading key) covers, while the connected database has automatic statistics creation turned off.</span></li>
     </ul>
   </section>
 

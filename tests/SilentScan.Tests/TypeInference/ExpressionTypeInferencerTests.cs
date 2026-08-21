@@ -351,4 +351,224 @@ public sealed class ExpressionTypeInferencerTests
         Assert.Null(result.Length);
         Assert.False(result.LengthKnown);
     }
+
+    private static SqlType Decimal(int precision, int scale) => new(SqlTypeCategory.Decimal, Precision: precision, Scale: scale);
+
+    [Theory]
+    [InlineData("A + B", 6, 2)]
+    [InlineData("A - B", 6, 2)]
+    [InlineData("A * B", 11, 4)]
+    [InlineData("A / B", 13, 8)]
+    public void Resolve_Arithmetic_OracleVerified_DecimalWithDecimal_ExactPrecisionAndScale(string expressionSql, int expectedPrecision, int expectedScale)
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(5, 2), ["B"] = Decimal(5, 2) };
+
+        var result = Resolve(expressionSql, typesByName);
+
+        Assert.Equal(SqlTypeCategory.Decimal, result!.Category);
+        Assert.Equal(expectedPrecision, result.Precision);
+        Assert.Equal(expectedScale, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_IntPlusDecimal_NormalizesIntToDecimalTenZero()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = IntType, ["B"] = Decimal(5, 2) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(13, result!.Precision);
+        Assert.Equal(2, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_DecimalPlusInt_SameResultRegardlessOfOperandOrder()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(5, 2), ["B"] = IntType };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(13, result!.Precision);
+        Assert.Equal(2, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_BigIntPlusDecimal_NormalizesBigIntToDecimalNineteenZero()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.BigInt), ["B"] = Decimal(5, 2) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(22, result!.Precision);
+        Assert.Equal(2, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_TinyIntPlusDecimal_NormalizesTinyIntToDecimalThreeZero()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.TinyInt), ["B"] = Decimal(5, 2) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(6, result!.Precision);
+        Assert.Equal(2, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_SmallIntPlusDecimal_NormalizesSmallIntToDecimalFiveZero()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.SmallInt), ["B"] = Decimal(5, 2) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(8, result!.Precision);
+        Assert.Equal(2, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_MultiplyMixedPrecisionScale()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(9, 2), ["B"] = Decimal(9, 4) };
+
+        var result = Resolve("A * B", typesByName);
+
+        Assert.Equal(19, result!.Precision);
+        Assert.Equal(6, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_DivideMixedPrecisionScale()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(9, 2), ["B"] = Decimal(5, 4) };
+
+        var result = Resolve("A / B", typesByName);
+
+        Assert.Equal(19, result!.Precision);
+        Assert.Equal(8, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_AddExactlyAtPrecisionThirtyEight_NoCappingNeeded()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(38, 0), ["B"] = Decimal(38, 0) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(38, result!.Precision);
+        Assert.Equal(0, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_AddOverflowsThirtyEight_ScaleUnchangedIntegralPartTruncated()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(38, 37), ["B"] = Decimal(38, 37) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(38, result!.Precision);
+        Assert.Equal(37, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_AddOverflowsThirtyEight_ScaleCanReduceBelowMultiplyDivideFloor()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(38, 0), ["B"] = Decimal(38, 38) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(38, result!.Precision);
+        Assert.Equal(0, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_MultiplyOverflowsThirtyEight_ScaleFloorsAtSix()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(38, 10), ["B"] = Decimal(38, 0) };
+
+        var result = Resolve("A * B", typesByName);
+
+        Assert.Equal(38, result!.Precision);
+        Assert.Equal(6, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_MultiplyOverflow_PreservesIntegralDigitsWhenUnderThirtyTwo()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(20, 10), ["B"] = Decimal(20, 10) };
+
+        var result = Resolve("A * B", typesByName);
+
+        Assert.Equal(38, result!.Precision);
+        Assert.Equal(17, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_DivideOverflowsThirtyEight_ScaleFloorsAtSix()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = Decimal(38, 0), ["B"] = Decimal(38, 38) };
+
+        var result = Resolve("A / B", typesByName);
+
+        Assert.Equal(38, result!.Precision);
+        Assert.Equal(6, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_MoneyPlusDecimal_NormalizesMoneyToDecimalNineteenFour()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.Money), ["B"] = Decimal(5, 2) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Decimal, result!.Category);
+        Assert.Equal(20, result.Precision);
+        Assert.Equal(4, result.Scale);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_OracleVerified_MoneyPlusMoney_NoDecimalOperand_StaysMoney()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.Money), ["B"] = new SqlType(SqlTypeCategory.Money) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Money, result!.Category);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_FloatOperand_UnresolvedByExactFormula_FallsBackToPrecedenceOnly()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = new SqlType(SqlTypeCategory.Float), ["B"] = Decimal(5, 2) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Float, result!.Category);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_PureIntegerFamily_NeverPromotedToDecimal()
+    {
+        var typesByName = new Dictionary<string, SqlType?> { ["A"] = IntType, ["B"] = new SqlType(SqlTypeCategory.BigInt) };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.BigInt, result!.Category);
+        Assert.Null(result.Precision);
+    }
+
+    [Fact]
+    public void Resolve_Arithmetic_DecimalOperandMissingScale_DeclinesExactFormula_FallsBackToPrecedenceOnly()
+    {
+        var typesByName = new Dictionary<string, SqlType?>
+        {
+            ["A"] = new SqlType(SqlTypeCategory.Decimal, Precision: 9),
+            ["B"] = Decimal(5, 2),
+        };
+
+        var result = Resolve("A + B", typesByName);
+
+        Assert.Equal(SqlTypeCategory.Decimal, result!.Category);
+        Assert.Equal(9, result.Precision);
+        Assert.Null(result.Scale);
+    }
 }

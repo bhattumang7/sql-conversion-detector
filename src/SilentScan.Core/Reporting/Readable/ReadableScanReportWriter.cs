@@ -128,6 +128,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ViewOrdering(report, headingLevel, pathBase));
         blocks.AddRange(TransactionHygiene(report, headingLevel, pathBase));
         blocks.AddRange(CompositeIndexLeadingColumn(report, headingLevel, pathBase));
+        blocks.AddRange(MissingStatistics(report, headingLevel, pathBase));
         blocks.AddRange(IndexHint(report, headingLevel, pathBase));
         blocks.AddRange(SessionDateSetting(report, headingLevel, pathBase));
         blocks.AddRange(CartesianJoin(report, headingLevel, pathBase));
@@ -275,6 +276,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "View/inline TVF ordering not guaranteed", report.ViewOrderingFindings.Count);
         AddCount(counts, "Unresolved BEGIN TRANSACTION", report.TransactionHygieneFindings.Count);
         AddCount(counts, "Composite index leading-column violations", report.CompositeIndexLeadingColumnFindings.Count);
+        AddCount(counts, "Predicate columns with no applicable statistic and auto-create disabled", report.MissingStatisticsFindings.Count);
         AddCount(counts, "INDEX hints naming a nonexistent or non-seekable index", report.IndexHintFindings.Count);
         AddCount(counts, "SET DATEFORMAT/DATEFIRST mid-module", report.SessionDateSettingFindings.Count);
         AddCount(counts, "True cartesian joins", report.CartesianJoinFindings.Count);
@@ -1990,6 +1992,27 @@ public static class ReadableScanReportWriter
             {
                 Where(f.SourcePath, f.BeginTransactionLine, dynamicSqlCallSite: null, pathBase, f.Confidence),
                 $"{f.SourcePath}:{f.UnresolvedExitLine}",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MissingStatistics(ScanReport report, int level, string? pathBase)
+    {
+        if (report.MissingStatisticsFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Predicate columns with no applicable statistic, auto-create disabled ({report.MissingStatisticsFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A resolved predicate column has no covering statistic (single-column, or leading key of a multi-column statistic) on its table, and the connected database has AUTO_CREATE_STATISTICS turned off - the engine cannot create one on its own for this predicate.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, TableHeader, "Column"],
+            [.. report.MissingStatisticsFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.ColumnName,
             })]);
     }
 

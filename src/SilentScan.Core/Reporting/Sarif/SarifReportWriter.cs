@@ -120,6 +120,7 @@ public static class SarifReportWriter
         results.AddRange(report.SecurityPredicateIndexFindings.Select(ToResult));
         results.AddRange(report.DanglingObjectReferenceFindings.Select(ToResult));
         results.AddRange(report.TriggerOrderFindings.Select(ToResult));
+        results.AddRange(report.MissingStatisticsFindings.Select(ToResult));
 
         var notifications = BuildParseHealthNotifications(report.ParseHealth);
         var invocation = new SarifInvocation(ExecutionSuccessful: true, notifications);
@@ -1057,6 +1058,16 @@ public static class SarifReportWriter
         var indexLabel = finding.IndexName ?? "(unnamed index)";
         var message =
             $"Index {indexLabel} on {finding.TableQualifiedName} is keyed ({string.Join(", ", finding.IndexKeyColumns)}) - this query constrains {finding.ViolatingColumnName} (key position {finding.ViolatingColumnPosition}) but never binds the leading key column {finding.IndexKeyColumns[0]} anywhere in the statement, and no other index on this table leads with {finding.ViolatingColumnName} either, so nothing here can seek {finding.ViolatingColumnName} through a real index.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
+    }
+
+    private static SarifResult ToResult(MissingStatisticsFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MissingStatisticsRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+        var message =
+            $"{finding.TableQualifiedName}.{finding.ColumnName} is constrained here by a resolved predicate, but no statistic on {finding.TableQualifiedName} covers it (single-column, or leading key of a multi-column statistic) - and the connected database has AUTO_CREATE_STATISTICS turned off, so the engine cannot create one on its own.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.Column);
     }

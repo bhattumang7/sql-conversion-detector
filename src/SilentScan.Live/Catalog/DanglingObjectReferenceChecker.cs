@@ -167,6 +167,17 @@ public sealed class DanglingObjectReferenceChecker
             // an unrelated bind failure elsewhere in the same module can never wrongly confirm it.
             stillUnresolved = ex.Message.Contains(candidate.ReferencedEntityName, StringComparison.OrdinalIgnoreCase);
         }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            // Same whole-module-must-bind requirement as Msg 208 above, but for a column instead
+            // of an object: some unrelated statement in this module references a column the
+            // engine can't resolve right now, which blocks the DMV from describing ANY of the
+            // module's object references, including the one this call is checking. Msg 207 names
+            // a column, never this candidate's (object-shaped) ReferencedEntityName, so the same
+            // containment check used for 208 correctly leaves this candidate unconfirmed rather
+            // than guessing - the live reconciliation is simply inconclusive for this module.
+            stillUnresolved = ex.Message.Contains(candidate.ReferencedEntityName, StringComparison.OrdinalIgnoreCase);
+        }
 
         return stillUnresolved;
     }

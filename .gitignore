@@ -16,6 +16,8 @@ corpus/*
 .sonarqube/
 .scannerwork/
 .sonar-scan.lock
+project references.txt
+scan-report.txt
 
 # Local dev secrets (SA password override for docker-compose)
 .env

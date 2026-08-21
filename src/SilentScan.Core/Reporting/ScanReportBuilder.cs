@@ -473,6 +473,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<MissingStatisticsFinding> missingStatisticsFindings;
+        using (var missingStatisticsStage = progress.Begin("scanning missing-statistics/disabled-auto-create predicates", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = MissingStatisticsScanner.Scan(r, catalog);
+                    missingStatisticsStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            missingStatisticsFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<IndexHintFinding> indexHintFindings;
         using (var indexHintStage = progress.Begin("scanning INDEX hint validity", usableCount))
         {
@@ -1360,6 +1378,7 @@ public static class ScanReportBuilder
         stringConcatNullFindings = [.. stringConcatNullFindings.Where(f => f.Confidence <= minimumConfidence)];
         aggregateDivisionColumnstoreFindings = [.. aggregateDivisionColumnstoreFindings.Where(f => f.Confidence <= minimumConfidence)];
         triggerOrderFindings = [.. triggerOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
+        missingStatisticsFindings = [.. missingStatisticsFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1437,6 +1456,7 @@ public static class ScanReportBuilder
             columnstoreBatchModeDisqualifyingTypeFindings,
             alwaysEncryptedOrderByFindings,
             triggerOrderFindings,
+            missingStatisticsFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

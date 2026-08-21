@@ -41,6 +41,7 @@ public sealed class LiveCatalogReader
         catalog.CompatibilityLevel = await ReadCompatibilityLevelAsync(connection, cancellationToken);
         catalog.IsRecursiveTriggersEnabled = await ReadIsRecursiveTriggersEnabledAsync(connection, cancellationToken);
         catalog.IsNestedTriggersEnabled = await ReadIsNestedTriggersEnabledAsync(connection, cancellationToken);
+        catalog.IsAutoCreateStatsOn = await ReadIsAutoCreateStatsOnAsync(connection, cancellationToken);
 
         foreach (var (qualifiedName, underlyingType) in await ReadTypeAliasesAsync(connection, cancellationToken))
         {
@@ -739,6 +740,13 @@ public sealed class LiveCatalogReader
         return result is bool isOn ? isOn : null;
     }
 
+    private static async Task<bool?> ReadIsAutoCreateStatsOnAsync(SqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateReadOnlyCommand("SELECT is_auto_create_stats_on FROM sys.databases WHERE database_id = DB_ID();");
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is bool isOn ? isOn : null;
+    }
+
     /// <summary>
     /// Server-level <c>sys.configurations</c> option, distinct from the database-level
     /// <c>RECURSIVE_TRIGGERS</c> option read by <see cref="ReadIsRecursiveTriggersEnabledAsync"/> -
@@ -1118,31 +1126,50 @@ public sealed class LiveCatalogReader
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
-            SELECT s.object_id, s.name, s.no_recompute, s.auto_created
+            SELECT s.object_id, s.stats_id, s.name, s.no_recompute, s.auto_created, c.name AS column_name
             FROM sys.stats s
             JOIN sys.tables t ON t.object_id = s.object_id
-            WHERE t.is_ms_shipped = 0;
+            JOIN sys.stats_columns sc ON sc.object_id = s.object_id AND sc.stats_id = s.stats_id
+            JOIN sys.columns c ON c.object_id = sc.object_id AND c.column_id = sc.column_id
+            WHERE t.is_ms_shipped = 0
+            ORDER BY s.object_id, s.stats_id, sc.stats_column_id;
             """;
 
         await using var command = connection.CreateReadOnlyCommand(sql);
 
-        var statisticsByTable = new Dictionary<int, List<CatalogStatisticsInfo>>();
+        var rowsByStat = new Dictionary<(int ObjectId, int StatsId), (string Name, bool NoRecompute, bool IsAutoCreated, List<string> KeyColumns)>();
+        var statOrderByTable = new Dictionary<int, List<(int ObjectId, int StatsId)>>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             var objectId = reader.GetInt32(0);
-            var info = new CatalogStatisticsInfo(
-                Name: reader.GetString(1),
-                NoRecompute: reader.GetBoolean(2),
-                IsAutoCreated: reader.GetBoolean(3));
+            var statsId = reader.GetInt32(1);
+            var key = (objectId, statsId);
 
-            if (!statisticsByTable.TryGetValue(objectId, out var list))
+            if (!rowsByStat.TryGetValue(key, out var row))
             {
-                list = [];
-                statisticsByTable[objectId] = list;
+                row = (reader.GetString(2), reader.GetBoolean(3), reader.GetBoolean(4), []);
+                rowsByStat[key] = row;
+
+                if (!statOrderByTable.TryGetValue(objectId, out var order))
+                {
+                    order = [];
+                    statOrderByTable[objectId] = order;
+                }
+
+                order.Add(key);
             }
 
-            list.Add(info);
+            row.KeyColumns.Add(reader.GetString(5));
+        }
+
+        var statisticsByTable = new Dictionary<int, List<CatalogStatisticsInfo>>();
+        foreach (var (objectId, order) in statOrderByTable)
+        {
+            statisticsByTable[objectId] = order
+                .Select(key => rowsByStat[key])
+                .Select(row => new CatalogStatisticsInfo(row.Name, row.NoRecompute, row.IsAutoCreated, row.KeyColumns))
+                .ToList();
         }
 
         return statisticsByTable;

@@ -204,6 +204,8 @@ public static class SarifRuleCatalog
 
     public const string CompositeIndexLeadingColumnRuleId = "silentscan/index-shape/composite-leading-column-unconstrained";
 
+    public const string MissingStatisticsRuleId = "silentscan/statistics/no-applicable-statistic-auto-create-disabled";
+
     public static string IndexHintRuleId(IndexHintFindingKind kind) => kind switch
     {
         IndexHintFindingKind.IndexDoesNotExist => "silentscan/hint/index-does-not-exist",

@@ -499,6 +499,8 @@ public sealed class DatabaseCatalog
     /// </summary>
     public bool? IsNestedTriggersEnabled { get; set; }
 
+    public bool? IsAutoCreateStatsOn { get; set; }
+
     /// <summary>Everything Pass 1 saw but could not resolve into catalog data - never silently dropped.</summary>
     public SkipLedger Skipped { get; } = new();
 
