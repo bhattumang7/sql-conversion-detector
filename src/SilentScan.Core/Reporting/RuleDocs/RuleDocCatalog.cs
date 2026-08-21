@@ -81,6 +81,7 @@ public static class RuleDocCatalog
         [QueryAntiPattern.LinkedServerOrCrossDatabaseReference.RuleId] = QueryAntiPattern.LinkedServerOrCrossDatabaseReference.Content,
         [QueryAntiPattern.MultiRowInsertIgnoreDupKeyDrop.RuleId] = QueryAntiPattern.MultiRowInsertIgnoreDupKeyDrop.Content,
         [QueryAntiPattern.AlterTableSwitchColumnMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchColumnMismatch.Content,
+        [QueryAntiPattern.AlterTableSwitchIndexMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchIndexMismatch.Content,
 
         // TriggerCorrectness / ForcedSerial / CrossModule / Trigger
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,

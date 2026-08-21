@@ -764,4 +764,100 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
     }
+
+    // --- AlterTableSwitchIndexMismatch ------------------------------------------------------
+    // IsClustered/IncludedColumns/KeyColumnIsDescendingRaw are live-only (never set by
+    // CatalogBuilder from DDL text) - these tests build the catalog from DDL first, then
+    // AddOrReplace each table with its indexes carrying the live-only facts directly, the same
+    // pattern CatalogWithCouponTable above already uses.
+
+    private static DatabaseCatalog CatalogWithSwitchTables(
+        IReadOnlyList<CatalogIndex> sourceIndexes, IReadOnlyList<CatalogIndex> targetIndexes)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Code VARCHAR(20) NOT NULL, Pct INT NOT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, Code VARCHAR(20) NOT NULL, Pct INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { Indexes = sourceIndexes });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { Indexes = targetIndexes });
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchIndexes(
+        IReadOnlyList<CatalogIndex> sourceIndexes, IReadOnlyList<CatalogIndex> targetIndexes)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchTables(sourceIndexes, targetIndexes));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_ClusteredIndexPresenceMismatch_Fires()
+    {
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [],
+            targetIndexes: [new CatalogIndex("CX_SwTgt", CatalogIndexKind.Index, IsUnique: false, KeyColumns: ["Id"], IncludedColumns: [], IsClustered: true)]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4913", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetIndexMissingFromSource_Fires()
+    {
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [],
+            targetIndexes: [new CatalogIndex("IX_SwTgt_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [])]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+        Assert.Contains("4947", finding.DetailText);
+        Assert.Contains("IX_SwTgt_Code", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetIndexIncludeColumnMissingFromSource_Fires()
+    {
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [new CatalogIndex("IX_SwSrc_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [])],
+            targetIndexes: [new CatalogIndex("IX_SwTgt_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: ["Pct"])]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+        Assert.Contains("4947", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetIndexSortDirectionDiffersFromSource_Fires()
+    {
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [new CatalogIndex("IX_SwSrc_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [], KeyColumnIsDescendingRaw: [false])],
+            targetIndexes: [new CatalogIndex("IX_SwTgt_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [], KeyColumnIsDescendingRaw: [true])]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+        Assert.Contains("4947", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceHasExtraIndexTargetLacks_NeverFires()
+    {
+        // Oracle-confirmed (2026-08-21): only a TARGET index missing from the source matters -
+        // the reverse (source has more indexes than the target) raises nothing at all.
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [new CatalogIndex("IX_SwSrc_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [])],
+            targetIndexes: []);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_IdenticalIndexSet_NeverFires()
+    {
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [new CatalogIndex("IX_SwSrc_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: ["Pct"], KeyColumnIsDescendingRaw: [false])],
+            targetIndexes: [new CatalogIndex("IX_SwTgt_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: ["Pct"], KeyColumnIsDescendingRaw: [false])]);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+    }
 }

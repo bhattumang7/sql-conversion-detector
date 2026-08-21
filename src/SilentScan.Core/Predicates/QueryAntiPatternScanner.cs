@@ -164,6 +164,7 @@ public static class QueryAntiPatternScanner
         public override void ExplicitVisit(AlterTableSwitchStatement node)
         {
             InspectAlterTableSwitchColumnMismatch(node);
+            InspectAlterTableSwitchIndexMismatch(node);
             base.ExplicitVisit(node);
         }
 
@@ -435,6 +436,71 @@ public static class QueryAntiPatternScanner
 
         private static bool HasSameShape(SqlType a, SqlType b) =>
             a.Category == b.Category && a.Length == b.Length && a.Precision == b.Precision && a.Scale == b.Scale && a.IsMax == b.IsMax;
+
+        private void InspectAlterTableSwitchIndexMismatch(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var sourceHasClustered = source.Indexes.Any(ix => ix.IsClustered && !ix.IsColumnstore);
+            var targetHasClustered = target.Indexes.Any(ix => ix.IsClustered && !ix.IsColumnstore);
+            if (sourceHasClustered != targetHasClustered)
+            {
+                var (withClusteredName, withoutClusteredName) = sourceHasClustered
+                    ? (sourceQualifiedName, targetQualifiedName)
+                    : (targetQualifiedName, sourceQualifiedName);
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{withClusteredName}' has a clustered index while table '{withoutClusteredName}' does not (error 4913); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            foreach (var targetIndex in target.Indexes.Where(IsComparableSwitchIndex))
+            {
+                if (source.Indexes.Where(IsComparableSwitchIndex).Any(sourceIndex => HasSameIndexShape(sourceIndex, targetIndex)))
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - there is no identical index in the source table for index '{targetIndex.Name}' in the target table (error 4947); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+        }
+
+        private static bool IsComparableSwitchIndex(CatalogIndex index) =>
+            !index.IsFiltered && !index.IsColumnstore && !index.IsDisabled && !index.IsHypothetical;
+
+        private static bool HasSameIndexShape(CatalogIndex sourceIndex, CatalogIndex targetIndex)
+        {
+            if (sourceIndex.IsUnique != targetIndex.IsUnique
+                || !sourceIndex.KeyColumns.SequenceEqual(targetIndex.KeyColumns, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (sourceIndex.KeyColumnIsDescending.Count > 0 && targetIndex.KeyColumnIsDescending.Count > 0
+                && !sourceIndex.KeyColumnIsDescending.SequenceEqual(targetIndex.KeyColumnIsDescending))
+            {
+                return false;
+            }
+
+            var sourceIncluded = new HashSet<string>(sourceIndex.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+            var targetIncluded = new HashSet<string>(targetIndex.IncludedColumns, StringComparer.OrdinalIgnoreCase);
+            return sourceIncluded.SetEquals(targetIncluded);
+        }
 
         private static IEnumerable<NamedTableReference> CollectNamedTableReferences(TableReference tableReference)
         {

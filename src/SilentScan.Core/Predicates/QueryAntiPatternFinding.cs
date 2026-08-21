@@ -365,6 +365,34 @@ public enum QueryAntiPatternFindingKind
     /// always-available schema facts (file mode and live mode alike), and every reported mismatch
     /// shape was reproduced against the real engine, not inferred from documentation alone.</summary>
     AlterTableSwitchColumnMismatch,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement whose source and
+    /// target tables both resolve in the catalog (<see cref="Catalog.CatalogTableKind.Table"/> on
+    /// both sides) but disagree on clustered-index presence, or where the target carries a
+    /// non-clustered index with no identical counterpart on the source. Oracle-confirmed directly
+    /// (Docker instance, 2026-08-21) against three distinct shapes: a clustered index present on
+    /// one table but not the other raises error 4913/4914 regardless of any other index; a target
+    /// index whose key columns, key-column sort direction, or INCLUDE column set differs from
+    /// every source index (uniqueness must also match) raises error 4947 - all three facets were
+    /// verified independently to matter, not assumed from documentation. Confirmed the reverse
+    /// direction does NOT matter: a source-only index with no target counterpart raises nothing at
+    /// all, so this finding only ever walks the target table's own index list looking for a
+    /// missing source match, never the other way around. Clustered-index-presence comparison is
+    /// live-only (<see cref="Catalog.CatalogIndex.IsClustered"/> defaults false in file mode, so
+    /// this half never fires on a file-mode scan - same discipline as every other
+    /// <see cref="Catalog.CatalogIndex.IsClustered"/> consumer in this codebase). The matching-
+    /// index-set comparison degrades gracefully rather than misfiring in file mode: INCLUDE columns
+    /// (<see cref="Catalog.CatalogIndex.IncludedColumns"/>) and key sort direction
+    /// (<see cref="Catalog.CatalogIndex.KeyColumnIsDescending"/>) are both live-only fields that
+    /// read as empty on every file-mode index, so an empty-vs-empty comparison trivially matches -
+    /// weaker in file mode, never a false positive. A filtered, columnstore, disabled, or
+    /// hypothetical index is excluded from comparison on both sides - none of those participate in
+    /// the engine's own "identical index" check the same way an ordinary rowstore index does, and
+    /// this codebase's own precision discipline declines rather than guesses at their equivalence
+    /// rules. <see cref="FindingConfidence.High"/>: both tables' index shapes are ordinary schema
+    /// facts (clustered-presence live-only, the rest available in both modes), and every reported
+    /// mismatch shape was reproduced against the real engine.</summary>
+    AlterTableSwitchIndexMismatch,
 }
 
 public sealed record QueryAntiPatternFinding(
