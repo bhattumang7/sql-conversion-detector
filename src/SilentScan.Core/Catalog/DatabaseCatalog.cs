@@ -35,6 +35,10 @@ public sealed class DatabaseCatalog
 
     private readonly List<TemporalTablePair> _temporalTablePairs = [];
 
+    // Keyed by the UPPERCASE-normalized scheme name (T-SQL identifiers are case-insensitive by
+    // default collation) - avoids needing a custom tuple IEqualityComparer for a two-field key.
+    private readonly Dictionary<(string SchemeName, int PartitionNumber), string> _partitionFilegroupsBySchemeAndNumber = [];
+
     private readonly Dictionary<string, IReadOnlyList<CatalogIndex>> _indexedViewIndexesByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -201,6 +205,26 @@ public sealed class DatabaseCatalog
     public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
 
     public IReadOnlyList<TemporalTablePair> TemporalTablePairs => _temporalTablePairs;
+
+    /// <summary>
+    /// A partition scheme's own static boundary-to-filegroup assignment (<c>sys.destination_data_spaces</c>
+    /// joined off <c>sys.partition_schemes</c>/<c>sys.filegroups</c>) - a database-wide, schema-
+    /// definition fact independent of any one table (multiple partitioned tables commonly share
+    /// the same scheme), so this is a flat side-registry rather than folded into
+    /// <see cref="CatalogTable"/> the same way <see cref="TemporalTablePairs"/> is. Oracle-
+    /// confirmed (2026-08-21) as the source <c>ALTER TABLE ... SWITCH PARTITION</c>'s own per-
+    /// partition filegroup-mismatch check (errors 4938/4939) needs - see
+    /// <c>Predicates.QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch</c>'s
+    /// own doc comment. Live-only; always empty for a file-mode scan (partition scheme filegroup
+    /// assignment is never replayed from parsed DDL, the same DDL-fidelity reasoning every other
+    /// live-only fact in this codebase already gives).
+    /// </summary>
+    public void AddPartitionFilegroup(string schemeName, int partitionNumber, string filegroupName) =>
+        _partitionFilegroupsBySchemeAndNumber[(schemeName.ToUpperInvariant(), partitionNumber)] = filegroupName;
+
+    /// <summary>The filegroup a given partition scheme's given partition number resolves to, or null if unknown (an unpartitioned scan, file mode, or a scheme/number this registry never saw).</summary>
+    public string? FindPartitionFilegroup(string schemeName, int partitionNumber) =>
+        _partitionFilegroupsBySchemeAndNumber.GetValueOrDefault((schemeName.ToUpperInvariant(), partitionNumber));
 
     /// <summary>
     /// An indexed view's own clustered/nonclustered index shape, keyed by the view's qualified

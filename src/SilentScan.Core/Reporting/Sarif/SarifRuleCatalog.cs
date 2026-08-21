@@ -57,6 +57,9 @@ public static class SarifRuleCatalog
     public const string QueryAntiPatternAlterTableSwitchTargetOnlyIndexRestrictionRuleId = "silentscan/query/alter-table-switch-target-only-index-restriction";
     public const string QueryAntiPatternAlterTableSwitchFilegroupMismatchRuleId = "silentscan/query/alter-table-switch-filegroup-mismatch";
     public const string QueryAntiPatternAlterTableSwitchTemporalMismatchRuleId = "silentscan/query/alter-table-switch-temporal-mismatch";
+    public const string QueryAntiPatternAlterTableSwitchRuleConstraintRuleId = "silentscan/query/alter-table-switch-rule-constraint";
+    public const string QueryAntiPatternAlterTableSwitchCdcPartitionSwitchRuleId = "silentscan/query/alter-table-switch-cdc-partition-switch";
+    public const string QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId = "silentscan/query/alter-table-switch-partition-filegroup-mismatch";
     public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
     public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = "silentscan/trigger/multi-row-unsafe-single-row-assignment";
     public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = "silentscan/trigger/multi-row-unsafe-keyed-dml";
@@ -482,6 +485,9 @@ public static class SarifRuleCatalog
         QueryAntiPatternFindingKind.AlterTableSwitchTargetOnlyIndexRestriction => QueryAntiPatternAlterTableSwitchTargetOnlyIndexRestrictionRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch => QueryAntiPatternAlterTableSwitchFilegroupMismatchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch => QueryAntiPatternAlterTableSwitchTemporalMismatchRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchRuleConstraint => QueryAntiPatternAlterTableSwitchRuleConstraintRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch => QueryAntiPatternAlterTableSwitchCdcPartitionSwitchRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch => QueryAntiPatternAlterTableSwitchPartitionFilegroupMismatchRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
     };
 

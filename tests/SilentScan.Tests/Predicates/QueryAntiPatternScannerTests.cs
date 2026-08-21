@@ -1167,4 +1167,203 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch);
     }
+
+    // --- AlterTableSwitchRuleConstraint ------------------------------------------------------
+
+    private static DatabaseCatalog CatalogWithSwitchRuleConstraint(bool sourceHasRule, bool targetHasRule)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { HasRuleConstraint = sourceHasRule });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { HasRuleConstraint = targetHasRule });
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchRuleConstraint(bool sourceHasRule, bool targetHasRule)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchRuleConstraint(sourceHasRule, targetHasRule));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetHasRuleConstraint_Fires()
+    {
+        var findings = ScanSwitchRuleConstraint(sourceHasRule: false, targetHasRule: true);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchRuleConstraint);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4964", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceHasRuleConstraint_Fires()
+    {
+        var findings = ScanSwitchRuleConstraint(sourceHasRule: true, targetHasRule: false);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchRuleConstraint);
+        Assert.Contains("4964", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_NeitherHasRuleConstraint_NeverFires()
+    {
+        var findings = ScanSwitchRuleConstraint(sourceHasRule: false, targetHasRule: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchRuleConstraint);
+    }
+
+    // --- AlterTableSwitchCdcPartitionSwitch --------------------------------------------------
+
+    private static DatabaseCatalog CatalogWithSwitchCdc(bool sourceDisallowed, bool targetDisallowed)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { CdcPartitionSwitchDisallowed = sourceDisallowed });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { CdcPartitionSwitchDisallowed = targetDisallowed });
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchCdc(string switchSql, bool sourceDisallowed, bool targetDisallowed)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", switchSql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchCdc(sourceDisallowed, targetDisallowed));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetCdcPartitionSwitchDisallowed_Fires()
+    {
+        var findings = ScanSwitchCdc(
+            "ALTER TABLE dbo.SwSrc SWITCH PARTITION 1 TO dbo.SwTgt PARTITION 1;",
+            sourceDisallowed: false, targetDisallowed: true);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("22842", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceCdcPartitionSwitchDisallowed_Fires()
+    {
+        var findings = ScanSwitchCdc(
+            "ALTER TABLE dbo.SwSrc SWITCH PARTITION 1 TO dbo.SwTgt PARTITION 1;",
+            sourceDisallowed: true, targetDisallowed: false);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch);
+        Assert.Contains("22843", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_NoPartitionNumber_CdcDisallowedNeverFires()
+    {
+        // Oracle-confirmed (2026-08-21): the engine forces the flag back to 1 for a non-
+        // partitioned table regardless of what was requested - a plain whole-table SWITCH (no
+        // partition number in the syntax at all) can never be the hazard this error models.
+        var findings = ScanSwitchCdc(
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;",
+            sourceDisallowed: false, targetDisallowed: true);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_CdcPartitionSwitchAllowed_NeverFires()
+    {
+        var findings = ScanSwitchCdc(
+            "ALTER TABLE dbo.SwSrc SWITCH PARTITION 1 TO dbo.SwTgt PARTITION 1;",
+            sourceDisallowed: false, targetDisallowed: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch);
+    }
+
+    // --- AlterTableSwitchPartitionFilegroupMismatch ------------------------------------------
+
+    private static DatabaseCatalog CatalogWithSwitchPartitionFilegroups(
+        string? sourceScheme, string? targetScheme, IEnumerable<(string Scheme, int PartitionNumber, string Filegroup)> mappings)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { PartitionSchemeName = sourceScheme });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { PartitionSchemeName = targetScheme });
+
+        foreach (var (scheme, partitionNumber, filegroup) in mappings)
+        {
+            catalog.AddPartitionFilegroup(scheme, partitionNumber, filegroup);
+        }
+
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchPartitionFilegroups(
+        string switchSql, string? sourceScheme, string? targetScheme, IEnumerable<(string Scheme, int PartitionNumber, string Filegroup)> mappings)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", switchSql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchPartitionFilegroups(sourceScheme, targetScheme, mappings));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_DifferentSchemesSamePartitionNumberDifferentFilegroup_Fires()
+    {
+        var findings = ScanSwitchPartitionFilegroups(
+            "ALTER TABLE dbo.SwSrc SWITCH PARTITION 1 TO dbo.SwTgt PARTITION 1;",
+            sourceScheme: "PS_B", targetScheme: "PS_A",
+            mappings: [("PS_A", 1, "FG_A"), ("PS_B", 1, "FG_B")]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4938", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_NonPartitionedSourceDifferentFilegroupThanTargetPartition_Fires()
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { FilegroupName = "FG_B" });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { PartitionSchemeName = "PS_A" });
+        catalog.AddPartitionFilegroup("PS_A", 1, "FG_A");
+
+        var switchResult = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt PARTITION 1;");
+        Assert.False(switchResult.HasErrors, string.Join("; ", switchResult.Errors.Select(e => e.Message)));
+        var findings = QueryAntiPatternScanner.Scan(switchResult, catalog);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch);
+        Assert.Contains("4939", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SamePartitionSchemeSamePartitionNumber_NeverFires()
+    {
+        var findings = ScanSwitchPartitionFilegroups(
+            "ALTER TABLE dbo.SwSrc SWITCH PARTITION 1 TO dbo.SwTgt PARTITION 1;",
+            sourceScheme: "PS_A", targetScheme: "PS_A",
+            mappings: [("PS_A", 1, "FG_A")]);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_BothNonPartitioned_PartitionFilegroupCheckNeverFires()
+    {
+        // No partition number named at all - the whole-table filegroup check already covers
+        // this shape (error 4940), not this one.
+        var findings = ScanSwitchPartitionFilegroups(
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;",
+            sourceScheme: null, targetScheme: null, mappings: []);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch);
+    }
 }

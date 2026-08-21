@@ -467,6 +467,54 @@ public enum QueryAntiPatternFindingKind
     /// consumers - no new plumbing needed for this one fact.
     /// <see cref="FindingConfidence.High"/>: reproduced directly against the real engine.</summary>
     AlterTableSwitchTemporalMismatch,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's source or
+    /// target table carries a legacy <c>CREATE RULE</c>/<c>sp_bindrule</c> column binding
+    /// (<see cref="Catalog.CatalogTable.HasRuleConstraint"/>, distinct from a modern CHECK
+    /// constraint). Oracle-confirmed directly (Docker instance, 2026-08-21) to raise error 4964
+    /// unconditionally, symmetric on both sides - reproduced with the RULE bound to either the
+    /// source or the target table independently. Live-only (<c>sys.columns.rule_object_id</c>
+    /// is never replayed from parsed DDL in file mode - RULE/<c>sp_bindrule</c> is a legacy,
+    /// effectively extinct T-SQL feature, the same "engine-authoritative, never DDL-inferred"
+    /// reasoning <see cref="Catalog.CatalogCheckConstraint"/>'s own doc comment gives for a modern
+    /// check constraint). <see cref="FindingConfidence.High"/>: reproduced directly against the
+    /// real engine.</summary>
+    AlterTableSwitchRuleConstraint,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH PARTITION ...</c> statement (a real partition-
+    /// number-targeted SWITCH, not a whole-table one - <see cref="Microsoft.SqlServer.TransactSql.ScriptDom.AlterTableSwitchStatement.SourcePartitionNumber"/>/
+    /// <c>TargetPartitionNumber</c> not both null) where the source or target table is enabled
+    /// for Change Data Capture with a capture instance whose own <c>@allow_partition_switch</c>
+    /// was explicitly set to 0 at <c>sp_cdc_enable_table</c> time
+    /// (<see cref="Catalog.CatalogTable.CdcPartitionSwitchDisallowed"/>). Oracle-confirmed
+    /// directly (Docker instance, 2026-08-21): the DEFAULT (<c>@allow_partition_switch = 1</c>,
+    /// or CDC not enabled at all) does NOT block the statement - only the explicit opt-out does,
+    /// raising error 22842 (target) or 22843 (source). Also confirmed the engine silently forces
+    /// this flag back to 1 for a table that isn't partitioned, which is why this finding declines
+    /// (rather than guesses) for any SWITCH with no partition number at all - it cannot be the
+    /// hazard this specific error models. Live-only end to end
+    /// (<see cref="Catalog.DatabaseCatalog"/> never queries the <c>cdc</c> schema in file mode,
+    /// and the schema itself only exists once <c>sp_cdc_enable_db</c> has run).
+    /// <see cref="FindingConfidence.High"/>: reproduced directly against the real engine, both
+    /// the firing condition and its negative (default settings don't block).</summary>
+    AlterTableSwitchCdcPartitionSwitch,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH PARTITION ...</c> statement where the source and
+    /// target sides resolve to different filegroups at the SPECIFIC partition number named (or,
+    /// for a non-partitioned side, the whole table's own filegroup) - a materially more granular
+    /// claim than <see cref="AlterTableSwitchFilegroupMismatch"/>'s whole-table check (error
+    /// 4940), which only ever applies when NEITHER side names a partition number.
+    /// Oracle-confirmed directly (Docker instance, 2026-08-21) against two shapes: two
+    /// partitioned tables using different partition schemes whose same-numbered partition maps to
+    /// a different filegroup on each side (error 4938), and a non-partitioned source/target
+    /// resolving to a different filegroup than the other side's specific partition number (error
+    /// 4939). A partition number that isn't a literal integer (a variable or expression) declines
+    /// rather than guesses, matching this codebase's usual literal-only resolution discipline.
+    /// Live-only end to end (<see cref="Catalog.CatalogTable.PartitionSchemeName"/>/
+    /// <see cref="Catalog.DatabaseCatalog.FindPartitionFilegroup"/>'s own doc comments).
+    /// <see cref="FindingConfidence.High"/>: both shapes were reproduced against the real
+    /// engine.</summary>
+    AlterTableSwitchPartitionFilegroupMismatch,
 }
 
 public sealed record QueryAntiPatternFinding(

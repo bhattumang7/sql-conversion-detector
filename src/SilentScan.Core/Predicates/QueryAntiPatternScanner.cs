@@ -169,6 +169,9 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchTargetOnlyIndexRestriction(node);
             InspectAlterTableSwitchFilegroupMismatch(node);
             InspectAlterTableSwitchTemporalMismatch(node);
+            InspectAlterTableSwitchRuleConstraint(node);
+            InspectAlterTableSwitchCdcPartitionSwitch(node);
+            InspectAlterTableSwitchPartitionFilegroupMismatch(node);
             base.ExplicitVisit(node);
         }
 
@@ -671,6 +674,122 @@ public static class QueryAntiPatternScanner
                     FindingConfidence.High));
             }
         }
+
+        private void InspectAlterTableSwitchRuleConstraint(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            if (!source.HasRuleConstraint && !target.HasRuleConstraint)
+            {
+                return;
+            }
+
+            var offendingName = source.HasRuleConstraint ? sourceQualifiedName : targetQualifiedName;
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterTableSwitchRuleConstraint, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{offendingName}' has a legacy RULE constraint bound to one of its columns; SWITCH is not allowed on tables with RULE constraints (error 4964); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
+
+        private void InspectAlterTableSwitchCdcPartitionSwitch(AlterTableSwitchStatement node)
+        {
+            if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
+            {
+                // Never fires without a real partition number - the engine forces the flag back
+                // to 1 for a non-partitioned table regardless of what was requested.
+                return;
+            }
+
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            if (target.CdcPartitionSwitchDisallowed)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table is enabled for Change Data Capture with @allow_partition_switch explicitly set to 0 (error 22842); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            if (source.CdcPartitionSwitchDisallowed)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchCdcPartitionSwitch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - source table is enabled for Change Data Capture with @allow_partition_switch explicitly set to 0 (error 22843); this statement will fail at execution.",
+                    FindingConfidence.High));
+            }
+        }
+
+        private void InspectAlterTableSwitchPartitionFilegroupMismatch(AlterTableSwitchStatement node)
+        {
+            if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
+            {
+                // Both non-partitioned - the whole-table filegroup check (error 4940) already
+                // covers this shape; this check is specifically about a partition NUMBER's own
+                // filegroup, which only applies when at least one side names one.
+                return;
+            }
+
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var sourceFilegroup = ResolveSwitchSideFilegroup(source, node.SourcePartitionNumber);
+            var targetFilegroup = ResolveSwitchSideFilegroup(target, node.TargetPartitionNumber);
+            if (sourceFilegroup is null || targetFilegroup is null
+                || string.Equals(sourceFilegroup, targetFilegroup, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - the source side resolves to filegroup '{sourceFilegroup}' and the target side resolves to filegroup '{targetFilegroup}' (error 4938/4939); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
+
+        private string? ResolveSwitchSideFilegroup(CatalogTable table, ScalarExpression? partitionNumberExpression)
+        {
+            if (partitionNumberExpression is null)
+            {
+                // Non-partitioned side - the whole table's own filegroup (null for a partitioned
+                // table or an unresolved fact, never guessed at).
+                return table.FilegroupName;
+            }
+
+            if (ResolveIntegerLiteral(partitionNumberExpression) is not { } partitionNumber || table.PartitionSchemeName is null)
+            {
+                return null;
+            }
+
+            return catalog.FindPartitionFilegroup(table.PartitionSchemeName, partitionNumber);
+        }
+
+        private static int? ResolveIntegerLiteral(ScalarExpression expression) =>
+            expression is IntegerLiteral { Value: { } text } && int.TryParse(text, out var value) ? value : null;
 
         private void InspectAlterTableSwitchTemporalMismatch(AlterTableSwitchStatement node)
         {

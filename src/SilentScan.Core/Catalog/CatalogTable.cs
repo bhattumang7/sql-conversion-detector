@@ -32,8 +32,44 @@ public sealed record CatalogTable(
     bool IsMemoryOptimized = false,
     IReadOnlyList<CatalogStatisticsInfo>? Statistics = null,
     string? FilegroupName = null,
-    bool FilegroupIsReadOnly = false)
+    bool FilegroupIsReadOnly = false,
+    bool HasRuleConstraint = false,
+    bool CdcPartitionSwitchDisallowed = false,
+    string? PartitionSchemeName = null)
 {
+    // PartitionSchemeName is the table's own heap/clustered storage's partition scheme (the same
+    // sys.indexes.index_id IN (0, 1) row FilegroupName/FilegroupIsReadOnly read, joined against
+    // sys.data_spaces instead of sys.filegroups when that data_space is a scheme, not a plain
+    // filegroup) - mutually exclusive with FilegroupName: a table is either non-partitioned
+    // (FilegroupName set) or partitioned (this set), never both. Paired with
+    // DatabaseCatalog.FindPartitionFilegroup to resolve which filegroup a SPECIFIC partition
+    // number of this table lives in - see AlterTableSwitchPartitionFilegroupMismatch's own doc
+    // comment for the oracle-confirmed SWITCH check this exists for. Live-only, defaults to null
+    // so file mode (which never sets it) never misreads an ordinary table.
+
+
+    // CdcPartitionSwitchDisallowed (cdc.change_tables.partition_switch = 0 for at least one of
+    // this table's own CDC capture instances, keyed by source_object_id - only queryable when
+    // CDC is enabled for the current database at all, sys.databases.is_cdc_enabled) is oracle-
+    // confirmed directly (2026-08-21): a PARTITIONED table enabled for CDC with the capture
+    // instance's own @allow_partition_switch explicitly set to 0 at sp_cdc_enable_table time
+    // blocks ALTER TABLE ... SWITCH PARTITION unconditionally (errors 22842/22843, target/source
+    // respectively) - confirmed the DEFAULT (@allow_partition_switch = 1, or CDC not enabled at
+    // all) does NOT block a SWITCH, only the explicit opt-out does; also confirmed the engine
+    // silently forces this flag back to 1 (ignoring an explicit 0) for a table that isn't
+    // partitioned, so this field is only ever a real hazard for a genuinely partitioned table.
+    // Live-only, same discipline as every other CDC/legacy-feature fact in this codebase -
+    // defaults to false so file mode (which never sets it) never misreads an ordinary table.
+
+    // HasRuleConstraint (any of this table's own sys.columns.rule_object_id <> 0 - a legacy
+    // CREATE RULE/sp_bindrule column binding, distinct from a modern CHECK constraint) is
+    // oracle-confirmed directly (2026-08-21) to block ALTER TABLE ... SWITCH unconditionally
+    // (error 4964) - reproduced with the RULE bound on either the source or the target table,
+    // symmetric unlike every other index/constraint SWITCH check in this family. Live-only -
+    // file mode never replays sp_bindrule's own statement history, the same DDL-fidelity
+    // reasoning CatalogCheckConstraint/ForeignKeyRelationship's own doc comments already give.
+    // Defaults to false so file mode (which never sets it) never misreads an ordinary table.
+
     // FilegroupName/FilegroupIsReadOnly (sys.filegroups.name/is_read_only, joined off the table's
     // own heap/clustered-index row - sys.indexes.index_id IN (0, 1) - live-only) are oracle-
     // confirmed directly (2026-08-21) prerequisites for ALTER TABLE ... SWITCH: source and target

@@ -57,6 +57,14 @@ public sealed class LiveCatalogReader
         var indexesByTable = await ReadIndexesAsync(connection, cancellationToken);
         var statisticsByTable = await ReadStatisticsAsync(connection, cancellationToken);
         var filegroupByTable = await ReadTableFilegroupsAsync(connection, cancellationToken);
+        var ruleConstraintTables = await ReadRuleConstraintTablesAsync(connection, cancellationToken);
+        var cdcPartitionSwitchDisallowedTables = await ReadCdcPartitionSwitchDisallowedTablesAsync(connection, cancellationToken);
+        var partitionSchemeByTable = await ReadTablePartitionSchemesAsync(connection, cancellationToken);
+
+        foreach (var (schemeName, partitionNumber, filegroupName) in await ReadPartitionFilegroupsAsync(connection, cancellationToken))
+        {
+            catalog.AddPartitionFilegroup(schemeName, partitionNumber, filegroupName);
+        }
 
         foreach (var (objectId, schemaName, tableName, isMemoryOptimized) in tables)
         {
@@ -73,7 +81,10 @@ public sealed class LiveCatalogReader
                 IsMemoryOptimized: isMemoryOptimized,
                 Statistics: statisticsByTable.GetValueOrDefault(objectId, []),
                 FilegroupName: filegroupName,
-                FilegroupIsReadOnly: filegroupIsReadOnly));
+                FilegroupIsReadOnly: filegroupIsReadOnly,
+                HasRuleConstraint: ruleConstraintTables.Contains(objectId),
+                CdcPartitionSwitchDisallowed: cdcPartitionSwitchDisallowedTables.Contains(objectId),
+                PartitionSchemeName: partitionSchemeByTable.GetValueOrDefault(objectId)));
         }
 
         foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
@@ -1117,6 +1128,136 @@ public sealed class LiveCatalogReader
         }
 
         return filegroupByTable;
+    }
+
+    /// <summary>
+    /// The partition scheme a table's own heap/clustered-index row (<c>sys.indexes.index_id IN
+    /// (0, 1)</c>) belongs to - the partitioned-table counterpart to
+    /// <see cref="ReadTableFilegroupsAsync"/>'s non-partitioned case, joined against
+    /// <c>sys.partition_schemes</c> instead of <c>sys.filegroups</c> so the two queries never both
+    /// match the same table (a table's storage <c>data_space_id</c> is either a scheme or a
+    /// filegroup, never both). See <see cref="CatalogTable.PartitionSchemeName"/>'s own doc
+    /// comment.
+    /// </summary>
+    private static async Task<Dictionary<int, string>> ReadTablePartitionSchemesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT t.object_id, ps.name
+            FROM sys.tables t
+            JOIN sys.indexes i ON i.object_id = t.object_id AND i.index_id IN (0, 1)
+            JOIN sys.partition_schemes ps ON ps.data_space_id = i.data_space_id
+            WHERE t.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var schemeByTable = new Dictionary<int, string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            schemeByTable[reader.GetInt32(0)] = reader.GetString(1);
+        }
+
+        return schemeByTable;
+    }
+
+    /// <summary>
+    /// A partition scheme's static per-partition-number filegroup assignment
+    /// (<c>sys.destination_data_spaces</c>) - see <see cref="SilentScan.Core.Catalog.DatabaseCatalog.AddPartitionFilegroup"/>'s
+    /// own doc comment.
+    /// </summary>
+    private static async Task<List<(string SchemeName, int PartitionNumber, string FilegroupName)>> ReadPartitionFilegroupsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT ps.name, dds.destination_id, fg.name
+            FROM sys.partition_schemes ps
+            JOIN sys.destination_data_spaces dds ON dds.partition_scheme_id = ps.data_space_id
+            JOIN sys.filegroups fg ON fg.data_space_id = dds.data_space_id;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var results = new List<(string, int, string)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add((reader.GetString(0), reader.GetInt32(1), reader.GetString(2)));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Tables carrying at least one legacy <c>CREATE RULE</c>/<c>sp_bindrule</c> column binding
+    /// (<c>sys.columns.rule_object_id &lt;&gt; 0</c>) - distinct from a modern CHECK constraint,
+    /// which is <see cref="CatalogCheckConstraint"/>'s own concern. Oracle-confirmed (2026-08-21)
+    /// as an <c>ALTER TABLE ... SWITCH</c> blocker - see <see cref="CatalogTable.HasRuleConstraint"/>'s
+    /// own doc comment.
+    /// </summary>
+    private static async Task<HashSet<int>> ReadRuleConstraintTablesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT DISTINCT c.object_id
+            FROM sys.columns c
+            JOIN sys.tables t ON t.object_id = c.object_id
+            WHERE t.is_ms_shipped = 0 AND c.rule_object_id <> 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var tables = new HashSet<int>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            tables.Add(reader.GetInt32(0));
+        }
+
+        return tables;
+    }
+
+    /// <summary>
+    /// Tables carrying at least one CDC capture instance whose own <c>@allow_partition_switch</c>
+    /// was explicitly set to 0 (<c>cdc.change_tables.partition_switch = 0</c>) - oracle-confirmed
+    /// as an <c>ALTER TABLE ... SWITCH PARTITION</c> blocker for a genuinely partitioned table,
+    /// see <see cref="CatalogTable.CdcPartitionSwitchDisallowed"/>'s own doc comment. The
+    /// <c>cdc</c> schema only exists once CDC has been enabled for the current database at all
+    /// (<c>sp_cdc_enable_db</c>) - querying <c>cdc.change_tables</c> on a database that never
+    /// enabled CDC would fail outright, so this checks <c>sys.databases.is_cdc_enabled</c> first
+    /// and returns an empty set without querying further when it's off (the overwhelming common
+    /// case).
+    /// </summary>
+    private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string isCdcEnabledSql = "SELECT is_cdc_enabled FROM sys.databases WHERE database_id = DB_ID();";
+        await using (var probeCommand = connection.CreateReadOnlyCommand(isCdcEnabledSql))
+        {
+            var isCdcEnabled = await probeCommand.ExecuteScalarAsync(cancellationToken);
+            if (isCdcEnabled is not true)
+            {
+                return [];
+            }
+        }
+
+        const string sql = """
+            SELECT DISTINCT source_object_id
+            FROM cdc.change_tables
+            WHERE partition_switch = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var tables = new HashSet<int>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            tables.Add(reader.GetInt32(0));
+        }
+
+        return tables;
     }
 
     private static CatalogIndexKind ClassifyIndexKind(IndexRow row)
