@@ -393,6 +393,32 @@ public enum QueryAntiPatternFindingKind
     /// facts (clustered-presence live-only, the rest available in both modes), and every reported
     /// mismatch shape was reproduced against the real engine.</summary>
     AlterTableSwitchIndexMismatch,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement whose source and
+    /// target tables both resolve in the catalog (<see cref="Catalog.CatalogTableKind.Table"/> on
+    /// both sides) but disagree on CHECK or FOREIGN KEY constraints. Oracle-confirmed directly
+    /// (Docker instance, 2026-08-21) against four distinct shapes: a target CHECK constraint with
+    /// no source counterpart (error 4970/4971), a matching CHECK constraint pair (matched by
+    /// <see cref="Catalog.CatalogCheckConstraint.DefinitionText"/> - confirmed the engine matches
+    /// by definition text, NOT by constraint name, so two identically-defined constraints with
+    /// different names still count as corresponding) that disagrees on NOCHECK/CHECK state (error
+    /// 4960), a target foreign key with no source counterpart (matched by referenced table plus
+    /// referencing/referenced column pairs, again confirmed name-independent - error 4968), and a
+    /// matching foreign key pair that disagrees on enabled/disabled state (error 4969) or
+    /// NOCHECK/CHECK trust state (error 4974). Confirmed the same asymmetric direction as
+    /// <see cref="AlterTableSwitchIndexMismatch"/>: a source-only extra CHECK constraint with no
+    /// target counterpart raises nothing at all - only a TARGET constraint missing from the source
+    /// matters. Deliberately does not attempt RULE-constraint detection (error 4964) - this
+    /// codebase's catalog does not track legacy <c>CREATE RULE</c>/<c>sp_bindrule</c> bindings at
+    /// all, and the feature is effectively extinct in modern T-SQL. Live-only end to end
+    /// (<see cref="Catalog.DatabaseCatalog.CheckConstraints"/>/<see cref="Catalog.DatabaseCatalog.ForeignKeys"/>
+    /// are read live from <c>sys.check_constraints</c>/<c>sys.foreign_keys</c> only, engine-
+    /// authoritative by construction the same way <see cref="Catalog.ForeignKeyRelationship"/>'s
+    /// own doc comment explains - never populated by a file-mode scan, matching this codebase's
+    /// existing DDL-fidelity discipline). <see cref="FindingConfidence.High"/>: every reported
+    /// mismatch shape was reproduced against the real engine, not inferred from documentation
+    /// alone.</summary>
+    AlterTableSwitchConstraintMismatch,
 }
 
 public sealed record QueryAntiPatternFinding(

@@ -165,6 +165,7 @@ public static class QueryAntiPatternScanner
         {
             InspectAlterTableSwitchColumnMismatch(node);
             InspectAlterTableSwitchIndexMismatch(node);
+            InspectAlterTableSwitchConstraintMismatch(node);
             base.ExplicitVisit(node);
         }
 
@@ -501,6 +502,102 @@ public static class QueryAntiPatternScanner
             var targetIncluded = new HashSet<string>(targetIndex.IncludedColumns, StringComparer.OrdinalIgnoreCase);
             return sourceIncluded.SetEquals(targetIncluded);
         }
+
+        private void InspectAlterTableSwitchConstraintMismatch(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var sourceChecks = catalog.CheckConstraints.Where(c => string.Equals(c.TableQualifiedName, sourceQualifiedName, StringComparison.OrdinalIgnoreCase)).ToList();
+            var targetChecks = catalog.CheckConstraints.Where(c => string.Equals(c.TableQualifiedName, targetQualifiedName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            foreach (var targetCheck in targetChecks)
+            {
+                var matchingSource = sourceChecks.FirstOrDefault(c => string.Equals(c.DefinitionText, targetCheck.DefinitionText, StringComparison.Ordinal));
+                if (matchingSource is null)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table has check constraint '{targetCheck.ConstraintName}' with no corresponding constraint in the source table (error 4970/4971); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+
+                if (matchingSource.IsDisabled != targetCheck.IsDisabled)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - check constraint '{matchingSource.ConstraintName}' in the source table and matching constraint '{targetCheck.ConstraintName}' in the target table disagree on NOCHECK/CHECK state (error 4960); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+            }
+
+            var sourceForeignKeys = GroupForeignKeys(catalog.ForeignKeys, sourceQualifiedName);
+            var targetForeignKeys = GroupForeignKeys(catalog.ForeignKeys, targetQualifiedName);
+
+            foreach (var targetFk in targetForeignKeys)
+            {
+                var matchingSource = sourceForeignKeys.FirstOrDefault(fk => HasSameForeignKeyShape(fk, targetFk));
+                if (matchingSource is null)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table has foreign key constraint '{targetFk.ConstraintName}' with no corresponding key in the source table (error 4968); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+
+                if (matchingSource.IsDisabled != targetFk.IsDisabled)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - foreign key constraint '{matchingSource.ConstraintName}' in the source table and matching constraint '{targetFk.ConstraintName}' in the target table disagree on enabled/disabled state (error 4969); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+
+                if (matchingSource.IsNotTrusted != targetFk.IsNotTrusted)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - foreign key constraint '{matchingSource.ConstraintName}' in the source table and matching constraint '{targetFk.ConstraintName}' in the target table disagree on NOCHECK/CHECK state (error 4974); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+            }
+        }
+
+        private sealed record GroupedForeignKey(
+            string ConstraintName, string ReferencedTableQualifiedName,
+            IReadOnlySet<(string Parent, string Referenced)> ColumnPairs, bool IsDisabled, bool IsNotTrusted);
+
+        private static List<GroupedForeignKey> GroupForeignKeys(IReadOnlyList<ForeignKeyRelationship> foreignKeys, string tableQualifiedName) =>
+            foreignKeys
+                .Where(fk => string.Equals(fk.ParentTableQualifiedName, tableQualifiedName, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(fk => fk.ConstraintName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new GroupedForeignKey(
+                    g.Key,
+                    g.First().ReferencedTableQualifiedName,
+                    g.Select(fk => (fk.ParentColumnName.ToUpperInvariant(), fk.ReferencedColumnName.ToUpperInvariant())).ToHashSet(),
+                    g.First().IsDisabled,
+                    g.First().IsNotTrusted))
+                .ToList();
+
+        private static bool HasSameForeignKeyShape(GroupedForeignKey a, GroupedForeignKey b) =>
+            string.Equals(a.ReferencedTableQualifiedName, b.ReferencedTableQualifiedName, StringComparison.OrdinalIgnoreCase)
+            && a.ColumnPairs.SetEquals(b.ColumnPairs);
 
         private static IEnumerable<NamedTableReference> CollectNamedTableReferences(TableReference tableReference)
         {

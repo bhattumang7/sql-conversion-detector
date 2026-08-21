@@ -82,6 +82,7 @@ public static class RuleDocCatalog
         [QueryAntiPattern.MultiRowInsertIgnoreDupKeyDrop.RuleId] = QueryAntiPattern.MultiRowInsertIgnoreDupKeyDrop.Content,
         [QueryAntiPattern.AlterTableSwitchColumnMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchColumnMismatch.Content,
         [QueryAntiPattern.AlterTableSwitchIndexMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchIndexMismatch.Content,
+        [QueryAntiPattern.AlterTableSwitchConstraintMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchConstraintMismatch.Content,
 
         // TriggerCorrectness / ForcedSerial / CrossModule / Trigger
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,

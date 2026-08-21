@@ -860,4 +860,139 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
     }
+
+    // --- AlterTableSwitchConstraintMismatch -------------------------------------------------
+    // CheckConstraints/ForeignKeys are live-only (never populated by CatalogBuilder from DDL
+    // text) - these tests build the catalog from DDL first, then add constraints directly via
+    // DatabaseCatalog.AddCheckConstraint/AddForeignKey, the same live-only-fact pattern used
+    // above.
+
+    private static DatabaseCatalog CatalogWithSwitchConstraints(
+        IReadOnlyList<CatalogCheckConstraint> checkConstraints, IReadOnlyList<ForeignKeyRelationship> foreignKeys)
+    {
+        var ddl = "CREATE TABLE dbo.SwRef (Id INT NOT NULL); "
+            + "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, RegionId INT NOT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, RegionId INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        foreach (var check in checkConstraints)
+        {
+            catalog.AddCheckConstraint(check);
+        }
+
+        foreach (var fk in foreignKeys)
+        {
+            catalog.AddForeignKey(fk);
+        }
+
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchConstraints(
+        IReadOnlyList<CatalogCheckConstraint> checkConstraints, IReadOnlyList<ForeignKeyRelationship> foreignKeys)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchConstraints(checkConstraints, foreignKeys));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetCheckConstraintMissingFromSource_Fires()
+    {
+        var findings = ScanSwitchConstraints(
+            checkConstraints: [new CatalogCheckConstraint("CK_SwTgt", "dbo.SwTgt", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))")],
+            foreignKeys: []);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4970", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_MatchingCheckConstraintDisabledStateDiffers_Fires()
+    {
+        var findings = ScanSwitchConstraints(
+            checkConstraints:
+            [
+                new CatalogCheckConstraint("CK_SwSrc", "dbo.SwSrc", IsNotTrusted: false, IsDisabled: true, DefinitionText: "([RegionId]>(0))"),
+                new CatalogCheckConstraint("CK_SwTgt", "dbo.SwTgt", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))"),
+            ],
+            foreignKeys: []);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+        Assert.Contains("4960", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceHasExtraCheckConstraintTargetLacks_NeverFires()
+    {
+        // Same asymmetric direction as the index-set check - a source-only constraint with no
+        // target counterpart raises nothing at all (oracle-confirmed 2026-08-21).
+        var findings = ScanSwitchConstraints(
+            checkConstraints: [new CatalogCheckConstraint("CK_SwSrc", "dbo.SwSrc", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))")],
+            foreignKeys: []);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetForeignKeyMissingFromSource_Fires()
+    {
+        var findings = ScanSwitchConstraints(
+            checkConstraints: [],
+            foreignKeys: [new ForeignKeyRelationship("FK_SwTgt", "dbo.SwTgt", "RegionId", "dbo.SwRef", "Id")]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+        Assert.Contains("4968", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_MatchingForeignKeyEnabledStateDiffers_Fires()
+    {
+        var findings = ScanSwitchConstraints(
+            checkConstraints: [],
+            foreignKeys:
+            [
+                new ForeignKeyRelationship("FK_SwSrc", "dbo.SwSrc", "RegionId", "dbo.SwRef", "Id", IsDisabled: true),
+                new ForeignKeyRelationship("FK_SwTgt", "dbo.SwTgt", "RegionId", "dbo.SwRef", "Id", IsDisabled: false),
+            ]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+        Assert.Contains("4969", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_MatchingForeignKeyTrustStateDiffers_Fires()
+    {
+        var findings = ScanSwitchConstraints(
+            checkConstraints: [],
+            foreignKeys:
+            [
+                new ForeignKeyRelationship("FK_SwSrc", "dbo.SwSrc", "RegionId", "dbo.SwRef", "Id", IsNotTrusted: true),
+                new ForeignKeyRelationship("FK_SwTgt", "dbo.SwTgt", "RegionId", "dbo.SwRef", "Id", IsNotTrusted: false),
+            ]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+        Assert.Contains("4974", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_IdenticalConstraints_NeverFires()
+    {
+        var findings = ScanSwitchConstraints(
+            checkConstraints:
+            [
+                new CatalogCheckConstraint("CK_SwSrc", "dbo.SwSrc", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))"),
+                new CatalogCheckConstraint("CK_SwTgt", "dbo.SwTgt", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))"),
+            ],
+            foreignKeys:
+            [
+                new ForeignKeyRelationship("FK_SwSrc", "dbo.SwSrc", "RegionId", "dbo.SwRef", "Id"),
+                new ForeignKeyRelationship("FK_SwTgt", "dbo.SwTgt", "RegionId", "dbo.SwRef", "Id"),
+            ]);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
+    }
 }
