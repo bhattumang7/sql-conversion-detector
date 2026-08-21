@@ -605,4 +605,81 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
     }
+
+    // --- MultiRowInsertIgnoreDupKeyDrop -----------------------------------------------------
+    // CatalogIndex.IgnoreDupKey is live-only (never set by CatalogBuilder from DDL text, same
+    // discipline as IsClustered/OptimizeForSequentialKey) - these tests build the catalog from
+    // DDL first, then AddOrReplace the target table with an index carrying the flag directly,
+    // the same pattern TemporalTableHistoryIndexGapScannerTests already uses for a live-only fact.
+
+    private static DatabaseCatalog CatalogWithCouponTable(bool ignoreDupKey)
+    {
+        var ddl = "CREATE TABLE dbo.Coupon (Code VARCHAR(20) NOT NULL, Pct INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        var existing = catalog.Find("dbo.Coupon")!;
+        var index = new CatalogIndex(
+            "UX_Coupon_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"],
+            IncludedColumns: [], IgnoreDupKey: ignoreDupKey);
+        catalog.AddOrReplace(existing with { Indexes = [index] });
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanCoupon(string sql, bool ignoreDupKey)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithCouponTable(ignoreDupKey));
+    }
+
+    [Fact]
+    public void MultiRowInsert_IntoIgnoreDupKeyUniqueIndex_Fires()
+    {
+        var findings = ScanCoupon(
+            "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10), ('SAVE20', 20), ('SAVE10', 15);",
+            ignoreDupKey: true);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("UX_Coupon_Code", finding.DetailText);
+    }
+
+    [Fact]
+    public void SingleRowInsert_IntoIgnoreDupKeyUniqueIndex_NeverFires()
+    {
+        // A single row can't collide with itself, and whether it collides with an EXISTING row
+        // is a data question this pass cannot see - left unanalyzed rather than guessed at.
+        var findings = ScanCoupon(
+            "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10);",
+            ignoreDupKey: true);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
+    }
+
+    [Fact]
+    public void MultiRowInsert_IntoOrdinaryUniqueIndex_NeverFires()
+    {
+        // Same multi-row shape, but the unique index does NOT carry IGNORE_DUP_KEY - a duplicate
+        // here raises a real error instead of silently vanishing, so this is not the hazard.
+        var findings = ScanCoupon(
+            "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10), ('SAVE20', 20), ('SAVE10', 15);",
+            ignoreDupKey: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
+    }
+
+    [Fact]
+    public void MultiRowInsertSelect_IntoIgnoreDupKeyUniqueIndex_NeverFires()
+    {
+        // INSERT ... SELECT: this pass cannot prove the SELECT returns more than one row, and
+        // guessing would violate this project's precision discipline - left unanalyzed.
+        var findings = ScanCoupon(
+            "CREATE TABLE dbo.CouponSource (Code VARCHAR(20) NOT NULL, Pct INT NOT NULL); "
+            + "INSERT INTO dbo.Coupon (Code, Pct) SELECT Code, Pct FROM dbo.CouponSource;",
+            ignoreDupKey: true);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
+    }
 }

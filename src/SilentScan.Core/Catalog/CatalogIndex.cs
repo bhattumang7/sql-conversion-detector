@@ -98,6 +98,18 @@ namespace SilentScan.Core.Catalog;
 /// scheme identity alone. Live-only, same discipline as <see cref="IsClustered"/>; both default to
 /// <see langword="null"/> so file mode (which never sets either) never misreads a partitioned table
 /// at all - it degrades to "no partitioning claim" rather than a false "this is non-aligned".
+///
+/// <paramref name="IgnoreDupKey"/> is <c>sys.indexes.ignore_dup_key</c> directly - true iff a
+/// UNIQUE index was built (or later rebuilt) <c>WITH (IGNORE_DUP_KEY = ON)</c>. Oracle-confirmed
+/// directly against the standing Docker instance (2026-08-21): the option changes engine behavior
+/// only for a multi-row <c>INSERT</c> - a duplicate-key row is silently skipped ("Duplicate key was
+/// ignored", no error, the rest of the batch still commits) - while an <c>UPDATE</c> that would
+/// create the identical duplicate still raises a hard error regardless of this flag, so
+/// <see cref="Predicates.QueryAntiPatternScanner"/>'s own consumer of this field checks the
+/// statement is an <c>INSERT</c> and never an <c>UPDATE</c>. Live-only, same discipline as
+/// <see cref="IsClustered"/>/<see cref="OptimizeForSequentialKey"/> - defaults to
+/// <see langword="false"/> so file mode (which never sets it) never misreads an ordinary unique
+/// index as carrying this hazard.
 /// </summary>
 public sealed record CatalogIndex(
     string? Name,
@@ -114,7 +126,8 @@ public sealed record CatalogIndex(
     IReadOnlyList<bool>? KeyColumnIsDescendingRaw = null,
     bool OptimizeForSequentialKey = false,
     string? PartitionSchemeName = null,
-    string? PartitioningColumnName = null)
+    string? PartitioningColumnName = null,
+    bool IgnoreDupKey = false)
 {
     /// <summary>
     /// Positional parameter is nullable (<see cref="KeyColumnIsDescendingRaw"/>) purely so every

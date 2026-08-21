@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">250 rules. 158 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">251 rules. 159 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -430,6 +430,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/query-merge-missing-holdlock.html">MERGE Missing Holdlock</a> <code class="rule-key">silentscan/query/merge-missing-holdlock</code><span class="snippet">A MERGE target carries no WITH (HOLDLOCK)/SERIALIZABLE hint.</span></li>
       <li><a class="id" href="rules/query-merge-non-unique-using-source.html">MERGE Non Unique Using Source</a> <code class="rule-key">silentscan/query/merge-non-unique-using-source</code><span class="snippet">A MERGE USING source is not backed by a unique index covering its own ON-clause join columns.</span></li>
       <li><a class="id" href="rules/query-merge-unconditional-delete.html">MERGE Unconditional Delete</a> <code class="rule-key">silentscan/query/merge-unconditional-delete</code><span class="snippet">A MERGE WHEN MATCHED/WHEN NOT MATCHED BY SOURCE THEN DELETE branch carries no additional AND condition of its own.</span></li>
+      <li><a class="id" href="rules/query-multi-row-insert-ignore-dup-key-drop.html">Multi Row Insert Ignore Dup Key Drop</a> <code class="rule-key">silentscan/query/multi-row-insert-ignore-dup-key-drop</code><span class="snippet">A multi-row INSERT targets a table with a UNIQUE index built WITH (IGNORE_DUP_KEY = ON).</span></li>
       <li><a class="id" href="rules/query-non-aggregate-having-predicate.html">Non Aggregate HAVING Predicate</a> <code class="rule-key">silentscan/query/non-aggregate-having-predicate</code><span class="snippet">A HAVING condition references only GROUP BY key columns/literals and no aggregate result.</span></li>
       <li><a class="id" href="rules/query-rbar-single-row-loop-dml.html">Rbar Single Row Loop DML</a> <code class="rule-key">silentscan/query/rbar-single-row-loop-dml</code><span class="snippet">A WHILE loop issues a single-row UPDATE/DELETE keyed to a variable the same loop advances per iteration (row-by-row processing).</span></li>
       <li><a class="id" href="rules/query-recursive-cte-missing-maxrecursion.html">Recursive CTE Missing Maxrecursion</a> <code class="rule-key">silentscan/query/recursive-cte-missing-maxrecursion</code><span class="snippet">A recursive CTE&#x27;s containing statement has no OPTION (MAXRECURSION n).</span></li>

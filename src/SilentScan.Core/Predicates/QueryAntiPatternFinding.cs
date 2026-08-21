@@ -306,6 +306,34 @@ public enum QueryAntiPatternFindingKind
     /// which is cheaper than a genuine linked server even though it is still a separate database
     /// context for stats/plan-cache purposes).</summary>
     LinkedServerOrCrossDatabaseReference,
+
+    /// <summary>A multi-row <c>INSERT ... VALUES (...), (...), ...</c> (a syntactically provable
+    /// row constructor list with more than one row - ScriptDom's own <c>ValuesInsertSource.RowValues</c>
+    /// exposes this directly, no row-count inference needed) targets a table carrying at least one
+    /// UNIQUE index built <c>WITH (IGNORE_DUP_KEY = ON)</c> (<see cref="Catalog.CatalogIndex.IgnoreDupKey"/>,
+    /// <c>sys.indexes.ignore_dup_key</c>). Oracle-confirmed directly (Docker instance, 2026-08-21):
+    /// when one of the inserted rows collides with an existing (or an earlier row in the SAME
+    /// batch's) unique key value, the engine does not raise an error - it silently skips that one
+    /// row ("Duplicate key was ignored", a message only, never an exception) and commits every
+    /// other row in the batch, so <c>@@ROWCOUNT</c> after the statement is smaller than the number
+    /// of rows the statement text names, with no signal at all to a caller that only checks for an
+    /// error. Deliberately narrower than "any write against this table": the SAME oracle run
+    /// confirmed an <c>UPDATE</c> that would create the identical duplicate key still raises a
+    /// genuine, uncaught-by-default error ("Cannot insert duplicate key row...") regardless of this
+    /// option, so this kind only ever inspects <c>INSERT</c>, never <c>UPDATE</c> - flagging the
+    /// UPDATE case would be a false claim this same oracle run directly disproved. A single-row
+    /// <c>INSERT ... VALUES (...)</c> is left unanalyzed rather than guessed at: it cannot collide
+    /// with itself, and whether it collides with an EXISTING row is a data question this pass
+    /// cannot see - the multi-row shape is the one place "at least one row in THIS statement can
+    /// collide with another row in THIS SAME statement" becomes a provable structural fact
+    /// independent of what already sits in the table. <c>INSERT ... SELECT</c> is also left
+    /// unanalyzed - this pass cannot prove the SELECT returns more than one row, and guessing
+    /// would violate the same precision discipline. Live-only (<see cref="Catalog.CatalogIndex.IgnoreDupKey"/>
+    /// is never set by a file-mode scan). <see cref="FindingConfidence.High"/>: both preconditions
+    /// (a syntactically multi-row VALUES list; a real unique index on the target table carrying
+    /// this exact catalog flag) are mechanical, provable facts, and the silent-skip behavior itself
+    /// is oracle-confirmed, not inferred from documentation alone.</summary>
+    MultiRowInsertIgnoreDupKeyDrop,
 }
 
 public sealed record QueryAntiPatternFinding(

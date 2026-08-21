@@ -79,6 +79,7 @@ public static class RuleDocCatalog
         [QueryAntiPattern.RecursiveCteMissingMaxRecursion.RuleId] = QueryAntiPattern.RecursiveCteMissingMaxRecursion.Content,
         [QueryAntiPattern.UnboundedTableWrite.RuleId] = QueryAntiPattern.UnboundedTableWrite.Content,
         [QueryAntiPattern.LinkedServerOrCrossDatabaseReference.RuleId] = QueryAntiPattern.LinkedServerOrCrossDatabaseReference.Content,
+        [QueryAntiPattern.MultiRowInsertIgnoreDupKeyDrop.RuleId] = QueryAntiPattern.MultiRowInsertIgnoreDupKeyDrop.Content,
 
         // TriggerCorrectness / ForcedSerial / CrossModule / Trigger
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,

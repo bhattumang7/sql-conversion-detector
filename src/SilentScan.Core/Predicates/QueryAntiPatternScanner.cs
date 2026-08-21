@@ -132,6 +132,7 @@ public static class QueryAntiPatternScanner
         public override void ExplicitVisit(InsertStatement node)
         {
             InspectSiteIfNamedTable(node.InsertSpecification.Target);
+            InspectMultiRowInsertIgnoreDupKey(node);
             base.ExplicitVisit(node);
         }
 
@@ -323,6 +324,36 @@ public static class QueryAntiPatternScanner
                 named.StartLine, named.StartColumn,
                 $"'{database.Value}.{schemaObject.SchemaIdentifier?.Value}.{schemaObject.BaseIdentifier.Value}' references a different database than the one this scan connected to ('{currentDatabase}').",
                 FindingConfidence.Medium));
+        }
+
+        // --- Multi-row INSERT into a table with an IGNORE_DUP_KEY unique index (kind 14) --------
+
+        private void InspectMultiRowInsertIgnoreDupKey(InsertStatement node)
+        {
+            if (node.InsertSpecification.InsertSource is not ValuesInsertSource { RowValues.Count: > 1 }
+                || node.InsertSpecification.Target is not NamedTableReference named)
+            {
+                return;
+            }
+
+            var qualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(named.SchemaObject));
+            var resolved = catalog.Find(qualifiedName);
+            if (resolved is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var hazardIndex = resolved.Indexes.FirstOrDefault(ix => ix.IsUnique && ix.IgnoreDupKey);
+            if (hazardIndex is null)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"Multi-row INSERT into '{qualifiedName}' - unique index '{hazardIndex.Name}' has IGNORE_DUP_KEY=ON, so a row whose key duplicates an existing (or an earlier row in this same batch's) value is silently skipped instead of raising an error.",
+                FindingConfidence.High));
         }
 
         private static IEnumerable<NamedTableReference> CollectNamedTableReferences(TableReference tableReference)

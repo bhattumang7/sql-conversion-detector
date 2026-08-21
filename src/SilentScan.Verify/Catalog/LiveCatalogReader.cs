@@ -912,7 +912,7 @@ public sealed class LiveCatalogReader
                    ic.key_ordinal, ic.is_included_column, ic.index_column_id, c.name AS column_name,
                    ic.is_descending_key,
                    CASE WHEN ds.type = 'PS' THEN ds.name ELSE NULL END AS partition_scheme_name,
-                   pc.name AS partitioning_column_name
+                   pc.name AS partitioning_column_name, i.ignore_dup_key
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
             LEFT JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
@@ -965,7 +965,8 @@ public sealed class LiveCatalogReader
                 FilterDefinition: filterDefinition,
                 OptimizeForSequentialKey: reader.GetBoolean(11),
                 PartitionSchemeName: partitionSchemeName,
-                PartitioningColumnName: partitioningColumnName);
+                PartitioningColumnName: partitioningColumnName,
+                IgnoreDupKey: reader.GetBoolean(19));
             rowsByIndex[key] = row;
         }
 
@@ -1019,7 +1020,8 @@ public sealed class LiveCatalogReader
                 KeyColumnIsDescendingRaw: orderedKeyColumns.Count > 0 ? orderedDescendingFlags : [],
                 OptimizeForSequentialKey: row.OptimizeForSequentialKey,
                 PartitionSchemeName: row.PartitionSchemeName,
-                PartitioningColumnName: row.PartitioningColumnName);
+                PartitioningColumnName: row.PartitioningColumnName,
+                IgnoreDupKey: row.IgnoreDupKey);
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -1112,7 +1114,12 @@ public sealed class LiveCatalogReader
         // partitioning-column pair; ReadIndexedViewsAsync never sets either (an indexed view is
         // never itself a partitioned base table).
         string? PartitionSchemeName = null,
-        string? PartitioningColumnName = null);
+        string? PartitioningColumnName = null,
+        // Same reasoning again - only ReadIndexesAsync's own query reads ignore_dup_key;
+        // ReadIndexedViewsAsync never sets it (IGNORE_DUP_KEY is a unique-index-only option, and
+        // an indexed view's own clustered index is never the target of a plain INSERT the way a
+        // base table is).
+        bool IgnoreDupKey = false);
 
     /// <summary>
     /// The same shape as <see cref="ReadIndexesAsync"/>, joined against <c>sys.views</c> instead
