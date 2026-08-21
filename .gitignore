@@ -36,3 +36,7 @@ docs/.rebuild-baseline/
 vendor/
 # (this ignore entry is belt-and-braces for any untracked state)
 local-test-database.md
+
+# Cross-reference from docs/detection-tasklist.md checkbox items back to
+# vendor/sql2025 internal method names - local-only, never committed.
+gap-survey-checklist-xref.md
