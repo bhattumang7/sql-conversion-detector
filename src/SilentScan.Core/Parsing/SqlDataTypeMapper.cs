@@ -36,8 +36,9 @@ public static class SqlDataTypeMapper
         SqlDataTypeOption.Time => SqlTypeCategory.Time,
         SqlDataTypeOption.DateTime2 => SqlTypeCategory.DateTime2,
         SqlDataTypeOption.DateTimeOffset => SqlTypeCategory.DateTimeOffset,
+        SqlDataTypeOption.Json => SqlTypeCategory.Json,
 
-        // Cursor/Table/Json/Vector/None are not scalar comparison types this tool reasons about.
+        // Cursor/Table/Vector/None are not scalar comparison types this tool reasons about.
         _ => null,
     };
 }

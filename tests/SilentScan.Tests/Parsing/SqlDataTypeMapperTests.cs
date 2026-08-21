@@ -38,6 +38,7 @@ public sealed class SqlDataTypeMapperTests
     [InlineData(SqlDataTypeOption.Time, SqlTypeCategory.Time)]
     [InlineData(SqlDataTypeOption.DateTime2, SqlTypeCategory.DateTime2)]
     [InlineData(SqlDataTypeOption.DateTimeOffset, SqlTypeCategory.DateTimeOffset)]
+    [InlineData(SqlDataTypeOption.Json, SqlTypeCategory.Json)]
     public void Map_KnownOption_ReturnsExpectedCategory(SqlDataTypeOption option, SqlTypeCategory expected)
     {
         Assert.Equal(expected, SqlDataTypeMapper.Map(option));
@@ -47,7 +48,6 @@ public sealed class SqlDataTypeMapperTests
     [InlineData(SqlDataTypeOption.None)]
     [InlineData(SqlDataTypeOption.Cursor)]
     [InlineData(SqlDataTypeOption.Table)]
-    [InlineData(SqlDataTypeOption.Json)]
     public void Map_OutOfScopeOption_ReturnsNull(SqlDataTypeOption option)
     {
         Assert.Null(SqlDataTypeMapper.Map(option));

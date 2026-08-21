@@ -37,19 +37,22 @@ public static class VerdictClassifier
     /// OperandClash/Unknown) is operator-invariant in every pair sampled.
     /// </param>
     /// <remarks>
-    /// A column-vs-column operand shape (e.g. a JOIN predicate) was investigated as a possible
-    /// third correction alongside <paramref name="operatorText"/> - an initial sample (both sides
-    /// indexed) showed the same RangeSeek-losing pattern the non-literal-LIKE case does. Further
-    /// probing showed that result is confounded: whether <c>GetRangeThroughConvert</c> appears
-    /// for a column-vs-column comparison depends on whether the OTHER column is ALSO indexed
-    /// (both indexed: no dynamic range seek in the plan; only the classified side indexed - the
-    /// far more common real-world shape - the dynamic range seek IS present, agreeing with the
-    /// matrix). That makes it a plan-SHAPE-dependent fact in the sense CLAUDE.md's own oracle
-    /// discipline warns against trusting ("Oracle is plan-XML based, never plan-shape based"),
-    /// not a stable type-pair fact the matrix's (Category, Category, Collation) key could safely
-    /// encode - a blanket column-vs-column correction would misclassify the common single-
-    /// indexed-side join as ScanForced when it is genuinely RangeSeek. Deliberately NOT
-    /// implemented; column-vs-column keeps the matrix's plain column-vs-variable-probed answer.
+    /// A column-vs-column operand shape (same table, not a join) was investigated TWICE as a
+    /// possible third correction alongside <paramref name="operatorText"/>, and rejected both
+    /// times, for two different reasons. First pass: an initial small/real-data sample showed the
+    /// same RangeSeek-losing pattern the non-literal-LIKE case does, but a wider join-shaped
+    /// sample showed that depends on whether the OTHER column is ALSO indexed - a plan-SHAPE-
+    /// dependent fact, not a stable type-pair one. Second pass, isolating same-table specifically
+    /// from a join: real-data execution (5,000 rows, real statistics) showed a same-table
+    /// comparison losing the seek where a join keeps it - but the project's own oracle harness
+    /// (<c>CorpusFindingVerifier</c>, DDL-only, no data, checks only whether
+    /// <c>GetRangeThroughConvert</c> appears in the COMPILED plan) showed the construct present
+    /// for the same-table shape too. That is the correct signal here, not the real-data result:
+    /// CLAUDE.md's own rule is that a static verdict must never depend on the cardinality
+    /// estimator, and a real-data probe's plan CHOICE is exactly a cardinality-driven fact -
+    /// different row counts or data distributions could flip it, while compiled-plan construct
+    /// availability cannot. Column-vs-column - same table or joined - keeps the matrix's plain
+    /// column-vs-variable-probed answer.
     /// </remarks>
     public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null) =>
         ClassifyWithReason(columnType, otherType, otherIsLiteral, operatorText).Verdict;
@@ -176,6 +179,21 @@ public static class VerdictClassifier
     /// </summary>
     private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
     {
+        // A non-unicode operand whose declared length exceeds 4000 characters (its byte length,
+        // doubled to a unicode representation, would exceed the 8000-byte limit) compared against
+        // a unicode MAX-length operand is promoted to unicode MAX by the engine before the
+        // comparison is even considered for a seek - a LENGTH-triggered promotion, not just the
+        // plain cross-category (varchar column vs nvarchar value) case TypePairMatrix's cells
+        // already cover. Oracle-probed directly (Windows collation, 5,000-row real data): the same
+        // varchar/nvarchar(MAX) pair that seeks cleanly (RangeSeek) at a bounded length loses the
+        // seek entirely (Clustered Index Scan) once the narrow side's own declared length crosses
+        // 4000 - checked before the matrix lookup below because it changes the verdict the matrix
+        // would otherwise report for that category pair.
+        if (IsLengthTriggeredUnicodePromotion(columnType, otherType))
+        {
+            return (Verdict.ScanForced, null);
+        }
+
         // TryGetOutcomeForColumnCollation tries the exact probed collation first, then falls
         // back to every probed collation sharing the same SQL_*-vs-Windows family (only when
         // that family's own probed representatives all agree) - a resolved-but-not-exactly-
@@ -225,9 +243,21 @@ public static class VerdictClassifier
         return (isNonLiteralLike ? Verdict.ScanForced : Verdict.RangeSeek, null);
     }
 
+    /// <summary>
+    /// True when <paramref name="columnType"/> is the non-unicode side of a promotion the engine
+    /// applies before comparing: a non-unicode operand longer than 4000 characters compared
+    /// against a unicode MAX operand is treated as unicode MAX itself. Only the COLUMN side
+    /// matters here - the promotion is a property of the column's own declared length, not the
+    /// other operand's. Length must be known and MAX must be false: an unresolved or already-MAX
+    /// column length can't cross this specific bounded-length threshold.
+    /// </summary>
+    private static bool IsLengthTriggeredUnicodePromotion(SqlType columnType, SqlType otherType) =>
+        columnType.IsNonUnicodeString && !columnType.IsMax && columnType.Length is > 4000
+        && otherType.IsUnicodeString && otherType.IsMax;
+
     private static bool IsOutOfModelCategory(SqlTypeCategory category) =>
         category is SqlTypeCategory.SqlVariant or SqlTypeCategory.Xml or SqlTypeCategory.UserDefined
-            or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image;
+            or SqlTypeCategory.Text or SqlTypeCategory.NText or SqlTypeCategory.Image or SqlTypeCategory.Json;
 
     private static (Verdict Verdict, string? UnknownReason) ClassifySameCategory(SqlType columnType, SqlType otherType)
     {

@@ -11,21 +11,18 @@ namespace SilentScan.Tests.Predicates;
 /// dynamic range seek and is genuinely ScanForced instead of RangeSeek - a real misclassification
 /// this suite closes (see VerdictClassifier.Classify's operatorText parameter).
 ///
-/// Column-vs-column (a JOIN predicate) was investigated as a second correction and deliberately
-/// NOT made: an initial sample showed the same pattern, but further probing found it confounded -
-/// whether the dynamic range seek disappears depends on whether the OTHER column is ALSO
-/// indexed, not on the type pair alone. That's a plan-shape-dependent fact CLAUDE.md's own oracle
-/// discipline warns against trusting, not a stable one the matrix could safely encode - a blanket
-/// correction would misclassify the far more common single-indexed-side join as ScanForced when
-/// it is genuinely RangeSeek. The test below pins today's (correct, matrix-driven) RangeSeek
-/// answer for that common shape so a future change can't silently reintroduce the confounded
-/// "always ScanForced" version of this correction.
+/// Column-vs-column (same table AND joined) was investigated TWICE as a second correction and
+/// rejected both times - see VerdictClassifier.Classify's own remarks for the full history,
+/// including why a real-data-driven probe (which DID show a same-table comparison losing the
+/// seek) was the wrong signal to trust: this project's own oracle harness checks compiled-plan
+/// construct presence, never a specific data volume's plan CHOICE, precisely because a verdict
+/// must never depend on the cardinality estimator.
 /// </summary>
 [Trait("Category", "Oracle")]
 public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
 {
     private const string Ddl_ = """
-        CREATE TABLE dbo.VarCharWin (Code VARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_Code (Code));
+        CREATE TABLE dbo.VarCharWin (Code VARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL, OtherCode NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_Code (Code));
         GO
         CREATE TABLE dbo.NVarCharWin (Code NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);
         """;
@@ -118,6 +115,51 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
         Assert.True(finding.Column.Indexed);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task VarCharColumnVsNVarcharColumn_WindowsCollation_SameTableWhereClause_StillRangeSeek_OracleConfirmed()
+    {
+        // Same category pair and collation as the JOIN test above, but both columns come from
+        // the SAME row (a plain WHERE-clause comparison, not a join predicate). A real-data probe
+        // (5,000 rows, real statistics) shows the optimizer choosing NOT to use the dynamic range
+        // seek here - but that is a cardinality-driven plan CHOICE, not a structural fact, and
+        // this project's own oracle harness (DDL-only, checks compiled-plan construct presence)
+        // confirms GetRangeThroughConvert is still structurally present. RangeSeek is correct here
+        // by the same reasoning as the JOIN case above. Guards against reintroducing a same-table
+        // correction based on a real-data probe rather than this project's calibrated methodology.
+        var report = await Scan("SELECT Code FROM dbo.VarCharWin WHERE Code = OtherCode;");
+
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
+        Assert.Equal(Verdict.RangeSeek, finding.Verdict);
+        Assert.True(finding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [finding]);
+        PipelineOracleVerification.AssertAllConfirmed(results);
+    }
+
+    [Fact]
+    public async Task VarCharColumnOverFourThousandChars_VsNVarcharMaxVariable_WindowsCollation_IsScanForced_OracleConfirmed()
+    {
+        // A non-unicode column longer than 4000 characters compared against a unicode MAX value
+        // is promoted to unicode MAX by the engine before the seek is considered
+        // (VerdictClassifier.IsLengthTriggeredUnicodePromotion) - loses the dynamic range seek
+        // the same category pair gets at a bounded length (see the LIKE/range-operator tests
+        // above, all VARCHAR(20)). Unlike the column-vs-column correction this class's own
+        // remarks reject, this one IS a structural fact: this project's own DDL-only oracle
+        // harness confirms GetRangeThroughConvert is genuinely absent from the compiled plan
+        // here, not merely a real-data-driven plan choice.
+        const string longNarrowDdl = "CREATE TABLE dbo.LongNarrow (Code VARCHAR(4001) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_LongCode (Code));";
+        var report = await EngineAuthoritativeScan.ScanAsync(
+            longNarrowDdl + "\nGO\nDECLARE @p NVARCHAR(MAX); SELECT Code FROM dbo.LongNarrow WHERE Code = @p;",
+            "Latin1_General_CI_AS");
+
+        var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
+        Assert.Equal(Verdict.ScanForced, finding.Verdict);
+        Assert.True(finding.Column.Indexed);
+
+        var results = await PipelineOracleVerification.DeployAndVerifyAsync(Options, DatabaseName, longNarrowDdl, [finding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
 }

@@ -33,4 +33,4 @@ docs/.rebuild-baseline/
 # never redistributable, must never be committed or pushed.
 vendor/
 # (this ignore entry is belt-and-braces for any untracked state)
-CLAUDE.md
+local-test-database.md

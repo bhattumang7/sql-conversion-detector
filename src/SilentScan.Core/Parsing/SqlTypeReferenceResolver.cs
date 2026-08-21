@@ -43,6 +43,20 @@ public static class SqlTypeReferenceResolver
             return ResolveUserType(userType, columnCollation, typeAliases);
         }
 
+        // XML is its own dedicated ScriptDom node (XmlDataTypeReference, carrying an optional
+        // schema collection name), never a SqlDataTypeReference - confirmed directly by parsing
+        // `A XML NULL` and inspecting the resulting DataType node's runtime type. Falling through
+        // to the generic "not a SqlDataTypeReference" null below (the same path Cursor/Table/CLR
+        // UDT types take) meant an XML column's type never actually resolved to
+        // SqlTypeCategory.Xml - VerdictClassifier.IsOutOfModelCategory's Xml case was unreachable
+        // from real DDL, even though it still produced the same safe Unknown verdict by falling
+        // into the "operand-type-unresolved" branch instead of the more specific
+        // "out-of-model-category:Xml" one.
+        if (dataType is XmlDataTypeReference)
+        {
+            return new SqlType(SqlTypeCategory.Xml);
+        }
+
         if (dataType is not SqlDataTypeReference sqlDataType)
         {
             // Table types (ColumnType) and CLR UDTs (assembly-backed types) are out of scope
