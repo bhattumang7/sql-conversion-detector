@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
 using SilentScan.Core.Common;
+using SilentScan.Core.TypeInference;
 
 namespace SilentScan.Core.Predicates;
 
@@ -155,6 +156,14 @@ public static class QueryAntiPatternScanner
             InspectSiteIfNamedTable(node.MergeSpecification.Target);
             InspectSiteIfNamedTable(node.MergeSpecification.TableReference);
             InspectMergeHazards(node.MergeSpecification);
+            base.ExplicitVisit(node);
+        }
+
+        // --- ALTER TABLE ... SWITCH source/target column-shape mismatch (kind 14) -------------
+
+        public override void ExplicitVisit(AlterTableSwitchStatement node)
+        {
+            InspectAlterTableSwitchColumnMismatch(node);
             base.ExplicitVisit(node);
         }
 
@@ -355,6 +364,77 @@ public static class QueryAntiPatternScanner
                 $"Multi-row INSERT into '{qualifiedName}' - unique index '{hazardIndex.Name}' has IGNORE_DUP_KEY=ON, so a row whose key duplicates an existing (or an earlier row in this same batch's) value is silently skipped instead of raising an error.",
                 FindingConfidence.High));
         }
+
+        private void InspectAlterTableSwitchColumnMismatch(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            if (source.Columns.Count != target.Columns.Count)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' ({source.Columns.Count} columns) to '{targetQualifiedName}' ({target.Columns.Count} columns) - SQL Server requires both tables to have the same number of columns (error 4943); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            for (var i = 0; i < source.Columns.Count; i++)
+            {
+                var sourceColumn = source.Columns[i];
+                var targetColumn = target.Columns[i];
+
+                if (!string.Equals(sourceColumn.Name, targetColumn.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - column '{sourceColumn.Name}' at ordinal {i + 1} in the source table has a different name than column '{targetColumn.Name}' at the same ordinal in the target table (error 4942); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+
+                if (sourceColumn.IsComputed != targetColumn.IsComputed)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - column '{sourceColumn.Name}' is computed in one table but not the other (error 4965); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+
+                if (sourceColumn.Type is not null && targetColumn.Type is not null && !HasSameShape(sourceColumn.Type, targetColumn.Type))
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - column '{sourceColumn.Name}' has type {sourceColumn.Type} in the source table which is different from its type {targetColumn.Type} in the target table (error 4944); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+
+                if (sourceColumn.IsNullable != targetColumn.IsNullable)
+                {
+                    Findings.Add(new QueryAntiPatternFinding(
+                        QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch, sourcePath,
+                        node.StartLine, node.StartColumn,
+                        $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - column '{sourceColumn.Name}' does not have the same nullability in both tables (error 4985); this statement will fail at execution.",
+                        FindingConfidence.High));
+                    return;
+                }
+            }
+        }
+
+        private static bool HasSameShape(SqlType a, SqlType b) =>
+            a.Category == b.Category && a.Length == b.Length && a.Precision == b.Precision && a.Scale == b.Scale && a.IsMax == b.IsMax;
 
         private static IEnumerable<NamedTableReference> CollectNamedTableReferences(TableReference tableReference)
         {

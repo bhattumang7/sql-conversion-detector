@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">251 rules. 159 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">252 rules. 160 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -422,6 +422,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>query</h2>
     <ul class="rule-list">
+      <li><a class="id" href="rules/query-alter-table-switch-column-mismatch.html">Alter Table Switch Column Mismatch</a> <code class="rule-key">silentscan/query/alter-table-switch-column-mismatch</code><span class="snippet">An ALTER TABLE .</span></li>
       <li><a class="id" href="rules/query-bare-top-no-order-by.html">Bare TOP No Order By</a> <code class="rule-key">silentscan/query/bare-top-no-order-by</code><span class="snippet">A bare TOP (n) with no ORDER BY anywhere in the same query.</span></li>
       <li><a class="id" href="rules/query-count-star-variable-existence-check.html">Count Star Variable Existence Check</a> <code class="rule-key">silentscan/query/count-star-variable-existence-check</code><span class="snippet">COUNT(*) is assigned to a variable and the very next statement compares that variable only to zero.</span></li>
       <li><a class="id" href="rules/query-distinct-masking-join-fanout.html">Distinct Masking Join Fanout</a> <code class="rule-key">silentscan/query/distinct-masking-join-fanout</code><span class="snippet">A SELECT DISTINCT joins a table whose own join columns are not backed by a unique index.</span></li>

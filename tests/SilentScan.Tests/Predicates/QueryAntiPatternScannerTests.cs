@@ -682,4 +682,86 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
     }
+
+    // --- AlterTableSwitchColumnMismatch -----------------------------------------------------
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitch(string ddl, string switchSql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{switchSql}");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+        return QueryAntiPatternScanner.Scan(result, catalog);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_DifferentColumnCount_Fires()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Amount INT NOT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL);",
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4943", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_DifferentColumnNameAtSameOrdinal_Fires()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Amount INT NOT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, Amt INT NOT NULL);",
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
+        Assert.Contains("4942", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_DifferentDataType_Fires()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Amount DECIMAL(10,2) NOT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, Amount DECIMAL(12,4) NOT NULL);",
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
+        Assert.Contains("4944", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_DifferentNullability_Fires()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Amount INT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, Amount INT NOT NULL);",
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
+        Assert.Contains("4985", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_ComputedOnOneSideOnly_Fires()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Amount AS (Id * 2)); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, Amount INT NULL);",
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
+        Assert.Contains("4965", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_IdenticalShape_NeverFires()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwSrc (Id INT NOT NULL, Amount DECIMAL(10,2) NOT NULL); "
+            + "CREATE TABLE dbo.SwTgt (Id INT NOT NULL, Amount DECIMAL(10,2) NOT NULL);",
+            "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch);
+    }
 }

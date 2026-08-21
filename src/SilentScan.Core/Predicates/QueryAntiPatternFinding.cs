@@ -334,6 +334,37 @@ public enum QueryAntiPatternFindingKind
     /// this exact catalog flag) are mechanical, provable facts, and the silent-skip behavior itself
     /// is oracle-confirmed, not inferred from documentation alone.</summary>
     MultiRowInsertIgnoreDupKeyDrop,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement whose source and
+    /// target tables both resolve in the catalog (<see cref="Catalog.CatalogTableKind.Table"/> on
+    /// both sides) but have a structural column mismatch that SQL Server rejects unconditionally,
+    /// before any data-dependent check (partition emptiness, row ranges) ever runs. Oracle-confirmed
+    /// directly (Docker instance, 2026-08-21) against four distinct shapes, each raising a real,
+    /// specific engine error every time, independent of table content: a different column count
+    /// (error 4943), a column whose name differs from its counterpart at the same ordinal (error
+    /// 4942), a column that is computed in one table but not the other (error 4965), and a column
+    /// whose declared type/length/precision/scale differs between the two tables (error 4944). This
+    /// finding reports whichever ONE of these four is the first true mismatch found scanning
+    /// column-by-column in declaration order (count first, since a count mismatch makes any further
+    /// positional comparison meaningless) - not an exhaustive list of every mismatch in one
+    /// statement, matching how the engine itself raises on the first violation it finds. A
+    /// column-name-only difference (case) is not flagged as a mismatch here since T-SQL identifier
+    /// comparison is case-insensitive and the engine's own 4942 check is too. Type comparison
+    /// deliberately ignores collation (<see cref="TypeInference.SqlType.Collation"/>) - collation
+    /// drift between the two tables is a real, separate engine check (error 4945) this finding does
+    /// not claim to cover, and this codebase's own collation resolution is not reliable enough
+    /// end-to-end to assert that specific claim without risking a false positive. A column whose
+    /// type could not be resolved at all (<see cref="Catalog.CatalogColumn.Type"/> null on either
+    /// side) is skipped for the type comparison rather than guessed at, though name/computed/
+    /// nullability comparisons for that same column still apply since they don't depend on the
+    /// type being known. This is a purely schema-shape check: it says nothing about partition
+    /// alignment (already covered separately by <see cref="IndexDesignFindingKind.NonAlignedPartitionedIndex"/>)
+    /// or any of the many other independent SWITCH prerequisites (indexes, constraints, filegroup
+    /// placement, indexed views, temporal/CDC/replication settings) - those are out of scope for
+    /// this finding. <see cref="FindingConfidence.High"/>: both tables' column shapes are ordinary,
+    /// always-available schema facts (file mode and live mode alike), and every reported mismatch
+    /// shape was reproduced against the real engine, not inferred from documentation alone.</summary>
+    AlterTableSwitchColumnMismatch,
 }
 
 public sealed record QueryAntiPatternFinding(
