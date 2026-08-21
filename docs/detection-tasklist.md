@@ -33,13 +33,11 @@ Competitor tools are referred to generically; real identities are in
       finding wrong — and precision beats recall everywhere. Because we key
       confirmation on a plan marker, a rewritten-away predicate produces no
       marker and is currently indistinguishable from an unconfirmed finding.
-      **Next step:** enumerate the simplifications that can rescue a predicate
-      we already flag (constant folding, contradiction detection, redundant
-      -conversion removal, subquery flattening), then test each shipped
-      conversion and sargability rule against those shapes. Every survivor is
-      a confirmed rule; every casualty is a false positive we ship today. This
-      starts as an audit of shipped rules; if it turns up a construct the
-      engine reliably rewrites, that may well justify a new rule too.
+      **Next step:** enumerate contradiction detection (AND/OR propagation
+      across a full boolean tree — short-circuit/three-valued-NULL
+      reasoning) and subquery flattening, then test each shipped conversion
+      and sargability rule against those shapes. Every survivor is a
+      confirmed rule; every casualty is a false positive we ship today.
 
 - [ ] **Static risk factor: persisted computed column on a spatial expression,
       disabled by a future compat-level change.** `sys.dm_db_objects_disabled_on_compatibility_level_change(@level)`
@@ -333,12 +331,11 @@ per phase (Phase 0 commits per fix).
 - [ ] **Phase 3 — one findings schema, one emission path.** `ScanReport` is a
       76-positional-list record each writer hand-picks from; SARIF (the CI
       gate) references none of `SkippedConstructs`/`DynamicSqlSummary`/
-      `TypedPredicateSummary`/`ParseHealth`, so "couldn't look" is
-      indistinguishable from "clean" exactly where the contract forbids it;
-      `scan-db` has no stderr warning or exit-code effect for parse failures
-      (`scan-corpus-live` does). Collapse to findings + summaries consumed
-      uniformly; SARIF gets the honesty channels via `invocations`/
-      `notifications`. Decided (Umang, 2026-08-19): always warn on stderr +
+      `TypedPredicateSummary`, so "couldn't look" is
+      indistinguishable from "clean" exactly where the contract forbids it.
+      Collapse to findings + summaries consumed uniformly; SARIF gets the
+      honesty channels via `invocations`/`notifications`. Decided (Umang,
+      2026-08-19): always warn on stderr +
       always carry parse health/skip counts in SARIF notifications; exit code
       stays 0 unless a new `--strict` flag is passed, so existing pipelines
       keep passing while the honesty is visible. This is THE one schema change, so the three decisions
@@ -372,6 +369,10 @@ per phase (Phase 0 commits per fix).
 * **The incumbent survey is closed.** `detection-reference.md` §7.9–7.11.
 * **Killed candidates stay killed.** Each has its measurement in
   `detection-reference.md` Appendix 9; re-read it before re-proposing one.
+* **Redundant CAST/CONVERT does not rescue sargability — do not re-propose
+  suppressing it.** Oracle-confirmed: a CAST to a type identical to the
+  wrapped column's own still produces a Table Scan, not a Seek.
+  `detection-reference.md`, "Sargability and index eligibility."
 * **"One binder" shipped.** `FromScopeResolver`/`CteResolver`/`BaseColumnResolver`
   are now the only name-resolution path predicates go through;
   `DirectBaseTableResolver` (the second, independent bypass) is deleted.

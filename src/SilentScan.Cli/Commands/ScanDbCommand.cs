@@ -135,6 +135,8 @@ public static class ScanDbCommand
             return 1;
         }
 
+        await WarnOnParseHealthAsync(result, stderr);
+
         // Rendering is its own reported stage rather than silent tail-time. On a database with a
         // large finding count, serializing the report and writing it out is a substantial share
         // of total wall clock - measured at roughly a third of a real run - and reporting "done"
@@ -166,5 +168,31 @@ public static class ScanDbCommand
         // condition of the scanned database, not a tool bug, so neither affects the exit code -
         // both still appear in the report, prominently.
         return result.LineageParity.Mismatches.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Unlike scan-corpus-live, this command previously inspected <c>ParseHealth</c> nowhere at
+    /// all - a module that failed to parse from <c>sys.sql_modules</c>, or a batch dropped from
+    /// within one, was silently absent from every stream with no stderr signal. Exit code is
+    /// untouched: a module the live server itself accepted but ScriptDOM couldn't reparse is a
+    /// condition of the target database, not a tool failure.
+    /// </summary>
+    private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)
+    {
+        foreach (var file in result.Report.ParseHealth.Files)
+        {
+            foreach (var error in file.Errors)
+            {
+                await stderr.WriteLineAsync($"warning: '{file.Path}' failed to parse: line {error.Line}: {error.Message}");
+            }
+
+            foreach (var unanalyzed in file.UnanalyzedBatches)
+            {
+                var what = unanalyzed.ObjectName is { } name ? $"{unanalyzed.Kind} '{name}'" : "an unidentified object";
+                await stderr.WriteLineAsync(
+                    $"warning: '{unanalyzed.SourcePath}':{unanalyzed.StartLine} - a batch failed to parse and was dropped; " +
+                    $"{what} received zero analysis.");
+            }
+        }
     }
 }

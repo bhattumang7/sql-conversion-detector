@@ -89,7 +89,58 @@ public static class SqlScriptParser
         var parser = CreateParser(compatibilityLevel, initialQuotedIdentifiers);
         using var reader = new StringReader(sql);
         var fragment = parser.Parse(reader, out var errors);
-        return new SqlParseResult(sourcePath, fragment, errors.ToList());
+        var unanalyzedBatches = FindUnanalyzedBatches(sourcePath, sql, fragment);
+        return new SqlParseResult(sourcePath, fragment, errors.ToList(), unanalyzedBatches);
+    }
+
+    /// <summary>
+    /// A GO-separated batch with a syntax error never becomes a <see cref="TSqlBatch"/> at all -
+    /// ScriptDOM just omits it from <see cref="TSqlScript.Batches"/> - so the only way to know
+    /// one went missing is to independently split the same raw text on GO
+    /// (<see cref="GoBatchSplitter.SplitWithSpans"/>) and diff against the batches that did
+    /// survive. A raw span with no surviving batch whose <c>StartOffset</c> falls within it was
+    /// dropped; its best-effort object identity is read from its own raw text only (see
+    /// <see cref="DroppedBatchObjectSniffer"/>), never guessed. Raw text never leaves this
+    /// method - only the small derived result is kept.
+    /// </summary>
+    private static List<UnanalyzedBatch> FindUnanalyzedBatches(string sourcePath, string sql, TSqlFragment fragment)
+    {
+        if (fragment is not TSqlScript script)
+        {
+            return [];
+        }
+
+        var survivingStarts = script.Batches.Select(b => b.StartOffset).ToList();
+        List<UnanalyzedBatch>? unanalyzed = null;
+
+        foreach (var (start, length, text) in GoBatchSplitter.SplitWithSpans(sql))
+        {
+            var end = start + length;
+            if (survivingStarts.Any(s => s >= start && s < end))
+            {
+                continue;
+            }
+
+            var (kind, name) = DroppedBatchObjectSniffer.Sniff(text);
+            var startLine = CountLines(sql, start);
+            (unanalyzed ??= []).Add(new UnanalyzedBatch(sourcePath, startLine, kind, name));
+        }
+
+        return unanalyzed ?? [];
+    }
+
+    private static int CountLines(string sql, int upToOffset)
+    {
+        var line = 1;
+        for (var i = 0; i < upToOffset && i < sql.Length; i++)
+        {
+            if (sql[i] == '\n')
+            {
+                line++;
+            }
+        }
+
+        return line;
     }
 
     /// <summary>

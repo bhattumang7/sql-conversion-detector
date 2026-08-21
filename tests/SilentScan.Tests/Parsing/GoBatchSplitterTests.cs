@@ -1,6 +1,6 @@
-using SilentScan.Verify.Deployment;
+using SilentScan.Core.Parsing;
 
-namespace SilentScan.Tests.Deployment;
+namespace SilentScan.Tests.Parsing;
 
 /// <summary>
 /// GoBatchSplitter had zero test coverage before this - a lexer-aware GO split is easy to get
@@ -181,5 +181,83 @@ public sealed class GoBatchSplitterTests
 
         Assert.Equal(2, batches.Count);
         Assert.Contains("SELECT 2", batches[1]);
+    }
+
+    [Fact]
+    public void SplitWithSpans_SimpleTwoBatches_ReturnsSpansMatchingExactText()
+    {
+        var script = "CREATE TABLE T1 (Id INT);\nGO\nCREATE TABLE T2 (Id INT);";
+
+        var spans = GoBatchSplitter.SplitWithSpans(script);
+
+        Assert.Equal(2, spans.Count);
+        foreach (var (start, length, text) in spans)
+        {
+            Assert.Equal(text, script.Substring(start, length));
+        }
+
+        Assert.Contains("CREATE TABLE T1", spans[0].Text);
+        Assert.Contains("CREATE TABLE T2", spans[1].Text);
+    }
+
+    [Fact]
+    public void SplitWithSpans_GoWithRepeatCount_ReturnsTheSegmentOnce()
+    {
+        // Unlike Split(), which repeats the batch 3 times to match deploy semantics,
+        // SplitWithSpans must return each GO-separated segment exactly once - it locates raw
+        // text spans, not a deploy plan.
+        var spans = GoBatchSplitter.SplitWithSpans("SELECT 1;\nGO 3");
+
+        Assert.Single(spans);
+    }
+
+    [Fact]
+    public void SplitWithSpans_EmptyBatchesAreDropped()
+    {
+        var script = "GO\nGO\nSELECT 1;\nGO\nGO";
+
+        var spans = GoBatchSplitter.SplitWithSpans(script);
+
+        Assert.Single(spans);
+        Assert.Equal("SELECT 1;", spans[0].Text);
+        Assert.Equal(spans[0].Text, script.Substring(spans[0].Start, spans[0].Length));
+    }
+
+    [Fact]
+    public void SplitWithSpans_LeadingAndTrailingWhitespaceAroundABatch_IsExcludedFromItsSpan()
+    {
+        var script = "\n\n  SELECT 1;  \n\nGO\nSELECT 2;";
+
+        var spans = GoBatchSplitter.SplitWithSpans(script);
+
+        Assert.Equal(2, spans.Count);
+        Assert.Equal("SELECT 1;", spans[0].Text);
+        Assert.Equal(spans[0].Text, script.Substring(spans[0].Start, spans[0].Length));
+    }
+
+    [Fact]
+    public void SplitWithSpans_GoInsideStringLiteral_DoesNotSplit()
+    {
+        var script = "INSERT INTO T (Note) VALUES ('line one\nGO\nline two');\nGO\nSELECT 1;";
+
+        var spans = GoBatchSplitter.SplitWithSpans(script);
+
+        Assert.Equal(2, spans.Count);
+        Assert.Contains("line one", spans[0].Text);
+        Assert.Contains("line two", spans[0].Text);
+        Assert.DoesNotContain("SELECT 1", spans[0].Text);
+    }
+
+    [Fact]
+    public void SplitWithSpans_NoGoSeparators_ReturnsSingleSpanCoveringWholeTrimmedScript()
+    {
+        var script = "SELECT 1;\nSELECT 2;";
+
+        var spans = GoBatchSplitter.SplitWithSpans(script);
+
+        Assert.Single(spans);
+        Assert.Equal(script, spans[0].Text);
+        Assert.Equal(0, spans[0].Start);
+        Assert.Equal(script.Length, spans[0].Length);
     }
 }

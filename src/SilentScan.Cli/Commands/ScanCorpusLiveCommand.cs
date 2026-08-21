@@ -221,6 +221,17 @@ public static class ScanCorpusLiveCommand
                 $"({failure.Errors.Count} error(s)) - it contributes zero findings to this scan.");
         }
 
+        // Batch-level, not file/module-level: a GO-separated batch that failed to parse was
+        // dropped entirely and never even reached ScriptDOM's Batches, so neither check above
+        // ever sees it - this is the only place that names what object, if any, was lost.
+        foreach (var unanalyzed in result.Report.ParseHealth.Files.SelectMany(f => f.UnanalyzedBatches))
+        {
+            var what = unanalyzed.ObjectName is { } name ? $"{unanalyzed.Kind} '{name}'" : "an unidentified object";
+            await stderr.WriteLineAsync(
+                $"warning: '{repo.Name}' {unanalyzed.SourcePath}:{unanalyzed.StartLine} - a batch failed to parse and was dropped; " +
+                $"{what} received zero analysis.");
+        }
+
         return result;
     }
 

@@ -992,4 +992,66 @@ public sealed class SarifReportWriterTests
             Enum.GetValues<CheckConstraintFindingKind>().Length,
             Enum.GetValues<CheckConstraintFindingKind>().Select(SarifRuleCatalog.CheckConstraintRuleId).Distinct().Count());
     }
+
+    [Fact]
+    public void Write_ParseError_EmitsToolExecutionNotification()
+    {
+        var parsed = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
+        Assert.True(parsed.HasErrors);
+        var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var notifications = document.RootElement.GetProperty("runs")[0]
+            .GetProperty("invocations")[0]
+            .GetProperty("toolExecutionNotifications");
+
+        Assert.True(notifications.GetArrayLength() >= 1);
+        var messages = notifications.EnumerateArray().Select(n => n.GetProperty("message").GetProperty("text").GetString()).ToList();
+        Assert.Contains(messages, m => m!.Contains("broken.sql", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Write_UnanalyzedBatch_EmitsDistinctToolExecutionNotificationNamingTheObject()
+    {
+        var script = string.Join('\n',
+            "CREATE VIEW dbo.vw_First AS SELECT 1 AS X;",
+            "GO",
+            "CREATE PROCEDURE dbo.usp_Broken AS SELECT 1 FROM FROM;",
+            "GO",
+            "CREATE VIEW dbo.vw_Third AS SELECT 1 AS X;");
+        var parsed = SqlScriptParser.ParseText("mixed.sql", script);
+        Assert.Single(parsed.UnanalyzedBatches);
+        var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var notifications = document.RootElement.GetProperty("runs")[0]
+            .GetProperty("invocations")[0]
+            .GetProperty("toolExecutionNotifications")
+            .EnumerateArray()
+            .ToList();
+
+        Assert.Contains(
+            notifications,
+            n => n.GetProperty("message").GetProperty("text").GetString()!.Contains("dbo.usp_Broken", StringComparison.Ordinal));
+        Assert.Contains(
+            notifications,
+            n => n.GetProperty("level").GetString() == "warning");
+    }
+
+    [Fact]
+    public void Write_NoParseErrors_StillEmitsInvocationWithEmptyNotifications()
+    {
+        var report = ScanReportBuilder.BuildFromParseResults([], new DatabaseCatalog());
+
+        var sarif = SarifReportWriter.Write(report);
+        using var document = JsonDocument.Parse(sarif);
+
+        var invocation = document.RootElement.GetProperty("runs")[0].GetProperty("invocations")[0];
+        Assert.True(invocation.GetProperty("executionSuccessful").GetBoolean());
+        Assert.Equal(0, invocation.GetProperty("toolExecutionNotifications").GetArrayLength());
+    }
 }

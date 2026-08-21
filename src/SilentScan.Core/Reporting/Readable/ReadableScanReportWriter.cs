@@ -2,6 +2,7 @@ using System.Globalization;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
+using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Rules;
 using SilentScan.Core.Reporting.Sarif;
@@ -175,6 +176,7 @@ public static class ReadableScanReportWriter
             "The oracle-probed type matrix confirms this exact type pair does not compile as a comparison at all (e.g. TIME vs a date-family type, or a GUID vs a string) - distinct from an unclassified comparison above: this one has a definitive answer, and the answer is that the comparison itself cannot run as written."));
         blocks.AddRange(DynamicSql(report, headingLevel, pathBase, verbosity));
         blocks.AddRange(ParseFailures(report, headingLevel, pathBase, verbosity));
+        blocks.AddRange(UnanalyzedObjects(report, headingLevel, pathBase, verbosity));
         blocks.AddRange(SkippedConstructs(report, headingLevel));
 
         return blocks;
@@ -2376,6 +2378,50 @@ public static class ReadableScanReportWriter
                 $"line {f.Errors[0].Line.ToString(CultureInfo.InvariantCulture)}: {f.Errors[0].Message}",
             })]);
     }
+
+    /// <summary>
+    /// A dropped batch's best-effort object identity - a distinct epistemic category from
+    /// <see cref="ParseFailures"/> (which pinpoints WHERE a parse failed) and from
+    /// <see cref="SkippedConstructs"/> (parsed, recognised, deliberately not analyzed): these
+    /// objects were never parsed at all, so nothing about them was ever examined. Not a finding.
+    /// </summary>
+    private static IEnumerable<ReadableBlock> UnanalyzedObjects(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
+    {
+        var unanalyzed = report.ParseHealth.Files.SelectMany(f => f.UnanalyzedBatches).ToList();
+        if (unanalyzed.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unanalyzed objects - dropped batches ({unanalyzed.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Each of these batches failed to parse and was dropped entirely (see \"Files with parse errors\" above) - the object it was defining, if any, received zero analysis. This is a coverage gap, not a finding: an object listed here was never examined, not confirmed clean.");
+
+        if (verbosity == ReadableVerbosity.Brief)
+        {
+            yield return BriefPointer(unanalyzed.Count, "unanalyzed object");
+            yield break;
+        }
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Kind", "Object"],
+            [.. unanalyzed.Select(u => new List<string>
+            {
+                Where(u.SourcePath, u.StartLine, null, pathBase),
+                UnanalyzedObjectKindLabel(u.Kind),
+                u.ObjectName ?? "(unidentified)",
+            })]);
+    }
+
+    private static string UnanalyzedObjectKindLabel(UnanalyzedObjectKind kind) => kind switch
+    {
+        UnanalyzedObjectKind.Procedure => "procedure",
+        UnanalyzedObjectKind.View => "view",
+        UnanalyzedObjectKind.Function => "function",
+        UnanalyzedObjectKind.Trigger => "trigger",
+        UnanalyzedObjectKind.Table => "table",
+        _ => "unidentified",
+    };
 
     private static IEnumerable<ReadableBlock> SkippedConstructs(ScanReport report, int level)
     {

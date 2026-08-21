@@ -30,11 +30,15 @@ public static class ParseHealthReportBuilder
     public static ParseHealthReport BuildFromParseResults(IReadOnlyList<SqlParseResult> fileParseResults) =>
         new([.. fileParseResults.Select(ToFileParseHealth)]);
 
-    private static FileParseHealth ToFileParseHealth(SqlParseResult result)
+    /// <summary>
+    /// Shared with <see cref="ScanReportBuilder"/>'s own file-health mapping so the two never
+    /// drift into two different opinions of what a <see cref="SqlParseResult"/> maps to.
+    /// </summary>
+    internal static FileParseHealth ToFileParseHealth(SqlParseResult result)
     {
         var errors = result.Errors
             .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))
             .ToList();
-        return new FileParseHealth(result.SourcePath, errors, result.BatchCount);
+        return new FileParseHealth(result.SourcePath, errors, result.BatchCount, result.UnanalyzedBatches);
     }
 }

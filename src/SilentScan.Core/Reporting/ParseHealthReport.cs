@@ -1,3 +1,5 @@
+using SilentScan.Core.Parsing;
+
 namespace SilentScan.Core.Reporting;
 
 /// <summary>
@@ -29,7 +31,20 @@ public sealed record ParseHealthReport(IReadOnlyList<FileParseHealth> Files)
 /// <paramref name="BatchCount"/> is the number of GO-separated batches that survived to parse
 /// cleanly (docs/audit-remediation-plan.md Phase 4.4) - a file can have both a positive
 /// BatchCount and a non-empty Errors list when only some of its batches failed.
+/// <paramref name="UnanalyzedBatches"/> is the best-effort identity of the batches that did NOT
+/// survive - a different signal from <c>Errors</c> (which only pinpoints where a parse failure
+/// occurred, not what object, if any, was lost as a result).
 /// </summary>
-public sealed record FileParseHealth(string Path, IReadOnlyList<ParseErrorInfo> Errors, int BatchCount);
+public sealed record FileParseHealth(
+    string Path,
+    IReadOnlyList<ParseErrorInfo> Errors,
+    int BatchCount,
+    IReadOnlyList<UnanalyzedBatch> UnanalyzedBatches)
+{
+    public FileParseHealth(string Path, IReadOnlyList<ParseErrorInfo> Errors, int BatchCount)
+        : this(Path, Errors, BatchCount, [])
+    {
+    }
+}
 
 public sealed record ParseErrorInfo(int Line, int Column, int Number, string Message);

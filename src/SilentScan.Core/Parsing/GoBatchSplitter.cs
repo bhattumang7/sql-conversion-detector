@@ -1,13 +1,13 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace SilentScan.Verify.Deployment;
+namespace SilentScan.Core.Parsing;
 
 /// <summary>
 /// Splits a .sql script on GO batch separators. GO is a client-side convention (sqlcmd/SSMS),
 /// not T-SQL grammar, so it must be handled before anything reaches the server - ScriptDOM
-/// itself already batches on GO when parsing, but the raw deploy path here works directly
-/// against SqlClient and needs its own split.
+/// itself already batches on GO when parsing, but the raw deploy path works directly against
+/// SqlClient and needs its own split.
 ///
 /// Splitting is lexer-aware, not a blind line regex over raw text: a line that looks like a GO
 /// separator but sits inside a single-quoted string literal, a block comment, or after a line
@@ -52,6 +52,71 @@ public static partial class GoBatchSplitter
         return batches;
     }
 
+    /// <summary>
+    /// Same lexer-aware split as <see cref="Split"/>, but returns each GO-separated segment
+    /// exactly once (never repeated for `GO n`) together with its character offset/length in
+    /// <paramref name="script"/> - for correlating ScriptDOM's own surviving
+    /// <c>TSqlBatch.StartOffset</c>/<c>FragmentLength</c> spans against the raw text to find a
+    /// batch ScriptDOM silently dropped on a syntax error. <c>Start</c>/<c>Length</c> bound the
+    /// trimmed <c>Text</c> exactly (leading/trailing whitespace around a batch is not part of
+    /// its span), matching how <see cref="Split"/> itself trims each batch.
+    /// </summary>
+    public static IReadOnlyList<(int Start, int Length, string Text)> SplitWithSpans(string script)
+    {
+        var spans = new List<(int Start, int Length, string Text)>();
+        var state = LexState.Default;
+        var commentDepth = 0;
+        var batchStart = -1;
+        var batchEnd = 0;
+
+        foreach (var (rawLine, lineStart) in SplitLinesWithOffsets(script))
+        {
+            var (line, endState, endCommentDepth) = ScanLine(rawLine, state, commentDepth);
+
+            if (state == LexState.Default && endState == LexState.Default)
+            {
+                var trimmed = line.Trim();
+                var match = GoLinePattern().Match(trimmed);
+                if (match.Success)
+                {
+                    FlushSpan(spans, script, batchStart, batchEnd);
+                    batchStart = -1;
+                    continue;
+                }
+            }
+
+            if (batchStart < 0)
+            {
+                batchStart = lineStart;
+            }
+
+            batchEnd = lineStart + rawLine.Length;
+            state = endState;
+            commentDepth = endCommentDepth;
+        }
+
+        FlushSpan(spans, script, batchStart, batchEnd);
+        return spans;
+    }
+
+    private static void FlushSpan(List<(int Start, int Length, string Text)> spans, string script, int start, int end)
+    {
+        if (start < 0 || start >= end)
+        {
+            return;
+        }
+
+        var raw = script[start..end];
+        var trimmed = raw.Trim();
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        var leadingWhitespace = raw.Length - raw.TrimStart().Length;
+        spans.Add((start + leadingWhitespace, trimmed.Length, trimmed));
+    }
+
     private static int ParseRepeatCount(Match match) =>
         match.Groups[1].Success && int.TryParse(match.Groups[1].Value, out var n) && n > 0 ? n : 1;
 
@@ -86,6 +151,25 @@ public static partial class GoBatchSplitter
         if (start < script.Length)
         {
             yield return script[start..];
+        }
+    }
+
+    private static IEnumerable<(string Line, int Start)> SplitLinesWithOffsets(string script)
+    {
+        var start = 0;
+        for (var i = 0; i < script.Length; i++)
+        {
+            if (script[i] == '\n')
+            {
+                var end = i > start && script[i - 1] == '\r' ? i - 1 : i;
+                yield return (script[start..end], start);
+                start = i + 1;
+            }
+        }
+
+        if (start < script.Length)
+        {
+            yield return (script[start..], start);
         }
     }
 

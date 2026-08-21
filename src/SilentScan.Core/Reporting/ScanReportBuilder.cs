@@ -1448,10 +1448,7 @@ public static class ScanReportBuilder
 
         foreach (var result in allParseResults)
         {
-            var errors = result.Errors
-                .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))
-                .ToList();
-            fileHealth.Add(new FileParseHealth(result.SourcePath, errors, result.BatchCount));
+            fileHealth.Add(ParseHealthReportBuilder.ToFileParseHealth(result));
 
             // A batch containing a syntax error is dropped by ScriptDOM itself, not the whole
             // file (docs/audit-remediation-plan.md Phase 4.4, audit finding B4) - excluding the

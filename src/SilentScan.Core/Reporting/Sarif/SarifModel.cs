@@ -10,7 +10,19 @@ public sealed record SarifLog(
     string Version,
     IReadOnlyList<SarifRun> Runs);
 
-public sealed record SarifRun(SarifTool Tool, IReadOnlyList<SarifResult> Results);
+public sealed record SarifRun(
+    SarifTool Tool, IReadOnlyList<SarifResult> Results, IReadOnlyList<SarifInvocation>? Invocations = null);
+
+/// <summary>
+/// SARIF's own <c>run.invocations[].toolExecutionNotifications</c> - the spec-sanctioned channel
+/// for "the tool could not fully process X", distinct from <see cref="SarifResult"/>. A parse
+/// error or a dropped batch is not a finding about the SQL; it is the tool telling a CI consumer
+/// it did not get to look at something, which <see cref="ExecutionSuccessful"/> mirrors at the
+/// run level.
+/// </summary>
+public sealed record SarifInvocation(bool ExecutionSuccessful, IReadOnlyList<SarifNotification> ToolExecutionNotifications);
+
+public sealed record SarifNotification(SarifMessage Message, string Level, IReadOnlyList<SarifLocation>? Locations = null);
 
 public sealed record SarifTool(SarifDriver Driver);
 

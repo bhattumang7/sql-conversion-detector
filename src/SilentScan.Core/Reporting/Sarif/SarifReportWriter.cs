@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
+using SilentScan.Core.Parsing;
 using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting;
 using SilentScan.Core.Rules;
@@ -120,15 +121,67 @@ public static class SarifReportWriter
         results.AddRange(report.DanglingObjectReferenceFindings.Select(ToResult));
         results.AddRange(report.TriggerOrderFindings.Select(ToResult));
 
+        var notifications = BuildParseHealthNotifications(report.ParseHealth);
+        var invocation = new SarifInvocation(ExecutionSuccessful: true, notifications);
+
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
         var log = new SarifLog(
             "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
             "2.1.0",
-            [new SarifRun(new SarifTool(new SarifDriver(ToolName, ToolVersion, InformationUri: RuleDocSite.IndexUrl, SarifRuleCatalog.AllRules)), results)]);
+            [new SarifRun(new SarifTool(new SarifDriver(ToolName, ToolVersion, InformationUri: RuleDocSite.IndexUrl, SarifRuleCatalog.AllRules)), results, [invocation])]);
 
         return JsonSerializer.Serialize(log, JsonOptions);
     }
+
+    /// <summary>
+    /// The SARIF honesty channel for "the tool did not get to look at something" - a parse error
+    /// pinpoints WHERE parsing failed; an unanalyzed-batch notification (see
+    /// <see cref="UnanalyzedBatch"/>) additionally names WHAT object, if any, was lost as a
+    /// result. Neither is a <see cref="SarifResult"/> - notifications are never rule-bound
+    /// findings about the SQL, only the tool reporting its own coverage.
+    /// </summary>
+    private static List<SarifNotification> BuildParseHealthNotifications(ParseHealthReport parseHealth)
+    {
+        var notifications = new List<SarifNotification>();
+
+        foreach (var file in parseHealth.Files)
+        {
+            foreach (var error in file.Errors)
+            {
+                notifications.Add(new SarifNotification(
+                    new SarifMessage($"Parse error in '{file.Path}': {error.Message}"),
+                    LevelWarning,
+                    [ToLocation(file.Path, error.Line, error.Column)]));
+            }
+
+            foreach (var unanalyzed in file.UnanalyzedBatches)
+            {
+                var what = unanalyzed.ObjectName is { } name
+                    ? $"{DescribeUnanalyzedKind(unanalyzed.Kind)} '{name}'"
+                    : "an unidentified object";
+                notifications.Add(new SarifNotification(
+                    new SarifMessage($"Batch in '{file.Path}' failed to parse and was dropped - {what} received zero analysis."),
+                    LevelWarning,
+                    [ToLocation(file.Path, unanalyzed.StartLine, startColumn: null)]));
+            }
+        }
+
+        return notifications;
+    }
+
+    private static SarifLocation ToLocation(string sourcePath, int line, int? startColumn) =>
+        new(new SarifPhysicalLocation(new SarifArtifactLocation(ToUri(sourcePath)), new SarifRegion(line, startColumn)));
+
+    private static string DescribeUnanalyzedKind(UnanalyzedObjectKind kind) => kind switch
+    {
+        UnanalyzedObjectKind.Procedure => "procedure",
+        UnanalyzedObjectKind.View => "view",
+        UnanalyzedObjectKind.Function => "function",
+        UnanalyzedObjectKind.Trigger => "trigger",
+        UnanalyzedObjectKind.Table => "table",
+        _ => "object",
+    };
 
     private static SarifResult ToResult(SargabilityFinding finding)
     {

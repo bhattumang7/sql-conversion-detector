@@ -592,61 +592,15 @@ public static class DuplicationScanner
 
         /// <summary>Only asserts a truth value where collation cannot change the answer - see
         /// <see cref="DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison"/>'s own doc
-        /// comment for the full collation-safety reasoning.</summary>
+        /// comment for the full collation-safety reasoning. Evaluation itself is shared with
+        /// <see cref="TypedPredicateExtractor"/> via <see cref="LiteralComparisonFolder"/>.</summary>
         private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression node)
         {
-            bool? truth = (node.FirstExpression, node.SecondExpression) switch
-            {
-                (IntegerLiteral or NumericLiteral, IntegerLiteral or NumericLiteral)
-                    when TryGetNumericLiteralValue(node.FirstExpression) is { } a && TryGetNumericLiteralValue(node.SecondExpression) is { } b
-                    => EvaluateNumericComparison(node.ComparisonType, a, b),
-
-                (StringLiteral s1, StringLiteral s2)
-                    when node.ComparisonType is BooleanComparisonType.Equals
-                        or BooleanComparisonType.NotEqualToBrackets
-                        or BooleanComparisonType.NotEqualToExclamation
-                    => EvaluateExactStringMatch(node.ComparisonType, s1, s2),
-
-                _ => null,
-            };
-
-            if (truth is { } value)
+            if (LiteralComparisonFolder.TryFoldComparison(node.FirstExpression, node.SecondExpression, node.ComparisonType) is { } value)
             {
                 Add(DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison, value ? "always true" : "always false", node, FindingConfidence.High);
             }
         }
-
-        private static bool? EvaluateNumericComparison(BooleanComparisonType op, decimal a, decimal b) => op switch
-        {
-            BooleanComparisonType.Equals => a == b,
-            BooleanComparisonType.NotEqualToBrackets or BooleanComparisonType.NotEqualToExclamation => a != b,
-            BooleanComparisonType.GreaterThan => a > b,
-            BooleanComparisonType.GreaterThanOrEqualTo => a >= b,
-            BooleanComparisonType.LessThan => a < b,
-            BooleanComparisonType.LessThanOrEqualTo => a <= b,
-            _ => null,
-        };
-
-        /// <summary>Only a byte-identical (case-sensitive, ordinal) textual match/mismatch is
-        /// collation-proof - two textually DIFFERENT string literals are declined entirely for
-        /// both '=' and '&lt;&gt;', since a case-insensitive collation could still make them
-        /// compare equal at runtime. Never guess.</summary>
-        private static bool? EvaluateExactStringMatch(BooleanComparisonType op, StringLiteral first, StringLiteral second)
-        {
-            if (!string.Equals(first.Value, second.Value, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            return op == BooleanComparisonType.Equals;
-        }
-
-        private static decimal? TryGetNumericLiteralValue(ScalarExpression expression) => expression switch
-        {
-            IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
-            NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
-            _ => null,
-        };
 
         private static bool BothLiterals(ScalarExpression first, ScalarExpression second) =>
             first is Literal && second is Literal;
@@ -972,19 +926,31 @@ public static class DuplicationScanner
             }
 
             if (comparison.FirstExpression is not Literal
-                && TryGetNumericLiteralValue(comparison.SecondExpression) is { } rightValue)
+                && TryGetDirectNumericLiteralValue(comparison.SecondExpression) is { } rightValue)
             {
                 return (FragmentTextRenderer.Render(comparison.FirstExpression), comparison.ComparisonType, rightValue);
             }
 
             if (comparison.SecondExpression is not Literal
-                && TryGetNumericLiteralValue(comparison.FirstExpression) is { } leftValue)
+                && TryGetDirectNumericLiteralValue(comparison.FirstExpression) is { } leftValue)
             {
                 return (FragmentTextRenderer.Render(comparison.SecondExpression), MirrorOperator(comparison.ComparisonType), leftValue);
             }
 
             return null;
         }
+
+        /// <summary>
+        /// Deliberately narrower than <see cref="LiteralComparisonFolder.TryFoldToNumeric"/> - a
+        /// direct literal only, no one-level arithmetic folding, so this redundant-bound check's
+        /// behavior is unaffected by that folder's broader scope.
+        /// </summary>
+        private static decimal? TryGetDirectNumericLiteralValue(ScalarExpression expression) => expression switch
+        {
+            IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
+            NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
+            _ => null,
+        };
 
         private static BooleanComparisonType MirrorOperator(BooleanComparisonType op) => op switch
         {

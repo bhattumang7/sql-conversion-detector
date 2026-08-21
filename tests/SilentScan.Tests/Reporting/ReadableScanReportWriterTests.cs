@@ -161,6 +161,36 @@ public sealed class ReadableScanReportWriterTests
     }
 
     [Fact]
+    public void UnanalyzedObjects_DroppedBatchIsListedWithItsBestEffortIdentity()
+    {
+        var script = string.Join('\n',
+            "CREATE VIEW dbo.vw_First AS SELECT 1 AS X;",
+            "GO",
+            "CREATE PROCEDURE dbo.usp_Broken AS SELECT 1 FROM FROM;",
+            "GO",
+            "CREATE VIEW dbo.vw_Third AS SELECT 1 AS X;");
+        var parsed = SqlScriptParser.ParseText("mixed.sql", script);
+        Assert.Single(parsed.UnanalyzedBatches);
+        var report = ScanReportBuilder.BuildFromParseResults([parsed], new DatabaseCatalog());
+
+        var rendered = Render(report);
+
+        Assert.Contains("Unanalyzed objects - dropped batches (1)", rendered, StringComparison.Ordinal);
+        Assert.Contains("mixed.sql", rendered, StringComparison.Ordinal);
+        Assert.Contains("dbo.usp_Broken", rendered, StringComparison.Ordinal);
+        Assert.Contains("procedure", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SectionsWithNothingToReport_OmitUnanalyzedObjects()
+    {
+        var report = await Build(LayeredSql);
+        var rendered = Render(report);
+
+        Assert.DoesNotContain("Unanalyzed objects", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NonSargablePattern_IsExplainedOncePerPatternRatherThanPerRow()
     {
         const string Sql = """

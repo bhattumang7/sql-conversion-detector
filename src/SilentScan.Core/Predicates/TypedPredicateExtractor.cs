@@ -89,6 +89,16 @@ public static class TypedPredicateExtractor
         /// </summary>
         private const string UnresolvedColumnComparisonConstructKind = "unresolved column comparison";
 
+        /// <summary>
+        /// Skip-ledger construct kind for the subset of <see cref="NoColumnOperandConstructKind"/>
+        /// that <see cref="LiteralComparisonFolder"/> can prove is a tautology or contradiction
+        /// (e.g. <c>1 = 1</c>, or one level of literal arithmetic like <c>5 + 3 = 8</c>) - split
+        /// out so the published honesty numbers can distinguish "two literals, provably always
+        /// true/false" from "two arbitrary unresolvable expressions", which the undifferentiated
+        /// bucket could not tell apart before.
+        /// </summary>
+        private const string FoldableLiteralComparisonConstructKind = "foldable literal comparison";
+
         /// <summary>Pushes the enclosing trigger's inserted/deleted pseudo-tables onto the CTE stack, if any - called once, before the visitor starts walking, so they're visible for the whole reparsed fragment exactly like a real trigger body's own VisitTriggerBody does.</summary>
         public void SeedEnclosingScope(TSqlFragment rootFragment)
         {
@@ -1191,6 +1201,15 @@ public static class TypedPredicateExtractor
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, UnresolvedColumnComparisonConstructKind,
                     "at least one side of this comparison is a bare column reference that failed to resolve to a real column (most commonly an unresolved FROM-scope alias) - not the benign no-column-operand shape");
+                return;
+            }
+
+            if (node is BooleanComparisonExpression comparison
+                && LiteralComparisonFolder.TryFoldComparison(first, second, comparison.ComparisonType) is { } truth)
+            {
+                ledger.Record(
+                    AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, FoldableLiteralComparisonConstructKind,
+                    $"both sides are literals (optionally with one level of arithmetic) provably {(truth ? "always true" : "always false")} - not an arbitrary unresolvable comparison");
                 return;
             }
 
