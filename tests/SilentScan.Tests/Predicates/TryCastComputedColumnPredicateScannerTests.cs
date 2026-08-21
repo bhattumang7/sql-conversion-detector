@@ -100,6 +100,29 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     }
 
     [Fact]
+    public void ComputedColumnWhoseDefinitionOnlyMentionsTryCastInAStringLiteral_NeverFires()
+    {
+        // A text-pattern check on the raw definition would match "TRY_CAST" here even though the
+        // expression is a plain string literal, never a real TRY_CAST call - a parse-based check
+        // must not.
+        var ddl = """
+            CREATE TABLE dbo.Labels (
+                Id INT NOT NULL PRIMARY KEY,
+                Kind VARCHAR(20) NULL,
+                KindLabel AS ('TRY_CAST(' + Kind + ')')
+            );
+            """;
+        var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\nCREATE PROCEDURE dbo.usp_Find AS BEGIN SELECT Id FROM dbo.Labels WHERE KindLabel = 'x'; END");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        var candidates = TryCastComputedColumnPredicateScanner.BuildCandidates(catalog);
+        var findings = TryCastComputedColumnPredicateScanner.Scan(result, catalog, candidates);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void OrdinaryColumn_NeverFires()
     {
         var findings = Scan(

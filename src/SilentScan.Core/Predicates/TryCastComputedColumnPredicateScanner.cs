@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
@@ -15,11 +14,8 @@ namespace SilentScan.Core.Predicates;
 /// non-persisted, <c>TRY_CAST</c>-defined computed column once from the catalog; <see cref="Scan"/>
 /// then walks each file's own AST for a genuine filter-context reference to one of them.
 /// </summary>
-public static partial class TryCastComputedColumnPredicateScanner
+public static class TryCastComputedColumnPredicateScanner
 {
-    [GeneratedRegex(@"\bTRY_CAST\b", RegexOptions.IgnoreCase)]
-    private static partial Regex TryCastPattern();
-
     public readonly record struct Candidate(string DefinitionText, string SourcePath, int Line);
 
     /// <summary>
@@ -39,7 +35,7 @@ public static partial class TryCastComputedColumnPredicateScanner
                 continue;
             }
 
-            if (!TryCastPattern().IsMatch(expression.DefinitionText))
+            if (!DefinesTryCast(expression.DefinitionText))
             {
                 continue;
             }
@@ -55,6 +51,40 @@ public static partial class TryCastComputedColumnPredicateScanner
         }
 
         return candidates;
+    }
+
+    /// <summary>
+    /// Reparses the computed column's own definition text (the same throwaway-wrapper-statement
+    /// trick <see cref="ComputedColumnMatcher"/> uses) and looks for a real <see cref="TryCastCall"/>
+    /// node anywhere in the tree - not a text match. A regex on the raw definition text would also
+    /// match a <c>TRY_CAST</c> substring occurring inside a string literal or bracketed identifier
+    /// within an unrelated expression (e.g. a column literally named <c>[TRY_CAST]</c>), which is
+    /// never a real <c>TRY_CAST</c> call. A parse failure declines the candidate rather than
+    /// guessing - the safe direction, since <see cref="BuildCandidates"/> only narrows findings,
+    /// never widens them.
+    /// </summary>
+    private static bool DefinesTryCast(string definitionText)
+    {
+        var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
+        if (result.HasErrors || result.Fragment is not TSqlScript script)
+        {
+            return false;
+        }
+
+        var visitor = new TryCastCallDetector();
+        script.Accept(visitor);
+        return visitor.Found;
+    }
+
+    private sealed class TryCastCallDetector : TSqlFragmentVisitor
+    {
+        public bool Found { get; private set; }
+
+        public override void ExplicitVisit(TryCastCall node)
+        {
+            Found = true;
+            base.ExplicitVisit(node);
+        }
     }
 
     public static IReadOnlyList<TryCastComputedColumnPredicateFinding> Scan(
