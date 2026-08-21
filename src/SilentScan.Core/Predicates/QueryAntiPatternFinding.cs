@@ -419,6 +419,54 @@ public enum QueryAntiPatternFindingKind
     /// mismatch shape was reproduced against the real engine, not inferred from documentation
     /// alone.</summary>
     AlterTableSwitchConstraintMismatch,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's target table
+    /// carries an XML or spatial index (<see cref="Catalog.CatalogIndex.IsXmlIndex"/>/
+    /// <see cref="Catalog.CatalogIndex.IsSpatialIndex"/>). Oracle-confirmed directly (Docker
+    /// instance, 2026-08-21): unlike every other index/constraint check in this family, this one
+    /// is NOT a "must match between source and target" claim - it is unconditional and one-
+    /// directional: an XML or spatial index on the TARGET table always fails the statement (error
+    /// 4983), while the identical index on the SOURCE table is explicitly fine (confirmed by
+    /// reproducing both directions independently). Live-only, same discipline as
+    /// <see cref="Catalog.CatalogIndex.IsClustered"/>. <see cref="FindingConfidence.High"/>: the
+    /// index-type facts are ordinary live catalog data, and the restriction was reproduced against
+    /// the real engine, not inferred from documentation alone.</summary>
+    AlterTableSwitchTargetOnlyIndexRestriction,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's source and
+    /// target tables reside in different filegroups, or either resides in a filegroup currently
+    /// marked read-only. Oracle-confirmed directly (Docker instance, 2026-08-21): a plain
+    /// filegroup-name mismatch between the two (non-partitioned) tables raises error 4940
+    /// unconditionally; a table whose filegroup was marked <c>READ_ONLY</c> after the table was
+    /// created raises error 4979 regardless of whether the other table's filegroup matches (a
+    /// table cannot be <c>CREATE</c>d directly into an already-read-only filegroup, so this only
+    /// ever matters for a table that predates the filegroup being marked read-only - reproduced by
+    /// creating both tables while the filegroup was still read-write, then marking it read-only
+    /// afterward). Only ever populated for a non-partitioned table
+    /// (<see cref="Catalog.CatalogTable.FilegroupName"/>'s own doc comment) - a partitioned table
+    /// declines rather than guesses at a per-partition filegroup claim (errors 4938/4939/4959,
+    /// deliberately out of scope - a materially more granular claim this finding does not
+    /// attempt). Live-only end to end. <see cref="FindingConfidence.High"/>: both shapes were
+    /// reproduced against the real engine.</summary>
+    AlterTableSwitchFilegroupMismatch,
+
+    /// <summary>An <c>ALTER TABLE ... SWITCH [PARTITION ...] TO ...</c> statement's source and
+    /// target tables disagree on system-versioning: one has a <c>PERIOD FOR SYSTEM_TIME</c>
+    /// (found via presence in <see cref="Catalog.DatabaseCatalog.TemporalTablePairs"/> as a
+    /// current, non-history table) while the other does not. Oracle-confirmed directly (Docker
+    /// instance, 2026-08-21) that this raises error 13577 unconditionally, independent of any
+    /// other structural fact about either table. Deliberately narrower than the full temporal/CDC/
+    /// replication SWITCH restriction family (errors 13546/13547/13578/13736, 21867/21868,
+    /// 22750-22857) - those need catalog facts this codebase does not yet track (CDC enablement
+    /// plus the specific <c>@allow_partition_switch</c> setting, which a quick oracle probe showed
+    /// does NOT block a plain non-partitioned SWITCH with default settings, meaning the real
+    /// condition needs partition-number awareness this finding family does not yet model;
+    /// replication topology, not configurable on the standing Docker instance) - left unbuilt
+    /// rather than guessed at. Live-only, reusing the exact same catalog population
+    /// <see cref="Catalog.DatabaseCatalog.AddTemporalTablePair"/> already provides for other
+    /// consumers - no new plumbing needed for this one fact.
+    /// <see cref="FindingConfidence.High"/>: reproduced directly against the real engine.</summary>
+    AlterTableSwitchTemporalMismatch,
 }
 
 public sealed record QueryAntiPatternFinding(

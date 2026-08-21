@@ -995,4 +995,176 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch);
     }
+
+    // --- AlterTableSwitchTargetOnlyIndexRestriction ------------------------------------------
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchTargetOnlyIndexes(
+        IReadOnlyList<CatalogIndex> sourceIndexes, IReadOnlyList<CatalogIndex> targetIndexes)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchTables(sourceIndexes, targetIndexes));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetHasXmlIndex_Fires()
+    {
+        var findings = ScanSwitchTargetOnlyIndexes(
+            sourceIndexes: [],
+            targetIndexes: [new CatalogIndex("PXML_SwTgt", CatalogIndexKind.Index, IsUnique: false, KeyColumns: [], IncludedColumns: [], IsXmlIndex: true)]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTargetOnlyIndexRestriction);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4983", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceHasXmlIndexTargetDoesNot_NeverFires()
+    {
+        // Oracle-confirmed (2026-08-21): the source table is explicitly allowed to carry an
+        // XML/spatial index - only the target is restricted.
+        var findings = ScanSwitchTargetOnlyIndexes(
+            sourceIndexes: [new CatalogIndex("PXML_SwSrc", CatalogIndexKind.Index, IsUnique: false, KeyColumns: [], IncludedColumns: [], IsXmlIndex: true)],
+            targetIndexes: []);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTargetOnlyIndexRestriction);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetHasSpatialIndex_Fires()
+    {
+        var findings = ScanSwitchTargetOnlyIndexes(
+            sourceIndexes: [],
+            targetIndexes: [new CatalogIndex("SIDX_SwTgt", CatalogIndexKind.Index, IsUnique: false, KeyColumns: [], IncludedColumns: [], IsSpatialIndex: true)]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTargetOnlyIndexRestriction);
+        Assert.Contains("4983", finding.DetailText);
+    }
+
+    // --- AlterTableSwitchFilegroupMismatch --------------------------------------------------
+    // FilegroupName/FilegroupIsReadOnly are live-only (never set by CatalogBuilder from DDL text)
+    // - built the same way as CatalogWithSwitchTables above, but overriding the table records
+    // themselves rather than just their indexes.
+
+    private static DatabaseCatalog CatalogWithSwitchFilegroups(
+        string? sourceFilegroup, bool sourceReadOnly, string? targetFilegroup, bool targetReadOnly)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { FilegroupName = sourceFilegroup, FilegroupIsReadOnly = sourceReadOnly });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { FilegroupName = targetFilegroup, FilegroupIsReadOnly = targetReadOnly });
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchFilegroups(
+        string? sourceFilegroup, bool sourceReadOnly, string? targetFilegroup, bool targetReadOnly)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchFilegroups(sourceFilegroup, sourceReadOnly, targetFilegroup, targetReadOnly));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_DifferentFilegroups_Fires()
+    {
+        var findings = ScanSwitchFilegroups("PRIMARY", sourceReadOnly: false, "FG_Orders", targetReadOnly: false);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4940", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetInReadOnlyFilegroup_Fires()
+    {
+        var findings = ScanSwitchFilegroups("FG_Orders", sourceReadOnly: false, "FG_Orders", targetReadOnly: true);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
+        Assert.Contains("4979", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SameReadWriteFilegroup_NeverFires()
+    {
+        var findings = ScanSwitchFilegroups("FG_Orders", sourceReadOnly: false, "FG_Orders", targetReadOnly: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_PartitionedTableUnknownFilegroup_NeverFires()
+    {
+        // FilegroupName is only ever populated for a non-partitioned table - null on either side
+        // is declined, never guessed at.
+        var findings = ScanSwitchFilegroups(null, sourceReadOnly: false, "FG_Orders", targetReadOnly: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
+    }
+
+    // --- AlterTableSwitchTemporalMismatch ---------------------------------------------------
+
+    private static DatabaseCatalog CatalogWithSwitchTemporal(bool sourceIsTemporal, bool targetIsTemporal)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        if (sourceIsTemporal)
+        {
+            catalog.AddTemporalTablePair(new TemporalTablePair("dbo.SwSrc", "dbo.SwSrcHistory"));
+        }
+
+        if (targetIsTemporal)
+        {
+            catalog.AddTemporalTablePair(new TemporalTablePair("dbo.SwTgt", "dbo.SwTgtHistory"));
+        }
+
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchTemporal(bool sourceIsTemporal, bool targetIsTemporal)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchTemporal(sourceIsTemporal, targetIsTemporal));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetSystemVersionedSourceIsNot_Fires()
+    {
+        var findings = ScanSwitchTemporal(sourceIsTemporal: false, targetIsTemporal: true);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("13577", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceSystemVersionedTargetIsNot_Fires()
+    {
+        var findings = ScanSwitchTemporal(sourceIsTemporal: true, targetIsTemporal: false);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch);
+        Assert.Contains("13577", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_BothSystemVersioned_NeverFires()
+    {
+        var findings = ScanSwitchTemporal(sourceIsTemporal: true, targetIsTemporal: true);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_NeitherSystemVersioned_NeverFires()
+    {
+        var findings = ScanSwitchTemporal(sourceIsTemporal: false, targetIsTemporal: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch);
+    }
 }

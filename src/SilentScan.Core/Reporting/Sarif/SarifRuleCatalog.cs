@@ -54,6 +54,9 @@ public static class SarifRuleCatalog
     public const string QueryAntiPatternAlterTableSwitchColumnMismatchRuleId = "silentscan/query/alter-table-switch-column-mismatch";
     public const string QueryAntiPatternAlterTableSwitchIndexMismatchRuleId = "silentscan/query/alter-table-switch-index-mismatch";
     public const string QueryAntiPatternAlterTableSwitchConstraintMismatchRuleId = "silentscan/query/alter-table-switch-constraint-mismatch";
+    public const string QueryAntiPatternAlterTableSwitchTargetOnlyIndexRestrictionRuleId = "silentscan/query/alter-table-switch-target-only-index-restriction";
+    public const string QueryAntiPatternAlterTableSwitchFilegroupMismatchRuleId = "silentscan/query/alter-table-switch-filegroup-mismatch";
+    public const string QueryAntiPatternAlterTableSwitchTemporalMismatchRuleId = "silentscan/query/alter-table-switch-temporal-mismatch";
     public const string IndexCoverageKeyLookupProneIndexRuleId = "silentscan/index/key-lookup-prone";
     public const string TriggerCorrectnessMultiRowUnsafeSingleRowAssignmentRuleId = "silentscan/trigger/multi-row-unsafe-single-row-assignment";
     public const string TriggerCorrectnessMultiRowUnsafeKeyedDmlRuleId = "silentscan/trigger/multi-row-unsafe-keyed-dml";
@@ -476,6 +479,9 @@ public static class SarifRuleCatalog
         QueryAntiPatternFindingKind.AlterTableSwitchColumnMismatch => QueryAntiPatternAlterTableSwitchColumnMismatchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch => QueryAntiPatternAlterTableSwitchIndexMismatchRuleId,
         QueryAntiPatternFindingKind.AlterTableSwitchConstraintMismatch => QueryAntiPatternAlterTableSwitchConstraintMismatchRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchTargetOnlyIndexRestriction => QueryAntiPatternAlterTableSwitchTargetOnlyIndexRestrictionRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch => QueryAntiPatternAlterTableSwitchFilegroupMismatchRuleId,
+        QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch => QueryAntiPatternAlterTableSwitchTemporalMismatchRuleId,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled QueryAntiPatternFindingKind."),
     };
 

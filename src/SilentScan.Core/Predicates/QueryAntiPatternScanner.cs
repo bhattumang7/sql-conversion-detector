@@ -166,6 +166,9 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchColumnMismatch(node);
             InspectAlterTableSwitchIndexMismatch(node);
             InspectAlterTableSwitchConstraintMismatch(node);
+            InspectAlterTableSwitchTargetOnlyIndexRestriction(node);
+            InspectAlterTableSwitchFilegroupMismatch(node);
+            InspectAlterTableSwitchTemporalMismatch(node);
             base.ExplicitVisit(node);
         }
 
@@ -598,6 +601,103 @@ public static class QueryAntiPatternScanner
         private static bool HasSameForeignKeyShape(GroupedForeignKey a, GroupedForeignKey b) =>
             string.Equals(a.ReferencedTableQualifiedName, b.ReferencedTableQualifiedName, StringComparison.OrdinalIgnoreCase)
             && a.ColumnPairs.SetEquals(b.ColumnPairs);
+
+        private void InspectAlterTableSwitchTargetOnlyIndexRestriction(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var target = catalog.Find(targetQualifiedName);
+            if (catalog.Find(sourceQualifiedName) is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var offendingIndex = target.Indexes.FirstOrDefault(ix => ix.IsXmlIndex || ix.IsSpatialIndex);
+            if (offendingIndex is null)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterTableSwitchTargetOnlyIndexRestriction, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table has an XML or spatial index '{offendingIndex.Name}' on it; only the source table is allowed to carry one (error 4983); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
+
+        private void InspectAlterTableSwitchFilegroupMismatch(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            if (source.FilegroupName is null || target.FilegroupName is null)
+            {
+                // Never populated for a partitioned table (or a file-mode scan) - declined, not guessed.
+                return;
+            }
+
+            if (source.FilegroupIsReadOnly)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - source table resides in read-only filegroup '{source.FilegroupName}' (error 4979); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            if (target.FilegroupIsReadOnly)
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - target table resides in read-only filegroup '{target.FilegroupName}' (error 4979); this statement will fail at execution.",
+                    FindingConfidence.High));
+                return;
+            }
+
+            if (!string.Equals(source.FilegroupName, target.FilegroupName, StringComparison.OrdinalIgnoreCase))
+            {
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch, sourcePath,
+                    node.StartLine, node.StartColumn,
+                    $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - source table is in filegroup '{source.FilegroupName}' and target table is in filegroup '{target.FilegroupName}' (error 4940); this statement will fail at execution.",
+                    FindingConfidence.High));
+            }
+        }
+
+        private void InspectAlterTableSwitchTemporalMismatch(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            if (catalog.Find(sourceQualifiedName) is not { Kind: CatalogTableKind.Table } || catalog.Find(targetQualifiedName) is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var sourceIsTemporal = catalog.TemporalTablePairs.Any(p => string.Equals(p.CurrentTableQualifiedName, sourceQualifiedName, StringComparison.OrdinalIgnoreCase));
+            var targetIsTemporal = catalog.TemporalTablePairs.Any(p => string.Equals(p.CurrentTableQualifiedName, targetQualifiedName, StringComparison.OrdinalIgnoreCase));
+            if (sourceIsTemporal == targetIsTemporal)
+            {
+                return;
+            }
+
+            var (withPeriodName, withoutPeriodName) = targetIsTemporal
+                ? (targetQualifiedName, sourceQualifiedName)
+                : (sourceQualifiedName, targetQualifiedName);
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{withPeriodName}' has a SYSTEM_TIME PERIOD (system-versioned) while table '{withoutPeriodName}' does not (error 13577); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
 
         private static IEnumerable<NamedTableReference> CollectNamedTableReferences(TableReference tableReference)
         {

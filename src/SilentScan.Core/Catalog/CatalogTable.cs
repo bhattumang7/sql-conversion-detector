@@ -30,8 +30,26 @@ public sealed record CatalogTable(
     string SourcePath,
     int SourceLine,
     bool IsMemoryOptimized = false,
-    IReadOnlyList<CatalogStatisticsInfo>? Statistics = null)
+    IReadOnlyList<CatalogStatisticsInfo>? Statistics = null,
+    string? FilegroupName = null,
+    bool FilegroupIsReadOnly = false)
 {
+    // FilegroupName/FilegroupIsReadOnly (sys.filegroups.name/is_read_only, joined off the table's
+    // own heap/clustered-index row - sys.indexes.index_id IN (0, 1) - live-only) are oracle-
+    // confirmed directly (2026-08-21) prerequisites for ALTER TABLE ... SWITCH: source and target
+    // residing in different filegroups fails unconditionally (error 4940), and either table
+    // residing in a filegroup currently marked READ_ONLY fails too (error 4979) - reproduced by
+    // creating both tables while the filegroup was still read-write, then marking it read-only
+    // afterward (a table cannot be CREATEd directly into an already-read-only filegroup at all, so
+    // this only matters for a table that predates the filegroup being marked read-only). Only ever
+    // populated for a NON-partitioned table: a partitioned table's heap/clustered-index row points
+    // at a partition SCHEME's own data_space_id, which never matches a real sys.filegroups row, so
+    // FilegroupName stays null rather than misreporting a partition scheme as a filegroup name -
+    // the partition-level filegroup checks (errors 4938/4939/4959, per-partition filegroup
+    // placement) are a materially different, more granular claim this field deliberately does not
+    // attempt. Defaults to null/false so file mode (which never sets either) never misreads an
+    // ordinary table.
+
     // IsMemoryOptimized (sys.tables.is_memory_optimized, live-only) guards
     // Predicates.IndexDesignScanner's heap findings: a memory-optimized table has no on-disk
     // heap/RID storage at all - the engine requires at least one HASH or NONCLUSTERED (BW-tree)

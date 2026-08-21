@@ -83,6 +83,9 @@ public static class RuleDocCatalog
         [QueryAntiPattern.AlterTableSwitchColumnMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchColumnMismatch.Content,
         [QueryAntiPattern.AlterTableSwitchIndexMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchIndexMismatch.Content,
         [QueryAntiPattern.AlterTableSwitchConstraintMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchConstraintMismatch.Content,
+        [QueryAntiPattern.AlterTableSwitchTargetOnlyIndexRestriction.RuleId] = QueryAntiPattern.AlterTableSwitchTargetOnlyIndexRestriction.Content,
+        [QueryAntiPattern.AlterTableSwitchFilegroupMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchFilegroupMismatch.Content,
+        [QueryAntiPattern.AlterTableSwitchTemporalMismatch.RuleId] = QueryAntiPattern.AlterTableSwitchTemporalMismatch.Content,
 
         // TriggerCorrectness / ForcedSerial / CrossModule / Trigger
         [TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.RuleId] = TriggerCorrectness.MultiRowUnsafeSingleRowAssignment.Content,

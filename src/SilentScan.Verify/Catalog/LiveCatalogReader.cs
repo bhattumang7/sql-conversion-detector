@@ -56,10 +56,12 @@ public sealed class LiveCatalogReader
         var columnsByTable = await ReadColumnsAsync(connection, catalog.Skipped, cancellationToken);
         var indexesByTable = await ReadIndexesAsync(connection, cancellationToken);
         var statisticsByTable = await ReadStatisticsAsync(connection, cancellationToken);
+        var filegroupByTable = await ReadTableFilegroupsAsync(connection, cancellationToken);
 
         foreach (var (objectId, schemaName, tableName, isMemoryOptimized) in tables)
         {
             var qualifiedName = $"{schemaName}.{tableName}";
+            var (filegroupName, filegroupIsReadOnly) = filegroupByTable.GetValueOrDefault(objectId);
             catalog.AddOrReplace(new CatalogTable(
                 SchemaName: schemaName,
                 Name: tableName,
@@ -69,7 +71,9 @@ public sealed class LiveCatalogReader
                 SourcePath: qualifiedName,
                 SourceLine: 0,
                 IsMemoryOptimized: isMemoryOptimized,
-                Statistics: statisticsByTable.GetValueOrDefault(objectId, [])));
+                Statistics: statisticsByTable.GetValueOrDefault(objectId, []),
+                FilegroupName: filegroupName,
+                FilegroupIsReadOnly: filegroupIsReadOnly));
         }
 
         foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
@@ -1021,7 +1025,9 @@ public sealed class LiveCatalogReader
                 OptimizeForSequentialKey: row.OptimizeForSequentialKey,
                 PartitionSchemeName: row.PartitionSchemeName,
                 PartitioningColumnName: row.PartitioningColumnName,
-                IgnoreDupKey: row.IgnoreDupKey);
+                IgnoreDupKey: row.IgnoreDupKey,
+                IsXmlIndex: string.Equals(row.TypeDesc, "XML", StringComparison.OrdinalIgnoreCase),
+                IsSpatialIndex: string.Equals(row.TypeDesc, "SPATIAL", StringComparison.OrdinalIgnoreCase));
 
             if (!indexesByTable.TryGetValue(objectId, out var indexes))
             {
@@ -1076,6 +1082,41 @@ public sealed class LiveCatalogReader
         }
 
         return statisticsByTable;
+    }
+
+    /// <summary>
+    /// A table's own storage filegroup (name plus current read-only state), joined off its heap/
+    /// clustered-index row (<c>sys.indexes.index_id IN (0, 1)</c> - 0 is a heap, 1 is the clustered
+    /// index; a table has exactly one such row). Deliberately an INNER JOIN to
+    /// <c>sys.filegroups</c>, not a LEFT JOIN to <c>sys.data_spaces</c> the way
+    /// <see cref="ReadIndexesAsync"/>'s partition-scheme columns are: a PARTITIONED table's
+    /// heap/clustered-index row points at a partition SCHEME's own <c>data_space_id</c>, which
+    /// never appears in <c>sys.filegroups</c> at all, so the INNER JOIN naturally excludes
+    /// partitioned tables from this result rather than misreporting a partition scheme as a
+    /// filegroup name - see <see cref="CatalogTable.FilegroupName"/>'s own doc comment for why
+    /// that's the correct, deliberate scope limit.
+    /// </summary>
+    private static async Task<Dictionary<int, (string Name, bool IsReadOnly)>> ReadTableFilegroupsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT t.object_id, fg.name, fg.is_read_only
+            FROM sys.tables t
+            JOIN sys.indexes i ON i.object_id = t.object_id AND i.index_id IN (0, 1)
+            JOIN sys.filegroups fg ON fg.data_space_id = i.data_space_id
+            WHERE t.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var filegroupByTable = new Dictionary<int, (string Name, bool IsReadOnly)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            filegroupByTable[reader.GetInt32(0)] = (reader.GetString(1), reader.GetBoolean(2));
+        }
+
+        return filegroupByTable;
     }
 
     private static CatalogIndexKind ClassifyIndexKind(IndexRow row)

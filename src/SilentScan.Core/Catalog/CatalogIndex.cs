@@ -110,6 +110,16 @@ namespace SilentScan.Core.Catalog;
 /// <see cref="IsClustered"/>/<see cref="OptimizeForSequentialKey"/> - defaults to
 /// <see langword="false"/> so file mode (which never sets it) never misreads an ordinary unique
 /// index as carrying this hazard.
+///
+/// <paramref name="IsXmlIndex"/>/<paramref name="IsSpatialIndex"/> are <c>sys.indexes.type_desc</c>
+/// equal to <c>'XML'</c>/<c>'SPATIAL'</c> directly - oracle-confirmed directly against the standing
+/// Docker instance (2026-08-21) for <c>ALTER TABLE ... SWITCH</c>: an XML or spatial index on the
+/// SWITCH TARGET table unconditionally fails the statement (error 4983), regardless of whether the
+/// source table has one too - the source table is explicitly allowed to carry one. Read from the
+/// same <c>sys.indexes.type_desc</c> column <see cref="IsClustered"/>/<see cref="IsColumnstore"/>
+/// already read, no new query needed. Live-only, same discipline as <see cref="IsClustered"/> -
+/// both default to <see langword="false"/> so file mode (which never sets either) never misreads an
+/// ordinary index.
 /// </summary>
 public sealed record CatalogIndex(
     string? Name,
@@ -127,7 +137,9 @@ public sealed record CatalogIndex(
     bool OptimizeForSequentialKey = false,
     string? PartitionSchemeName = null,
     string? PartitioningColumnName = null,
-    bool IgnoreDupKey = false)
+    bool IgnoreDupKey = false,
+    bool IsXmlIndex = false,
+    bool IsSpatialIndex = false)
 {
     /// <summary>
     /// Positional parameter is nullable (<see cref="KeyColumnIsDescendingRaw"/>) purely so every
