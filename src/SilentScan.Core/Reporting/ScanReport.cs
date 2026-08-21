@@ -87,6 +87,7 @@ public sealed record ScanReport(
     IReadOnlyList<Predicates.ForcedParameterizationFinding> ForcedParameterizationFindings,
     IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding> ColumnstoreUnsupportedColumnTypeFindings,
     IReadOnlyList<AlwaysEncryptedOrderByFinding> AlwaysEncryptedOrderByFindings,
+    IReadOnlyList<TriggerOrderFinding> TriggerOrderFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -414,5 +415,11 @@ public sealed record ScanReport(
     /// ORDER BY clause referencing an Always Encrypted column - oracle-confirmed the statement
     /// never compiles at all, Msg 33277, for both DETERMINISTIC and RANDOMIZED encryption types,
     /// regardless of whether the connecting client is itself Always-Encrypted-enabled).
-    public const int CurrentSchemaVersion = 64;
+    /// Bumped to 65 for the new <see cref="TriggerOrderFindings"/> stream (two or more enabled
+    /// AFTER triggers on the same table+event left unpinned relative to each other by
+    /// <c>sp_settriggerorder</c> - oracle-confirmed <c>sys.trigger_events.is_first</c>/<c>is_last</c>
+    /// report the real pin state directly). Live-mode only, same reasoning as
+    /// <see cref="CrossTableTypeDriftFindings"/> - a trigger's firing-order pin has no DDL
+    /// representation to replay in file mode.
+    public const int CurrentSchemaVersion = 65;
 }

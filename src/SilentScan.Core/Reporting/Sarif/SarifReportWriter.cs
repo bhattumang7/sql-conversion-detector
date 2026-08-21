@@ -118,6 +118,7 @@ public static class SarifReportWriter
         results.AddRange(report.AggregateDivisionColumnstoreFindings.Select(ToResult));
         results.AddRange(report.SecurityPredicateIndexFindings.Select(ToResult));
         results.AddRange(report.DanglingObjectReferenceFindings.Select(ToResult));
+        results.AddRange(report.TriggerOrderFindings.Select(ToResult));
 
         // No public repository exists for this project yet, so informationUri (optional in
         // the SARIF spec) is omitted rather than pointed at a URL that doesn't resolve.
@@ -1223,6 +1224,20 @@ public static class SarifReportWriter
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(TriggerOrderFinding finding)
+    {
+        // A real, catalog-provable structural risk - engine-documented undefined order, not a
+        // proven-active bug (whether any of the unordered triggers actually depends on order is
+        // intent this pass cannot see) - Warning, same tier as CrossTableTypeDriftFinding's own
+        // "real risk, not yet a confirmed defect" reasoning, floored by confidence.
+        var triggerList = string.Join(", ", finding.UnorderedTriggerNames);
+        var message = $"'{finding.TableQualifiedName}' has {finding.UnorderedTriggerNames.Count} AFTER {finding.EventTypeDescription} triggers with no sp_settriggerorder pin between them ({triggerList}) - their relative firing order is undefined by the engine.";
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerOrderRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }
 
     private static SarifResult ToResult(QueryAntiPatternFinding finding)

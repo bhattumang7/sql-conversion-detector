@@ -39,6 +39,7 @@ public static class SarifRuleCatalog
     public const string ColumnstoreUnsupportedColumnTypeRuleId = "silentscan/catalog/columnstore-unsupported-column-type";
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
+    public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";
 
     public const string QueryAntiPatternTableVariableLowCompatEstimateRuleId = "silentscan/query/table-variable-low-compat-estimate";
     public const string QueryAntiPatternTableVariableStaleEstimateInLoopRuleId = "silentscan/query/table-variable-stale-estimate-in-loop";

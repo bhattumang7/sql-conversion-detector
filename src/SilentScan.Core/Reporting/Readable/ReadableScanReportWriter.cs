@@ -94,6 +94,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(ScalarUdf(report, headingLevel, pathBase));
         blocks.AddRange(ColumnCollationDrift(report, headingLevel, pathBase));
         blocks.AddRange(CrossTableTypeDrift(report, headingLevel, pathBase));
+        blocks.AddRange(TriggerOrder(report, headingLevel, pathBase));
         blocks.AddRange(ProcCallArgumentMismatch(report, headingLevel, pathBase));
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
@@ -209,6 +210,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Scalar UDF calls (per-row cost, non-sargable when predicate-context)", report.ScalarUdfFindings.Count);
         AddCount(counts, "Columns whose collation drifts from the database/tempdb default", report.ColumnCollationDriftFindings.Count);
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
+        AddCount(counts, "Tables with undefined AFTER trigger firing order", report.TriggerOrderFindings.Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
@@ -638,6 +640,27 @@ public static class ReadableScanReportWriter
                 $"{f.ParentTableQualifiedName}.{f.ParentColumnName} ({f.ParentTypeDisplay})",
                 $"{f.ReferencedTableQualifiedName}.{f.ReferencedColumnName} ({f.ReferencedTypeDisplay})",
                 f.CollationDiffers.ToString(),
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> TriggerOrder(ScanReport report, int level, string? pathBase)
+    {
+        if (report.TriggerOrderFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Tables with undefined trigger firing order ({report.TriggerOrderFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "Two or more enabled AFTER triggers on the same table+event with no sp_settriggerorder pin narrowing their relative order down to a single pair - the engine documents this order as undefined. Read live from sys.triggers/sys.trigger_events - always empty for a file-mode scan.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Event", "Unordered triggers"],
+            [.. report.TriggerOrderFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.EventTypeDescription,
+                string.Join(", ", f.UnorderedTriggerNames),
             })]);
     }
 

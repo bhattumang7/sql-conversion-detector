@@ -76,6 +76,14 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         CREATE NONCLUSTERED INDEX IX_Gadget_Code ON dbo.Gadget(Code);
         GO
         CREATE NONCLUSTERED INDEX IX_GadgetHistory_Code ON dbo.GadgetHistory(Code);
+        GO
+        CREATE TABLE dbo.OrderedTriggers (Id INT NOT NULL PRIMARY KEY);
+        GO
+        CREATE TRIGGER dbo.trg_OrderedTriggers_1 ON dbo.OrderedTriggers AFTER INSERT AS BEGIN SET NOCOUNT ON; END;
+        GO
+        CREATE TRIGGER dbo.trg_OrderedTriggers_2 ON dbo.OrderedTriggers AFTER INSERT AS BEGIN SET NOCOUNT ON; END;
+        GO
+        EXEC sp_settriggerorder @triggername = N'dbo.trg_OrderedTriggers_1', @order = N'First', @stmttype = N'INSERT';
         """;
 
     [Fact]
@@ -227,6 +235,30 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
         Assert.Equal("dbo.CheckedOrders", check.TableQualifiedName);
         Assert.True(check.IsNotTrusted);
         Assert.False(check.IsDisabled);
+    }
+
+    [Fact]
+    public async Task ReadAsync_TriggerFiringOrder_ReadsRealPinStateFromSysTriggerEvents()
+    {
+        var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var pinned = Assert.Single(catalog.TriggerEvents, e => e.TriggerQualifiedName == "dbo.trg_OrderedTriggers_1");
+        Assert.Equal("dbo.OrderedTriggers", pinned.TableQualifiedName);
+        Assert.Equal("INSERT", pinned.EventTypeDescription);
+        Assert.True(pinned.IsFirst);
+        Assert.False(pinned.IsLast);
+        Assert.False(pinned.IsInsteadOf);
+        Assert.False(pinned.IsDisabled);
+
+        var unpinned = Assert.Single(catalog.TriggerEvents, e => e.TriggerQualifiedName == "dbo.trg_OrderedTriggers_2");
+        Assert.False(unpinned.IsFirst);
+        Assert.False(unpinned.IsLast);
+
+        // First pinned + one unpinned = a fully determined order (middle set of one) - the
+        // scanner correctly declines even though a pin exists, matching TriggerOrderScanner's
+        // own ThreeTriggers_FirstAndLastPinned_MiddleSingleton_NeverFires unit test.
+        var findings = TriggerOrderScanner.Scan(catalog);
+        Assert.DoesNotContain(findings, f => f.TableQualifiedName == "dbo.OrderedTriggers");
     }
 
     [Fact]

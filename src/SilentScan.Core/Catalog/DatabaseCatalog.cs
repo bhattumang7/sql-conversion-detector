@@ -30,6 +30,7 @@ public sealed class DatabaseCatalog
     private readonly List<ForeignKeyRelationship> _foreignKeys = [];
 
     private readonly List<CatalogCheckConstraint> _checkConstraints = [];
+    private readonly List<CatalogTriggerEvent> _triggerEvents = [];
 
     private readonly List<CatalogSecurityPredicate> _securityPredicates = [];
 
@@ -186,6 +187,11 @@ public sealed class DatabaseCatalog
     public void AddSecurityPredicate(CatalogSecurityPredicate predicate) => _securityPredicates.Add(predicate);
 
     public IReadOnlyList<CatalogSecurityPredicate> SecurityPredicates => _securityPredicates;
+
+    /// <summary>Trigger firing-order state, live from <c>sys.triggers</c>/<c>sys.trigger_events</c> only - same "engine-authoritative, never parsed from DDL" reasoning as <see cref="ForeignKeys"/>/<see cref="CheckConstraints"/> (<c>sp_settriggerorder</c>'s own pin state has no DDL representation to replay). Always empty for a file-mode scan.</summary>
+    public void AddTriggerEvent(CatalogTriggerEvent triggerEvent) => _triggerEvents.Add(triggerEvent);
+
+    public IReadOnlyList<CatalogTriggerEvent> TriggerEvents => _triggerEvents;
 
     /// <summary>
     /// A system-versioned temporal table's own current-table/history-table pairing, read live from

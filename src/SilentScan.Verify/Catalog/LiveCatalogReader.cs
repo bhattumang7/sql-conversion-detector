@@ -130,6 +130,11 @@ public sealed class LiveCatalogReader
             catalog.AddCheckConstraint(checkConstraint);
         }
 
+        foreach (var triggerEvent in await ReadTriggerEventsAsync(connection, cancellationToken))
+        {
+            catalog.AddTriggerEvent(triggerEvent);
+        }
+
         foreach (var securityPredicate in await ReadSecurityPredicatesAsync(connection, cancellationToken))
         {
             catalog.AddSecurityPredicate(securityPredicate);
@@ -475,6 +480,54 @@ public sealed class LiveCatalogReader
         }
 
         return constraints;
+    }
+
+    /// <summary>
+    /// Every AFTER trigger's own firing-order pin state, one row per (trigger, event) pair - the
+    /// live-only precondition <see cref="SilentScan.Core.Predicates.TriggerOrderScanner"/> needs.
+    /// <c>sys.trigger_events.is_first</c>/<c>is_last</c> report <c>sp_settriggerorder</c>'s current
+    /// pin state directly (oracle-confirmed: see <see cref="SilentScan.Core.Catalog.CatalogTriggerEvent"/>'s
+    /// own doc comment) - no OBJECTPROPERTY call needed, and no per-trigger round trip either,
+    /// unlike <see cref="ReadClrScalarUdfInfoAsync"/>'s own one-at-a-time discipline for a
+    /// different, genuinely per-object-failure-prone catalog fact. INSTEAD OF triggers are still
+    /// read (<see cref="SilentScan.Core.Catalog.CatalogTriggerEvent.IsInsteadOf"/> preserved) so
+    /// the scanner can exclude them explicitly rather than this reader silently deciding that
+    /// scope question.
+    /// </summary>
+    private static async Task<List<CatalogTriggerEvent>> ReadTriggerEventsAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT s.name AS schema_name, t.name AS table_name, tr.name AS trigger_name,
+                   te.type_desc, tr.is_instead_of_trigger, tr.is_disabled, te.is_first, te.is_last
+            FROM sys.triggers tr
+            JOIN sys.trigger_events te ON te.object_id = tr.object_id
+            JOIN sys.tables t ON t.object_id = tr.parent_id
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            WHERE tr.parent_class = 1 AND t.is_ms_shipped = 0;
+            """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var triggerEvents = new List<CatalogTriggerEvent>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var tableQualifiedName = $"{reader.GetString(0)}.{reader.GetString(1)}";
+            var triggerQualifiedName = $"{reader.GetString(0)}.{reader.GetString(2)}";
+            triggerEvents.Add(new CatalogTriggerEvent(
+                TriggerQualifiedName: triggerQualifiedName,
+                TableQualifiedName: tableQualifiedName,
+                EventTypeDescription: reader.GetString(3),
+                IsInsteadOf: reader.GetBoolean(4),
+                IsDisabled: reader.GetBoolean(5),
+                IsFirst: reader.GetBoolean(6),
+                IsLast: reader.GetBoolean(7),
+                SourcePath: triggerQualifiedName,
+                SourceLine: 0));
+        }
+
+        return triggerEvents;
     }
 
     /// <summary>

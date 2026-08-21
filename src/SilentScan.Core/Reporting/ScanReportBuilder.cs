@@ -249,6 +249,13 @@ public static class ScanReportBuilder
             crossTableDriftStage.Complete($"{crossTableTypeDriftFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<TriggerOrderFinding> triggerOrderFindings;
+        using (var triggerOrderStage = progress.Begin("scanning trigger firing-order gaps"))
+        {
+            triggerOrderFindings = TriggerOrderScanner.Scan(catalog);
+            triggerOrderStage.Complete($"{triggerOrderFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<ProcCallArgumentMismatchFinding> procCallArgumentMismatchFindings;
         using (var argumentMismatchStage = progress.Begin("scanning call-boundary argument mismatches"))
         {
@@ -1352,6 +1359,7 @@ public static class ScanReportBuilder
         bareTopNoOrderByFindings = [.. bareTopNoOrderByFindings.Where(f => f.Confidence <= minimumConfidence)];
         stringConcatNullFindings = [.. stringConcatNullFindings.Where(f => f.Confidence <= minimumConfidence)];
         aggregateDivisionColumnstoreFindings = [.. aggregateDivisionColumnstoreFindings.Where(f => f.Confidence <= minimumConfidence)];
+        triggerOrderFindings = [.. triggerOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1428,6 +1436,7 @@ public static class ScanReportBuilder
             [],
             columnstoreBatchModeDisqualifyingTypeFindings,
             alwaysEncryptedOrderByFindings,
+            triggerOrderFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 
