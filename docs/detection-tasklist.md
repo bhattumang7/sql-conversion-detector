@@ -20,24 +20,32 @@ Competitor tools are referred to generically; real identities are in
 ### Detections
 
 - [ ] **No predicate-survival (normalization) step: our largest structural
-      false-positive exposure.** The engine's compile pipeline is bind → derive
-      type → normalize/simplify → sargability → plan emission. Our passes cover
-      four of those five: Lineage binds, TypeInference derives, the
-      Predicates scanners decide sargability, and the Verify path confirms the
-      plan marker. Nothing in `src/SilentScan.Core` corresponds to
-      normalization — a search for simplification/rewrite/contradiction logic
-      returns only rule-doc prose and catalog text, no pass.
-      **Why it matters:** the engine rewrites and sometimes eliminates
-      predicates before sargability is ever considered. A predicate we flag
-      may not survive to execution in the form we flagged it, which makes the
-      finding wrong — and precision beats recall everywhere. Because we key
-      confirmation on a plan marker, a rewritten-away predicate produces no
-      marker and is currently indistinguishable from an unconfirmed finding.
-      **Next step:** enumerate contradiction detection (AND/OR propagation
-      across a full boolean tree — short-circuit/three-valued-NULL
-      reasoning) and subquery flattening, then test each shipped conversion
-      and sargability rule against those shapes. Every survivor is a
-      confirmed rule; every casualty is a false positive we ship today.
+      false-positive exposure — partially closed.** `Predicates/Normalization/`
+      (`NumericValueRangeSet` + `PredicateSurvivalAnalyzer`) now covers shapes
+      1-3 from `detection-reference.md`'s "Predicate survival" section: a
+      per-column value-range set intersected across an AND group (same-column
+      contradiction, `IS NULL` conflicts, self-contradictory `BETWEEN`) or
+      unioned across an OR group (`NOT NULL`-gated tautology, including
+      `IS NULL`/`IS NOT NULL` pairs unconditionally), with a strict
+      `AlwaysFalse` state so `NOT` of a contradiction on a confirmed
+      non-nullable column is recognized as a real tautology too. Oracle-
+      confirmed directly (a contradiction compiles to `Constant Scan`; a
+      `NOT NULL`-column tautology and its `NOT`-of-contradiction dual both
+      drop the residual filter; the nullable negative control correctly keeps
+      one). Wired into the two highest-blast-radius call sites,
+      `TypedPredicateExtractor` and `NonSargablePredicateScanner`
+      (`ExplicitVisit(WhereClause)`/`(HavingClause)`/`(QualifiedJoin)` compute
+      the dead-comparison set once per clause; every finding-emitting `Visit`
+      declines and ledgers `"predicate eliminated by normalization"` instead
+      of scoring a dead predicate).
+      **Still open:** the other 5 at-risk call sites from `detection-
+      reference.md`'s survey (`CatchAllPredicateScanner`, `DuplicationScanner`,
+      `PartialCompositeForeignKeyJoinScanner`, `QueryAntiPatternScanner`,
+      `JoinKeyUniqueness`/`NotInNullableSubqueryScanner`) don't yet consult
+      `PredicateSurvivalAnalyzer` - lower blast radius than the two wired
+      sites, not yet confirmed immune. Shape 4 (redundant-branch absorption),
+      shape 5 (subquery flattening), and shape 6 (arithmetic constant
+      folding) remain unbuilt per that section's own scope notes.
 
 - [ ] **Static risk factor: persisted computed column on a spatial expression,
       disabled by a future compat-level change.** `sys.dm_db_objects_disabled_on_compatibility_level_change(@level)`

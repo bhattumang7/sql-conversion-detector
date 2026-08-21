@@ -55,6 +55,29 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     }
 
     [Fact]
+    public void FunctionWrappedColumn_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
+    {
+        // Id=1 AND Id=2 can never select a row, so UPPER(Notes)='X' - an ordinary conjunct of
+        // the same unsatisfiable AND - never reaches a real Filter/Seek decision either, even
+        // though this scanner's own contradiction algebra never looks at wrapped-column
+        // comparisons directly (it only has to prove the ENCLOSING AND is dead).
+        var result = SqlScriptParser.ParseText("test.sql", """
+            CREATE TABLE dbo.Orders (Id INT NOT NULL, Notes VARCHAR(200) NOT NULL);
+            GO
+            SELECT 1 FROM dbo.Orders WHERE Id = 1 AND Id = 2 AND UPPER(Notes) = 'X';
+            """);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+
+        var catalog = CatalogBuilder.Build([result]);
+        var lineage = LineageResolver.Resolve(catalog, [result]);
+        var ledger = new SkipLedger();
+        var findings = NonSargablePredicateScanner.Scan(result, catalog, lineage, ledger: ledger);
+
+        Assert.Empty(findings);
+        Assert.Contains(ledger.Entries, e => e.ConstructKind == "predicate eliminated by normalization");
+    }
+
+    [Fact]
     public void FunctionWrappedColumn_OnNonLeadingCompositeKeyColumn_ResolvesIndexedFalse()
     {
         // The column is technically a key column of an index, but not the LEADING one - it

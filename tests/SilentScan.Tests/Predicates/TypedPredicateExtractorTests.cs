@@ -236,6 +236,49 @@ public sealed class TypedPredicateExtractorTests
     }
 
     [Fact]
+    public void Extract_SameColumnContradiction_NoFindingAndLedgeredAsNormalizationEliminated()
+    {
+        // WHERE Id = 1 AND Id = 2 can never select a row - the engine folds this to a Constant
+        // Scan before sargability is ever considered (oracle-confirmed directly), so reporting a
+        // seek/scan verdict for either comparison would be a false positive, not merely an
+        // unconfirmed one.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Id = 1 AND Id = 2;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Equal(2, result.SkippedConstructs.Count(s => s.ConstructKind == "predicate eliminated by normalization"));
+    }
+
+    [Fact]
+    public void Extract_SiblingConjunctOfAnUnsatisfiableAnd_AlsoEliminated()
+    {
+        // The whole AND can never select a row once Id=1 AND Id=2 contradict, so Other=5 never
+        // meaningfully reaches a Filter/Seek decision either - not just the two contradicting
+        // comparisons.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL, Other INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Id = 1 AND Id = 2 AND Other = 5;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Equal(3, result.SkippedConstructs.Count(s => s.ConstructKind == "predicate eliminated by normalization"));
+    }
+
+    [Fact]
+    public void Extract_OrDisjunctOutsideTheContradiction_StillReportsNormally()
+    {
+        // Only the dead disjunct's own comparisons are eliminated - the live OR branch is
+        // unaffected, since the OR as a whole is not provably dead.
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Id INT NOT NULL, Other INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE (Id = 1 AND Id = 2) OR Other = 5;");
+
+        var finding = Assert.Single(result.TypedFindings);
+        Assert.Equal("Other", finding.Column.ColumnName);
+        Assert.Equal(2, result.SkippedConstructs.Count(s => s.ConstructKind == "predicate eliminated by normalization"));
+    }
+
+    [Fact]
     public void Extract_NestedSubqueryHasOwnScope_DoesNotLeakOuterAlias()
     {
         var findings = Extract(

@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.Normalization;
 using SilentScan.Core.TypeInference;
 using SilentScan.Core.Common;
 
@@ -92,6 +93,47 @@ public static class NonSargablePredicateScanner
 #pragma warning restore CS9107
     {
         private bool _inFilterContext;
+
+        /// <summary>See TypedPredicateExtractor's identical field for the full rationale - one
+        /// entry per active filter clause, innermost on top.</summary>
+        private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
+
+        private static readonly IReadOnlySet<TSqlFragment> EmptyDeadPredicateSet = new HashSet<TSqlFragment>();
+
+        private IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
+        {
+            if (searchCondition is null || ScopeStack.Count == 0)
+            {
+                return EmptyDeadPredicateSet;
+            }
+
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+        }
+
+        /// <summary>Side-effect-free column-fact lookup, mirroring TypedPredicateExtractor's
+        /// identical helper - <c>ledger: null</c> so this auxiliary resolution never double-records
+        /// a skip the real predicate visit (<see cref="ResolveIndexInfo"/>) already records.</summary>
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
+        }
+
+        private bool IsDeadPredicate(TSqlFragment node) => _deadPredicateStack.Count > 0 && _deadPredicateStack.Peek().Contains(node);
+
+        private const string NormalizationEliminatedConstructKind = "predicate eliminated by normalization";
+
+        private const string NormalizationEliminatedLedgerReason =
+            "this comparison lives inside a branch the engine's own normalize/simplify pass proves can never contribute a selected row (a same-column contradiction, or a tautology on a confirmed NOT NULL column) - never reaches a real Filter/Seek decision";
 
         public List<SargabilityFinding> Findings { get; } = [];
 
@@ -201,7 +243,9 @@ public static class NonSargablePredicateScanner
         {
             var previous = _inFilterContext;
             _inFilterContext = true;
+            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.AcceptChildren(this);
+            _deadPredicateStack.Pop();
             _inFilterContext = previous;
         }
 
@@ -209,7 +253,9 @@ public static class NonSargablePredicateScanner
         {
             var previous = _inFilterContext;
             _inFilterContext = true;
+            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.AcceptChildren(this);
+            _deadPredicateStack.Pop();
             _inFilterContext = previous;
         }
 
@@ -224,7 +270,9 @@ public static class NonSargablePredicateScanner
 
             var previous = _inFilterContext;
             _inFilterContext = true;
+            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.SearchCondition?.Accept(this);
+            _deadPredicateStack.Pop();
             _inFilterContext = previous;
         }
 
@@ -233,6 +281,12 @@ public static class NonSargablePredicateScanner
         {
             if (!_inFilterContext)
             {
+                return;
+            }
+
+            if (IsDeadPredicate(node))
+            {
+                ledger?.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
                 return;
             }
 
@@ -257,6 +311,12 @@ public static class NonSargablePredicateScanner
         {
             if (!_inFilterContext)
             {
+                return;
+            }
+
+            if (IsDeadPredicate(node))
+            {
+                ledger?.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
                 return;
             }
 
@@ -288,6 +348,12 @@ public static class NonSargablePredicateScanner
                 return;
             }
 
+            if (IsDeadPredicate(node))
+            {
+                ledger?.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                return;
+            }
+
             InspectSide(node.Expression);
         }
 
@@ -295,6 +361,12 @@ public static class NonSargablePredicateScanner
         {
             if (!_inFilterContext)
             {
+                return;
+            }
+
+            if (IsDeadPredicate(node))
+            {
+                ledger?.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
                 return;
             }
 

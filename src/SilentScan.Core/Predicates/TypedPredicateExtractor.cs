@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.Normalization;
 using SilentScan.Core.Rules;
 using SilentScan.Core.TypeInference;
 using SilentScan.Core.Common;
@@ -137,6 +138,69 @@ public static class TypedPredicateExtractor
         }
 
         private PredicatePosition _position;
+
+        /// <summary>
+        /// One entry per active filter clause (WHERE/HAVING/JOIN ON), innermost on top - a nested
+        /// subquery's own WHERE pushes its own, independently-computed set before this visitor
+        /// descends into it, and pops back to the enclosing clause's set afterward. Never consulted
+        /// outside an active filter clause (<see cref="IsDeadPredicate"/> reads only the top entry).
+        /// </summary>
+        private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
+
+        private static readonly IReadOnlySet<TSqlFragment> EmptyDeadPredicateSet = new HashSet<TSqlFragment>();
+
+        /// <summary>
+        /// Predicate-survival gate (docs/detection-reference.md "Predicate survival
+        /// (normalization/simplification)"): a comparison that lives inside a branch the real
+        /// engine's own normalize/simplify pass would eliminate before sargability is ever
+        /// considered never reaches a real Filter/Seek decision, so reporting a verdict for it
+        /// would be a genuine false positive, not merely unconfirmed. Computed once per filter
+        /// clause (see <see cref="ExplicitVisit(WhereClause)"/>/<see cref="ExplicitVisit(HavingClause)"/>/
+        /// <see cref="ExplicitVisit(QualifiedJoin)"/>), not per comparison - the analysis needs the
+        /// whole boolean tree at once to find a cross-conjunct contradiction.
+        /// </summary>
+        private IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
+        {
+            if (searchCondition is null || ScopeStack.Count == 0)
+            {
+                return EmptyDeadPredicateSet;
+            }
+
+            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+            return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+        }
+
+        /// <summary>
+        /// Side-effect-free column-fact lookup for <see cref="ComputeDeadPredicates"/> - deliberately
+        /// bypasses <see cref="ResolveOperand"/>/<see cref="ResolveColumnOperand"/> (whose
+        /// <c>ScalarExpressionResolver.ResolveColumnReference</c> call records to the
+        /// skip ledger) since this runs once per column reference inside every filter clause's
+        /// boolean tree, most of which never become a real finding either way - double-recording an
+        /// unresolved-column skip for the same reference the real predicate visit already records
+        /// would corrupt the ledger's own counts. <c>ledger: null</c> is the same "auxiliary,
+        /// non-primary resolution" pattern <see cref="TryCastComputedColumnPredicateScanner"/> and
+        /// <see cref="ComputedColumnMatcher"/> already use.
+        /// </summary>
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
+        }
+
+        private bool IsDeadPredicate(TSqlFragment node) => _deadPredicateStack.Count > 0 && _deadPredicateStack.Peek().Contains(node);
+
+        private const string NormalizationEliminatedConstructKind = "predicate eliminated by normalization";
+
+        private const string NormalizationEliminatedLedgerReason =
+            "this comparison lives inside a branch the engine's own normalize/simplify pass proves can never contribute a selected row (a same-column contradiction, or a tautology on a confirmed NOT NULL column) - never reaches a real Filter/Seek decision";
 
         // Roadmap Phase E2: `WHERE NOT (Col = @p)` previously visited the inner
         // BooleanComparisonExpression completely unaware of the enclosing NOT - the default
@@ -350,7 +414,9 @@ public static class TypedPredicateExtractor
         {
             var previous = _position;
             _position = PredicatePosition.Seekable;
+            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.AcceptChildren(this);
+            _deadPredicateStack.Pop();
             _position = previous;
         }
 
@@ -358,7 +424,9 @@ public static class TypedPredicateExtractor
         {
             var previous = _position;
             _position = PredicatePosition.Seekable;
+            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.AcceptChildren(this);
+            _deadPredicateStack.Pop();
             _position = previous;
         }
 
@@ -370,7 +438,9 @@ public static class TypedPredicateExtractor
 
             var previous = _position;
             _position = PredicatePosition.Seekable;
+            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.SearchCondition?.Accept(this);
+            _deadPredicateStack.Pop();
             _position = previous;
         }
 
@@ -827,6 +897,12 @@ public static class TypedPredicateExtractor
 
         public override void Visit(BooleanComparisonExpression node)
         {
+            if (IsDeadPredicate(node))
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                return;
+            }
+
             var operatorText = ToOperatorText(node.ComparisonType);
             if (operatorText is null)
             {
@@ -841,6 +917,12 @@ public static class TypedPredicateExtractor
         {
             if (node.TernaryExpressionType is not (BooleanTernaryExpressionType.Between or BooleanTernaryExpressionType.NotBetween))
             {
+                return;
+            }
+
+            if (IsDeadPredicate(node))
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
                 return;
             }
 
@@ -880,6 +962,12 @@ public static class TypedPredicateExtractor
 
         public override void Visit(LikePredicate node)
         {
+            if (IsDeadPredicate(node))
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                return;
+            }
+
             // `NOT (Col LIKE @p)` reaches here with node.NotDefined still false - the NOT sits
             // on the wrapping BooleanNotExpression, not this node - so _negated stands in for it
             // (Roadmap Phase E2, same bug class as the comparison-operator fix above).
@@ -916,6 +1004,12 @@ public static class TypedPredicateExtractor
 
         public override void Visit(InPredicate node)
         {
+            if (IsDeadPredicate(node))
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                return;
+            }
+
             if (ScopeStack.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
@@ -979,6 +1073,12 @@ public static class TypedPredicateExtractor
         /// </summary>
         public override void Visit(SubqueryComparisonPredicate node)
         {
+            if (IsDeadPredicate(node))
+            {
+                ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NormalizationEliminatedConstructKind, NormalizationEliminatedLedgerReason);
+                return;
+            }
+
             if (ScopeStack.Count == 0)
             {
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
