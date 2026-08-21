@@ -1417,11 +1417,10 @@ public static class SarifReportWriter
 
     private static SarifResult ToResult(WriteLossFinding finding)
     {
-        // Always warning, not error/downgraded-by-index the way a seek/scan finding is - "is
-        // this column indexed" has no bearing on whether a write silently loses data.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WriteLossRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
-        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TargetType}) is assigned a {finding.SourceType} value - {DescribeWriteLossKind(finding.Kind)}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
+        var target = finding.TableQualifiedName is { } table ? $"{table}.{finding.ColumnName}" : finding.ColumnName;
+        var message = $"'{target}' ({finding.TargetType}) is assigned a {finding.SourceType} value - {DescribeWriteLossKind(finding.Kind)}.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, finding.ColumnPosition);
     }

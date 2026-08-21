@@ -188,11 +188,11 @@ public static partial class DynamicSqlPipeline
 
     private static List<WriteLossFinding> DedupeWriteLoss(List<WriteLossFinding> findings)
     {
-        var seen = new HashSet<(string, string, WriteLossKind, SqlType, SqlType)>();
+        var seen = new HashSet<(string?, string, WriteLossKind, SqlType, SqlType)>();
         return findings.Where(finding => seen.Add(WriteLossKey(finding))).ToList();
     }
 
-    private static (string, string, WriteLossKind, SqlType, SqlType) WriteLossKey(WriteLossFinding finding) =>
+    private static (string?, string, WriteLossKind, SqlType, SqlType) WriteLossKey(WriteLossFinding finding) =>
         (finding.TableQualifiedName, finding.ColumnName, finding.Kind, finding.TargetType, finding.SourceType);
 
     private static List<TvfFenceFinding> DedupeTvfFence(List<TvfFenceFinding> findings)

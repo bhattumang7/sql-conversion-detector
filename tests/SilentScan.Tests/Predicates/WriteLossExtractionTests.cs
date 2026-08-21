@@ -317,4 +317,51 @@ public sealed class WriteLossExtractionTests
         Assert.Equal("dbo.T", finding.TableQualifiedName);
         Assert.Equal("VarCol", finding.ColumnName);
     }
+
+    [Fact]
+    public void Extract_SetVariableWithLossyLiteral_FlagsWriteLoss()
+    {
+        var findings = Extract("DECLARE @v DECIMAL(10,2); SET @v = 123.456;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.NumericScaleNarrowing, finding.Kind);
+        Assert.Null(finding.TableQualifiedName);
+        Assert.Equal("@v", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_SetVariableWithinDeclaredScale_NoFinding()
+    {
+        var findings = Extract("DECLARE @v DECIMAL(10,2); SET @v = 123.40;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_SetVariableFromScalarSubquery_NonLiteral_AlwaysFlagged()
+    {
+        var findings = Extract(
+            "CREATE TABLE dbo.T (NCol NVARCHAR(20) NULL);",
+            "DECLARE @v VARCHAR(20); SET @v = (SELECT TOP 1 NCol FROM dbo.T);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(WriteLossKind.UnicodeToNonUnicodeReplacement, finding.Kind);
+        Assert.Equal("@v", finding.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_SetVariableUndeclared_LedgeredOrSkippedWithoutThrowing()
+    {
+        var findings = Extract("SET @never_declared = 123.456;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_SetVariableCompoundAssignment_NotAnalyzed()
+    {
+        var findings = Extract("DECLARE @v DECIMAL(10,2) = 0; SET @v += 123.456;");
+
+        Assert.Empty(findings);
+    }
 }

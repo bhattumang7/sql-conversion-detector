@@ -591,10 +591,10 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
   <section class="family-section">
     <h2>write-loss</h2>
     <ul class="rule-list">
-      <li><a class="id" href="rules/write-loss-approximate-to-exact-truncation.html">Approximate To Exact Truncation</a> <code class="rule-key">silentscan/write-loss/approximate-to-exact-truncation</code><span class="snippet">An INSERT/UPDATE assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target.</span></li>
-      <li><a class="id" href="rules/write-loss-numeric-scale-narrowing.html">Numeric Scale Narrowing</a> <code class="rule-key">silentscan/write-loss/numeric-scale-narrowing</code><span class="snippet">An INSERT/UPDATE assigns a DECIMAL/NUMERIC value to a target with a smaller scale.</span></li>
-      <li><a class="id" href="rules/write-loss-temporal-precision-loss.html">Temporal Precision Loss</a> <code class="rule-key">silentscan/write-loss/temporal-precision-loss</code><span class="snippet">An INSERT/UPDATE assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target.</span></li>
-      <li><a class="id" href="rules/write-loss-unicode-to-non-unicode.html">Unicode To Non Unicode</a> <code class="rule-key">silentscan/write-loss/unicode-to-non-unicode</code><span class="snippet">An INSERT/UPDATE assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target.</span></li>
+      <li><a class="id" href="rules/write-loss-approximate-to-exact-truncation.html">Approximate To Exact Truncation</a> <code class="rule-key">silentscan/write-loss/approximate-to-exact-truncation</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns an approximate-numeric (REAL/FLOAT) value to an exact integer target.</span></li>
+      <li><a class="id" href="rules/write-loss-numeric-scale-narrowing.html">Numeric Scale Narrowing</a> <code class="rule-key">silentscan/write-loss/numeric-scale-narrowing</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns a DECIMAL/NUMERIC value to a target with a smaller scale.</span></li>
+      <li><a class="id" href="rules/write-loss-temporal-precision-loss.html">Temporal Precision Loss</a> <code class="rule-key">silentscan/write-loss/temporal-precision-loss</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns a DATETIME/DATETIME2/SMALLDATETIME/DATETIMEOFFSET value to a DATE target.</span></li>
+      <li><a class="id" href="rules/write-loss-unicode-to-non-unicode.html">Unicode To Non Unicode</a> <code class="rule-key">silentscan/write-loss/unicode-to-non-unicode</code><span class="snippet">An INSERT/UPDATE or SET variable assignment assigns a Unicode (NVARCHAR/NCHAR) value to a non-Unicode (VARCHAR/CHAR) target.</span></li>
     </ul>
   </section>
 

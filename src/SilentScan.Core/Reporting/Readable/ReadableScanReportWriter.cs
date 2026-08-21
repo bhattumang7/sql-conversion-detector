@@ -207,7 +207,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Implicit conversions forcing a scan", summary.ScanForcedCount, summary.DistinctScanForcedCount);
         AddCount(counts, "Implicit conversions degrading the seek", summary.RangeSeekCount, summary.DistinctRangeSeekCount);
         AddCount(counts, "Expression-derived columns in predicates", report.ExpressionDerivedFindings.Count);
-        AddCount(counts, "INSERT/UPDATE assignments risking silent data loss", report.WriteLossFindings.Count);
+        AddCount(counts, "Assignments risking silent data loss", report.WriteLossFindings.Count);
         AddCount(counts, "Non-sargable predicate patterns", report.Tier1Findings.Count);
         AddCount(counts, "Multi-statement/CLR TVF references acting as optimization fences", report.TvfFenceFindings.Count);
         AddCount(counts, "Scalar UDF calls (per-row cost, non-sargable when predicate-context)", report.ScalarUdfFindings.Count);
@@ -422,15 +422,15 @@ public static class ReadableScanReportWriter
             yield break;
         }
 
-        yield return new ReadableBlock.Heading(level, $"INSERT/UPDATE assignments risking silent data loss ({report.WriteLossFindings.Count})");
+        yield return new ReadableBlock.Heading(level, $"Assignments risking silent data loss ({report.WriteLossFindings.Count})");
         yield return new ReadableBlock.Paragraph(
-            "Each of these writes a value whose static type carries more information than its target column can hold - T-SQL rounds, truncates, or replaces the value with no error raised, so nothing here shows up as a failed statement. A case T-SQL itself refuses to run (a too-long string, an overflowing integer) is not listed - those already fail loudly on their own.");
+            "Each of these writes a value whose static type carries more information than its target can hold - T-SQL rounds, truncates, or replaces the value with no error raised, so nothing here shows up as a failed statement. A case T-SQL itself refuses to run (a too-long string, an overflowing integer) is not listed - those already fail loudly on their own.");
         yield return new ReadableBlock.Table(
             [WhereHeader, ColumnHeader, "Target type", "Source type", "Risk"],
             [.. report.WriteLossFindings.Select(f => new List<string>
             {
                 Where(f.SourcePath, f.Line, f.DynamicSqlCallSite, pathBase, f.Confidence),
-                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TableQualifiedName is { } table ? $"{table}.{f.ColumnName}" : f.ColumnName,
                 f.TargetType.ToString(),
                 f.SourceType.ToString(),
                 DescribeWriteLossKind(f.Kind),

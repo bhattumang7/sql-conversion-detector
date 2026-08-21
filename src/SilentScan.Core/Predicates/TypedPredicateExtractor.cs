@@ -581,6 +581,19 @@ public static class TypedPredicateExtractor
             base.ExplicitVisit(node);
         }
 
+        public override void ExplicitVisit(SetVariableStatement node)
+        {
+            if (node.AssignmentKind == AssignmentKind.Equals && node.Expression is { } sourceExpression
+                && _variables.TryGetValue(node.Variable.Name, out var targetType) && targetType is { } target)
+            {
+                var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+                var sourceType = OperandType(ResolveOperand(sourceExpression, scopeChain));
+                EmitWriteLossFinding(tableQualifiedName: null, node.Variable.Name, target, sourceType, sourceExpression);
+            }
+
+            base.ExplicitVisit(node);
+        }
+
         /// <summary>
         /// DECLARE'd variable types are batch-scoped in real T-SQL (a `GO`-separated batch
         /// starts with none) - without this, an ad-hoc batch with no CREATE PROCEDURE/FUNCTION/
@@ -852,7 +865,7 @@ public static class TypedPredicateExtractor
             }
         }
 
-        private void EmitWriteLossFinding(string tableQualifiedName, string columnName, SqlType targetType, SqlType? sourceType, ScalarExpression sourceExpression)
+        private void EmitWriteLossFinding(string? tableQualifiedName, string columnName, SqlType targetType, SqlType? sourceType, ScalarExpression sourceExpression)
         {
             var kind = Rules.WriteLossClassifier.Classify(targetType, sourceType, sourceExpression);
             if (kind is null)
