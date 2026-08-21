@@ -2,6 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -64,14 +65,18 @@ public static class NotInNullableSubqueryScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            InspectSearchCondition(node.WhereClause?.SearchCondition);
+            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
+            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, catalog, EmptyResolvedViews, sourcePath, ledger: null, cteRelations, procScope: null);
+            InspectSearchCondition(node.WhereClause?.SearchCondition, byAlias, ordered);
             base.ExplicitVisit(node);
         }
 
         public override void ExplicitVisit(UpdateStatement node)
         {
             cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
-            InspectSearchCondition(node.UpdateSpecification.WhereClause?.SearchCondition);
+            var spec = node.UpdateSpecification;
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
             base.ExplicitVisit(node);
             cteScopeStack.Pop();
         }
@@ -79,14 +84,40 @@ public static class NotInNullableSubqueryScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
-            InspectSearchCondition(node.DeleteSpecification.WhereClause?.SearchCondition);
+            var spec = node.DeleteSpecification;
+            var (byAlias, ordered) = FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(node.WithCtesAndXmlNamespaces));
+            InspectSearchCondition(spec.WhereClause?.SearchCondition, byAlias, ordered);
             base.ExplicitVisit(node);
             cteScopeStack.Pop();
         }
 
-        private void InspectSearchCondition(BooleanExpression? searchCondition)
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
+
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
+        }
+
+        private void InspectSearchCondition(
+            BooleanExpression? searchCondition, IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered)
         {
             if (searchCondition is null)
+            {
+                return;
+            }
+
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }

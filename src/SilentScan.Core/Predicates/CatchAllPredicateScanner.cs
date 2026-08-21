@@ -2,6 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -182,11 +183,26 @@ public static class CatchAllPredicateScanner
             }
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
+            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
 
             foreach (var orClause in FlattenOr(searchCondition))
             {
-                InspectOrClause(orClause, scopeChain);
+                InspectOrClause(orClause, scopeChain, dead);
             }
+        }
+
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
         /// <summary>Flattens every top-level OR-connected fragment reachable without crossing an AND - <c>(A OR B) AND (C OR D)</c> yields two independent 2-fragment groups, never one flat 4-fragment group (mixing them would let a fragment from one AND-branch pair with an unrelated fragment from another).</summary>
@@ -257,7 +273,8 @@ public static class CatchAllPredicateScanner
 
         private void InspectOrClause(
             IReadOnlyList<BooleanExpression> orLeaves,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
+            IReadOnlySet<TSqlFragment> dead)
         {
             // Match every (equality, IS NULL) pair sharing the same parameter name - a chain of
             // several independent catch-all clauses ORed together (`Col = @p OR @p IS NULL OR
@@ -271,7 +288,7 @@ public static class CatchAllPredicateScanner
                 .Select(v => v!.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var equality in orLeaves.OfType<BooleanComparisonExpression>().Where(c => c.ComparisonType == BooleanComparisonType.Equals))
+            foreach (var equality in orLeaves.OfType<BooleanComparisonExpression>().Where(c => c.ComparisonType == BooleanComparisonType.Equals && !dead.Contains(c)))
             {
                 TryMatchCatchAllPair(equality.FirstExpression, equality.SecondExpression, isNullVariables, scopeChain, equality);
                 TryMatchCatchAllPair(equality.SecondExpression, equality.FirstExpression, isNullVariables, scopeChain, equality);

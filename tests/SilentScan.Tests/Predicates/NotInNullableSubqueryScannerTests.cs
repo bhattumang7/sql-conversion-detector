@@ -40,6 +40,14 @@ public sealed class NotInNullableSubqueryScannerTests
     }
 
     [Fact]
+    public void OuterWhereClauseUnsatisfiable_NeverFires()
+    {
+        var findings = Scan("SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM dbo.ChildNullable) AND Id = 1 AND Id = 2;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void NotNullSubqueryColumn_NeverFires()
     {
         var findings = Scan("SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM dbo.ChildNotNull);");

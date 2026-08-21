@@ -15,12 +15,21 @@ public sealed class CatchAllPredicateScannerTests
 {
     private static IReadOnlyList<CatchAllPredicateFinding> Scan(string sql)
     {
-        var ddl = "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Code (Code));";
+        var ddl = "CREATE TABLE dbo.Customers (Id INT NOT NULL, Code VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL, INDEX IX_Customers_Code (Code));";
         var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
         var catalog = CatalogBuilder.Build([result]);
         return CatchAllPredicateScanner.Scan(result, catalog);
+    }
+
+    [Fact]
+    public void CatchAllPair_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE (Code = @p OR @p IS NULL) AND Id = 1 AND Id = 2; END");
+
+        Assert.Empty(findings);
     }
 
     [Fact]

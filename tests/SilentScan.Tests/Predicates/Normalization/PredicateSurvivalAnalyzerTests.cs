@@ -44,18 +44,23 @@ public sealed class PredicateSurvivalAnalyzerTests
         public override void ExplicitVisit(BooleanTernaryExpression node) => Leaves.Add(node);
     }
 
-    /// <summary>Single parse per test case: the dead set is keyed by AST reference identity, so the
-    /// dead set and the leaf list being compared must come from the exact same parse.</summary>
-    private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Leaves) Analyze(string whereExpr)
+    private static BooleanExpression ParseCondition(string whereExpr)
     {
         var result = SqlScriptParser.ParseText("test.sql", $"SELECT 1 WHERE {whereExpr};");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
         var select = Assert.IsType<TSqlScript>(result.Fragment).Batches[0].Statements
             .OfType<SelectStatement>().Single();
-        var condition = select.QueryExpression is QuerySpecification { WhereClause.SearchCondition: { } sc }
+        return select.QueryExpression is QuerySpecification { WhereClause.SearchCondition: { } sc }
             ? sc
             : throw new InvalidOperationException("no WHERE clause parsed");
+    }
+
+    /// <summary>Single parse per test case: the dead set is keyed by AST reference identity, so the
+    /// dead set and the leaf list being compared must come from the exact same parse.</summary>
+    private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Leaves) Analyze(string whereExpr)
+    {
+        var condition = ParseCondition(whereExpr);
 
         var collector = new LeafCollector();
         condition.Accept(collector);
@@ -356,5 +361,26 @@ public sealed class PredicateSurvivalAnalyzerTests
         // x = NULL is ANSI_NULLS-dependent and declined entirely, not treated as an ordinary
         // comparison and not treated as IS NULL either.
         Assert.Empty(Analyze("NullableCol = NULL AND NullableCol IS NOT NULL").Dead);
+    }
+
+    [Fact]
+    public void IsUnsatisfiable_ContradictoryWhereClause_True()
+    {
+        var condition = ParseCondition("NotNullCol = 1 AND NotNullCol = 2");
+        Assert.True(PredicateSurvivalAnalyzer.IsUnsatisfiable(condition, ResolveFacts));
+    }
+
+    [Fact]
+    public void IsUnsatisfiable_OrdinaryWhereClause_False()
+    {
+        var condition = ParseCondition("NotNullCol = 1");
+        Assert.False(PredicateSurvivalAnalyzer.IsUnsatisfiable(condition, ResolveFacts));
+    }
+
+    [Fact]
+    public void IsUnsatisfiable_ContradictionInsideALiveOr_False()
+    {
+        var condition = ParseCondition("(NotNullCol = 1 AND NotNullCol = 2) OR NullableCol = 5");
+        Assert.False(PredicateSurvivalAnalyzer.IsUnsatisfiable(condition, ResolveFacts));
     }
 }

@@ -50,6 +50,9 @@ public static class PredicateSurvivalAnalyzer
         return dead;
     }
 
+    public static bool IsUnsatisfiable(BooleanExpression? searchCondition, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
+        searchCondition is not null && Classify(searchCondition, resolveColumnFacts).NeverTrue;
+
     private readonly record struct ColumnKey(string Qualifier, string Name);
 
     private enum CmpOp { Eq, Ne, Lt, Le, Gt, Ge }

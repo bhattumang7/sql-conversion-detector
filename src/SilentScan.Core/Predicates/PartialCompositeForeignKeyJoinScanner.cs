@@ -2,6 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.Normalization;
 using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
@@ -114,6 +115,20 @@ public static class PartialCompositeForeignKeyJoinScanner
             base.ExplicitVisit(node);
         }
 
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
+        }
+
         private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)
         {
             if (fromClause is null)
@@ -131,6 +146,11 @@ public static class PartialCompositeForeignKeyJoinScanner
             {
                 (byAlias, ordered),
             };
+
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            {
+                return;
+            }
 
             var joinNodes = fromClause.TableReferences.SelectMany(PredicateTreeWalker.FlattenJoinNodes).ToList();
             if (joinNodes.Count == 0 && fromClause.TableReferences.Count < 2)

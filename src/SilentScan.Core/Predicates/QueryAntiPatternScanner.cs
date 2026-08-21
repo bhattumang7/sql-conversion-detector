@@ -2,6 +2,7 @@ using Microsoft.SqlServer.TransactSql.ScriptDom;
 using SilentScan.Core.Catalog;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Parsing;
+using SilentScan.Core.Predicates.Normalization;
 using SilentScan.Core.Common;
 using SilentScan.Core.TypeInference;
 
@@ -234,13 +235,31 @@ public static class QueryAntiPatternScanner
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            InspectHaving(node);
-
             var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
-            var (byAlias, _) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations));
-            InspectDistinctJoinFanout(node, byAlias);
+            var (byAlias, ordered) = FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations));
+            var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
+            {
+                (byAlias, ordered),
+            };
+
+            InspectHaving(node, scopeChain);
+            InspectDistinctJoinFanout(node, byAlias, scopeChain);
 
             base.ExplicitVisit(node);
+        }
+
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
         // --- UNION of provably disjoint branches (kind 7) --------------------------------------
@@ -921,6 +940,18 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
+            var cteRelations = _cteScopeStack.Count > 0 ? _cteScopeStack.Peek() : EmptyResolvedViews;
+            var (mergeByAlias, mergeOrdered) = FromScopeResolver.ResolveForMerge(spec.Target, spec.TableAlias, spec.TableReference, ResolutionContext(cteRelations));
+            var mergeScopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)>
+            {
+                (mergeByAlias, mergeOrdered),
+            };
+
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.SearchCondition, columnRef => ResolveColumnFacts(columnRef, mergeScopeChain)))
+            {
+                return;
+            }
+
             Findings.Add(new QueryAntiPatternFinding(
                 QueryAntiPatternFindingKind.MergeNonUniqueUsingSource, sourcePath,
                 spec.StartLine, spec.StartColumn,
@@ -1290,7 +1321,8 @@ public static class QueryAntiPatternScanner
             _ => type,
         };
 
-        private void InspectHaving(QuerySpecification node)
+        private void InspectHaving(
+            QuerySpecification node, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             if (node.HavingClause?.SearchCondition is not { } having || node.GroupByClause is not { } groupBy)
             {
@@ -1304,9 +1336,11 @@ public static class QueryAntiPatternScanner
                 .Select(c => c.MultiPartIdentifier.Identifiers[^1].Value)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(having, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+
             foreach (var condition in PredicateTreeWalker.FlattenAnd(having))
             {
-                if (ContainsAggregate(condition))
+                if (ContainsAggregate(condition) || dead.Contains(condition))
                 {
                     continue;
                 }
@@ -1358,9 +1392,16 @@ public static class QueryAntiPatternScanner
         // --- DISTINCT masking a join fan-out (kind 8, reuses NonUniqueUpdateSourceScanner's
         // composite-uniqueness catalog check) ---------------------------------------------------
 
-        private void InspectDistinctJoinFanout(QuerySpecification node, Dictionary<string, ScopeEntry> byAlias)
+        private void InspectDistinctJoinFanout(
+            QuerySpecification node, Dictionary<string, ScopeEntry> byAlias,
+            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             if (node.UniqueRowFilter != UniqueRowFilter.Distinct || node.FromClause is null)
+            {
+                return;
+            }
+
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(node.WhereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
             {
                 return;
             }

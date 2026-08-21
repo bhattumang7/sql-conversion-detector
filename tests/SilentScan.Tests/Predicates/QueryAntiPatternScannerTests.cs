@@ -276,6 +276,14 @@ public sealed class QueryAntiPatternScannerTests
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
     }
 
+    [Fact]
+    public void HavingConditionInsideUnsatisfiableConjunct_NeverFires()
+    {
+        var findings = Scan("SELECT Id, COUNT(*) FROM dbo.Big GROUP BY Id HAVING Id = 1 AND Id = 2;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
+    }
+
     // --- UnionOfProvablyDisjointBranches --------------------------------------------------------
 
     [Fact]
@@ -350,6 +358,14 @@ public sealed class QueryAntiPatternScannerTests
     public void PlainSelectJoinOnNonUniqueColumn_NoDistinct_NeverFires()
     {
         var findings = Scan("SELECT a.Id FROM dbo.A a JOIN dbo.C c ON a.Id = c.AId;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
+    }
+
+    [Fact]
+    public void SelectDistinctJoinOnNonUniqueColumn_WhereClauseUnsatisfiable_NeverFires()
+    {
+        var findings = Scan("SELECT DISTINCT a.Id FROM dbo.A a JOIN dbo.C c ON a.Id = c.AId WHERE a.Id = 1 AND a.Id = 2;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
     }
@@ -440,6 +456,17 @@ public sealed class QueryAntiPatternScannerTests
     {
         var findings = Scan(
             "MERGE dbo.A AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeNonUniqueUsingSource);
+    }
+
+    [Fact]
+    public void MergeUsingNonUniqueSource_OnClauseUnsatisfiable_NeverFires()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING dbo.C AS s ON t.Id = s.AId AND s.AId = 1 AND s.AId = 2 "
             + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
             + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
 

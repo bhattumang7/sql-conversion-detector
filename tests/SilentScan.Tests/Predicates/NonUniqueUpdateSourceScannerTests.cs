@@ -48,6 +48,15 @@ public sealed class NonUniqueUpdateSourceScannerTests
     }
 
     [Fact]
+    public void WhereClauseUnsatisfiable_NeverFires()
+    {
+        var findings = Scan(
+            "UPDATE t SET t.Val = s.Val FROM dbo.TargetT t JOIN dbo.SourceNonUnique s ON t.Id = s.TargetId WHERE t.Id = 1 AND t.Id = 2;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void UpdateThroughCteNamedLikeTheRealTargetTable_NeverFires()
     {
         // 2026-08 audit: cteRelations was always null when resolving the UPDATE's own target

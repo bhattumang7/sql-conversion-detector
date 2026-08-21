@@ -100,6 +100,16 @@ public sealed class PartialCompositeForeignKeyJoinScannerTests
     }
 
     [Fact]
+    public void JoinOnOnlyOneOfTwoCompositeColumns_WhereClauseUnsatisfiable_NeverFires()
+    {
+        var catalog = BuildCatalog();
+        var findings = Scan(
+            "SELECT 1 FROM dbo.OrderLines ol JOIN dbo.Orders o ON ol.OrderId = o.OrderId WHERE ol.LineId = 1 AND ol.LineId = 2;", catalog);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void CteSharesNameWithReferencedTable_JoinNeverFires()
     {
         // 2026-08 audit: the ANSI-JOIN path's own ResolveDirectBaseTable independently re-
