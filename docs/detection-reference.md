@@ -191,3 +191,142 @@ confirmed independently of any one tool's output.
   "out-of-model-category:Xml" one, and any future logic keyed on the actual
   category (rather than just null-checking) would have silently never seen
   Xml at all.
+
+## Predicate survival (normalization/simplification)
+
+Scope note for `detection-tasklist.md`'s top open item. Every predicate
+scanner in `src/SilentScan.Core/Predicates/` reads a `WHERE`/`HAVING`/`ON`
+tree exactly as parsed and decides sargability leaf-by-leaf; none of them
+ask whether the engine's own normalize/simplify pass (bind → derive type →
+**normalize/simplify** → sargability → plan) would rewrite or eliminate that
+leaf before sargability is ever evaluated on it. `LiteralComparisonFolder`
+is the only existing normalization-shaped code in the tree, and it is
+deliberately narrow by its own doc comment: literal-vs-literal only, no
+AND/OR propagation, NULL excluded outright. Nothing composes it across a
+boolean tree.
+
+### Boolean-tree shapes that need contradiction/tautology detection
+
+Three-valued logic (`TRUE`/`FALSE`/`UNKNOWN`) is ANSI SQL, not an
+engine-specific fact, and governs every shape below: `UNKNOWN AND TRUE =
+UNKNOWN`, `UNKNOWN AND FALSE = FALSE`, `UNKNOWN OR TRUE = TRUE`, `UNKNOWN OR
+FALSE = UNKNOWN`, `NOT UNKNOWN = UNKNOWN`. A `WHERE`/`ON` clause keeps a row
+only when the whole condition evaluates `TRUE` - `UNKNOWN` is treated exactly
+like `FALSE` at the top level, but NOT inside a nested AND/OR, where it
+propagates per the table above instead of collapsing early. Any contradiction
+checker has to reason in three values, not two, or it will misclassify the
+NULL case.
+
+1. **Same-column AND contradiction, non-nullable-safe only.** `x = 1 AND x =
+   2` is unconditionally `FALSE` regardless of whether `x` is NULL (`NULL =
+   1` is `UNKNOWN`, `UNKNOWN AND anything-but-TRUE` is never `TRUE`) - safe
+   to fold without a nullability check. Range contradictions (`x > 5 AND x <
+   3`) fold the same way. This is the highest-confidence, lowest-effort
+   shape: pure literal-bound reasoning per column, no NULL case to get
+   wrong.
+2. **OR tautology - NULL-unsafe, the shape to get right first.** `x = 1 OR x
+   <> 1` looks like a tautology but is NOT one: when `x IS NULL`, both sides
+   evaluate `UNKNOWN`, so the whole OR is `UNKNOWN`, not `TRUE`, and the row
+   is excluded. A tautology fold is only safe when the column is provably
+   non-nullable (from the catalog) or when an explicit `x IS NULL` branch is
+   already OR'd in alongside the complementary-literal branches. Folding this
+   wrong is a false negative in the OPPOSITE direction from the rest of this
+   project's precision bias would predict: declining to fold is always safe
+   here, folding without the nullability check is the unsafe direction.
+3. **`IS NULL`/`IS NOT NULL` interaction with a same-column AND.** `x = 1
+   AND x IS NULL` is unconditionally `FALSE` the same way shape 1 is (`x = 1`
+   is `FALSE` or `UNKNOWN`, never `TRUE`, whenever `x IS NULL` is `TRUE`) -
+   safe to fold without a nullability check, same confidence tier as shape 1.
+4. **Redundant-branch absorption inside an already-flattened AND.** `x = 1
+   AND (x = 1 OR y = 2)` - the inner OR is redundant given the outer
+   conjunct, but the outer `x = 1` itself is untouched and still reaches
+   sargability normally. This shape matters only for scanners that inspect
+   the INNER disjunction's own leaves (none currently do outside
+   `CatchAllPredicateScanner`'s narrow `(Col = @p OR @p IS NULL)` idiom
+   check) - lower priority than shapes 1-3 for this project's actual rule
+   set.
+5. **Subquery flattening changing a predicate's effective scope.** A
+   correlated `EXISTS`/`IN`/scalar subquery predicate can be flattened by the
+   engine into a join, at which point a condition that looks like it lives
+   "inside the subquery" for AST-scoping purposes is evaluated at the outer
+   query's row source instead. None of the current sargability scanners
+   already open a subquery's own `WHERE` as a flattening target (confirmed:
+   `NotInNullableSubqueryScanner` is the only scanner that walks INTO a
+   subquery's `WHERE` at all, and it does so for a different reason -
+   correlated-NULL detection on the `NOT IN` idiom itself, not sargability of
+   a predicate inside it) - so this shape is a real gap but not yet a
+   concretely at-risk shipped rule; flag for the next sweep once shapes 1-3
+   ship and subquery-interior sargability scanning is ever added.
+6. **Constant folding across a function/arithmetic wrap.** `x + 0 = 5` is
+   algebraically foldable to `x = 5`, which WOULD be sargable - but nothing
+   in the engine's normalize/simplify pass has been confirmed (oracle or
+   otherwise) to actually perform this specific rewrite for an *indexed*
+   column before cost-based optimization; `LiteralComparisonFolder`'s own
+   scope note treats non-literal arithmetic as fundamentally out of bounds.
+   Not scoped further here - would need a dedicated oracle probe (a real
+   `x + 0 = @p` predicate against an indexed column, checked for a seek)
+   before this project could safely narrow any existing "arithmetic wrap
+   blocks the seek" finding on the strength of it.
+
+### Shipped rules that assume a predicate reaches the optimizer as written
+
+Every one of these treats each `FlattenAnd`-split leaf (or, for
+`TypedPredicateExtractor`, every `BooleanComparisonExpression` node reached
+by a generic tree walk with no AND/OR awareness at all) as independently
+sargability-relevant, with no check for whether shapes 1-3 above would
+eliminate that leaf, or the branch it lives in, before the optimizer ever
+scores it:
+
+- `TypedPredicateExtractor` (`src/SilentScan.Core/Predicates/TypedPredicateExtractor.cs:349`,
+  `ExplicitVisit(WhereClause)`) - the shared per-predicate typed-comparison
+  feed every sargability/conversion finding stream is built from. Highest
+  blast radius: a contradiction-eliminated leaf here propagates into every
+  downstream consumer, not just one rule.
+- `NonSargablePredicateScanner` (`src/SilentScan.Core/Predicates/NonSargablePredicateScanner.cs:200`,
+  `ExplicitVisit(WhereClause)`) - same generic-walk shape as above, same
+  exposure.
+- `CatchAllPredicateScanner` (`src/SilentScan.Core/Predicates/CatchAllPredicateScanner.cs:193`
+  `FlattenOr`/`InspectOrClause`) - already OR-aware for its own narrow
+  `(Col = @p OR @p IS NULL)` idiom, but has no general OR-tautology check
+  (shape 2); a hand-written `x = @p OR x <> @p`-shaped guard elsewhere in the
+  same clause would not be recognized as dead.
+- `DuplicationScanner` (`src/SilentScan.Core/Predicates/DuplicationScanner.cs:834`,
+  local `FlattenAnd`) - already calls `LiteralComparisonFolder` for its own
+  "always true/false literal comparison" check per its doc comment, but only
+  literal-vs-literal, never column-vs-literal same-column contradiction
+  (shape 1) across the flattened set.
+- `PartialCompositeForeignKeyJoinScanner` (`src/SilentScan.Core/Predicates/PartialCompositeForeignKeyJoinScanner.cs:146-188`) -
+  flattens a JOIN's `ON` and the statement's `WHERE` into one leaf set
+  without checking whether a `WHERE`-side contradiction (shape 1 or 3) makes
+  the whole branch dead, which would make a "partial composite key join"
+  finding derived from it moot.
+- `QueryAntiPatternScanner` (`src/SilentScan.Core/Predicates/QueryAntiPatternScanner.cs:1307,1383`) -
+  same exposure for its `HAVING`- and join-column-derived checks.
+- `JoinKeyUniqueness` / `NotInNullableSubqueryScanner` (`JoinKeyUniqueness.cs:35`,
+  `NotInNullableSubqueryScanner.cs:94,148`) - lower priority: both already
+  reason narrowly about a specific idiom (join-key uniqueness, `NOT IN`
+  correlated-NULL), so a stray same-column contradiction elsewhere in the
+  same clause is less likely to change their verdict, but not confirmed
+  immune.
+
+### Proposed minimal first module
+
+Ship shapes 1 and 3 only (same-column AND contradiction, `IS NULL`
+interaction) as a single new `PredicateContradictionFolder`, deliberately
+excluding shape 2 (OR tautology) from the first cut - shape 2 needs a
+catalog nullability lookup to stay NULL-safe, shapes 1/3 do not, so shapes
+1/3 alone are a same-file, no-new-dependency addition next to
+`LiteralComparisonFolder`. Contract: given a flattened AND-leaf set (already
+produced by `PredicateTreeWalker.FlattenAnd` everywhere it's needed), return
+the subset of leaves that are reachable given the others - i.e. `[]` for the
+whole set the moment two leaves contradict per shape 1/3, the input
+unchanged otherwise. Consumers (`TypedPredicateExtractor`,
+`NonSargablePredicateScanner` first, as the two highest-blast-radius sites)
+call it once per flattened AND group and skip typed-predicate/sargability
+extraction entirely for an eliminated group instead of scoring dead
+predicates. This covers 2 of the 7 at-risk call sites directly (the two
+generic-walk ones) at full confidence and gives the other 5 a shared,
+already-tested primitive to adopt next, without touching OR-tautology
+(shape 2), subquery flattening (shape 5), or arithmetic constant folding
+(shape 6) - each of which needs its own follow-on scoping pass before being
+built, per the shape notes above.
