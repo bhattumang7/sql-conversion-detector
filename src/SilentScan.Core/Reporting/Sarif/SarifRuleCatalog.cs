@@ -30,7 +30,12 @@ public static class SarifRuleCatalog
     public const string CrossTableTypeDriftRuleId = "silentscan/catalog/cross-table-fk-type-drift";
     public const string ProcCallArgumentMismatchRuleId = "silentscan/call-graph/argument-type-mismatch";
     public const string TemporalBoundaryPrecisionRuleId = "silentscan/correctness/between-end-of-period-boundary";
-    public const string MaxTypedColumnRuleId = "silentscan/catalog/max-typed-column";
+    public static string MaxTypedColumnRuleId(NonIndexableColumnFindingKind kind) => kind switch
+    {
+        NonIndexableColumnFindingKind.MaxLength => "silentscan/catalog/max-typed-column",
+        NonIndexableColumnFindingKind.LegacyLargeObject => "silentscan/catalog/legacy-large-object-column",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled NonIndexableColumnFindingKind."),
+    };
     public const string ColumnstoreUnsupportedColumnTypeRuleId = "silentscan/catalog/columnstore-unsupported-column-type";
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
@@ -327,6 +332,7 @@ public static class SarifRuleCatalog
         SetOptionFindingKind.AnsiNullsOffBlocksIndexedFeature => "silentscan/set-option/ansi-nulls-off",
         SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature => "silentscan/set-option/ansi-warnings-off",
         SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature => "silentscan/set-option/concat-null-yields-null-off",
+        SetOptionFindingKind.AnsiPaddingOffBlocksIndexedFeature => "silentscan/set-option/ansi-padding-off",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SetOptionFindingKind."),
     };
 

@@ -1,10 +1,11 @@
+using SilentScan.Core.Predicates;
 using SilentScan.Core.Reporting.Sarif;
 
 namespace SilentScan.Core.Reporting.RuleDocs.Catalog;
 
 internal static class MaxTypedColumn
 {
-    public static string RuleId => SarifRuleCatalog.MaxTypedColumnRuleId;
+    public static string RuleId => SarifRuleCatalog.MaxTypedColumnRuleId(NonIndexableColumnFindingKind.MaxLength);
 
     public static RuleDocContent Content { get; } = new(
         WhyItMatters: """

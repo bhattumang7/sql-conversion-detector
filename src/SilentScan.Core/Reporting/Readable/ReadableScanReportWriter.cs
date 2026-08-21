@@ -211,7 +211,8 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Foreign-key column pairs whose types/collations drift", report.CrossTableTypeDriftFindings.Count);
         AddCount(counts, "EXEC call-site arguments risking silent data loss at the parameter boundary", report.ProcCallArgumentMismatchFindings.Count);
         AddCount(counts, "BETWEEN predicates silently excluding rows at an imprecise end-of-period boundary", report.TemporalBoundaryFindings.Count);
-        AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count);
+        AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
+        AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
         AddCount(counts, "SQL_VARIANT columns participating in a columnstore index (does not deploy)", report.ColumnstoreUnsupportedColumnTypeFindings.Count);
         AddCount(counts, "Non-persisted computed columns", report.NonPersistedComputedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
@@ -690,23 +691,39 @@ public static class ReadableScanReportWriter
 
     private static IEnumerable<ReadableBlock> MaxTypedColumn(ScanReport report, int level, string? pathBase)
     {
-        if (report.MaxTypedColumnFindings.Count == 0)
+        var maxLength = report.MaxTypedColumnFindings.Where(f => f.Kind == NonIndexableColumnFindingKind.MaxLength).ToList();
+        if (maxLength.Count > 0)
         {
-            yield break;
+            yield return new ReadableBlock.Heading(level, $"MAX-typed columns ({maxLength.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "A structural catalog fact, not a comparison: VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) columns can never be an index key column at all (SQL Server rejects them at CREATE INDEX time), so no predicate or join on them can ever seek, regardless of how they're used.");
+
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Type"],
+                [.. maxLength.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.TypeDisplay,
+                })]);
         }
 
-        yield return new ReadableBlock.Heading(level, $"MAX-typed columns ({report.MaxTypedColumnFindings.Count})");
-        yield return new ReadableBlock.Paragraph(
-            "A structural catalog fact, not a comparison: VARCHAR(MAX)/NVARCHAR(MAX)/VARBINARY(MAX) columns can never be an index key column at all (SQL Server rejects them at CREATE INDEX time), so no predicate or join on them can ever seek, regardless of how they're used.");
+        var legacyLob = report.MaxTypedColumnFindings.Where(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject).ToList();
+        if (legacyLob.Count > 0)
+        {
+            yield return new ReadableBlock.Heading(level, $"Legacy large-object columns ({legacyLob.Count})");
+            yield return new ReadableBlock.Paragraph(
+                "A structural catalog fact, not a comparison: TEXT/NTEXT/IMAGE columns can never appear in any index at all (SQL Server rejects them at CREATE INDEX time, even as a nonclustered index's INCLUDE column), so no predicate or join on them can ever seek and they can never be covered.");
 
-        yield return new ReadableBlock.Table(
-            [WhereHeader, ColumnHeader, "Type"],
-            [.. report.MaxTypedColumnFindings.Select(f => new List<string>
-            {
-                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
-                $"{f.TableQualifiedName}.{f.ColumnName}",
-                f.TypeDisplay,
-            })]);
+            yield return new ReadableBlock.Table(
+                [WhereHeader, ColumnHeader, "Type"],
+                [.. legacyLob.Select(f => new List<string>
+                {
+                    Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                    $"{f.TableQualifiedName}.{f.ColumnName}",
+                    f.TypeDisplay,
+                })]);
+        }
     }
 
     private static IEnumerable<ReadableBlock> ColumnstoreUnsupportedColumnType(ScanReport report, int level, string? pathBase)
@@ -2227,6 +2244,7 @@ public static class ReadableScanReportWriter
         SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature => "SET NUMERIC_ROUNDABORT ON",
         SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature => "SET ANSI_WARNINGS OFF",
         SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature => "SET CONCAT_NULL_YIELDS_NULL OFF",
+        SetOptionFindingKind.AnsiPaddingOffBlocksIndexedFeature => "SET ANSI_PADDING OFF",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled SetOptionFindingKind."),
     };
 

@@ -35,6 +35,7 @@ public sealed class MaxTypedColumnScannerTests
         Assert.Equal("dbo.Documents", finding.TableQualifiedName);
         Assert.Equal("Body", finding.ColumnName);
         Assert.Equal(expectedTypeDisplay, finding.TypeDisplay, ignoreCase: true);
+        Assert.Equal(NonIndexableColumnFindingKind.MaxLength, finding.Kind);
     }
 
     [Theory]
@@ -48,6 +49,27 @@ public sealed class MaxTypedColumnScannerTests
         var findings = Scan($"CREATE TABLE dbo.Documents (Body {declaredType} NOT NULL);");
 
         Assert.Empty(findings);
+    }
+
+    /// <summary>
+    /// Oracle-confirmed directly (Docker SQL Server 2022): TEXT/NTEXT/IMAGE are rejected as an
+    /// index KEY column (Msg 1919, same as MAX-typed) AND, unlike MAX-typed columns, also
+    /// rejected as a nonclustered index's INCLUDE column (Msg 1999) - a genuinely stronger, and
+    /// genuinely distinct, restriction from the MAX-typed-column fact.
+    /// </summary>
+    [Theory]
+    [InlineData("TEXT", "text")]
+    [InlineData("NTEXT", "ntext")]
+    [InlineData("IMAGE", "image")]
+    public void LegacyLargeObjectColumn_Fires(string declaredType, string expectedTypeDisplay)
+    {
+        var findings = Scan($"CREATE TABLE dbo.Documents (Body {declaredType} NULL);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("dbo.Documents", finding.TableQualifiedName);
+        Assert.Equal("Body", finding.ColumnName);
+        Assert.Equal(expectedTypeDisplay, finding.TypeDisplay, ignoreCase: true);
+        Assert.Equal(NonIndexableColumnFindingKind.LegacyLargeObject, finding.Kind);
     }
 
     [Fact]

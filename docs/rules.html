@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">260 rules. 168 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">262 rules. 170 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -106,6 +106,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/catalog-cross-table-fk-type-drift.html">Cross Table FK Type Drift</a> <code class="rule-key">silentscan/catalog/cross-table-fk-type-drift</code><span class="snippet">A foreign-key column pair&#x27;s declared types and/or collations genuinely differ.</span></li>
       <li><a class="id" href="rules/catalog-dangling-object-reference.html">Dangling Object Reference</a> <code class="rule-key">silentscan/catalog/dangling-object-reference</code><span class="snippet">A stored procedure, view, function, or trigger names a table/view/synonym the engine&#x27;s own binder cannot resolve to a real object right now.</span></li>
       <li><a class="id" href="rules/catalog-default-constraint-on-nullable-column.html">Default Constraint On Nullable Column</a> <code class="rule-key">silentscan/catalog/default-constraint-on-nullable-column</code><span class="snippet">A column carries a DEFAULT constraint but is still nullable.</span></li>
+      <li><a class="id" href="rules/catalog-legacy-large-object-column.html">Legacy Large Object Column</a> <code class="rule-key">silentscan/catalog/legacy-large-object-column</code><span class="snippet">A column is declared TEXT/NTEXT/IMAGE (legacy large-object types).</span></li>
       <li><a class="id" href="rules/catalog-max-typed-column.html">Max Typed Column</a> <code class="rule-key">silentscan/catalog/max-typed-column</code><span class="snippet">A string/binary column is declared MAX-typed.</span></li>
       <li><a class="id" href="rules/catalog-non-persisted-computed-column.html">Non Persisted Computed Column</a> <code class="rule-key">silentscan/catalog/non-persisted-computed-column</code><span class="snippet">A computed column with is_persisted = 0 (sys.computed_columns).</span></li>
       <li><a class="id" href="rules/catalog-rls-predicate-unindexed-column.html">Rls Predicate Unindexed Column</a> <code class="rule-key">silentscan/catalog/rls-predicate-unindexed-column</code><span class="snippet">An enabled Row-Level Security FILTER predicate&#x27;s own bound column(s) lead no active index on the secured table.</span></li>
@@ -484,6 +485,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
     <h2>set-option</h2>
     <ul class="rule-list">
       <li><a class="id" href="rules/set-option-ansi-nulls-off.html">ANSI Nulls Off</a> <code class="rule-key">silentscan/set-option/ansi-nulls-off</code><span class="snippet">The module was compiled under ANSI_NULLS OFF (sys.sql_modules.uses_ansi_nulls) while its own body touches a filtered index or an indexed view.</span></li>
+      <li><a class="id" href="rules/set-option-ansi-padding-off.html">ANSI Padding Off</a> <code class="rule-key">silentscan/set-option/ansi-padding-off</code><span class="snippet">An explicit SET ANSI_PADDING OFF in a module whose own body touches a filtered index or an indexed view.</span></li>
       <li><a class="id" href="rules/set-option-ansi-warnings-off.html">ANSI Warnings Off</a> <code class="rule-key">silentscan/set-option/ansi-warnings-off</code><span class="snippet">An explicit SET ANSI_WARNINGS OFF in a module whose own body touches a filtered index or an indexed view.</span></li>
       <li><a class="id" href="rules/set-option-concat-null-yields-null-off.html">Concat Null Yields Null Off</a> <code class="rule-key">silentscan/set-option/concat-null-yields-null-off</code><span class="snippet">An explicit SET CONCAT_NULL_YIELDS_NULL OFF in a module whose own body touches a filtered index or an indexed view.</span></li>
       <li><a class="id" href="rules/set-option-numeric-roundabort-on.html">Numeric Roundabort On</a> <code class="rule-key">silentscan/set-option/numeric-roundabort-on</code><span class="snippet">An explicit SET NUMERIC_ROUNDABORT ON in a module whose own body touches a filtered index or an indexed view.</span></li>

@@ -27,6 +27,7 @@ public static class SetOptionScanner
         (SetOptions.NumericRoundAbort, true, SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature),
         (SetOptions.AnsiWarnings, false, SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature),
         (SetOptions.ConcatNullYieldsNull, false, SetOptionFindingKind.ConcatNullYieldsNullOffBlocksIndexedFeature),
+        (SetOptions.AnsiPadding, false, SetOptionFindingKind.AnsiPaddingOffBlocksIndexedFeature),
     ];
 
     public static IReadOnlyList<SetOptionFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage)

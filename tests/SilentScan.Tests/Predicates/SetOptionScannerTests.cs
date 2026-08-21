@@ -16,9 +16,10 @@ namespace SilentScan.Tests.Predicates;
 /// so <c>SetOptionScanner.Scan</c>'s <c>moduleQualifiedName = parseResult.SourcePath</c>
 /// convention lines up the same way it would against a real live scan.
 ///
-/// QUOTED_IDENTIFIER OFF, ANSI_NULLS OFF, NUMERIC_ROUNDABORT ON, ANSI_WARNINGS OFF, and
-/// CONCAT_NULL_YIELDS_NULL OFF are covered - ARITHABORT OFF was investigated and dropped,
-/// oracle-falsified: see <see cref="SetOptionFinding"/>'s own doc comment.
+/// QUOTED_IDENTIFIER OFF, ANSI_NULLS OFF, NUMERIC_ROUNDABORT ON, ANSI_WARNINGS OFF,
+/// CONCAT_NULL_YIELDS_NULL OFF, and ANSI_PADDING OFF are covered - ARITHABORT OFF was
+/// investigated and dropped, oracle-falsified: see <see cref="SetOptionFinding"/>'s own doc
+/// comment.
 /// </summary>
 public sealed class SetOptionScannerTests
 {
@@ -289,6 +290,31 @@ public sealed class SetOptionScannerTests
 
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET CONCAT_NULL_YIELDS_NULL ON; SELECT Id FROM dbo.Orders; END", catalog);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AnsiPaddingOff_ModuleTouchesFilteredIndexTable_Fires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET ANSI_PADDING OFF; SELECT Id FROM dbo.Orders; END", catalog);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SetOptionFindingKind.AnsiPaddingOffBlocksIndexedFeature, finding.Kind);
+    }
+
+    [Fact]
+    public void AnsiPaddingOn_NeverFires()
+    {
+        var catalog = new DatabaseCatalog();
+        catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
+
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Test AS BEGIN SET ANSI_PADDING ON; SELECT Id FROM dbo.Orders; END", catalog);
 
         Assert.Empty(findings);
     }

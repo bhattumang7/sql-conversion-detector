@@ -262,9 +262,11 @@ public static class SarifReportWriter
         // Informational, not error/warning - a structural catalog fact, not evidence of an
         // actual predicate/join comparison against it. It can never be an index key column,
         // but that's an inherent property, not something a query newly triggered.
-        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MaxTypedColumnRuleId, finding.Confidence);
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MaxTypedColumnRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
-        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - MAX-typed columns can never be an index key column, so no predicate/join on it can ever seek.";
+        var message = finding.Kind == NonIndexableColumnFindingKind.LegacyLargeObject
+            ? $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - TEXT/NTEXT/IMAGE columns can never appear in any index at all, not even as an INCLUDE column, so no predicate/join on it can ever seek and it can never be covered."
+            : $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} - MAX-typed columns can never be an index key column, so no predicate/join on it can ever seek.";
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }
@@ -330,6 +332,8 @@ public static class SarifReportWriter
                 $"'{finding.ModuleQualifiedName}': SET NUMERIC_ROUNDABORT ON{touchedDisplay}.",
             SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature =>
                 $"'{finding.ModuleQualifiedName}': SET ANSI_WARNINGS OFF{touchedDisplay}.",
+            SetOptionFindingKind.AnsiPaddingOffBlocksIndexedFeature =>
+                $"'{finding.ModuleQualifiedName}': SET ANSI_PADDING OFF{touchedDisplay}.",
             _ => $"'{finding.ModuleQualifiedName}': SET CONCAT_NULL_YIELDS_NULL OFF{touchedDisplay}.",
         };
 

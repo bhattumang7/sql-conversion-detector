@@ -90,6 +90,98 @@ confirmed independently of any one tool's output.
   `IS NOT NULL` work normally. Routed through `SqlTypeCategory.Json` and
   `VerdictClassifier.IsOutOfModelCategory`, same as `xml`.
 
+## Sargability and index eligibility
+
+- **The engine's comparison-operator sargability gate treats every non-bare-column operand
+  identically - there is no per-wrapper-type unwrapping.** A column wrapped in a function call,
+  CAST/CONVERT, or arithmetic is rejected from range-seek eligibility by the same single check
+  that requires an operand to be a bare column reference; none of these wrapper shapes gets any
+  special-cased handling that would let it through. This confirms there is no case where the
+  engine quietly rescues a function-wrapped/CAST/arithmetic-wrapped predicate into a seek - the
+  loss is unconditional, matching every one of this project's own "wrapping a column blocks the
+  seek" rules with no exception to account for.
+
+- **`LIKE` sargability is decided by a dedicated range-transform step, separate from the general
+  comparison-operator gate above, and is stricter than "can't rule out a leading wildcard."** It
+  requires the pattern operand to be a literal constant node before any wildcard analysis even
+  runs - a variable/parameter pattern is rejected outright, not merely treated as unprovable. Only
+  after that does it inspect the literal text for a disqualifying wildcard; the sole exception is
+  the single-character pattern `%` alone, which builds a degenerate not-NULL predicate rather than
+  a range. Every other wildcard-containing literal pattern, and every non-literal pattern, yields
+  no seekable range.
+
+- **An expression-derived column (a view/derived-table/TVF SELECT-list expression referenced
+  downstream) can never reach the bare-column-operand sargability gate above, because view/TVF
+  expansion never substitutes a computed expression back down to a raw base column.** Expansion
+  only ever adds the base table into the query tree; a reference to a computed output column binds
+  to the expression itself. There is no optimizer rewrite that collapses a CAST/expression column
+  back into a plain column reference, so this loss is permanent for the lifetime of the query tree,
+  not merely "not yet proven seekable."
+
+- **The catch-all `(Col = @p OR @p IS NULL)` optional-filter idiom cannot be rescued by the
+  engine's own OR-to-seek rewrite (index union).** Index union is real and can turn some
+  disjunctions into a seek-based plan, but it requires every branch of the OR to be a
+  column-referencing comparison predicate; an `IS NULL` test against a parameter/variable tests
+  the parameter's own value, not a column, and structurally disqualifies the whole disjunction from
+  the gate before index union is even considered. The "one cached plan must suit every NULL/
+  non-NULL state" cost is therefore structural, not merely a missed optimization opportunity.
+
+- **Two differing column collations (not a literal-vs-column comparison, which coerces silently
+  and for free) have no transparent rescue path - the engine either hard-fails compilation (Msg
+  468, "Cannot resolve the collation conflict") once a coercibility algorithm run over both
+  operands can't determine a winning collation, or proceeds to an implicit conversion.** This
+  applies identically whether the two columns are directly compared or joined across a foreign
+  key relationship with drifted declared collations - there is no case where the engine silently
+  and correctly reconciles two genuinely different column collations at zero cost.
+
+- **`TEXT`/`NTEXT`/`IMAGE` (legacy large-object types) can never appear in any index at all - not
+  just as a key column (the same restriction MAX-typed `VARCHAR(MAX)`/`NVARCHAR(MAX)`/
+  `VARBINARY(MAX)` columns already carry), but not even as a nonclustered index's INCLUDE column,
+  where a MAX-typed column IS accepted.** Oracle-confirmed directly (Docker SQL Server 2022): `CREATE
+  INDEX ... (col)` on a TEXT/NTEXT/IMAGE column raises Msg 1919 ("is of a type that is invalid for
+  use as a key column in an index"), identical to a MAX-typed column; `CREATE INDEX ... INCLUDE
+  (col)` on the same column raises a second, distinct error, Msg 1999 ("is of a type that is
+  invalid for use as included column in an index") - confirmed a MAX-typed column does NOT raise
+  this second error, so the two type families carry genuinely different, non-overlapping
+  restrictions, not variants of the same fact.
+
+- **A filtered index/indexed view's actual required-SET-options list, read from the engine's own
+  compiled-in message text, has seven members: `ANSI_NULLS`, `ANSI_WARNINGS`, `ANSI_PADDING`,
+  `ARITHABORT`, `CONCAT_NULL_YIELDS_NULL` (all required ON), plus `QUOTED_IDENTIFIER` (required ON)
+  and `NUMERIC_ROUNDABORT` (required OFF), gated by a separate check.** Do not treat the
+  seven-option list as uniformly reproducible on its own, though: `ARITHABORT OFF` alone was
+  oracle-probed directly (real seeded data, a real filtered index AND a real indexed view) and
+  demonstrably changed neither plan at all on this engine version/edition - the compiled-in
+  message text names a broader set than this build's optimizer actually enforces for that one
+  option, so it was deliberately NOT shipped as a rule despite appearing in the required list.
+  `ANSI_PADDING OFF` alone, by contrast, WAS oracle-confirmed directly to degrade a filtered-index
+  seek to a full clustered index scan (all other options left at their default) - the engine's
+  message text and the observed plan behavior agree for this option, unlike ARITHABORT. Always
+  oracle-probe each option's real plan effect individually before shipping it; the compiled-in
+  required-options message is a candidate list to test against, not a source of truth on its own.
+
+- **`TRY_CAST`/`TRY_CONVERT` are not a distinct expression-node type in the engine - they compile
+  to the same node class as `CAST`/`CONVERT`, with one additional flag bit set at construction,
+  layered on top of the ordinary CAST/CONVERT node shape.** This is structural evidence (not a
+  directly-read single determinism-table entry) that `TRY_CAST` feeds the identical
+  determinism-bitmask mechanism CAST's own DATEFORMAT-dependency classification uses, rather than
+  being computed through some separate, potentially-more-lenient path - consistent with (not yet
+  byte-level-proof of) the non-persisted-non-determinism premise this project's TRY_CAST-computed-
+  column rule depends on.
+
+- **`FOR SYSTEM_TIME` genuinely expands to a `UNION ALL` of the current-table and history-table
+  branches** - read directly from the temporal-table transformation's own tree-construction
+  sequence (two independently-bound branches, each wrapped in a Project, both passed to an
+  explicit UNION ALL constructor). A current-side index with no structurally matching history-side
+  index therefore degrades specifically to a full scan of the history-table branch, not some other
+  access path - confirming the mechanism a shipped rule's cost claim depends on.
+
+- **An `INDEX(...)` table hint hard-forces that single physical index with no cost-based
+  fallback.** The forced-index id is read from a field stored directly on the access-path node
+  itself, checked by a dedicated "is this index forced" predicate - not folded into the cost model
+  as a strong preference the optimizer could still outbid. If the hinted index's own leading key
+  column isn't bound, there is structurally no other access path available to that node.
+
 - **`XML` parses to its own dedicated ScriptDom node
   (`XmlDataTypeReference`), never a `SqlDataTypeReference`.** Before this was
   handled explicitly, an XML column's type resolved to `null` (the same path
