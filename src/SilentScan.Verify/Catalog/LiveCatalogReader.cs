@@ -61,6 +61,7 @@ public sealed class LiveCatalogReader
         var ruleConstraintTables = await ReadRuleConstraintTablesAsync(connection, cancellationToken);
         var cdcPartitionSwitchDisallowedTables = await ReadCdcPartitionSwitchDisallowedTablesAsync(connection, cancellationToken);
         var partitionSchemeByTable = await ReadTablePartitionSchemesAsync(connection, cancellationToken);
+        var fullTextIndexTables = await ReadFullTextIndexTablesAsync(connection, cancellationToken);
 
         foreach (var (schemeName, partitionNumber, filegroupName) in await ReadPartitionFilegroupsAsync(connection, cancellationToken))
         {
@@ -85,7 +86,8 @@ public sealed class LiveCatalogReader
                 FilegroupIsReadOnly: filegroupIsReadOnly,
                 HasRuleConstraint: ruleConstraintTables.Contains(objectId),
                 CdcPartitionSwitchDisallowed: cdcPartitionSwitchDisallowedTables.Contains(objectId),
-                PartitionSchemeName: partitionSchemeByTable.GetValueOrDefault(objectId)));
+                PartitionSchemeName: partitionSchemeByTable.GetValueOrDefault(objectId),
+                HasFullTextIndex: fullTextIndexTables.Contains(objectId)));
         }
 
         foreach (var (schemaName, functionName, columns) in await ReadClrTableValuedFunctionShapesAsync(connection, catalog.Skipped, cancellationToken))
@@ -1287,6 +1289,23 @@ public sealed class LiveCatalogReader
             JOIN sys.tables t ON t.object_id = c.object_id
             WHERE t.is_ms_shipped = 0 AND c.rule_object_id <> 0;
             """;
+
+        await using var command = connection.CreateReadOnlyCommand(sql);
+
+        var tables = new HashSet<int>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            tables.Add(reader.GetInt32(0));
+        }
+
+        return tables;
+    }
+
+    private static async Task<HashSet<int>> ReadFullTextIndexTablesAsync(
+        SqlConnection connection, CancellationToken cancellationToken)
+    {
+        const string sql = "SELECT object_id FROM sys.fulltext_indexes;";
 
         await using var command = connection.CreateReadOnlyCommand(sql);
 

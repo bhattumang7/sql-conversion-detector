@@ -19,27 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **ALTER TABLE SWITCH: fulltext-index restriction (Msg 4918).** Catalog-
-      decidable in principle - `sys.fulltext_indexes` is a plain catalog view,
-      readable live exactly like `sys.indexes`, no execution required. Blocked
-      purely by test-environment coverage, not discoverability: the standing
-      Docker oracle instance does not have full-text search installed
-      (`SERVERPROPERTY('IsFullTextInstalled')` returns 0, confirmed
-      2026-08-21), so the documented behavior ("ALTER TABLE SWITCH statement
-      failed because the table '%.*ls' has fulltext index on it") cannot be
-      oracle-confirmed here, and this project ships nothing it can't
-      oracle-confirm. Do not build this rule until a full-text-search-capable
-      target is available to verify against - re-check
-      `SERVERPROPERTY('IsFullTextInstalled')` before re-attempting, don't
-      assume the environment gap has closed. Sibling rules already shipped
-      from the same `FCanSwitchPartitions` investigation: see
-      `AlterTableSwitchColumnMismatch`/`IndexMismatch`/`ConstraintMismatch`/
-      `TargetOnlyIndexRestriction`/`FilegroupMismatch`/`TemporalMismatch`/
-      `RuleConstraint`/`CdcPartitionSwitch`/`PartitionFilegroupMismatch` in
-      `QueryAntiPatternFinding.cs` for the established pattern (visitor hook
-      on `AlterTableSwitchStatement`, source/target resolved via catalog,
-      oracle-confirmed message text cited in the finding).
-
 - [ ] **`SelfReferencingDmlRuleId` may over-fire on modern compatibility
       levels.** The rule's rationale claims the engine always inserts extra
       defensive plan work (an eager spool, or an extra sort) for any

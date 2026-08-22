@@ -35,7 +35,8 @@ public sealed record CatalogTable(
     bool FilegroupIsReadOnly = false,
     bool HasRuleConstraint = false,
     bool CdcPartitionSwitchDisallowed = false,
-    string? PartitionSchemeName = null)
+    string? PartitionSchemeName = null,
+    bool HasFullTextIndex = false)
 {
     // PartitionSchemeName is the table's own heap/clustered storage's partition scheme (the same
     // sys.indexes.index_id IN (0, 1) row FilegroupName/FilegroupIsReadOnly read, joined against

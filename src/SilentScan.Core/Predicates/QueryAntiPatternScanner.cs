@@ -220,6 +220,7 @@ public static class QueryAntiPatternScanner
             InspectAlterTableSwitchRuleConstraint(node);
             InspectAlterTableSwitchCdcPartitionSwitch(node);
             InspectAlterTableSwitchPartitionFilegroupMismatch(node);
+            InspectAlterTableSwitchFullTextIndexRestriction(node);
             base.ExplicitVisit(node);
         }
 
@@ -892,6 +893,30 @@ public static class QueryAntiPatternScanner
                 QueryAntiPatternFindingKind.AlterTableSwitchTemporalMismatch, sourcePath,
                 node.StartLine, node.StartColumn,
                 $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{withPeriodName}' has a SYSTEM_TIME PERIOD (system-versioned) while table '{withoutPeriodName}' does not (error 13577); this statement will fail at execution.",
+                FindingConfidence.High));
+        }
+
+        private void InspectAlterTableSwitchFullTextIndexRestriction(AlterTableSwitchStatement node)
+        {
+            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
+            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
+            var source = catalog.Find(sourceQualifiedName);
+            var target = catalog.Find(targetQualifiedName);
+            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            {
+                return;
+            }
+
+            var offendingName = source.HasFullTextIndex ? sourceQualifiedName : target.HasFullTextIndex ? targetQualifiedName : null;
+            if (offendingName is null)
+            {
+                return;
+            }
+
+            Findings.Add(new QueryAntiPatternFinding(
+                QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction, sourcePath,
+                node.StartLine, node.StartColumn,
+                $"ALTER TABLE SWITCH from '{sourceQualifiedName}' to '{targetQualifiedName}' - table '{offendingName}' has a full-text index on it (error 4918); this statement will fail at execution.",
                 FindingConfidence.High));
         }
 

@@ -5,7 +5,7 @@ public sealed record SqlServerOptions(string Host, int Port, string UserId, stri
 {
     public static SqlServerOptions LocalDocker { get; } = new(
         Host: "localhost",
-        Port: 14330,
+        Port: int.TryParse(Environment.GetEnvironmentVariable("SILENTSCAN_SQL_PORT"), out var port) ? port : 14330,
         UserId: "sa",
         Password: Environment.GetEnvironmentVariable("SILENTSCAN_SA_PASSWORD") ?? "SilentScan!Dev2026");
 

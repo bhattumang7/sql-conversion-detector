@@ -517,6 +517,8 @@ public enum QueryAntiPatternFindingKind
     /// <see cref="FindingConfidence.High"/>: both shapes were reproduced against the real
     /// engine.</summary>
     AlterTableSwitchPartitionFilegroupMismatch,
+
+    AlterTableSwitchFullTextIndexRestriction,
 }
 
 public sealed record QueryAntiPatternFinding(

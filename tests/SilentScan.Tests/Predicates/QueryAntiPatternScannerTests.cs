@@ -1092,6 +1092,54 @@ public sealed class QueryAntiPatternScannerTests
         Assert.Contains("4983", finding.DetailText);
     }
 
+    private static DatabaseCatalog CatalogWithSwitchFullTextIndexes(bool sourceHasFullTextIndex, bool targetHasFullTextIndex)
+    {
+        var ddl = "CREATE TABLE dbo.SwSrc (Id INT NOT NULL); CREATE TABLE dbo.SwTgt (Id INT NOT NULL);";
+        var result = SqlScriptParser.ParseText("test.sql", ddl);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        var catalog = CatalogBuilder.Build([result]);
+
+        catalog.AddOrReplace(catalog.Find("dbo.SwSrc")! with { HasFullTextIndex = sourceHasFullTextIndex });
+        catalog.AddOrReplace(catalog.Find("dbo.SwTgt")! with { HasFullTextIndex = targetHasFullTextIndex });
+        return catalog;
+    }
+
+    private static IReadOnlyList<QueryAntiPatternFinding> ScanSwitchFullTextIndexes(bool sourceHasFullTextIndex, bool targetHasFullTextIndex)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;");
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return QueryAntiPatternScanner.Scan(result, CatalogWithSwitchFullTextIndexes(sourceHasFullTextIndex, targetHasFullTextIndex));
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceHasFullTextIndex_Fires()
+    {
+        var findings = ScanSwitchFullTextIndexes(sourceHasFullTextIndex: true, targetHasFullTextIndex: false);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+        Assert.Contains("4918", finding.DetailText);
+        Assert.Contains("dbo.SwSrc", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_TargetHasFullTextIndex_Fires()
+    {
+        var findings = ScanSwitchFullTextIndexes(sourceHasFullTextIndex: false, targetHasFullTextIndex: true);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction);
+        Assert.Contains("4918", finding.DetailText);
+        Assert.Contains("dbo.SwTgt", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_NeitherHasFullTextIndex_NeverFires()
+    {
+        var findings = ScanSwitchFullTextIndexes(sourceHasFullTextIndex: false, targetHasFullTextIndex: false);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFullTextIndexRestriction);
+    }
+
     // --- AlterTableSwitchFilegroupMismatch --------------------------------------------------
     // FilegroupName/FilegroupIsReadOnly are live-only (never set by CatalogBuilder from DDL text)
     // - built the same way as CatalogWithSwitchTables above, but overriding the table records

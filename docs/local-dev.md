@@ -7,6 +7,10 @@ cp .env.example .env      # override SILENTSCAN_SA_PASSWORD if you want
 docker compose up -d
 ```
 
+The compose image includes Full-Text Search, so `SERVERPROPERTY('IsFullTextInstalled')` is 1 on the local oracle.
+
+Set `SILENTSCAN_SQL_PORT` before `docker compose up -d` to use a different local port; the test tooling uses the same setting.
+
 Connects on `localhost,14330`, user `sa`. Used by `SilentScan.Verify` (lineage
 oracle against `sys.columns`, plan-XML `CONVERT_IMPLICIT` confirmation) and
 `SilentScan.Bench`. Compat level is pinned to 160 per-database by the tooling,
