@@ -152,6 +152,7 @@ public static class ReadableScanReportWriter
         blocks.AddRange(IdentityRange(report, headingLevel, pathBase));
         blocks.AddRange(FloatEquality(report, headingLevel, pathBase));
         blocks.AddRange(AlwaysEncryptedOrderBy(report, headingLevel, pathBase));
+        blocks.AddRange(OperandComparability(report, headingLevel, pathBase));
         blocks.AddRange(QueryAntiPattern(report, headingLevel, pathBase));
         blocks.AddRange(IndexCoverage(report, headingLevel, pathBase));
         blocks.AddRange(TriggerCorrectness(report, headingLevel, pathBase));
@@ -241,6 +242,7 @@ public static class ReadableScanReportWriter
         AddCount(counts, "Identity/sequence range signals", report.IdentityRangeFindings.Count);
         AddCount(counts, "Float/real equality predicates", report.FloatEqualityFindings.Count);
         AddCount(counts, "Always Encrypted ORDER BY", report.AlwaysEncryptedOrderByFindings.Count);
+        AddCount(counts, "Operand not comparable (xml/legacy large object)", report.OperandComparabilityFindings.Count);
         AddCount(counts, "Query anti-patterns", report.QueryAntiPatternFindings.Count);
         AddCount(counts, "Index-coverage shapes", report.IndexCoverageFindings.Count);
         AddCount(counts, "Trigger correctness", report.TriggerCorrectnessFindings.Count);
@@ -1273,6 +1275,28 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.EncryptionTypeDisplay,
                 $"Referenced in ORDER BY at line {f.Line}, column {f.Column}.",
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> OperandComparability(ScanReport report, int level, string? pathBase)
+    {
+        if (report.OperandComparabilityFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Operand not comparable ({report.OperandComparabilityFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "An xml or legacy large-object (text/ntext/image) column is referenced from a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT - these types are not comparable at all outside IS NULL (and, for the legacy large-object types, LIKE); the statement does not compile. Direct base-table columns resolved through the immediate statement's own FROM/CTE scope only - a column reached only through a view/derived table is not analyzed by this v1.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type", DetailHeader],
+            [.. report.OperandComparabilityFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+                $"{f.Context}{(f.OperatorText is null ? "" : $" ({f.OperatorText})")} at line {f.Line}, column {f.Column}.",
             })]);
     }
 

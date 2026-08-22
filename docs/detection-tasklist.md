@@ -19,21 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: operand not legally comparable at compile time
-      (distinct from sargability).** SQL Server rejects some operand shapes
-      outright at bind time, independent of whether an index could seek them:
-      an XML column, a legacy LOB (`TEXT`/`NTEXT`/`IMAGE`), or an
-      Always-Encrypted column whose encryption state doesn't match its
-      comparison partner, used in a comparison, `GROUP BY`/`ORDER BY`/`DISTINCT`,
-      an `IN` list, `BETWEEN`, a `CASE`/`COALESCE`/`NULLIF` branch, or a
-      built-in function argument. `ExpressionTypeInferencer` merges type
-      category/precedence today but never checks whether the merged or
-      compared types are actually legal together, so a statement that would
-      never compile can pass through silently. Needs its own oracle matrix,
-      one shape at a time (XML equality, LOB in `GROUP BY`, encrypted-vs-
-      plaintext comparison, …) before any rule ships — several shapes may
-      already have a documented, citable error message worth checking first.
-
 - [ ] **New rule family: unsupported type/constraint inside a memory-optimized
       table or natively compiled module.** In-Memory OLTP tables reject a
       documented set of column types, constraint shapes, and index options

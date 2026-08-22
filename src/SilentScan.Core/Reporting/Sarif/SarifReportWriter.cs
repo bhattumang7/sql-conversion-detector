@@ -105,6 +105,7 @@ public static class SarifReportWriter
         results.AddRange(report.IdentityRangeFindings.Select(ToResult));
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
         results.AddRange(report.AlwaysEncryptedOrderByFindings.Select(ToResult));
+        results.AddRange(report.OperandComparabilityFindings.Select(ToResult));
         results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
         results.AddRange(report.IndexCoverageFindings.Select(ToResult));
         results.AddRange(report.TriggerCorrectnessFindings.Select(ToResult));
@@ -1289,6 +1290,26 @@ public static class SarifReportWriter
         // "maybe" about whether the statement compiles.
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
+
+        return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
+    }
+
+    private static SarifResult ToResult(OperandComparabilityFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OperandComparabilityRuleId(finding.Kind), finding.Confidence);
+        var typeLabel = finding.Kind == OperandComparabilityFindingKind.Xml ? "xml" : "text/ntext/image";
+        var positionText = finding.Context switch
+        {
+            OperandComparabilityContext.Comparison => $"compared with {finding.OperatorText} in this predicate",
+            OperandComparabilityContext.In => "used in an IN list",
+            OperandComparabilityContext.Between => "used in a BETWEEN",
+            OperandComparabilityContext.NullIf => "used in a NULLIF",
+            OperandComparabilityContext.OrderBy => "referenced in this ORDER BY clause",
+            OperandComparabilityContext.GroupBy => "referenced in this GROUP BY clause",
+            OperandComparabilityContext.Distinct => "selected under SELECT DISTINCT",
+            _ => "used in a comparison",
+        };
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is {positionText} - the {typeLabel} data type is not comparable here; the statement does not compile.";
 
         return BuildResult(ruleId, LevelError, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
     }

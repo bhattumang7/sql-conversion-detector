@@ -40,6 +40,12 @@ public static class SarifRuleCatalog
     public const string FloatEqualityRuleId = "silentscan/predicates/float-equality";
     public const string AlwaysEncryptedOrderByRuleId = "silentscan/predicates/always-encrypted-order-by";
     public const string TriggerOrderRuleId = "silentscan/catalog/trigger-firing-order-undefined";
+    public static string OperandComparabilityRuleId(OperandComparabilityFindingKind kind) => kind switch
+    {
+        OperandComparabilityFindingKind.Xml => "silentscan/predicates/xml-operand-not-comparable",
+        OperandComparabilityFindingKind.LegacyLargeObject => "silentscan/predicates/legacy-lob-operand-not-comparable",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled OperandComparabilityFindingKind."),
+    };
 
     public const string QueryAntiPatternTableVariableLowCompatEstimateRuleId = "silentscan/query/table-variable-low-compat-estimate";
     public const string QueryAntiPatternTableVariablePspSkipRuleId = "silentscan/query/table-variable-psp-skip";

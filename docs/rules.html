@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">267 rules. 175 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">269 rules. 177 carry fix guidance; 21 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -415,10 +415,12 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/predicates-catch-all-parameter.html">Catch All Parameter</a> <code class="rule-key">silentscan/predicates/catch-all-parameter</code><span class="snippet">A predicate of the shape (Col = @p OR @p IS NULL).</span></li>
       <li><a class="id" href="rules/predicates-filtered-index-parameter-mismatch.html">Filtered Index Parameter Mismatch</a> <code class="rule-key">silentscan/predicates/filtered-index-parameter-mismatch</code><span class="snippet">A predicate compares a column against a parameter or local variable, but that same column carries a filtered index whose own filter is a literal-equality restatement of this exact comparison.</span></li>
       <li><a class="id" href="rules/predicates-float-equality.html">Float Equality</a> <code class="rule-key">silentscan/predicates/float-equality</code><span class="snippet">A WHERE/ON equality predicate (=) compares a float/real (approximate, IEEE-754) column.</span></li>
+      <li><a class="id" href="rules/predicates-legacy-lob-operand-not-comparable.html">Legacy Lob Operand Not Comparable</a> <code class="rule-key">silentscan/predicates/legacy-lob-operand-not-comparable</code><span class="snippet">A TEXT/NTEXT/IMAGE column is used in a comparison, IN list, BETWEEN, NULLIF, ORDER BY, or GROUP BY.</span></li>
       <li><a class="id" href="rules/predicates-local-variable-predicate.html">Local Variable Predicate</a> <code class="rule-key">silentscan/predicates/local-variable-predicate</code><span class="snippet">A predicate compares a column against a DECLARE&#x27;d local variable&#x27;s value, never a formal parameter.</span></li>
       <li><a class="id" href="rules/predicates-oversized-parameter.html">Oversized Parameter</a> <code class="rule-key">silentscan/predicates/oversized-parameter</code><span class="snippet">A predicate compares a column against a parameter/variable/expression declared with a meaningfully longer length than the column itself.</span></li>
       <li><a class="id" href="rules/predicates-reassigned-parameter.html">Reassigned Parameter</a> <code class="rule-key">silentscan/predicates/reassigned-parameter</code><span class="snippet">A formal parameter is reassigned (SET/SELECT) on every statically reachable path before a later predicate use of the same name.</span></li>
       <li><a class="id" href="rules/predicates-under-length-parameter.html">Under Length Parameter</a> <code class="rule-key">silentscan/predicates/under-length-parameter</code><span class="snippet">A predicate compares a column against a parameter/variable/expression declared with a meaningfully shorter length than the column itself, or with no explicit length at all (T-SQL defaults to length 1).</span></li>
+      <li><a class="id" href="rules/predicates-xml-operand-not-comparable.html">Xml Operand Not Comparable</a> <code class="rule-key">silentscan/predicates/xml-operand-not-comparable</code><span class="snippet">An xml column is used in a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT.</span></li>
     </ul>
   </section>
 

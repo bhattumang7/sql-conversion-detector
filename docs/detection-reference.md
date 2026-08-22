@@ -90,6 +90,35 @@ confirmed independently of any one tool's output.
   `IS NOT NULL` work normally. Routed through `SqlTypeCategory.Json` and
   `VerdictClassifier.IsOutOfModelCategory`, same as `xml`.
 
+- **`xml` and legacy large-object (`text`/`ntext`/`image`) columns raise
+  distinct, shape-dependent compile errors outside `IS NULL`/`IS NOT NULL` -
+  never a single blanket message.** Oracle-confirmed directly (Docker,
+  compat 160): a comparison operator (`=`/`<>`/`<`/`>`/`<=`/`>=`), `IN`,
+  `BETWEEN`, or `NULLIF` against two `xml` columns raises Msg 305 ("The XML
+  data type cannot be compared or sorted, except when using the IS NULL
+  operator"); the identical shapes against `text`/`ntext`/`image` raise Msg
+  402 ("The data types ... are incompatible in the ... operator") instead -
+  `xml`'s own Msg 305 only appears for `text`/`ntext`/`image` in `ORDER
+  BY`/`GROUP BY` (there it is Msg 306, wording nearly identical to Msg 305
+  but naming `LIKE` as a second exception `xml` doesn't get). `xml` compared
+  against a differently-typed, resolved operand (a string literal) raises
+  Msg 402 too, not Msg 305 - the blanket message is reserved for same-
+  category-shaped comparisons. `SELECT DISTINCT` over either family raises a
+  third message, Msg 421 ("... cannot be selected as DISTINCT because it is
+  not comparable"). `LIKE` against `text`/`ntext` compiles and runs
+  normally (the engine's own Msg 306 text names it as the second exception);
+  there is no equivalent exception for `xml`.
+
+- **A `CASE`/`COALESCE` branch over an `xml`/legacy-large-object column never
+  raises a comparability error - only `NULLIF` does.** Oracle-confirmed:
+  `CASE WHEN ... THEN XmlCol ELSE XmlCol2 END` and `COALESCE(XmlCol,
+  XmlCol2)` both compile and run, because neither construct compares its
+  branches against each other (it picks one). `NULLIF(XmlCol, XmlCol2)`
+  does compare its two arguments internally and fails with the same Msg
+  305/402 the other comparison shapes get. A rule flagging "operand not
+  comparable" in a `CASE`/`COALESCE` branch would be a false positive; do
+  not re-propose it.
+
 ## Sargability and index eligibility
 
 - **The engine's comparison-operator sargability gate treats every non-bare-column operand

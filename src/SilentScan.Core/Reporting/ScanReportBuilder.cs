@@ -972,6 +972,24 @@ public static class ScanReportBuilder
         }
         PhaseMemory.ReleaseBetweenPhases();
 
+        List<OperandComparabilityFinding> operandComparabilityFindings;
+        using (var operandComparabilityStage = progress.Begin("scanning operand comparability", usableCount))
+        {
+            var unordered = usableParseResults
+                .AsParallel()
+                .SelectMany(r =>
+                {
+                    var findings = OperandComparabilityScanner.Scan(r, catalog);
+                    operandComparabilityStage.Advance();
+                    return findings;
+                })
+                .ToList();
+            operandComparabilityFindings = unordered
+                .OrderBy(f => f.SourcePath, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Column)
+                .ToList();
+        }
+        PhaseMemory.ReleaseBetweenPhases();
+
         List<QueryAntiPatternFinding> queryAntiPatternFindings;
         using (var queryAntiPatternStage = progress.Begin("scanning query anti-patterns", usableCount))
         {
@@ -1379,6 +1397,7 @@ public static class ScanReportBuilder
         aggregateDivisionColumnstoreFindings = [.. aggregateDivisionColumnstoreFindings.Where(f => f.Confidence <= minimumConfidence)];
         triggerOrderFindings = [.. triggerOrderFindings.Where(f => f.Confidence <= minimumConfidence)];
         missingStatisticsFindings = [.. missingStatisticsFindings.Where(f => f.Confidence <= minimumConfidence)];
+        operandComparabilityFindings = [.. operandComparabilityFindings.Where(f => f.Confidence <= minimumConfidence)];
 
         return new ScanReport(
             new ParseHealthReport(fileHealth), tier1Findings, typedFindings, dynamicSqlFindings, expressionDerivedFindings, collationConflictFindings, writeLossFindings,
@@ -1457,6 +1476,7 @@ public static class ScanReportBuilder
             alwaysEncryptedOrderByFindings,
             triggerOrderFindings,
             missingStatisticsFindings,
+            operandComparabilityFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

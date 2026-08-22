@@ -89,6 +89,7 @@ public sealed record ScanReport(
     IReadOnlyList<AlwaysEncryptedOrderByFinding> AlwaysEncryptedOrderByFindings,
     IReadOnlyList<TriggerOrderFinding> TriggerOrderFindings,
     IReadOnlyList<MissingStatisticsFinding> MissingStatisticsFindings,
+    IReadOnlyList<OperandComparabilityFinding> OperandComparabilityFindings,
     IReadOnlyList<SkippedConstruct> SkippedConstructs,
     SkippedConstructSummary SkippedConstructSummary,
     TypedPredicateSummary TypedPredicateSummary,
@@ -422,5 +423,5 @@ public sealed record ScanReport(
     /// report the real pin state directly). Live-mode only, same reasoning as
     /// <see cref="CrossTableTypeDriftFindings"/> - a trigger's firing-order pin has no DDL
     /// representation to replay in file mode.
-    public const int CurrentSchemaVersion = 66;
+    public const int CurrentSchemaVersion = 67;
 }

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xml Operand Not Comparable - SilentScan rules</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --accent: #0a5cff;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --fires-bg: #fff5f5;
+  --fires-border: #e0a0a0;
+  --clean-bg: #f2fbf3;
+  --clean-border: #9fcfa6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --accent: #4993ff;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --fires-bg: #1e1315;
+    --fires-border: #6e3b3b;
+    --clean-bg: #131e14;
+    --clean-border: #3b6e42;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+h1 { font-size: 2.2rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+h3 { font-size: 1.05rem; margin-top: 1.75rem; }
+.tagline { color: var(--muted); font-size: 1.1rem; margin-top: 0; margin-bottom: 2.5rem; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  border-radius: 6px;
+}
+code { padding: 0.15em 0.4em; font-size: 0.9em; }
+pre { padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85em; margin: 0.5rem 0; }
+a { color: var(--accent); }
+.back-link { display: inline-block; margin-bottom: 1.5rem; }
+.rule { border-top: 1px solid var(--border); padding: 1.5rem 0; }
+.rule:first-of-type { border-top: none; }
+.rule-id { font-size: 1rem; margin: 0 0 0.5rem; }
+.rationale { margin: 0.5rem 0; }
+.fix { margin: 0.5rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.fix-label { font-weight: 600; color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.example { margin: 0.5rem 0; font-size: 0.9em; color: var(--muted); }
+.example-path { font-size: 0.8em; color: var(--muted); margin: 0 0 0.3rem; }
+.example-label { font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
+.example-explanation { font-size: 0.9em; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+.fires-block pre { background: var(--fires-bg); border: 1px solid var(--fires-border); }
+.clean-block pre { background: var(--clean-bg); border: 1px solid var(--clean-border); }
+.fires-label { color: #c14040; }
+.clean-label { color: #2f8f42; }
+.family-section { margin-top: 2rem; }
+.rule-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.rule-list li { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.rule-list li:first-child { border-top: none; }
+.rule-list .id { font-weight: 600; }
+.rule-list .snippet { display: block; color: var(--muted); font-size: 0.9em; margin-top: 0.15rem; }
+.rule-key { color: var(--muted); font-size: 0.8em; margin: 0 0 1.5rem; }
+.rule-key code { padding: 0.1em 0.35em; }
+footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="../rules.html">&larr; All rules</a>
+  <h1>Xml Operand Not Comparable</h1>
+  <p class="rule-key"><code>silentscan/predicates/xml-operand-not-comparable</code></p>
+  <p class="tagline">A medium-confidence or low-confidence finding of this same rule links here too - only the finding's certainty differs, not the underlying issue.</p>
+  <h2>Why is this an issue?</h2>
+  <p class="rationale">An xml column is used in a comparison, IN list, BETWEEN, NULLIF, ORDER BY, GROUP BY, or SELECT DISTINCT - oracle-confirmed the statement never compiles (Msg 305/402/421 depending on the shape): the XML data type cannot be compared or sorted at all, except IS NULL.</p>
+  <p class="rationale">The xml data type is not comparable at all - not to another xml value, and not to a string literal, a variable, or anything else. SQL Server&#x27;s binder rejects the statement outright at compile time, before any row is ever touched: an xml column compared with another xml column fails with Msg 305 (&quot;The XML data type cannot be compared or sorted, except when using the IS NULL operator&quot;), the same message ORDER BY/GROUP BY/IN/BETWEEN/ NULLIF against an xml column produce; compared against a differently-typed operand (a string literal, for instance) the engine instead raises the narrower Msg 402 for the identical reason. SELECT DISTINCT over an xml column fails its own way, Msg 421 (&quot;... cannot be selected as DISTINCT because it is not comparable&quot;). Every one of these was confirmed directly against a real SQL Server instance, not assumed from documentation.</p>
+  <p class="rationale">IS NULL/IS NOT NULL are unaffected (comparability isn&#x27;t at stake - null-ness is a distinct, always-legal question), and so is a bare CASE/COALESCE branch: picking one of several xml-typed branches never compares them against each other, and neither does this rule flag it.</p>
+  <h2>How can I fix it?</h2>
+  <p class="rationale">Remove the xml column from the comparison/ordering/grouping/DISTINCT position. If the comparison is genuinely needed, shred the value first with .value()/.exist()/.nodes() (or an OPENXML/nodes() cross apply) down to a comparable scalar type, and compare that instead of the xml value itself.</p>
+  <h3>Comparing two xml columns never compiles</h3>
+  <p class="example-label fires-label">Noncompliant code example</p>
+  <div class="fires-block"><pre><code>CREATE TABLE dbo.Document&#xA;(&#xA;    DocumentId INT NOT NULL PRIMARY KEY,&#xA;    Payload    XML NOT NULL,&#xA;    Template   XML NOT NULL&#xA;);&#xA;&#xA;SELECT DocumentId&#xA;FROM dbo.Document&#xA;WHERE Payload = Template;</code></pre></div>
+  <p class="example-explanation">Payload and Template are both xml - this statement fails to compile with Msg 305 every time it runs.</p>
+  <p class="example-label clean-label">Compliant solution</p>
+  <div class="clean-block"><pre><code>SELECT DocumentId&#xA;FROM dbo.Document&#xA;WHERE Payload.value(&#x27;(/root/@id)[1]&#x27;, &#x27;int&#x27;) = Template.value(&#x27;(/root/@id)[1]&#x27;, &#x27;int&#x27;);</code></pre></div>
+  <p class="example-explanation">Both sides are shredded down to an INT with .value() first - a genuinely comparable scalar type, not the raw xml value.</p>
+  <h2>Verified by an automated test</h2>
+  <p class="example">This exact pattern also has a real, checked-in regression fixture in this tool's own test suite:</p>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/predicates/XML_OPERAND_NOT_COMPARABLE_fires.sql</code></p>
+  <div class="fires-block"><pre><code>-- Oracle-confirmed against the standing Docker instance: comparing two xml columns fails to&#xA;-- compile with Msg 305 (&quot;The XML data type cannot be compared or sorted, except when using the&#xA;-- IS NULL operator&quot;) every time the statement runs.&#xA;CREATE TABLE dbo.Document&#xA;(&#xA;    DocumentId INT NOT NULL PRIMARY KEY,&#xA;    Payload    XML NOT NULL,&#xA;    Template   XML NOT NULL&#xA;);&#xA;GO&#xA;SELECT DocumentId&#xA;FROM dbo.Document&#xA;WHERE Payload = Template;</code></pre></div>
+  <p class="example-path"><code>tests/SilentScan.Tests/fixtures/predicates/XML_OPERAND_NOT_COMPARABLE_clean.sql</code></p>
+  <div class="clean-block"><pre><code>-- Near-miss: same table shape as XML_OPERAND_NOT_COMPARABLE_fires.sql, but the predicate compares&#xA;-- the plain (non-xml) DocumentId column instead of the xml columns - stays quiet.&#xA;CREATE TABLE dbo.Document&#xA;(&#xA;    DocumentId INT NOT NULL PRIMARY KEY,&#xA;    Payload    XML NOT NULL,&#xA;    Template   XML NOT NULL&#xA;);&#xA;GO&#xA;SELECT DocumentId&#xA;FROM dbo.Document&#xA;WHERE DocumentId = 1;</code></pre></div>
+  <footer>
+    Generated by <code>silentscan rules-doc</code> from RuleCatalog/RuleDocs - do not hand-edit.
+  </footer>
+</main>
+</body>
+</html>

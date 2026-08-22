@@ -126,6 +126,8 @@ public static class RuleDocCatalog
         [Catalog.DanglingObjectReference.RuleId] = Catalog.DanglingObjectReference.Content,
         [Predicates.FloatEquality.RuleId] = Predicates.FloatEquality.Content,
         [Predicates.AlwaysEncryptedOrderBy.RuleId] = Predicates.AlwaysEncryptedOrderBy.Content,
+        [Predicates.XmlOperandNotComparable.RuleId] = Predicates.XmlOperandNotComparable.Content,
+        [Predicates.LegacyLobOperandNotComparable.RuleId] = Predicates.LegacyLobOperandNotComparable.Content,
 
         // Catalog constraints / Predicates estimate family
         [Catalog.UntrustedForeignKey.RuleId] = Catalog.UntrustedForeignKey.Content,
