@@ -1042,6 +1042,9 @@ public static class SarifReportWriter
             DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => (
                 SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
                 "The database's compatibility level is behind the connected engine instance's own current default (read live from the model system database) - it is silently kept on an older cardinality estimator and query-optimizer behavior nobody chose on purpose."),
+            DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange => (
+                SarifRuleCatalog.DatabaseConfigurationRuleId(finding.Kind), LevelWarning,
+                $"{finding.AffectedObjectName} depends on {finding.Dependency}; SQL Server's own compatibility-change DMV reports that it will be disabled at compatibility level {finding.TargetCompatibilityLevel}."),
             _ => throw new ArgumentOutOfRangeException(nameof(finding)),
         };
 

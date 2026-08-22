@@ -64,6 +64,7 @@ public static class RuleDocCatalog
         [Query.BareTopNoOrderBy.RuleId] = Query.BareTopNoOrderBy.Content,
 
         // QueryAntiPattern
+        [QueryAntiPattern.TableVariablePspSkip.RuleId] = QueryAntiPattern.TableVariablePspSkip.Content,
         [QueryAntiPattern.TableVariableLowCompatEstimate.RuleId] = QueryAntiPattern.TableVariableLowCompatEstimate.Content,
         [QueryAntiPattern.TableVariableStaleEstimateInLoop.RuleId] = QueryAntiPattern.TableVariableStaleEstimateInLoop.Content,
         [QueryAntiPattern.RbarSingleRowLoopDml.RuleId] = QueryAntiPattern.RbarSingleRowLoopDml.Content,
@@ -195,6 +196,7 @@ public static class RuleDocCatalog
         [Database.AutoCreateStatisticsOff.RuleId] = Database.AutoCreateStatisticsOff.Content,
         [Database.AutoUpdateStatisticsOff.RuleId] = Database.AutoUpdateStatisticsOff.Content,
         [Database.CompatibilityLevelBehindEngineDefault.RuleId] = Database.CompatibilityLevelBehindEngineDefault.Content,
+        [Database.SpatialPersistedComputedColumnCompatibilityChange.RuleId] = Database.SpatialPersistedComputedColumnCompatibilityChange.Content,
 
         // Lineage
         [Lineage.ExpressionDerivedColumn.RuleId] = Lineage.ExpressionDerivedColumn.Content,

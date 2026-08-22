@@ -34,6 +34,7 @@ public sealed class DatabaseConfigurationReader
         bool isAutoCreateStatsOn;
         bool isAutoUpdateStatsOn;
         int compatibilityLevel;
+        int? engineDefaultCompatibilityLevel = null;
 
         await using (var command = connection.CreateReadOnlyCommand(
             """
@@ -106,7 +107,7 @@ public sealed class DatabaseConfigurationReader
         {
             if (await modelReader.ReadAsync(cancellationToken))
             {
-                var engineDefaultCompatibilityLevel = modelReader.GetByte(0);
+                engineDefaultCompatibilityLevel = modelReader.GetByte(0);
                 if (compatibilityLevel < engineDefaultCompatibilityLevel)
                 {
                     findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault, databaseName));
@@ -116,6 +117,38 @@ public sealed class DatabaseConfigurationReader
             // If model's own row is unreadable (an unusually locked-down permission set that
             // still allowed the earlier DB_ID() row through), never guess at the engine's default -
             // silently skip this one kind rather than report a comparison against a made-up level.
+        }
+
+        if (engineDefaultCompatibilityLevel > compatibilityLevel)
+        {
+            await using var compatibilityCommand = connection.CreateReadOnlyCommand(
+                $"""
+                SELECT QUOTENAME(OBJECT_SCHEMA_NAME(change_object.major_id)) + N'.' + QUOTENAME(OBJECT_NAME(change_object.major_id)) + COALESCE(N'.' + QUOTENAME(index_row.name), N''), change_object.dependency
+                FROM sys.dm_db_objects_disabled_on_compatibility_level_change({engineDefaultCompatibilityLevel.Value}) AS change_object
+                LEFT JOIN sys.indexes AS index_row
+                    ON index_row.object_id = change_object.major_id
+                   AND index_row.index_id = change_object.minor_id
+                WHERE change_object.class_desc = N'INDEX'
+                  AND (change_object.dependency LIKE N'geography::%' OR change_object.dependency LIKE N'geometry::%')
+                ORDER BY change_object.major_id, change_object.minor_id;
+                """);
+
+            try
+            {
+                await using var compatibilityReader = await compatibilityCommand.ExecuteReaderAsync(cancellationToken);
+                while (await compatibilityReader.ReadAsync(cancellationToken))
+                {
+                    findings.Add(new DatabaseConfigurationFinding(
+                        DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange,
+                        databaseName,
+                        AffectedObjectName: compatibilityReader.GetString(0),
+                        Dependency: compatibilityReader.GetString(1),
+                        TargetCompatibilityLevel: engineDefaultCompatibilityLevel));
+                }
+            }
+            catch (SqlException)
+            {
+            }
         }
 
         // sys.database_query_store_options is scoped to the CURRENT database context (the

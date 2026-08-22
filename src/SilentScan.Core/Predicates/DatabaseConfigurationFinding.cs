@@ -53,6 +53,8 @@ public enum DatabaseConfigurationFindingKind
     /// exactly why this is reported as a gap rather than a specific target level.
     /// </summary>
     CompatibilityLevelBehindEngineDefault,
+
+    SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange,
 }
 
 /// <summary>
@@ -129,4 +131,7 @@ public enum DatabaseConfigurationFindingKind
 public sealed record DatabaseConfigurationFinding(
     DatabaseConfigurationFindingKind Kind,
     string DatabaseName,
-    FindingConfidence Confidence = FindingConfidence.High);
+    FindingConfidence Confidence = FindingConfidence.High,
+    string? AffectedObjectName = null,
+    string? Dependency = null,
+    int? TargetCompatibilityLevel = null);

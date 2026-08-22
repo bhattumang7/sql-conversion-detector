@@ -11,6 +11,8 @@ namespace SilentScan.Core.Predicates;
 /// </summary>
 public enum QueryAntiPatternFindingKind
 {
+    TableVariablePspSkip,
+
     /// <summary>A table variable (<c>DECLARE @t TABLE(...)</c> or a table-valued parameter) used
     /// as a query source in a <c>FROM</c>/<c>JOIN</c>, in a database connected at compatibility
     /// level BELOW 150 (SQL Server 2019's deferred-compilation fix for table variables never
@@ -527,4 +529,3 @@ public sealed record QueryAntiPatternFinding(
 {
     public SourceSpan Location => new(SourcePath, Line, Column);
 }
-

@@ -1,6 +1,8 @@
+using Microsoft.Data.SqlClient;
 using SilentScan.Core.Predicates;
 using SilentScan.Live.Catalog;
 using SilentScan.Tests.Support;
+using SilentScan.Verify.Deployment;
 
 namespace SilentScan.Tests.Integration;
 
@@ -184,5 +186,64 @@ public sealed class DatabaseConfigurationReaderCompatibilityLevelOracleTests : O
         var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.Contains(DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault, findings.Select(f => f.Kind));
+    }
+}
+
+[Trait("Category", "Oracle")]
+public sealed class DatabaseConfigurationReaderSpatialPersistedComputedColumnOracleTests : OracleTestFixture
+{
+    protected override string DatabaseNameSeed => nameof(DatabaseConfigurationReaderSpatialPersistedComputedColumnOracleTests);
+
+    protected override string Ddl => """
+        SET ANSI_NULLS ON;
+        SET ANSI_PADDING ON;
+        SET ANSI_WARNINGS ON;
+        SET ARITHABORT ON;
+        SET CONCAT_NULL_YIELDS_NULL ON;
+        SET QUOTED_IDENTIFIER ON;
+        SET NUMERIC_ROUNDABORT OFF;
+        GO
+        CREATE TABLE dbo.Areas
+        (
+            Id INT NOT NULL CONSTRAINT PK_Areas PRIMARY KEY,
+            Location geography NOT NULL,
+            ComparisonLocation geography NOT NULL,
+            Distance AS (Location.STDistance(ComparisonLocation)) PERSISTED,
+            Buffered AS (Location.STBuffer(1)) PERSISTED
+        );
+        GO
+        INSERT dbo.Areas (Id, Location, ComparisonLocation)
+        VALUES (1, geography::Point(0, 0, 4326), geography::Point(1, 1, 4326));
+        GO
+        CREATE INDEX IX_Areas_Distance ON dbo.Areas(Distance);
+        GO
+        CREATE SPATIAL INDEX SIX_Areas_Location ON dbo.Areas(Location) USING GEOGRAPHY_GRID;
+        GO
+        """;
+
+    public override async Task InitializeAsync()
+    {
+        await using (var connection = new SqlConnection(Options.BuildConnectionString(database: null)))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"CREATE DATABASE [{DatabaseName}];";
+            await command.ExecuteNonQueryAsync();
+            command.CommandText = $"ALTER DATABASE [{DatabaseName}] SET COMPATIBILITY_LEVEL = 100;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await new ScriptDeployer(Options).DeployAsync(Ddl, DatabaseName);
+    }
+
+    [Fact]
+    public async Task SpatialPersistedComputedColumnDisabledByCompatibilityChange_Fires()
+    {
+        var findings = await new DatabaseConfigurationReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
+
+        var finding = Assert.Single(findings, f => f.Kind == DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange);
+        Assert.NotNull(finding.AffectedObjectName);
+        Assert.Equal("geography::STBuffer", finding.Dependency);
+        Assert.Equal(160, finding.TargetCompatibilityLevel);
     }
 }

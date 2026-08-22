@@ -29,6 +29,30 @@ public sealed class QueryAntiPatternScannerTests
         return QueryAntiPatternScanner.Scan(result, catalog);
     }
 
+    [Fact]
+    public void TableValuedParameter_AtCompat170_FiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "CREATE PROCEDURE dbo.P @ids dbo.IdList READONLY AS SELECT 1;",
+            compatibilityLevel: 170);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+        Assert.Equal("@ids", finding.DetailText);
+        Assert.Equal(FindingConfidence.High, finding.Confidence);
+    }
+
+    [Fact]
+    public void TableValuedParameter_BelowCompat170_NeverFiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "CREATE PROCEDURE dbo.P @ids dbo.IdList READONLY AS SELECT 1;",
+            compatibilityLevel: 160);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
     // --- TableVariableLowCompatEstimate -----------------------------------------------------
 
     [Fact]

@@ -2203,11 +2203,11 @@ public static class ReadableScanReportWriter
             [.. report.DatabaseConfigurationFindings.Select(f => new List<string>
             {
                 f.DatabaseName,
-                DatabaseConfigurationFlagLabel(f.Kind),
+                DatabaseConfigurationFlagLabel(f),
             })]);
     }
 
-    private static string DatabaseConfigurationFlagLabel(DatabaseConfigurationFindingKind kind) => kind switch
+    private static string DatabaseConfigurationFlagLabel(DatabaseConfigurationFinding finding) => finding.Kind switch
     {
         DatabaseConfigurationFindingKind.PageVerifyNotChecksum => "PAGE_VERIFY <> CHECKSUM",
         DatabaseConfigurationFindingKind.AutoShrinkOn => "AUTO_SHRINK = ON",
@@ -2218,7 +2218,8 @@ public static class ReadableScanReportWriter
         DatabaseConfigurationFindingKind.AutoCreateStatisticsOff => "AUTO_CREATE_STATISTICS = OFF",
         DatabaseConfigurationFindingKind.AutoUpdateStatisticsOff => "AUTO_UPDATE_STATISTICS = OFF",
         DatabaseConfigurationFindingKind.CompatibilityLevelBehindEngineDefault => "Compatibility level behind engine default",
-        _ => kind.ToString(),
+        DatabaseConfigurationFindingKind.SpatialPersistedComputedColumnDisabledOnCompatibilityLevelChange => $"{finding.AffectedObjectName} disabled at compatibility level {finding.TargetCompatibilityLevel} ({finding.Dependency})",
+        _ => finding.Kind.ToString(),
     };
 
     private static IEnumerable<ReadableBlock> PartialCompositeForeignKeyJoin(ScanReport report, int level, string? pathBase)

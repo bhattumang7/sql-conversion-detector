@@ -86,7 +86,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
 <main>
   <a class="back-link" href="index.html">&larr; SilentScan</a>
   <h1>SilentScan rules</h1>
-  <p class="tagline">264 rules. 172 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
+  <p class="tagline">266 rules. 174 carry fix guidance; 19 link a real fixture example. Generated from the same catalog SARIF's own <code>rules</code> block reads &mdash; never hand-edited.</p>
 
   <section class="family-section">
     <h2>call-graph</h2>
@@ -166,6 +166,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/database-page-verify-not-checksum.html">Page Verify Not Checksum</a> <code class="rule-key">silentscan/database/page-verify-not-checksum</code><span class="snippet">PAGE_VERIFY is not CHECKSUM.</span></li>
       <li><a class="id" href="rules/database-query-store-capture-mode-not-auto.html">Query Store Capture Mode Not Auto</a> <code class="rule-key">silentscan/database/query-store-capture-mode-not-auto</code><span class="snippet">Query Store is running with a capture mode other than AUTO.</span></li>
       <li><a class="id" href="rules/database-query-store-not-read-write.html">Query Store Not Read Write</a> <code class="rule-key">silentscan/database/query-store-not-read-write</code><span class="snippet">Query Store is not actively running (actual state is not READ_WRITE).</span></li>
+      <li><a class="id" href="rules/database-spatial-persisted-computed-column-compatibility-change.html">Spatial Persisted Computed Column Compatibility Change</a> <code class="rule-key">silentscan/database/spatial-persisted-computed-column-compatibility-change</code><span class="snippet">SQL Server&#x27;s own sys.dm_db_objects_disabled_on_compatibility_level_change DMV reports that this index depends on a persisted computed column using a spatial UDT method and will be disabled at the connected instance&#x27;s current default compatibility level.</span></li>
       <li><a class="id" href="rules/database-target-recovery-time-unset.html">Target Recovery Time Unset</a> <code class="rule-key">silentscan/database/target-recovery-time-unset</code><span class="snippet">TARGET_RECOVERY_TIME is 0 (disabled).</span></li>
     </ul>
   </section>
@@ -446,6 +447,7 @@ footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; }
       <li><a class="id" href="rules/query-rbar-single-row-loop-dml.html">Rbar Single Row Loop DML</a> <code class="rule-key">silentscan/query/rbar-single-row-loop-dml</code><span class="snippet">A WHILE loop issues a single-row UPDATE/DELETE keyed to a variable the same loop advances per iteration (row-by-row processing).</span></li>
       <li><a class="id" href="rules/query-recursive-cte-missing-maxrecursion.html">Recursive CTE Missing Maxrecursion</a> <code class="rule-key">silentscan/query/recursive-cte-missing-maxrecursion</code><span class="snippet">A recursive CTE&#x27;s containing statement has no OPTION (MAXRECURSION n).</span></li>
       <li><a class="id" href="rules/query-table-variable-low-compat-estimate.html">Table Variable Low Compat Estimate</a> <code class="rule-key">silentscan/query/table-variable-low-compat-estimate</code><span class="snippet">A table variable is used as a query source while the connected database&#x27;s compatibility level is below 150.</span></li>
+      <li><a class="id" href="rules/query-table-variable-psp-skip.html">Table Variable Psp Skip</a> <code class="rule-key">silentscan/query/table-variable-psp-skip</code><span class="snippet">A table-valued parameter creates the engine&#x27;s TableVariable Parameter Sensitive Plan skip condition at compatibility level 170 or later.</span></li>
       <li><a class="id" href="rules/query-table-variable-stale-estimate-in-loop.html">Table Variable Stale Estimate In Loop</a> <code class="rule-key">silentscan/query/table-variable-stale-estimate-in-loop</code><span class="snippet">A table variable is read as a query source inside a WHILE loop that also writes to it.</span></li>
       <li><a class="id" href="rules/query-unbounded-table-write.html">Unbounded Table Write</a> <code class="rule-key">silentscan/query/unbounded-table-write</code><span class="snippet">An UPDATE/DELETE has no WHERE clause and no TOP.</span></li>
       <li><a class="id" href="rules/query-union-of-provably-disjoint-branches.html">Union Of Provably Disjoint Branches</a> <code class="rule-key">silentscan/query/union-of-provably-disjoint-branches</code><span class="snippet">A UNION combines branches that each filter the same table/column to a distinct literal.</span></li>

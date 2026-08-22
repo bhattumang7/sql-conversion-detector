@@ -75,6 +75,64 @@ public static class QueryAntiPatternScanner
 
         private readonly HashSet<BinaryQueryExpression> _consumedUnionChainNodes = [];
 
+        public override void ExplicitVisit(CreateProcedureStatement node)
+        {
+            InspectTableValuedParameters(node.Parameters);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(AlterProcedureStatement node)
+        {
+            InspectTableValuedParameters(node.Parameters);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(CreateOrAlterProcedureStatement node)
+        {
+            InspectTableValuedParameters(node.Parameters);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(CreateFunctionStatement node)
+        {
+            InspectTableValuedParameters(node.Parameters);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(AlterFunctionStatement node)
+        {
+            InspectTableValuedParameters(node.Parameters);
+            base.ExplicitVisit(node);
+        }
+
+        public override void ExplicitVisit(CreateOrAlterFunctionStatement node)
+        {
+            InspectTableValuedParameters(node.Parameters);
+            base.ExplicitVisit(node);
+        }
+
+        private void InspectTableValuedParameters(IList<ProcedureParameter> parameters)
+        {
+            if (catalog.CompatibilityLevel is not >= 170)
+            {
+                return;
+            }
+
+            foreach (var parameter in parameters)
+            {
+                if (parameter.DataType is not UserDataTypeReference userType
+                    || catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is not { Kind: CatalogTableKind.TableType })
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.TableVariablePspSkip, sourcePath,
+                    parameter.StartLine, parameter.StartColumn, parameter.VariableName.Value,
+                    FindingConfidence.High));
+            }
+        }
+
         public override void ExplicitVisit(DeclareTableVariableStatement node)
         {
             _tableVariableNames.Add(node.Body.VariableName.Value);
