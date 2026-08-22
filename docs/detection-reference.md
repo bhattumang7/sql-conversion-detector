@@ -240,11 +240,12 @@ NULL case.
 4. **Redundant-branch absorption inside an already-flattened AND.** `x = 1
    AND (x = 1 OR y = 2)` - the inner OR is redundant given the outer
    conjunct, but the outer `x = 1` itself is untouched and still reaches
-   sargability normally. This shape matters only for scanners that inspect
-   the INNER disjunction's own leaves (none currently do outside
-   `CatchAllPredicateScanner`'s narrow `(Col = @p OR @p IS NULL)` idiom
-   check) - lower priority than shapes 1-3 for this project's actual rule
-   set.
+   sargability normally. This matters to `CatchAllPredicateScanner`: an
+   equivalent outer equality absorbs its narrow `(Col = @p OR @p IS NULL)`
+   idiom, so the latter no longer causes a scan. The normalizer marks only
+   the inner disjunction eliminated, using exact supported scalar identity
+   and the equality's commutative form; the outer conjunct remains live. Static and
+   execution-plan tests confirm the resulting equality seeks.
 5. **Subquery flattening changing a predicate's effective scope.** A
    correlated `EXISTS`/`IN`/scalar subquery predicate can be flattened by the
    engine into a join, at which point a condition that looks like it lives

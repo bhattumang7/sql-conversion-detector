@@ -117,6 +117,15 @@ public sealed class CatchAllPredicateOracleTests : OracleTestFixture
     }
 
     [Fact]
+    public async Task CatchAllShape_AbsorbedByEquivalentOuterPredicate_Seeks()
+    {
+        var planXml = await CaptureRealExecutionPlanAsync(
+            "DECLARE @p VARCHAR(20) = 'R5'; SELECT Id FROM dbo.Customers WHERE Region = @p AND (Region = @p OR @p IS NULL);");
+
+        Assert.Contains("PhysicalOp=\"Index Seek\"", planXml);
+    }
+
+    [Fact]
     public async Task CatchAllShape_WithOptionRecompile_RestoresTheSeek()
     {
         var planXml = await CaptureRealExecutionPlanAsync(

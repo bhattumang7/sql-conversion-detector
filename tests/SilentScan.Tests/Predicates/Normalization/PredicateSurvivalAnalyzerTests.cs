@@ -347,6 +347,32 @@ public sealed class PredicateSurvivalAnalyzerTests
         Assert.Empty(Analyze("NOT ((NotNullCol = 1 AND NotNullCol = 2) OR NullableCol = 5)").Dead);
     }
 
+    [Fact]
+    public void EquivalentOuterConjunct_AbsorbsInnerDisjunction()
+    {
+        var (dead, leaves) = Analyze("NotNullCol = 1 AND (NotNullCol = 1 OR NullableCol = 2)");
+
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+        Assert.Contains(leaves[2], dead);
+    }
+
+    [Fact]
+    public void ReversedEquality_AbsorbsInnerDisjunction()
+    {
+        var (dead, leaves) = Analyze("1 = NotNullCol AND (NotNullCol = 1 OR NullableCol = 2)");
+
+        Assert.DoesNotContain(leaves[0], dead);
+        Assert.Contains(leaves[1], dead);
+        Assert.Contains(leaves[2], dead);
+    }
+
+    [Fact]
+    public void DifferentOuterConjunct_DoesNotAbsorbInnerDisjunction()
+    {
+        Assert.Empty(Analyze("NotNullCol = 1 AND (NotNullCol = 2 OR NullableCol = 2)").Dead);
+    }
+
     // ---- Opaque leaves: never guessed at ----
 
     [Fact]

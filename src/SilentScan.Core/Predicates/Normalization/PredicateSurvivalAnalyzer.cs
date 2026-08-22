@@ -140,6 +140,44 @@ public static class PredicateSurvivalAnalyzer
         }
     }
 
+    private static void MarkAbsorbedDisjunctions(IReadOnlyList<BooleanExpression> conjuncts, HashSet<TSqlFragment> dead)
+    {
+        foreach (var disjunction in conjuncts.Where(c => c is BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.Or }))
+        {
+            var alternatives = Flatten(disjunction, BooleanBinaryExpressionType.Or);
+            if (alternatives.Any(alternative => conjuncts.Any(conjunct => !ReferenceEquals(conjunct, disjunction) && SamePredicate(conjunct, alternative))))
+            {
+                MarkAllLeavesDead(disjunction, dead);
+            }
+        }
+    }
+
+    private static bool SamePredicate(BooleanExpression left, BooleanExpression right)
+    {
+        if (left is BooleanComparisonExpression a && right is BooleanComparisonExpression b
+            && a.ComparisonType == b.ComparisonType)
+        {
+            return SameScalar(a.FirstExpression, b.FirstExpression) && SameScalar(a.SecondExpression, b.SecondExpression)
+                || a.ComparisonType == BooleanComparisonType.Equals
+                && SameScalar(a.FirstExpression, b.SecondExpression) && SameScalar(a.SecondExpression, b.FirstExpression);
+        }
+
+        return left is BooleanIsNullExpression leftNull && right is BooleanIsNullExpression rightNull
+            && leftNull.IsNot == rightNull.IsNot
+            && SameScalar(leftNull.Expression, rightNull.Expression);
+    }
+
+    private static bool SameScalar(ScalarExpression left, ScalarExpression right) => (left, right) switch
+    {
+        (ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { } leftIds }, ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { } rightIds }) =>
+            leftIds.Count == rightIds.Count && leftIds.Zip(rightIds).All(pair => string.Equals(pair.First.Value, pair.Second.Value, StringComparison.Ordinal)),
+        (VariableReference leftVariable, VariableReference rightVariable) => string.Equals(leftVariable.Name, rightVariable.Name, StringComparison.Ordinal),
+        (IntegerLiteral leftLiteral, IntegerLiteral rightLiteral) => string.Equals(leftLiteral.Value, rightLiteral.Value, StringComparison.Ordinal),
+        (NumericLiteral leftLiteral, NumericLiteral rightLiteral) => string.Equals(leftLiteral.Value, rightLiteral.Value, StringComparison.Ordinal),
+        (MoneyLiteral leftLiteral, MoneyLiteral rightLiteral) => string.Equals(leftLiteral.Value, rightLiteral.Value, StringComparison.Ordinal),
+        _ => false,
+    };
+
     /// <summary>The actual mutating pass: marks <paramref name="node"/>'s own leaves dead outright
     /// when its OWN classification is fully resolved either way (NeverTrue or AlwaysTrue - both mean
     /// nothing inside it ever meaningfully gates row selection, regardless of what encloses it),
@@ -161,7 +199,9 @@ public static class PredicateSurvivalAnalyzer
                 break;
 
             case BooleanBinaryExpression { BinaryExpressionType: BooleanBinaryExpressionType.And }:
-                foreach (var c in Flatten(node, BooleanBinaryExpressionType.And))
+                var conjuncts = Flatten(node, BooleanBinaryExpressionType.And);
+                MarkAbsorbedDisjunctions(conjuncts, dead);
+                foreach (var c in conjuncts)
                 {
                     MarkDead(c, resolveColumnFacts, dead);
                 }

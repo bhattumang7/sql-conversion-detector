@@ -33,6 +33,15 @@ public sealed class CatchAllPredicateScannerTests
     }
 
     [Fact]
+    public void CatchAllPair_AbsorbedByEquivalentOuterConjunct_EliminatedByNormalization()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = @p AND (Code = @p OR @p IS NULL); END");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void CanonicalOrder_ColumnEqualsParameterOrParameterIsNull_Fires()
     {
         var findings = Scan(
