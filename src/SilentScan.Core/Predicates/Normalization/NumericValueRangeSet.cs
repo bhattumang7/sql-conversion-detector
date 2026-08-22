@@ -132,9 +132,6 @@ internal sealed class NumericValueRangeSet
         return lower.Value == upper.Value && lowerInclusive && upperInclusive;
     }
 
-    /// <summary>Sorts and merges overlapping/touching ranges so <see cref="IsEmpty"/> and
-    /// <see cref="HasFullCoverage"/> can be read directly off the resulting shape instead of
-    /// re-deriving coverage from a redundant representation every time.</summary>
     private static List<Range> Coalesce(List<Range> ranges)
     {
         if (ranges.Count == 0)
@@ -142,55 +139,67 @@ internal sealed class NumericValueRangeSet
             return [];
         }
 
-        ranges.Sort((a, b) =>
-        {
-            if (a.Lower is null && b.Lower is null)
-            {
-                return 0;
-            }
-
-            if (a.Lower is null)
-            {
-                return -1;
-            }
-
-            if (b.Lower is null)
-            {
-                return 1;
-            }
-
-            return a.Lower.Value.CompareTo(b.Lower.Value);
-        });
+        ranges.Sort(CompareLowerBounds);
 
         var merged = new List<Range> { ranges[0] };
         foreach (var next in ranges.Skip(1))
         {
             var current = merged[^1];
 
-            var touching = current.Upper is null
-                || next.Lower is null
-                || next.Lower.Value < current.Upper.Value
-                || (next.Lower.Value == current.Upper.Value && (current.UpperInclusive || next.LowerInclusive));
-
-            if (!touching)
+            if (!TryMerge(current, next, out var mergedRange))
             {
                 merged.Add(next);
                 continue;
             }
 
-            var (upper, upperInclusive) = current.Upper is null
-                ? (current.Upper, current.UpperInclusive)
-                : next.Upper is null
-                    ? (next.Upper, next.UpperInclusive)
-                    : current.Upper.Value > next.Upper.Value
-                        ? (current.Upper, current.UpperInclusive)
-                        : current.Upper.Value < next.Upper.Value
-                            ? (next.Upper, next.UpperInclusive)
-                            : (current.Upper, current.UpperInclusive || next.UpperInclusive);
-
-            merged[^1] = current with { Upper = upper, UpperInclusive = upperInclusive };
+            merged[^1] = mergedRange;
         }
 
         return merged;
+    }
+
+    private static int CompareLowerBounds(Range left, Range right)
+    {
+        if (left.Lower is null)
+        {
+            return right.Lower is null ? 0 : -1;
+        }
+
+        return right.Lower is null ? 1 : left.Lower.Value.CompareTo(right.Lower.Value);
+    }
+
+    private static bool TryMerge(Range current, Range next, out Range merged)
+    {
+        if (current.Upper is not null && next.Lower is not null
+            && (next.Lower.Value > current.Upper.Value
+                || (next.Lower.Value == current.Upper.Value && !current.UpperInclusive && !next.LowerInclusive)))
+        {
+            merged = default;
+            return false;
+        }
+
+        var (upper, upperInclusive) = SelectUpperBound(current, next);
+        merged = current with { Upper = upper, UpperInclusive = upperInclusive };
+        return true;
+    }
+
+    private static (decimal? Upper, bool Inclusive) SelectUpperBound(Range current, Range next)
+    {
+        if (current.Upper is null)
+        {
+            return (current.Upper, current.UpperInclusive);
+        }
+
+        if (next.Upper is null || next.Upper.Value > current.Upper.Value)
+        {
+            return (next.Upper, next.UpperInclusive);
+        }
+
+        if (next.Upper.Value < current.Upper.Value)
+        {
+            return (current.Upper, current.UpperInclusive);
+        }
+
+        return (current.Upper, current.UpperInclusive || next.UpperInclusive);
     }
 }

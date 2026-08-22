@@ -26,7 +26,7 @@ namespace SilentScan.Tests.Architecture;
 /// widening the folder-level check, so a NEW, unrelated Catalog-to-Predicates reference still
 /// fails the test.
 /// </summary>
-public sealed class PassOrderTests
+public sealed partial class PassOrderTests
 {
     private static readonly Dictionary<string, int> StageIndexByFolder = new()
     {
@@ -44,8 +44,11 @@ public sealed class PassOrderTests
         (Path.Combine("Catalog", "DynamicSqlTempTableDiscovery.cs"), "Predicates"),
     ];
 
-    private static readonly Regex BlockComment = new(@"/\*.*?\*/", RegexOptions.Singleline | RegexOptions.Compiled);
-    private static readonly Regex LineComment = new(@"//.*$", RegexOptions.Multiline | RegexOptions.Compiled);
+    [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
+    private static partial Regex BlockComment();
+
+    [GeneratedRegex(@"//.*$", RegexOptions.Multiline)]
+    private static partial Regex LineComment();
 
     private static string RepoRoot()
     {
@@ -86,8 +89,8 @@ public sealed class PassOrderTests
 
             foreach (var file in Directory.EnumerateFiles(folderPath, "*.cs", SearchOption.AllDirectories))
             {
-                var text = BlockComment.Replace(File.ReadAllText(file), string.Empty);
-                text = LineComment.Replace(text, string.Empty);
+                var text = BlockComment().Replace(File.ReadAllText(file), string.Empty);
+                text = LineComment().Replace(text, string.Empty);
                 var relativeToCoreRoot = Path.GetRelativePath(CoreSourceRoot(), file);
 
                 foreach (var laterFolder in laterFolders)

@@ -60,10 +60,9 @@ public sealed class AlwaysEncryptedOrderByOracleTests : OracleTestFixture
     [Fact]
     public async Task OrderByPlainColumn_NegativeControl_Succeeds()
     {
-        // Same schema, same connection, same run - only the target column differs. Proves the
-        // two failures above are specific to the encrypted column, not e.g. a schema/deployment
-        // problem that would make any ORDER BY fail on this database.
-        await ExecuteAsync("SELECT CustomerId FROM dbo.Customer ORDER BY PlainName;");
+        var exception = await Record.ExceptionAsync(() => ExecuteAsync("SELECT CustomerId FROM dbo.Customer ORDER BY PlainName;"));
+
+        Assert.Null(exception);
     }
 
     private async Task ExecuteAsync(string sql)

@@ -33,7 +33,7 @@ public static class QueryAntiPatternScanner
         // below ever reports a bare-reference finding - a CTE declared later in the same batch
         // than a use-site referencing the identical name is a real (if rare) shape, and this
         // scanner must never false-fire on it just because of traversal order.
-        var cteNameCollector = new CteNameCollector();
+        var cteNameCollector = new Visitor.CteNameCollector();
         parseResult.Fragment.Accept(cteNameCollector);
 
         var visitor = new Visitor(parseResult.SourcePath, catalog, cteNameCollector.Names);
@@ -46,17 +46,6 @@ public static class QueryAntiPatternScanner
                 .ThenBy(f => f.Line)
                 .ThenBy(f => f.Column),
         ];
-    }
-
-    private sealed class CteNameCollector : TSqlFragmentVisitor
-    {
-        public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public override void ExplicitVisit(CommonTableExpression node)
-        {
-            Names.Add(node.ExpressionName.Value);
-            base.ExplicitVisit(node);
-        }
     }
 
     private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer.OrdinalIgnoreCase)
@@ -248,20 +237,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
-        }
-
         // --- UNION of provably disjoint branches (kind 7) --------------------------------------
 
         public override void ExplicitVisit(BinaryQueryExpression node)
@@ -279,6 +254,31 @@ public static class QueryAntiPatternScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        internal sealed class CteNameCollector : TSqlFragmentVisitor
+        {
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            public override void ExplicitVisit(CommonTableExpression node)
+            {
+                Names.Add(node.ExpressionName.Value);
+                base.ExplicitVisit(node);
+            }
+        }
+
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+        {
+            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+            {
+                return default;
+            }
+
+            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
+            return new PredicateSurvivalAnalyzer.ColumnFacts(
+                catalogColumn is null ? null : !catalogColumn.IsNullable,
+                baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
         private void InspectSiteIfNamedTable(TableReference? tableReference)
@@ -1580,4 +1580,5 @@ public static class QueryAntiPatternScanner
         // live in ColumnAliasHelpers - base-table resolution itself goes through
         // FromScopeResolver (Phase 1.5 "one binder"), above.
     }
+
 }

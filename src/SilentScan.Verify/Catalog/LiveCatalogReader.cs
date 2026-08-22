@@ -878,15 +878,6 @@ public sealed class LiveCatalogReader
     private static async Task<Dictionary<int, List<CatalogColumn>>> ReadColumnsAsync(
         SqlConnection connection, SkipLedger skipLedger, CancellationToken cancellationToken)
     {
-        // LEFT JOINs sys.identity_columns for CatalogColumn's own IdentitySeed/IdentityIncrement/
-        // IdentityCurrentValue (docs/detection-checklist.md "DBA-script family sweep" §A
-        // "Identity/sequence range exhaustion") - a single extra join on the same query every
-        // other column fact already comes from, not a separate live round trip. seed_value/
-        // increment_value/last_value are sql_variant at the engine level; CONVERTed to
-        // decimal(38,0) here so every identity type (tinyint through decimal(p,0)) reports through
-        // the same CatalogColumn shape rather than needing a per-type reader downstream. last_value
-        // is NULL until the first row is ever inserted - reported as null (never a guessed 0),
-        // matching CatalogColumn's own "never guess" default for every other unresolved fact.
         const string sql = """
             SELECT c.object_id, s.name AS schema_name, t.name AS table_name, c.name AS column_name,
                    ty.name AS type_name, c.max_length, c.precision, c.scale, c.collation_name,
@@ -909,43 +900,7 @@ public sealed class LiveCatalogReader
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var objectId = reader.GetInt32(0);
-            var schemaName = reader.GetString(1);
-            var tableName = reader.GetString(2);
-            var columnName = reader.GetString(3);
-            var typeName = reader.GetString(4);
-            var maxLength = reader.GetInt16(5);
-            var precision = reader.GetByte(6);
-            var scale = reader.GetByte(7);
-            var collationName = await reader.IsDBNullAsync(8, cancellationToken) ? null : reader.GetString(8);
-            var isNullable = reader.GetBoolean(9);
-            var isIdentity = reader.GetBoolean(10);
-            var isComputed = reader.GetBoolean(11);
-            var isPersisted = !await reader.IsDBNullAsync(12, cancellationToken) && reader.GetBoolean(12);
-            var isAnsiPadded = reader.GetBoolean(13);
-            var identitySeed = await reader.IsDBNullAsync(14, cancellationToken) ? (decimal?)null : reader.GetDecimal(14);
-            var identityIncrement = await reader.IsDBNullAsync(15, cancellationToken) ? (decimal?)null : reader.GetDecimal(15);
-            var identityCurrentValue = await reader.IsDBNullAsync(16, cancellationToken) ? (decimal?)null : reader.GetDecimal(16);
-            var encryptionType = await reader.IsDBNullAsync(17, cancellationToken)
-                ? SilentScan.Core.Catalog.ColumnEncryptionType.None
-                : reader.GetInt32(17) switch
-                {
-                    1 => SilentScan.Core.Catalog.ColumnEncryptionType.Deterministic,
-                    2 => SilentScan.Core.Catalog.ColumnEncryptionType.Randomized,
-                    _ => SilentScan.Core.Catalog.ColumnEncryptionType.None,
-                };
-
-            var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName);
-            if (type is null)
-            {
-                // Never silently drop the column - callers must see Type=null and treat it as
-                // UNKNOWN, matching how an unresolvable DDL-mode column type is still recorded
-                // (CatalogColumn's own doc comment) rather than omitted entirely.
-                skipLedger.Record(
-                    AnalysisPass.Catalog, $"{schemaName}.{tableName}", 0, 0,
-                    "live column type",
-                    $"'{columnName}' has sys.types name '{typeName}', which this pass does not map to a scalar comparison type (CLR UDT, geography/geometry, hierarchyid, or similar) - type left UNKNOWN.");
-            }
+            var (objectId, column) = await ReadColumnAsync(reader, skipLedger, cancellationToken);
 
             if (!columnsByTable.TryGetValue(objectId, out var columns))
             {
@@ -953,12 +908,59 @@ public sealed class LiveCatalogReader
                 columnsByTable[objectId] = columns;
             }
 
-            columns.Add(new CatalogColumn(
-                columnName, type, isNullable, isIdentity, isComputed, isPersisted, isAnsiPadded,
-                identitySeed, identityIncrement, identityCurrentValue, encryptionType));
+            columns.Add(column);
         }
 
         return columnsByTable;
+    }
+
+    private static async Task<(int ObjectId, CatalogColumn Column)> ReadColumnAsync(
+        SqlDataReader reader, SkipLedger skipLedger, CancellationToken cancellationToken)
+    {
+        var objectId = reader.GetInt32(0);
+        var schemaName = reader.GetString(1);
+        var tableName = reader.GetString(2);
+        var columnName = reader.GetString(3);
+        var typeName = reader.GetString(4);
+        var type = LiveTypeMapper.BuildType(typeName, reader.GetInt16(5), reader.GetByte(6), reader.GetByte(7), await ReadNullableStringAsync(reader, 8, cancellationToken));
+        if (type is null)
+        {
+            skipLedger.Record(
+                AnalysisPass.Catalog, $"{schemaName}.{tableName}", 0, 0,
+                "live column type",
+                $"'{columnName}' has sys.types name '{typeName}', which this pass does not map to a scalar comparison type (CLR UDT, geography/geometry, hierarchyid, or similar) - type left UNKNOWN.");
+        }
+
+        var encryptionType = await ReadEncryptionTypeAsync(reader, cancellationToken);
+        var column = new CatalogColumn(
+            columnName, type, reader.GetBoolean(9), reader.GetBoolean(10), reader.GetBoolean(11),
+            !await reader.IsDBNullAsync(12, cancellationToken) && reader.GetBoolean(12), reader.GetBoolean(13),
+            await ReadNullableDecimalAsync(reader, 14, cancellationToken),
+            await ReadNullableDecimalAsync(reader, 15, cancellationToken),
+            await ReadNullableDecimalAsync(reader, 16, cancellationToken), encryptionType);
+        return (objectId, column);
+    }
+
+    private static async Task<string?> ReadNullableStringAsync(SqlDataReader reader, int ordinal, CancellationToken cancellationToken) =>
+        await reader.IsDBNullAsync(ordinal, cancellationToken) ? null : reader.GetString(ordinal);
+
+    private static async Task<decimal?> ReadNullableDecimalAsync(SqlDataReader reader, int ordinal, CancellationToken cancellationToken) =>
+        await reader.IsDBNullAsync(ordinal, cancellationToken) ? null : reader.GetDecimal(ordinal);
+
+    private static async Task<SilentScan.Core.Catalog.ColumnEncryptionType> ReadEncryptionTypeAsync(
+        SqlDataReader reader, CancellationToken cancellationToken)
+    {
+        if (await reader.IsDBNullAsync(17, cancellationToken))
+        {
+            return SilentScan.Core.Catalog.ColumnEncryptionType.None;
+        }
+
+        return reader.GetInt32(17) switch
+        {
+            1 => SilentScan.Core.Catalog.ColumnEncryptionType.Deterministic,
+            2 => SilentScan.Core.Catalog.ColumnEncryptionType.Randomized,
+            _ => SilentScan.Core.Catalog.ColumnEncryptionType.None,
+        };
     }
 
     private static async Task<Dictionary<int, List<CatalogIndex>>> ReadIndexesAsync(
@@ -1377,10 +1379,6 @@ public sealed class LiveCatalogReader
         // never itself a partitioned base table).
         string? PartitionSchemeName = null,
         string? PartitioningColumnName = null,
-        // Same reasoning again - only ReadIndexesAsync's own query reads ignore_dup_key;
-        // ReadIndexedViewsAsync never sets it (IGNORE_DUP_KEY is a unique-index-only option, and
-        // an indexed view's own clustered index is never the target of a plain INSERT the way a
-        // base table is).
         bool IgnoreDupKey = false);
 
     /// <summary>

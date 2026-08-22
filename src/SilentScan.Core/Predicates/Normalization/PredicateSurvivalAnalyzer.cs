@@ -34,8 +34,6 @@ namespace SilentScan.Core.Predicates.Normalization;
 /// </summary>
 public static class PredicateSurvivalAnalyzer
 {
-    /// <summary>Per-column facts the caller already has from the catalog - both default to the
-    /// safe "cannot conclude" direction when unresolved (<see langword="null"/>).</summary>
     public readonly record struct ColumnFacts(bool? IsNotNull, bool? IsCaseSensitiveCollation);
 
     public static IReadOnlySet<TSqlFragment> FindDeadComparisons(
@@ -308,12 +306,7 @@ public static class PredicateSurvivalAnalyzer
             return (false, false, false);
         }
 
-        bool? result =
-            TryGetNumericLiteral(cmp.FirstExpression) is { } a && TryGetNumericLiteral(cmp.SecondExpression) is { } b
-                ? EvaluateNumeric(op.Value, a, b)
-            : TryGetStringLiteral(cmp.FirstExpression) is { } sa && TryGetStringLiteral(cmp.SecondExpression) is { } sb
-                ? EvaluateString(op.Value, sa, sb)
-            : null;
+        var result = EvaluateConstantComparison(cmp, op.Value);
 
         if (result == false)
         {
@@ -321,6 +314,23 @@ public static class PredicateSurvivalAnalyzer
         }
 
         return (false, result == true, false);
+    }
+
+    private static bool? EvaluateConstantComparison(BooleanComparisonExpression comparison, CmpOp op)
+    {
+        if (TryGetNumericLiteral(comparison.FirstExpression) is { } leftNumber
+            && TryGetNumericLiteral(comparison.SecondExpression) is { } rightNumber)
+        {
+            return EvaluateNumeric(op, leftNumber, rightNumber);
+        }
+
+        if (TryGetStringLiteral(comparison.FirstExpression) is { } leftString
+            && TryGetStringLiteral(comparison.SecondExpression) is { } rightString)
+        {
+            return EvaluateString(op, leftString, rightString);
+        }
+
+        return null;
     }
 
     private static bool EvaluateNumeric(CmpOp op, decimal a, decimal b) => op switch
@@ -400,14 +410,16 @@ public static class PredicateSurvivalAnalyzer
             return null;
         }
 
-        if (TryGetColumnKey(cmp.FirstExpression) is { } column && TryGetLiteralValue(cmp.SecondExpression) is var (num, str) && (num is not null || str is not null))
+        var rightLiteral = TryGetLiteralValue(cmp.SecondExpression);
+        if (TryGetColumnKey(cmp.FirstExpression) is { } column && HasLiteralValue(rightLiteral))
         {
-            return new LiteralConstraint(column, op.Value, num, str);
+            return new LiteralConstraint(column, op.Value, rightLiteral.Numeric, rightLiteral.Str);
         }
 
-        if (TryGetColumnKey(cmp.SecondExpression) is { } column2 && TryGetLiteralValue(cmp.FirstExpression) is var (num2, str2) && (num2 is not null || str2 is not null))
+        var leftLiteral = TryGetLiteralValue(cmp.FirstExpression);
+        if (TryGetColumnKey(cmp.SecondExpression) is { } column2 && HasLiteralValue(leftLiteral))
         {
-            return new LiteralConstraint(column2, Flip(op.Value), num2, str2);
+            return new LiteralConstraint(column2, Flip(op.Value), leftLiteral.Numeric, leftLiteral.Str);
         }
 
         return null;
@@ -419,6 +431,8 @@ public static class PredicateSurvivalAnalyzer
         // the expression alone - declined entirely, never folded either way.
         expr is NullLiteral ? (null, null) : (TryGetNumericLiteral(expr), TryGetStringLiteral(expr));
 
+    private static bool HasLiteralValue((decimal? Numeric, string? Str) value) => value.Numeric is not null || value.Str is not null;
+
     /// <summary>True/<c>ColumnConfirmedNotNull</c>: whether the winning contradiction's own column
     /// is confirmed NOT NULL - see <see cref="Classify"/>'s doc comment on <c>AlwaysFalse</c> for
     /// why that distinction matters to a caller wrapping this in NOT. <c>IS NULL AND IS NOT NULL</c>
@@ -428,58 +442,46 @@ public static class PredicateSurvivalAnalyzer
     private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
         IReadOnlyList<BooleanExpression> conjuncts, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
-        foreach (var group in GroupByColumn(conjuncts))
+        foreach (var leaves in GroupByColumn(conjuncts).Select(group => group.Value))
         {
-            var nullSeen = group.Value.Any(c => c.IsNull);
-            var notNullSeen = group.Value.Any(c => c.IsNotNull);
+            var nullSeen = leaves.Any(c => c.IsNull);
+            var notNullSeen = leaves.Any(c => c.IsNotNull);
             if (nullSeen && notNullSeen)
             {
                 return (true, true);
             }
 
-            var confirmedNotNull = IsNotNull(group.Key, group.Value, resolveColumnFacts) == true;
-
-            var literalConstraints = group.Value.Select(c => c.Constraint).Where(c => c is not null).Select(c => c!.Value).ToList();
-            var anyValueComparisonSeen = literalConstraints.Count > 0;
-            if (nullSeen && anyValueComparisonSeen)
+            if (DetectGroupContradiction(leaves, resolveColumnFacts) is { Found: true } contradiction)
             {
-                return (true, confirmedNotNull);
+                return contradiction;
             }
+        }
 
-            var numeric = NumericValueRangeSet.Universal;
-            foreach (var c in literalConstraints.Where(c => c.Numeric is not null))
-            {
-                numeric = numeric.Intersect(ToRangeSet(c.Op, c.Numeric!.Value));
-            }
+        return (false, false);
+    }
 
-            if (numeric.IsEmpty)
-            {
-                return (true, confirmedNotNull);
-            }
+    private static (bool Found, bool ColumnConfirmedNotNull) DetectGroupContradiction(
+        IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
+    {
+        var confirmedNotNull = IsColumnNotNull(leaves, resolveColumnFacts) == true;
+        var literalConstraints = leaves.Select(c => c.Constraint).Where(c => c is not null).Select(c => c!.Value).ToList();
+        if (leaves.Any(c => c.IsNull) && literalConstraints.Count > 0)
+        {
+            return (true, confirmedNotNull);
+        }
 
-            var required = new HashSet<string>(StringComparer.Ordinal);
-            var excluded = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var c in literalConstraints.Where(c => c.Str is not null))
-            {
-                if (c.Op == CmpOp.Eq)
-                {
-                    required.Add(c.Str!);
-                }
-                else if (c.Op == CmpOp.Ne)
-                {
-                    excluded.Add(c.Str!);
-                }
-            }
+        var numeric = literalConstraints.Where(c => c.Numeric is not null)
+            .Aggregate(NumericValueRangeSet.Universal, (ranges, constraint) => ranges.Intersect(ToRangeSet(constraint.Op, constraint.Numeric!.Value)));
+        if (numeric.IsEmpty)
+        {
+            return (true, confirmedNotNull);
+        }
 
-            if (required.Overlaps(excluded))
-            {
-                return (true, confirmedNotNull);
-            }
-
-            if (required.Count >= 2 && IsCaseSensitive(group.Key, group.Value, resolveColumnFacts) == true)
-            {
-                return (true, confirmedNotNull);
-            }
+        var (required, excluded) = PartitionStringConstraints(literalConstraints);
+        if (required.Overlaps(excluded)
+            || (required.Count >= 2 && IsColumnCaseSensitive(leaves, resolveColumnFacts) == true))
+        {
+            return (true, confirmedNotNull);
         }
 
         return (false, false);
@@ -488,58 +490,64 @@ public static class PredicateSurvivalAnalyzer
     private static bool DetectTautology(
         IReadOnlyList<BooleanExpression> disjuncts, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
-        foreach (var group in GroupByColumn(disjuncts))
+        foreach (var leaves in GroupByColumn(disjuncts).Select(group => group.Value))
         {
-            var nullSeen = group.Value.Any(c => c.IsNull);
-            var notNullSeen = group.Value.Any(c => c.IsNotNull);
+            var nullSeen = leaves.Any(c => c.IsNull);
+            var notNullSeen = leaves.Any(c => c.IsNotNull);
             if (nullSeen && notNullSeen)
             {
                 // col IS NULL OR col IS NOT NULL - unconditionally true, neither side is ever UNKNOWN.
                 return true;
             }
 
-            if (IsNotNull(group.Key, group.Value, resolveColumnFacts) != true)
-            {
-                // Every other tautology shape below relies on covering every non-null value; without
-                // a confirmed NOT NULL column, a row where the column is NULL makes every comparison
-                // UNKNOWN, so the OR is never unconditionally true regardless of value coverage.
-                continue;
-            }
-
-            var literalConstraints = group.Value.Select(c => c.Constraint).Where(c => c is not null).Select(c => c!.Value).ToList();
-
-            var numericUnion = literalConstraints.Where(c => c.Numeric is not null)
-                .Select(c => ToRangeSet(c.Op, c.Numeric!.Value))
-                .Aggregate((NumericValueRangeSet?)null, (acc, next) => acc is null ? next : acc.Union(next));
-            if (numericUnion?.HasFullCoverage == true)
-            {
-                return true;
-            }
-
-            var required = new HashSet<string>(StringComparer.Ordinal);
-            var excluded = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var c in literalConstraints.Where(c => c.Str is not null))
-            {
-                if (c.Op == CmpOp.Eq)
-                {
-                    required.Add(c.Str!);
-                }
-                else if (c.Op == CmpOp.Ne)
-                {
-                    excluded.Add(c.Str!);
-                }
-            }
-
-            // x = V (one disjunct) OR x <> V (another disjunct), same literal V: together cover
-            // every non-null value regardless of collation, since equality is reflexive no matter
-            // how the collation orders anything else.
-            if (required.Overlaps(excluded))
+            if (IsGroupTautology(leaves, resolveColumnFacts))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool IsGroupTautology(IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
+    {
+        if (IsColumnNotNull(leaves, resolveColumnFacts) != true)
+        {
+            return false;
+        }
+
+        var literalConstraints = leaves.Select(c => c.Constraint).Where(c => c is not null).Select(c => c!.Value).ToList();
+        var numericUnion = literalConstraints.Where(c => c.Numeric is not null)
+            .Select(c => ToRangeSet(c.Op, c.Numeric!.Value))
+            .Aggregate((NumericValueRangeSet?)null, Union);
+        if (numericUnion?.HasFullCoverage == true)
+        {
+            return true;
+        }
+
+        var (required, excluded) = PartitionStringConstraints(literalConstraints);
+        return required.Overlaps(excluded);
+    }
+
+    private static NumericValueRangeSet? Union(NumericValueRangeSet? current, NumericValueRangeSet next) => current is null ? next : current.Union(next);
+
+    private static (HashSet<string> Required, HashSet<string> Excluded) PartitionStringConstraints(IEnumerable<LiteralConstraint> constraints)
+    {
+        var required = new HashSet<string>(StringComparer.Ordinal);
+        var excluded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var constraint in constraints.Where(constraint => constraint.Str is not null))
+        {
+            if (constraint.Op == CmpOp.Eq)
+            {
+                required.Add(constraint.Str!);
+            }
+            else if (constraint.Op == CmpOp.Ne)
+            {
+                excluded.Add(constraint.Str!);
+            }
+        }
+
+        return (required, excluded);
     }
 
     private static NumericValueRangeSet ToRangeSet(CmpOp op, decimal value) => op switch
@@ -611,11 +619,11 @@ public static class PredicateSurvivalAnalyzer
         return groups;
     }
 
-    private static bool? IsNotNull(
-        ColumnKey key, IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
+    private static bool? IsColumnNotNull(
+        IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
         leaves.Count > 0 ? resolveColumnFacts(leaves[0].ColumnRef).IsNotNull : null;
 
-    private static bool? IsCaseSensitive(
-        ColumnKey key, IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
+    private static bool? IsColumnCaseSensitive(
+        IReadOnlyList<GroupedLeaf> leaves, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts) =>
         leaves.Count > 0 ? resolveColumnFacts(leaves[0].ColumnRef).IsCaseSensitiveCollation : null;
 }
