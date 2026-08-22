@@ -19,43 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **No predicate-survival (normalization) step: our largest structural
-      false-positive exposure — shapes 1-4 shipped, shapes 5-6 open.**
-      `Predicates/Normalization/` (`NumericValueRangeSet` +
-      `PredicateSurvivalAnalyzer`) covers shapes 1-3 from `detection-
-      reference.md`'s "Predicate survival" section: a per-column value-range
-      set intersected across an AND group (same-column contradiction, `IS
-      NULL` conflicts, self-contradictory `BETWEEN`) or unioned across an OR
-      group (`NOT NULL`-gated tautology, including `IS NULL`/`IS NOT NULL`
-      pairs unconditionally), with a strict `AlwaysFalse` state so `NOT` of a
-      contradiction on a confirmed non-nullable column is recognized as a
-      real tautology too. Oracle-confirmed directly (a contradiction compiles
-      to `Constant Scan`; a `NOT NULL`-column tautology and its
-      `NOT`-of-contradiction dual both drop the residual filter; the nullable
-      negative control correctly keeps one).
-      All 7 at-risk call sites from that section's survey now consult it:
-      `TypedPredicateExtractor`/`NonSargablePredicateScanner` (dead-comparison
-      set computed once per `WHERE`/`HAVING`/`ON`, every finding-emitting
-      `Visit` declines and ledgers `"predicate eliminated by normalization"`);
-      `CatchAllPredicateScanner` (an equality half of the `(Col = @p OR @p IS
-      NULL)` idiom inside a dead branch is skipped); `PartialCompositeForeignKeyJoinScanner`/
-      `NonUniqueUpdateSourceScanner`/`QueryAntiPatternScanner`'s `MERGE`
-      check (a new `IsUnsatisfiable` entry point skips the whole statement
-      when its `WHERE`/`ON`/`USING` condition can never be satisfied);
-      `QueryAntiPatternScanner`'s `HAVING` and `DISTINCT`-join-fanout checks.
-      `DuplicationScanner` was surveyed and found not to need it: both its
-      call sites (`AlwaysTrueOrFalseLiteralComparison`, `MutuallyExclusiveAndCondition`/
-      `RedundantAndCondition`) already make self-contained dead-code claims
-      about the source text itself, never a plan/sargability claim, so there
-      is nothing for the optimizer to eliminate out from under them.
-      Exact redundant-branch absorption now also suppresses
-      `CatchAllPredicateScanner` when an equivalent outer conjunct makes its
-      inner catch-all OR redundant; static and execution-plan tests confirm
-      the resulting equality seeks. **Still open:** shape 5 (subquery
-      flattening) and shape 6 (arithmetic constant folding) remain unbuilt
-      per that section's own scope notes - neither has a concretely at-risk
-      shipped rule yet.
-
 - [ ] **Static risk factor: persisted computed column on a spatial expression,
       disabled by a future compat-level change.** `sys.dm_db_objects_disabled_on_compatibility_level_change(@level)`
       (real, documented: Microsoft Learn confirms it flags indexes/constraints

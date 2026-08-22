@@ -250,24 +250,22 @@ NULL case.
    correlated `EXISTS`/`IN`/scalar subquery predicate can be flattened by the
    engine into a join, at which point a condition that looks like it lives
    "inside the subquery" for AST-scoping purposes is evaluated at the outer
-   query's row source instead. None of the current sargability scanners
-   already open a subquery's own `WHERE` as a flattening target (confirmed:
-   `NotInNullableSubqueryScanner` is the only scanner that walks INTO a
-   subquery's `WHERE` at all, and it does so for a different reason -
-   correlated-NULL detection on the `NOT IN` idiom itself, not sargability of
-   a predicate inside it) - so this shape is a real gap but not yet a
-   concretely at-risk shipped rule; flag for the next sweep once shapes 1-3
-   ship and subquery-interior sargability scanning is ever added.
+   query's row source instead. Audited after the normalization module shipped:
+   `TypedPredicateExtractor` and `NonSargablePredicateScanner` already enter
+   every nested `QuerySpecification` with a fresh FROM scope and a fresh
+   condition-local normalization set, so no finding crosses the subquery
+   boundary or relies on the flattened placement. `NotInNullableSubqueryScanner`
+   separately resolves its correlated-NULL check in the subquery's native
+   scope. No shipped rule needs a flattening-specific suppression.
 6. **Constant folding across a function/arithmetic wrap.** `x + 0 = 5` is
    algebraically foldable to `x = 5`, which WOULD be sargable - but nothing
    in the engine's normalize/simplify pass has been confirmed (oracle or
    otherwise) to actually perform this specific rewrite for an *indexed*
-   column before cost-based optimization; `LiteralComparisonFolder`'s own
-   scope note treats non-literal arithmetic as fundamentally out of bounds.
-   Not scoped further here - would need a dedicated oracle probe (a real
-   `x + 0 = @p` predicate against an indexed column, checked for a seek)
-   before this project could safely narrow any existing "arithmetic wrap
-   blocks the seek" finding on the strength of it.
+   column before cost-based optimization. The dedicated oracle probe now
+   confirms `x + 0 = 5` does not seek an indexed integer column, so the
+   existing arithmetic-wrap finding remains correct and no suppression is
+   warranted. `LiteralComparisonFolder` remains deliberately limited to
+   literal-vs-literal arithmetic.
 
 ### Shipped rules that assume a predicate reaches the optimizer as written
 
@@ -309,25 +307,3 @@ scores it:
   correlated-NULL), so a stray same-column contradiction elsewhere in the
   same clause is less likely to change their verdict, but not confirmed
   immune.
-
-### Proposed minimal first module
-
-Ship shapes 1 and 3 only (same-column AND contradiction, `IS NULL`
-interaction) as a single new `PredicateContradictionFolder`, deliberately
-excluding shape 2 (OR tautology) from the first cut - shape 2 needs a
-catalog nullability lookup to stay NULL-safe, shapes 1/3 do not, so shapes
-1/3 alone are a same-file, no-new-dependency addition next to
-`LiteralComparisonFolder`. Contract: given a flattened AND-leaf set (already
-produced by `PredicateTreeWalker.FlattenAnd` everywhere it's needed), return
-the subset of leaves that are reachable given the others - i.e. `[]` for the
-whole set the moment two leaves contradict per shape 1/3, the input
-unchanged otherwise. Consumers (`TypedPredicateExtractor`,
-`NonSargablePredicateScanner` first, as the two highest-blast-radius sites)
-call it once per flattened AND group and skip typed-predicate/sargability
-extraction entirely for an eliminated group instead of scoring dead
-predicates. This covers 2 of the 7 at-risk call sites directly (the two
-generic-walk ones) at full confidence and gives the other 5 a shared,
-already-tested primitive to adopt next, without touching OR-tautology
-(shape 2), subquery flattening (shape 5), or arithmetic constant folding
-(shape 6) - each of which needs its own follow-on scoping pass before being
-built, per the shape notes above.
