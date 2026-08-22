@@ -19,23 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`SelfReferencingDmlRuleId` may over-fire on modern compatibility
-      levels.** The rule's rationale claims the engine always inserts extra
-      defensive plan work (an eager spool, or an extra sort) for any
-      self-referencing INSERT/UPDATE/DELETE/MERGE. SQL Server documents at
-      least two real bypasses this rule's own scanner (`SelfReferencingDmlScanner.cs`,
-      no `Top`/`CompatibilityLevel` handling at all today) never checks: a
-      `TOP(1) ... ORDER BY` guard on a table that won't be rewound can itself
-      satisfy Halloween Protection without a spool, and — separately, gated on
-      compatibility level 150+ plus table properties (no FILESTREAM columns,
-      not replicated, no disqualifying constraint types) all readable from the
-      catalog — a nest-ID-based tracking mode can skip the spool entirely.
-      Verify against the local test database (compat 150+, a `TOP(1) ORDER BY`
-      self-referencing `UPDATE`) whether the claimed defensive plan work still
-      appears; if the bypass is real and reachable, either suppress the finding
-      on that shape or downgrade its confidence — do not leave an oracle claim
-      standing that a real, catalog-visible bypass contradicts.
-
 - [ ] **New rule family: operand not legally comparable at compile time
       (distinct from sargability).** SQL Server rejects some operand shapes
       outright at bind time, independent of whether an index could seek them:

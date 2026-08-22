@@ -6,13 +6,6 @@ using SilentScan.Core.Common;
 
 namespace SilentScan.Core.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Halloween Protection and self-referencing DML". Reuses
-/// <see cref="FromScopeResolver.ResolveForDataModification"/>/<see cref="FromScopeResolver.ResolveForMerge"/>
-/// (the same UPDATE/MERGE-scope resolution <see cref="TypedPredicateExtractor"/>/
-/// <see cref="NonUniqueUpdateSourceScanner"/> already use) purely to learn the write target's own
-/// resolved qualified name and FROM-clause alias - never for column resolution.
-/// </summary>
 public static class SelfReferencingDmlScanner
 {
     public static IReadOnlyList<SelfReferencingDmlFinding> Scan(
@@ -36,13 +29,11 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(InsertStatement node)
         {
             var spec = node.InsertSpecification;
-            if (spec.Target is NamedTableReference targetRef)
+            if (spec.Target is NamedTableReference targetRef && !HasLiteralTopOne(spec.TopRowFilter))
             {
                 var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(targetRef.SchemaObject));
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
 
-                // ValuesInsertSource/ExecuteInsertSource carry no table reference of their own to
-                // re-read the target through - only a SELECT-sourced INSERT can self-reference.
                 var match = spec.InsertSource is SelectInsertSource select ? FindMatchInFragment(select.Select, targetQualifiedName, cteNames) : null;
                 Report(match, "INSERT", targetQualifiedName, node);
             }
@@ -53,7 +44,8 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            if (ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
+            if (!HasLiteralTopOne(spec.TopRowFilter)
+                && ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
                 var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName, cteNames)
@@ -70,7 +62,8 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            if (ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
+            if (!HasLiteralTopOne(spec.TopRowFilter)
+                && ResolveDataModificationTarget(spec.Target, spec.FromClause, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
                 var match = FindMatchInFromClauseExtras(spec.FromClause, spec.Target, targetQualifiedName, cteNames)
@@ -84,7 +77,8 @@ public static class SelfReferencingDmlScanner
         public override void ExplicitVisit(MergeStatement node)
         {
             var spec = node.MergeSpecification;
-            if (ResolveMergeTarget(spec, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
+            if (!HasLiteralTopOne(spec.TopRowFilter)
+                && ResolveMergeTarget(spec, node.WithCtesAndXmlNamespaces) is { } targetQualifiedName)
             {
                 var cteNames = CteNamesOf(node.WithCtesAndXmlNamespaces);
                 var match = FindMatchInFragment(spec.TableReference, targetQualifiedName, cteNames)
@@ -98,13 +92,22 @@ public static class SelfReferencingDmlScanner
             base.ExplicitVisit(node);
         }
 
-        /// <summary>
-        /// The statement's own declared CTE names, name-only (mirrors <c>ResolutionContext</c>'s
-        /// own CTE-shadowing doc comment above, applied to the READ side rather than the target).
-        /// An unqualified read-side reference sharing a CTE's bare name is never the same table as
-        /// an identically-named real one - <see cref="TryClassify"/> declines it rather than
-        /// resolving through the catalog.
-        /// </summary>
+        private static bool HasLiteralTopOne(TopRowFilter? topRowFilter)
+        {
+            if (topRowFilter is not { Percent: false } filter)
+            {
+                return false;
+            }
+
+            var expression = filter.Expression;
+            while (expression is ParenthesisExpression parenthesized)
+            {
+                expression = parenthesized.Expression;
+            }
+
+            return expression is IntegerLiteral { Value: "1" };
+        }
+
         private static HashSet<string> CteNamesOf(WithCtesAndXmlNamespaces? withClause) =>
             withClause is { CommonTableExpressions: { } ctes }
                 ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
@@ -118,7 +121,6 @@ public static class SelfReferencingDmlScanner
             }
         }
 
-        /// <summary>Target resolution shared by UPDATE/DELETE - with an extra FROM clause, T-SQL requires the target's own alias to already be one of its entries (<see cref="FromScopeResolver.ResolveForDataModification"/>'s own doc comment); with none, the target IS the whole scope.</summary>
         private string? ResolveDataModificationTarget(TableReference target, FromClause? fromClause, WithCtesAndXmlNamespaces? withClause)
         {
             if (target is not NamedTableReference named)
@@ -131,7 +133,6 @@ public static class SelfReferencingDmlScanner
             return byAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
         }
 
-        /// <summary>MergeSpecification's own inherited <c>Target</c> is the INTO target; its alias lives separately in <c>TableAlias</c> (see <see cref="FromScopeResolver.ResolveForMerge"/>'s own doc comment on this naming trap).</summary>
         private string? ResolveMergeTarget(MergeSpecification spec, WithCtesAndXmlNamespaces? withClause)
         {
             if (spec.Target is not NamedTableReference named)
@@ -144,23 +145,11 @@ public static class SelfReferencingDmlScanner
             return byAlias.TryGetValue(alias, out var entry) ? entry.Relation.QualifiedName : null;
         }
 
-        /// <summary>
-        /// A CTE name shadows a same-named base table for its own statement's lifetime, including
-        /// an updatable-CTE write target (<c>WITH cte AS (...) UPDATE cte SET ...</c> is valid
-        /// T-SQL) - resolving through the catalog instead silently matched an unrelated real
-        /// table sharing the CTE's name (2026-08 audit).
-        /// </summary>
         private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-        /// <summary>
-        /// Walks the target's OWN FROM clause for a SECOND, independent reference to the same
-        /// table - the target's own single canonical entry (matched by alias, which T-SQL forbids
-        /// duplicating within one FROM clause) is skipped exactly once so it is never mistaken for
-        /// a re-read of itself; every other entry is a genuine extra read.
-        /// </summary>
         private SelfReferencingDmlFinding? FindMatchInFromClauseExtras(FromClause? fromClause, TableReference target, string targetQualifiedName, HashSet<string> cteNames)
         {
             if (fromClause is null)
@@ -192,7 +181,6 @@ public static class SelfReferencingDmlScanner
             return null;
         }
 
-        /// <summary>Walks an arbitrary read-side fragment (a subquery, a SET-clause new value, a MERGE action body) with no skip logic at all - the write target's own reference is never part of any of these fragments, so every match found here is a genuine, unambiguous extra read.</summary>
         private SelfReferencingDmlFinding? FindMatchInFragment(TSqlFragment? fragment, string targetQualifiedName, HashSet<string> cteNames)
         {
             if (fragment is null)
@@ -208,13 +196,6 @@ public static class SelfReferencingDmlScanner
                 .FirstOrDefault(finding => finding is not null);
         }
 
-        /// <summary>
-        /// A read-side reference whose bare name is unqualified and matches one of the
-        /// statement's own CTEs is never a real re-read of an identically-named base table - a
-        /// CTE is never schema-qualified, so it always shadows a same-named real table for this
-        /// statement's own lifetime (mirrors <see cref="ResolutionContext"/>'s own doc comment,
-        /// applied to the read side rather than the target).
-        /// </summary>
         private SelfReferencingDmlFinding? TryClassify(NamedTableReference reference, string targetQualifiedName, HashSet<string> cteNames)
         {
             if (reference.SchemaObject.SchemaIdentifier is null && cteNames.Contains(reference.SchemaObject.BaseIdentifier.Value))

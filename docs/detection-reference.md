@@ -307,3 +307,22 @@ scores it:
   correlated-NULL), so a stray same-column contradiction elsewhere in the
   same clause is less likely to change their verdict, but not confirmed
   immune.
+
+## Halloween Protection bypasses for self-referencing DML
+
+`SelfReferencingDmlRuleId`'s scanner excludes any INSERT/UPDATE/DELETE/MERGE
+whose own TOP row limiter is the literal integer 1 (not `PERCENT`, not a
+variable/parameter): oracle-confirmed, via compile-only `SET SHOWPLAN_XML`
+probes across all four statement kinds and cross-checked against otherwise-
+identical TOP(2)/TOP(1) PERCENT controls, that a literal TOP(1) drops the
+Eager Spool/Sort entirely - the guaranteed-at-most-one-row cardinality alone
+satisfies Halloween Protection.
+
+A second bypass exists in the engine (an internal nest-ID-based tracking mode
+that can skip the spool independent of TOP), but its real gating conditions
+are execution-context internals - not a simple compatibility-level or catalog
+property check - and empirical probes against ordinary top-level self-
+referencing DML on a plain disk-based, non-FILESTREAM, non-replicated table
+never triggered it: the Eager Spool/Sort still appeared in every case tried
+outside the literal-TOP(1) shape above. Not implemented - no catalog-decidable
+condition for it was found precise enough to gate on.

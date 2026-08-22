@@ -39,6 +39,11 @@ internal static class SelfReferencingDml
             table, not with how much data logically needs re-checking: a self-join DELETE against a
             large table pays for materializing its full read side even when, semantically, no row
             was ever going to overlap between what's read and what's deleted.
+
+            One real, oracle-confirmed exception: a statement whose own TOP row limiter is the
+            literal integer 1 (not PERCENT, not a variable) guarantees at most one row can ever be
+            touched, and across all four statement kinds the extra spool or sort disappears from the
+            plan entirely - this rule does not fire on that shape.
             """,
         Examples:
         [

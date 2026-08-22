@@ -5,13 +5,6 @@ using SilentScan.Core.Predicates;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Halloween Protection and self-referencing DML" - structural/
-/// AST tests for the extraction logic; the underlying "extra defensive plan work appears" claim
-/// (and its correction from the checklist's own "always an eager spool" premise to "a spool OR a
-/// sort, depending on statement shape") is oracle-confirmed separately in
-/// <see cref="SelfReferencingDmlOracleTests"/>.
-/// </summary>
 public sealed class SelfReferencingDmlScannerTests
 {
     private const string Ddl = """
@@ -102,13 +95,6 @@ public sealed class SelfReferencingDmlScannerTests
     [Fact]
     public void UpdateThroughCteNamedLikeARealTable_NeverResolvesTargetAgainstTheRealTable()
     {
-        // 2026-08 audit: an updatable CTE (WITH T AS (...) UPDATE T SET ...) is valid T-SQL and
-        // writes through to the CTE's own underlying base table - but a CTE is never schema-
-        // qualified, so it always shadows dbo.T for this statement's own lifetime. Resolving
-        // through the catalog instead (cteRelations always null, pre-fix) matched the write
-        // target against the REAL dbo.T by coincidence of name, which is out of this scanner's
-        // own declared scope (base-table write targets only) - the target must resolve to
-        // nothing (a CTE relation carries no QualifiedName), so no finding should ever fire here.
         var findings = Scan("WITH T AS (SELECT Id, Val, Flag FROM dbo.T) UPDATE T SET Val = (SELECT MAX(Val) FROM dbo.T);");
 
         Assert.Empty(findings);
@@ -186,9 +172,6 @@ public sealed class SelfReferencingDmlScannerTests
     [Fact]
     public void OneFindingPerStatement_NotOnePerMatchingReference()
     {
-        // Two independent self-references in the same UPDATE (an extra JOIN plus a WHERE
-        // subquery) still yields exactly one finding - the fact this rule reports is "does the
-        // statement's own read side re-read the target," not an occurrence count.
         var findings = Scan(
             "UPDATE t1 SET t1.Val = t2.Val FROM dbo.T t1 JOIN dbo.T t2 ON t1.Id = t2.Id - 1 WHERE EXISTS (SELECT 1 FROM dbo.T t3 WHERE t3.Id = t1.Id - 2);");
 
@@ -196,14 +179,63 @@ public sealed class SelfReferencingDmlScannerTests
     }
 
     [Fact]
+    public void UpdateFromSelfJoinWithLiteralTopOne_NeverFires()
+    {
+        var findings = Scan("UPDATE TOP (1) t1 SET t1.Val = t2.Val FROM dbo.T t1 JOIN dbo.T t2 ON t1.Id = t2.Id - 1;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void UpdateFromSelfJoinWithTopTwo_StillFires()
+    {
+        var findings = Scan("UPDATE TOP (2) t1 SET t1.Val = t2.Val FROM dbo.T t1 JOIN dbo.T t2 ON t1.Id = t2.Id - 1;");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void UpdateFromSelfJoinWithTopOnePercent_StillFires()
+    {
+        var findings = Scan("UPDATE TOP (1) PERCENT t1 SET t1.Val = t2.Val FROM dbo.T t1 JOIN dbo.T t2 ON t1.Id = t2.Id - 1;");
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void DeleteWithLiteralTopOne_NeverFires()
+    {
+        var findings = Scan("DELETE TOP (1) FROM dbo.T WHERE EXISTS (SELECT 1 FROM dbo.T t2 WHERE t2.Id = T.Id - 1);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void InsertSelectWithLiteralTopOne_NeverFires()
+    {
+        var findings = Scan("INSERT TOP (1) INTO dbo.T (Id, Val, Flag) SELECT Id + 1000, Val, 0 FROM dbo.T t WHERE NOT EXISTS (SELECT 1 FROM dbo.T t2 WHERE t2.Id = t.Id + 1000);");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void MergeWithLiteralTopOne_NeverFires()
+    {
+        var findings = Scan(
+            """
+            MERGE TOP (1) dbo.T AS tgt
+            USING (SELECT Id, Val FROM dbo.T) AS src
+            ON tgt.Id = src.Id + 1
+            WHEN MATCHED THEN UPDATE SET tgt.Val = src.Val
+            WHEN NOT MATCHED BY TARGET THEN INSERT (Id, Val, Flag) VALUES (src.Id + 1, src.Val, 0);
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
     public void ReadSideReferenceIsACteSharingTheTargetsOwnBareName_NeverFires()
     {
-        // The SET clause's subquery references "T" - inside this statement's own WITH clause,
-        // that name is shadowed by the CTE (itself sourced from dbo.Other, never dbo.T), so the
-        // subquery never actually re-reads the real target dbo.T at all. A CTE is never schema-
-        // qualified, so an unqualified read-side reference whose bare name happens to match the
-        // target's own base identifier must be checked against the statement's own CTE names
-        // before being treated as a same-table match.
         var findings = Scan(
             """
             ;WITH T AS (SELECT Id FROM dbo.Other)

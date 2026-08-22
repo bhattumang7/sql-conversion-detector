@@ -3,20 +3,6 @@ using SilentScan.Verify.Oracle;
 
 namespace SilentScan.Tests.Predicates;
 
-/// <summary>
-/// docs/detection-checklist.md Tier 2 "Halloween Protection and self-referencing DML" - oracle-
-/// confirms the underlying plan-shape claim across all four statement kinds, compile-only (a self-
-/// referencing DML's defensive plan work is a compile-time structural artifact, not a cardinality-
-/// dependent choice - confirmed directly against completely empty tables).
-///
-/// <b>Corrects the checklist's own "forces a blocking eager spool" premise:</b> INSERT/DELETE
-/// really do gain a <c>PhysicalOp="Table Spool" LogicalOp="Eager Spool"</c> operator, but
-/// UPDATE ... FROM self-join and MERGE gain a <c>Sort</c> instead - no spool at all. Both are
-/// absent from the otherwise-identical cross-table control in every pair below, so "the read side
-/// re-reads the write target" reliably predicts SOME extra defensive plan work, even though which
-/// operator appears depends on the statement's own shape - see
-/// <see cref="Predicates.SelfReferencingDmlFinding"/>'s own doc comment for the full write-up.
-/// </summary>
 [Trait("Category", "Oracle")]
 public sealed class SelfReferencingDmlOracleTests : OracleTestFixture
 {
@@ -89,9 +75,6 @@ public sealed class SelfReferencingDmlOracleTests : OracleTestFixture
     [Fact]
     public async Task UpdateWithNoFromClauseAndNoSelfReference_NeverGainsAnyProtectiveOperator()
     {
-        // DMLRequestSort="0" is a real, always-present Update-element attribute containing the
-        // substring "Sort" - assert on a genuine RelOp/PhysicalOp element, never a bare substring
-        // match (the same trap SetOptionOracleTests' own doc comment already documents).
         var planXml = await CaptureAsync("UPDATE dbo.T SET Val = Val + 1 WHERE Flag = 1;");
 
         Assert.DoesNotContain("PhysicalOp=\"Sort\"", planXml);
@@ -142,6 +125,62 @@ public sealed class SelfReferencingDmlOracleTests : OracleTestFixture
             ON tgt.Id = src.Id
             WHEN MATCHED THEN UPDATE SET tgt.Val = src.Val
             WHEN NOT MATCHED BY TARGET THEN INSERT (Id, Val, Flag) VALUES (src.Id, src.Val, 0);
+            """);
+
+        Assert.DoesNotContain("PhysicalOp=\"Sort\"", planXml);
+        Assert.DoesNotContain("Eager Spool", planXml);
+    }
+
+    [Fact]
+    public async Task UpdateFromSelfJoinWithLiteralTopOne_NeverGainsAnyProtectiveOperator()
+    {
+        var planXml = await CaptureAsync(
+            "UPDATE TOP (1) t1 SET t1.Val = t2.Val FROM dbo.T t1 JOIN dbo.T t2 ON t1.Id = t2.Id - 1;");
+
+        Assert.DoesNotContain("Eager Spool", planXml);
+        Assert.DoesNotContain("Distinct Sort", planXml);
+    }
+
+    [Fact]
+    public async Task UpdateFromSelfJoinWithTopTwo_StillGainsTheProtectiveSort()
+    {
+        var planXml = await CaptureAsync(
+            "UPDATE TOP (2) t1 SET t1.Val = t2.Val FROM dbo.T t1 JOIN dbo.T t2 ON t1.Id = t2.Id - 1;");
+
+        Assert.Contains("LogicalOp=\"Distinct Sort\"", planXml);
+    }
+
+    [Fact]
+    public async Task DeleteWhereExistsSelfReferenceWithLiteralTopOne_NeverGainsAnEagerSpool()
+    {
+        var planXml = await CaptureAsync(
+            "DELETE TOP (1) FROM dbo.T WHERE EXISTS (SELECT 1 FROM dbo.T t2 WHERE t2.Id = T.Id - 1);");
+
+        Assert.DoesNotContain("Eager Spool", planXml);
+    }
+
+    [Fact]
+    public async Task InsertHoleFillingSelfReferenceWithLiteralTopOne_NeverGainsAnEagerSpool()
+    {
+        var planXml = await CaptureAsync(
+            """
+            INSERT TOP (1) INTO dbo.T (Id, Val, Flag)
+            SELECT Id + 1000, Val, 0 FROM dbo.T WHERE NOT EXISTS (SELECT 1 FROM dbo.T t2 WHERE t2.Id = dbo.T.Id + 1000);
+            """);
+
+        Assert.DoesNotContain("Eager Spool", planXml);
+    }
+
+    [Fact]
+    public async Task MergeUsingSameTargetTableWithLiteralTopOne_NeverGainsTheProtectiveSort()
+    {
+        var planXml = await CaptureAsync(
+            """
+            MERGE TOP (1) dbo.T AS tgt
+            USING (SELECT Id, Val FROM dbo.T) AS src
+            ON tgt.Id = src.Id + 1
+            WHEN MATCHED THEN UPDATE SET tgt.Val = src.Val
+            WHEN NOT MATCHED BY TARGET THEN INSERT (Id, Val, Flag) VALUES (src.Id + 1, src.Val, 0);
             """);
 
         Assert.DoesNotContain("PhysicalOp=\"Sort\"", planXml);
