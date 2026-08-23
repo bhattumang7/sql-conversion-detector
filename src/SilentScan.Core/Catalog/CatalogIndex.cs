@@ -20,5 +20,5 @@ public sealed record CatalogIndex(
     bool IsXmlIndex = false,
     bool IsSpatialIndex = false)
 {
-public IReadOnlyList<bool> KeyColumnIsDescending => KeyColumnIsDescendingRaw ?? [];
+    public IReadOnlyList<bool> KeyColumnIsDescending => KeyColumnIsDescendingRaw ?? [];
 }

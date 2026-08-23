@@ -69,7 +69,7 @@ public sealed class ScanReportBuilderParseRecoveryTests
         Assert.Empty(report.Tier1Findings);
     }
 
-private static async Task<DatabaseCatalog> DeployAndReadCatalogAsync(string sql, CancellationToken cancellationToken = default)
+    private static async Task<DatabaseCatalog> DeployAndReadCatalogAsync(string sql, CancellationToken cancellationToken = default)
     {
         var options = SqlServerOptions.LocalDocker;
         var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";

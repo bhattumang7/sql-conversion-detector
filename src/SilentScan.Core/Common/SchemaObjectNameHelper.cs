@@ -10,6 +10,7 @@ public static class SchemaObjectNameHelper
     {
         if (name.BaseIdentifier.Value.StartsWith('#'))
         {
+
             return (null, name.BaseIdentifier.Value);
         }
 
@@ -25,7 +26,7 @@ public static class SchemaObjectNameHelper
         return name.DatabaseIdentifier is { Value.Length: > 0 } db ? $"{db.Value}.{baseName}" : baseName;
     }
 
-public static string QualifyFunctionCall(FunctionCall functionCall)
+    public static string QualifyFunctionCall(FunctionCall functionCall)
     {
         var schema = functionCall.CallTarget is MultiPartIdentifierCallTarget { MultiPartIdentifier.Identifiers: [.., { } last] }
             ? last.Value

@@ -145,6 +145,7 @@ public sealed class NamingScannerTests
     [Fact]
     public void NonDboSchemaTypeQualifier_NeverFiresRedundantQualifier()
     {
+
         var findings = Scan("DECLARE @p custom.MyType;");
 
         Assert.DoesNotContain(findings, f => f.Kind == NamingFindingKind.RedundantTypeQualifier);

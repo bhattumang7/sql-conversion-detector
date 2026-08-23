@@ -25,6 +25,7 @@ public sealed class SqlTypeReferenceResolverTests
     [InlineData("SysName")]
     public void Resolve_Sysname_ResolvesToNVarChar128(string spelling)
     {
+
         var type = SqlTypeReferenceResolver.Resolve(ParseColumnDataType(spelling), columnCollation: null);
 
         Assert.Equal(SqlTypeCategory.NVarChar, type!.Category);
@@ -52,6 +53,7 @@ public sealed class SqlTypeReferenceResolverTests
     [Fact]
     public void Resolve_UserDataType_MatchingCatalogedAlias_ResolvesToUnderlyingType()
     {
+
         var aliases = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase)
         {
             ["dbo.MyIntAlias"] = new SqlType(SqlTypeCategory.Int),
@@ -65,6 +67,7 @@ public sealed class SqlTypeReferenceResolverTests
     [Fact]
     public void Resolve_UnqualifiedUserDataType_MatchesDefaultSchemaQualifiedAlias()
     {
+
         var aliases = new Dictionary<string, SqlType>(StringComparer.OrdinalIgnoreCase)
         {
             ["dbo.MyStr"] = new SqlType(SqlTypeCategory.VarChar, Length: 50),

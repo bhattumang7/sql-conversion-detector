@@ -11,13 +11,13 @@ public static class PartialCompositeForeignKeyJoinScanner
 {
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-public sealed record CompositeForeignKey(
+    public sealed record CompositeForeignKey(
         string ConstraintName,
         string ParentTableQualifiedName,
         string ReferencedTableQualifiedName,
         IReadOnlyList<ForeignKeyColumnPair> Pairs);
 
-public static IReadOnlyList<CompositeForeignKey> BuildCompositeForeignKeys(DatabaseCatalog catalog) =>
+    public static IReadOnlyList<CompositeForeignKey> BuildCompositeForeignKeys(DatabaseCatalog catalog) =>
         [.. catalog.ForeignKeys
             .GroupBy(fk => fk.ConstraintName, StringComparer.OrdinalIgnoreCase)
             .Where(g => g.Count() >= 2)
@@ -50,7 +50,7 @@ public static IReadOnlyList<CompositeForeignKey> BuildCompositeForeignKeys(Datab
     {
         public List<PartialCompositeForeignKeyJoinFinding> Findings { get; } = [];
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -146,6 +146,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
             IReadOnlyList<BooleanComparisonExpression> statementWideEqualities,
             HashSet<(string, string)> directlyJoinedTablePairs)
         {
+
             var firstTable = ResolveDirectBaseTable(join.FirstTableReference, byAlias);
             var secondTable = ResolveDirectBaseTable(join.SecondTableReference, byAlias);
             if (firstTable is null || secondTable is null)
@@ -166,7 +167,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
             }
         }
 
-private void InspectCommaJoins(
+        private void InspectCommaJoins(
             IReadOnlyList<ScopeEntry> ordered,
             IReadOnlyList<BooleanComparisonExpression> statementWideEqualities,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
@@ -193,6 +194,7 @@ private void InspectCommaJoins(
 
                     foreach (var fk in FindCandidateForeignKeys(baseTables[i], baseTables[j]))
                     {
+
                         TryReportFinding(fk, statementWideEqualities, statementWideEqualities, scopeChain, fromClause.StartLine, fromClause.StartColumn);
                     }
                 }
@@ -209,6 +211,7 @@ private void InspectCommaJoins(
             var coveredLocally = fk.Pairs.Where(p => localEqualities.Any(pred => PredicateCoversPair(pred, scopeChain, fk, p))).ToList();
             if (coveredLocally.Count == 0)
             {
+
                 return;
             }
 
@@ -216,6 +219,7 @@ private void InspectCommaJoins(
             var missingEverywhere = fk.Pairs.Except(coveredAnywhere).ToList();
             if (missingEverywhere.Count == 0)
             {
+
                 return;
             }
 
@@ -229,7 +233,7 @@ private void InspectCommaJoins(
                 fk.Pairs, coveredLocally, missingEverywhere, sourcePath, line, column));
         }
 
-private bool IsSuppressedByUniqueIndex(CompositeForeignKey fk, IReadOnlyList<ForeignKeyColumnPair> coveredLocally)
+        private bool IsSuppressedByUniqueIndex(CompositeForeignKey fk, IReadOnlyList<ForeignKeyColumnPair> coveredLocally)
         {
             var referencedTable = catalog.Find(fk.ReferencedTableQualifiedName);
             if (referencedTable is null)
@@ -262,7 +266,7 @@ private bool IsSuppressedByUniqueIndex(CompositeForeignKey fk, IReadOnlyList<For
             && string.Equals(r.TableQualifiedName, table, StringComparison.OrdinalIgnoreCase)
             && string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase);
 
-private string? ResolveDirectBaseTable(TableReference tableReference, IReadOnlyDictionary<string, ScopeEntry> byAlias)
+        private string? ResolveDirectBaseTable(TableReference tableReference, IReadOnlyDictionary<string, ScopeEntry> byAlias)
         {
             if (tableReference is not NamedTableReference named)
             {

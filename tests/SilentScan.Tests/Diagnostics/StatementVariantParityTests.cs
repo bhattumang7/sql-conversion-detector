@@ -24,7 +24,7 @@ public sealed class StatementVariantParityTests
         AssertNoUndocumentedGap(GetExplicitVisitParameterTypeNames(typeof(TypedPredicateExtractor)));
     }
 
-[Fact]
+    [Fact]
     public void TypedPredicateExtractor_PushesCteScopeForEveryConcreteCteBearingStatement()
     {
         AssertHandlesEveryCteBearingStatement(GetExplicitVisitParameterTypeNames(typeof(TypedPredicateExtractor)));
@@ -39,7 +39,7 @@ public sealed class StatementVariantParityTests
     private static readonly Type CteBearingStatementBaseType =
         ScriptDomAssembly.GetType("Microsoft.SqlServer.TransactSql.ScriptDom.StatementWithCtesAndXmlNamespaces")!;
 
-private static readonly HashSet<string> DocumentedUnreachableCteBearingTypes = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> DocumentedUnreachableCteBearingTypes = new(StringComparer.Ordinal)
     {
         "SelectStatementSnippet",
     };
@@ -99,13 +99,13 @@ private static readonly HashSet<string> DocumentedUnreachableCteBearingTypes = n
         Assert.True(gaps.Count == 0, string.Join("\n", gaps));
     }
 
-private static bool IsDocumentedInCoverageMatrix(string typeName) =>
+    private static bool IsDocumentedInCoverageMatrix(string typeName) =>
         ConstructCoverageCatalog.Instance.Entries.Any(e =>
             e.Status != ConstructCoverageStatus.Handled &&
             (e.Construct.Contains(typeName, StringComparison.Ordinal) ||
              (e.Rationale is { } r && r.Contains(typeName, StringComparison.Ordinal))));
 
-private static HashSet<string> GetExplicitVisitParameterTypeNames(Type passType)
+    private static HashSet<string> GetExplicitVisitParameterTypeNames(Type passType)
     {
         var candidateTypes = passType.GetNestedTypes(BindingFlags.NonPublic | BindingFlags.Public).Append(passType);
 

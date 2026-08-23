@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum ViewOrderingFindingKind
 {
-TopPercentOrderByNeverLimits,
+    TopPercentOrderByNeverLimits,
 
-OrderByNotGuaranteedToConsumer,
+    OrderByNotGuaranteedToConsumer,
 }
 
 public sealed record ViewOrderingFinding(

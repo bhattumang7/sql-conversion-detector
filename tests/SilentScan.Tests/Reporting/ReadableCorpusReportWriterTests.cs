@@ -46,6 +46,7 @@ public sealed class ReadableCorpusReportWriterTests
     [Fact]
     public void RepoBelowTheDialectSniffingBar_IsMarkedAndNamed()
     {
+
         var broken = SqlScriptParser.ParseText("broken.sql", "SELECT FROM WHERE ORDER;");
         var report = ScanReportBuilder.BuildFromParseResults([broken], new DatabaseCatalog());
         var repo = new ReadableCorpusRepo("mysql-ish", report, null);

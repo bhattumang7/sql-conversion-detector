@@ -130,6 +130,7 @@ public static class ParameterReassignmentPredicateScanner
         {
             if (!_formalParameterNames.Contains(variableName))
             {
+
                 return;
             }
 
@@ -341,6 +342,7 @@ public static class ParameterReassignmentPredicateScanner
             var sites = new Dictionary<string, TSqlFragment>(StringComparer.OrdinalIgnoreCase);
             foreach (var name in merged)
             {
+
                 sites[name] = b.ReassignmentSites!.TryGetValue(name, out var bSite) ? bSite : a.ReassignmentSites![name];
             }
 

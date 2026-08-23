@@ -17,6 +17,7 @@ public sealed class FunctionParameterReader
     public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
         string database, string qualifiedName, CancellationToken cancellationToken = default)
     {
+
         const string sql = """
             SELECT ty.name AS type_name, p.max_length, p.precision, p.scale
             FROM sys.parameters p
@@ -47,6 +48,7 @@ public sealed class FunctionParameterReader
                 var type = LiveTypeMapper.BuildType(typeName, maxLength, precision, scale, collationName: null);
                 if (type is null)
                 {
+
                     allTypesRendered = false;
                 }
                 else
@@ -66,7 +68,7 @@ public sealed class FunctionParameterReader
             : types;
     }
 
-private static async Task<bool> IsKnownObjectAsync(SqlConnection connection, string qualifiedName, CancellationToken cancellationToken)
+    private static async Task<bool> IsKnownObjectAsync(SqlConnection connection, string qualifiedName, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT type FROM sys.objects WHERE object_id = OBJECT_ID(@objectName);";

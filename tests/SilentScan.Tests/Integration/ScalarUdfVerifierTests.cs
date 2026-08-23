@@ -99,6 +99,7 @@ public sealed class ScalarUdfVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_InlineableFunctionMislabeledNotInlineable_IsNotConfirmed()
     {
+
         var finding = Finding("dbo.fn_Inlineable", ScalarUdfInlineability.NotInlineable);
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
@@ -109,6 +110,7 @@ public sealed class ScalarUdfVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_NotInlineableFunctionMislabeledInlineable_IsNotConfirmed()
     {
+
         var finding = Finding("dbo.fn_NotInlineable", ScalarUdfInlineability.Inlineable);
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);

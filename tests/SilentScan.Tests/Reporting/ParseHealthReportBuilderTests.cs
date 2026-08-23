@@ -86,6 +86,7 @@ public sealed class ParseHealthReportBuilderTests
     [Fact]
     public void PassesDialectSniffing_RateAtOrAboveNinetyPercent_IsTrue()
     {
+
         var report = new ParseHealthReport([
             new FileParseHealth("a.sql", [], BatchCount: 1),
             new FileParseHealth("b.sql", [], BatchCount: 1),

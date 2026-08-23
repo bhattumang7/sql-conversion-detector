@@ -2,25 +2,25 @@ namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
 public enum HoleKind
 {
-UntypedParameter,
+    UntypedParameter,
 
-UninitializedDeclare,
+    UninitializedDeclare,
 
-NonDeterministicTyped,
+    NonDeterministicTyped,
 
-EnvironmentDependent,
+    EnvironmentDependent,
 
-HavocWrite,
+    HavocWrite,
 
-WidenedChoice,
+    WidenedChoice,
 
-OptionalFragment,
+    OptionalFragment,
 
-TryOnlyDeclaration,
+    TryOnlyDeclaration,
 
-ArgumentIndependentReturnType,
+    ArgumentIndependentReturnType,
 
-RowDependentColumn,
+    RowDependentColumn,
 
-UserFunctionDeclaredReturnType,
+    UserFunctionDeclaredReturnType,
 }

@@ -53,6 +53,7 @@ public sealed class TemporalBoundaryPrecisionTests
     [Fact]
     public void BareDateBoundaryWithNoTimePortion_FiresWithZeroFractionalDigits()
     {
+
         const string sql = """
             CREATE TABLE dbo.Sessions (Id INT NOT NULL PRIMARY KEY, StartedAt DATETIME2(3) NOT NULL);
             SELECT Id FROM dbo.Sessions WHERE StartedAt BETWEEN '2024-01-01' AND '2024-06-30';
@@ -72,6 +73,7 @@ public sealed class TemporalBoundaryPrecisionTests
     [Fact]
     public void OrdinaryDateTimeColumn_NoDeclaredScale_NeverGuesses()
     {
+
         const string sql = """
             CREATE TABLE dbo.Legacy (Id INT NOT NULL PRIMARY KEY, OccurredAt DATETIME NOT NULL);
             SELECT Id FROM dbo.Legacy WHERE OccurredAt BETWEEN '2024-01-01' AND '2024-12-31 23:59:59.997';

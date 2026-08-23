@@ -75,10 +75,10 @@ public static class WriteLossClassifier
     private static bool IsWiderTemporal(SqlTypeCategory category) =>
         category is SqlTypeCategory.DateTime or SqlTypeCategory.DateTime2 or SqlTypeCategory.SmallDateTime or SqlTypeCategory.DateTimeOffset;
 
-private static bool IsAsciiOnlyLiteral(Literal? literal) =>
+    private static bool IsAsciiOnlyLiteral(Literal? literal) =>
         literal is StringLiteral stringLiteral && stringLiteral.Value.All(c => c <= 127);
 
-private static bool IsWithinScaleLiteral(Literal? literal, int targetScale)
+    private static bool IsWithinScaleLiteral(Literal? literal, int targetScale)
     {
         if (literal is IntegerLiteral)
         {
@@ -107,7 +107,7 @@ private static bool IsWithinScaleLiteral(Literal? literal, int targetScale)
         return fractional.Length <= targetScale || fractional[targetScale..].All(c => c == '0');
     }
 
-private static bool IsDateOnlyLiteral(Literal? literal) =>
+    private static bool IsDateOnlyLiteral(Literal? literal) =>
         literal is StringLiteral stringLiteral
         && !stringLiteral.Value.Contains(':', StringComparison.Ordinal)
         && !stringLiteral.Value.Contains('T', StringComparison.OrdinalIgnoreCase);

@@ -74,6 +74,7 @@ public sealed class DroppedConstraintPipelineTests : OracleTestFixture
     [Fact]
     public async Task DroppingOneConstraint_LeavesUnrelatedIndexesIntact()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync(DroppedOneOfTwoSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var orderCodeFinding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "OrderCode");

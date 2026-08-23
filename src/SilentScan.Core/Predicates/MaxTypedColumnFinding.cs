@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum NonIndexableColumnFindingKind
 {
-MaxLength,
+    MaxLength,
 
-LegacyLargeObject,
+    LegacyLargeObject,
 }
 
 public sealed record MaxTypedColumnFinding(

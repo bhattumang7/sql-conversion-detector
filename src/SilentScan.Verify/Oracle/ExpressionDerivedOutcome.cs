@@ -2,13 +2,13 @@ namespace SilentScan.Verify.Oracle;
 
 public enum ExpressionDerivedOutcome
 {
-Confirmed,
+    Confirmed,
 
-NotConfirmed,
+    NotConfirmed,
 
-NotProbeable,
+    NotProbeable,
 
-ProbeFailed,
+    ProbeFailed,
 
-UnindexedNotProbeable,
+    UnindexedNotProbeable,
 }

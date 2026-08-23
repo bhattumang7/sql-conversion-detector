@@ -11,7 +11,7 @@ public static class CorpusFileResolver
     public static IReadOnlyList<string> ResolveProcFiles(CorpusRepoEntry repo, string repoRoot) =>
         Resolve(repo.ProcPaths, repoRoot);
 
-public static IReadOnlyList<string> ResolveAllFiles(CorpusRepoEntry repo, string repoRoot) =>
+    public static IReadOnlyList<string> ResolveAllFiles(CorpusRepoEntry repo, string repoRoot) =>
         [.. ResolveDdlFiles(repo, repoRoot).Concat(ResolveProcFiles(repo, repoRoot)).Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal)];
 
     private static IReadOnlyList<string> Resolve(IReadOnlyList<string> globs, string repoRoot)

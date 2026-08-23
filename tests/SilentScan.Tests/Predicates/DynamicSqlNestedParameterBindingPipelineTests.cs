@@ -39,6 +39,7 @@ public sealed class DynamicSqlNestedParameterBindingPipelineTests
     [Fact]
     public async Task NestedCallBindsFormalParameterToNameOnlyMatch_NoEnclosingParameterOfThatName_StaysUnknown()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Vendors (VendorCode varchar(50) NOT NULL, INDEX IX_VendorCode (VendorCode));
             GO

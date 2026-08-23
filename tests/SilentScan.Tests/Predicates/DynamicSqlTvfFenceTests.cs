@@ -60,6 +60,7 @@ public sealed class DynamicSqlTvfFenceTests
         Assert.Equal(TvfFenceFindingKind.Standalone, finding.Kind);
         Assert.Equal("dbo.fn_Fence", finding.FunctionQualifiedName);
         Assert.Equal("app.sql", finding.SourcePath);
+
         Assert.Equal(5, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(4, finding.DynamicSqlCallSite!.Value.Line);

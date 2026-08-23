@@ -69,6 +69,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void TwoWordProseComment_NeverFiresCommentedOutCode()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 SELECT SettingValue FROM dbo.Settings WHERE Id = 43 /* Distance Factor */;
@@ -189,6 +190,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void NestedWhileOwnBreak_NeverCountsTowardOuterLoop()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @i INT = 0;
@@ -403,6 +405,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void ColumnEqualsItself_ProvenNotNull_FiresIdenticalBinaryOperands()
     {
+
         var findings = Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
             GO
@@ -416,6 +419,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void ColumnEqualsItself_Nullable_NeverFiresIdenticalBinaryOperands()
     {
+
         var findings = Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NULL);
             GO
@@ -428,6 +432,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void ColumnEqualsItself_UnresolvableAgainstAmbiguousScope_NeverFiresIdenticalBinaryOperands()
     {
+
         var findings = Scan("""
             CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);
             CREATE TABLE dbo.Archive (Code VARCHAR(20) NOT NULL);
@@ -553,6 +558,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void NegatedAndExpression_NeverFiresNegatedComparisonAsOpposite()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -645,6 +651,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void IfChainWithNoElse_NeverFiresAllBranchesIdentical()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -738,6 +745,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void InnerNestedIfHasElse_NeverFiresCollapsibleNestedIf()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -817,6 +825,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void CaseNestedInCase_NeverFiresNestedConditionalExpression()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 1;
@@ -860,6 +869,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void AdjacentTouchingBoundsExclusiveAndInclusive_FiresMutuallyExclusiveAndCondition()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 10;
@@ -873,6 +883,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void NarrowingBoundsAnded_NeverFireEither()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 10;
@@ -902,6 +913,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void OrCombinedBounds_NeverFireEither()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 10;
@@ -959,6 +971,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void IdenticalNumericLiteralsEquality_FiresAlwaysTrueOrFalseNotIdenticalOperands()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 IF 5 = 5 PRINT 'always';
@@ -985,6 +998,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void DifferentStringLiteralsEquality_NeverFiresAlwaysTrueOrFalse()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 IF 'abc' = 'ABC' PRINT 'maybe';
@@ -1022,6 +1036,7 @@ public sealed class DuplicationScannerTests
     [Fact]
     public void MixedTypeLiteralComparison_NeverFiresAlwaysTrueOrFalse()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 IF 5 = 'x' PRINT 'maybe';

@@ -14,11 +14,11 @@ internal sealed class NumericValueRangeSet
         NullPossible = nullPossible;
     }
 
-public static NumericValueRangeSet Universal { get; } = new([new Range(null, true, null, true)], nullPossible: true);
+    public static NumericValueRangeSet Universal { get; } = new([new Range(null, true, null, true)], nullPossible: true);
 
     public bool IsEmpty => _ranges.Count == 0 && !NullPossible;
 
-public bool HasFullCoverage => _ranges is [{ Lower: null, Upper: null }];
+    public bool HasFullCoverage => _ranges is [{ Lower: null, Upper: null }];
 
     public static NumericValueRangeSet ForEquals(decimal value) => new([new Range(value, true, value, true)], nullPossible: false);
 
@@ -33,9 +33,9 @@ public bool HasFullCoverage => _ranges is [{ Lower: null, Upper: null }];
 
     public static NumericValueRangeSet ForGreaterThanOrEqual(decimal value) => new([new Range(value, true, null, true)], nullPossible: false);
 
-public static NumericValueRangeSet ForIsNull() => new([], nullPossible: true);
+    public static NumericValueRangeSet ForIsNull() => new([], nullPossible: true);
 
-public static NumericValueRangeSet ForIsNotNull() => new([new Range(null, true, null, true)], nullPossible: false);
+    public static NumericValueRangeSet ForIsNotNull() => new([new Range(null, true, null, true)], nullPossible: false);
 
     public NumericValueRangeSet Intersect(NumericValueRangeSet other)
     {

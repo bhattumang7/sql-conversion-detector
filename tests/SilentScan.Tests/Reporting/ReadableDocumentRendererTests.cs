@@ -84,7 +84,7 @@ public sealed class ReadableDocumentRendererTests
         Assert.Contains("- one\n- two", rendered, StringComparison.Ordinal);
     }
 
-private static int UnescapedPipes(string line) =>
+    private static int UnescapedPipes(string line) =>
         line.Where((c, i) => c == '|' && (i == 0 || line[i - 1] != '\\')).Count();
 
     private static string[] Lines(string rendered) =>

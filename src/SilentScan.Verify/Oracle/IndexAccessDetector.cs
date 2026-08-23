@@ -6,7 +6,7 @@ public static class IndexAccessDetector
 {
     private static readonly XNamespace ShowPlanNs = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
 
-public static bool HasIndexSeek(string planXml, string indexName)
+    public static bool HasIndexSeek(string planXml, string indexName)
     {
         var doc = XDocument.Parse(planXml);
 

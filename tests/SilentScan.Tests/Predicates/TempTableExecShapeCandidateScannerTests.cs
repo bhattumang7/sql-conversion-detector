@@ -95,6 +95,7 @@ public sealed class TempTableExecShapeCandidateScannerTests
     [Fact]
     public void TempTableDeclaredOutsideAnyProcedure_TempTableColumnsIsNullNotGuessed()
     {
+
         var candidates = Scan("""
             CREATE TABLE #Results (Id INT NOT NULL);
             INSERT INTO #Results EXEC dbo.usp_Callee;
@@ -107,6 +108,7 @@ public sealed class TempTableExecShapeCandidateScannerTests
     [Fact]
     public void UnresolvedTempTable_TempTableColumnsIsNull()
     {
+
         var candidates = Scan("""
             CREATE PROCEDURE dbo.usp_Caller AS
             BEGIN

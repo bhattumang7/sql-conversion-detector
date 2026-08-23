@@ -12,5 +12,5 @@ public enum ScalarUdfContext
     SetAssignment,
     VariableAssignment,
 
-Other,
+    Other,
 }

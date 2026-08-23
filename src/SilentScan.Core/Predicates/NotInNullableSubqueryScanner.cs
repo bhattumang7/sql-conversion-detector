@@ -27,7 +27,7 @@ public static class NotInNullableSubqueryScanner
     {
         public List<NotInNullableSubqueryFinding> Findings { get; } = [];
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -144,7 +144,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
                 sourcePath, predicate.StartLine, predicate.StartColumn));
         }
 
-private bool HasDefensiveNotNullFilter(
+        private bool HasDefensiveNotNullFilter(
             BooleanExpression? subqueryWhere, string tableQualifiedName, string columnName,
             IReadOnlyDictionary<string, ScopeEntry> innerByAlias, IReadOnlyList<ScopeEntry> innerOrdered)
         {

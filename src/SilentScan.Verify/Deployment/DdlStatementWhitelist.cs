@@ -6,6 +6,7 @@ public static class DdlStatementWhitelist
 {
     private static readonly HashSet<Type> AllowedStatementTypes =
     [
+
         typeof(CreateTableStatement),
         typeof(AlterTableAddTableElementStatement),
         typeof(AlterTableAlterColumnStatement),
@@ -36,7 +37,7 @@ public static class DdlStatementWhitelist
         typeof(DropSynonymStatement),
     ];
 
-private static readonly HashSet<Type> ProcedureAndTriggerDefinitionTypes =
+    private static readonly HashSet<Type> ProcedureAndTriggerDefinitionTypes =
     [
         typeof(CreateProcedureStatement),
         typeof(AlterProcedureStatement),
@@ -48,9 +49,9 @@ private static readonly HashSet<Type> ProcedureAndTriggerDefinitionTypes =
         typeof(DropTriggerStatement),
     ];
 
-private static bool IsAllowedPredicateSet(TSqlStatement statement) => statement is PredicateSetStatement;
+    private static bool IsAllowedPredicateSet(TSqlStatement statement) => statement is PredicateSetStatement;
 
-public static bool IsAllowed(TSqlStatement statement, bool allowProcedureAndTriggerDefinitions = false) => statement switch
+    public static bool IsAllowed(TSqlStatement statement, bool allowProcedureAndTriggerDefinitions = false) => statement switch
     {
         IfStatement ifStatement =>
             (ifStatement.ThenStatement is null || IsAllowed(ifStatement.ThenStatement, allowProcedureAndTriggerDefinitions))
@@ -64,7 +65,7 @@ public static bool IsAllowed(TSqlStatement statement, bool allowProcedureAndTrig
             || (allowProcedureAndTriggerDefinitions && ProcedureAndTriggerDefinitionTypes.Contains(statement.GetType())),
     };
 
-public static IReadOnlyList<string> DisallowedStatementTypeNames(TSqlBatch batch, bool allowProcedureAndTriggerDefinitions = false)
+    public static IReadOnlyList<string> DisallowedStatementTypeNames(TSqlBatch batch, bool allowProcedureAndTriggerDefinitions = false)
     {
         var disallowed = new List<string>();
         foreach (var statement in batch.Statements)

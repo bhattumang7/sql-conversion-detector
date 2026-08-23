@@ -25,6 +25,7 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
     [Fact]
     public async Task VarcharColumnAgainstCoalesceOfVarcharAndNvarcharParams_ClassifiesScanForced_OracleConfirmed()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync(CoalesceSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");
@@ -38,6 +39,7 @@ public sealed class ExpressionTypeInferencerPipelineTests : OracleTestFixture
     [Fact]
     public void NullIf_DoesNotMergeByPrecedence_ClassifiesUsingFirstExpressionTypeOnly()
     {
+
         var sql = """
             CREATE TABLE dbo.AccountsNullIf (Code varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO

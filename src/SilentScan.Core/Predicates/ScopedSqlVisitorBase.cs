@@ -18,18 +18,18 @@ internal abstract class ScopedSqlVisitorBase(
 
     private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
 
-protected readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> ScopeStack = new();
+    protected readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> ScopeStack = new();
 
-protected string? CurrentProcScope { get; set; } = currentProcScope;
+    protected string? CurrentProcScope { get; set; } = currentProcScope;
 
-protected void PushCteScope(WithCtesAndXmlNamespaces? withClause)
+    protected void PushCteScope(WithCtesAndXmlNamespaces? withClause)
     {
         var currentCtes = CurrentCteRelations();
         var ctes = CteResolver.Resolve(withClause, catalog, resolvedViews, sourcePath, ledger, CurrentProcScope);
         _cteStack.Push(ctes.Count == 0 ? currentCtes : MergeCtes(currentCtes, ctes));
     }
 
-protected void PushCteRelations(IReadOnlyDictionary<string, ResolvedRelation> relations) => _cteStack.Push(relations);
+    protected void PushCteRelations(IReadOnlyDictionary<string, ResolvedRelation> relations) => _cteStack.Push(relations);
 
     protected void PopCteScope() => _cteStack.Pop();
 
@@ -39,7 +39,7 @@ protected void PushCteRelations(IReadOnlyDictionary<string, ResolvedRelation> re
     protected FromScopeResolver.ResolutionContext CurrentResolutionContext() =>
         new(catalog, resolvedViews, sourcePath, ledger, CurrentCteRelations(), CurrentProcScope, callerScopeByCalleeScope);
 
-protected static Dictionary<string, ResolvedRelation> MergeCtes(
+    protected static Dictionary<string, ResolvedRelation> MergeCtes(
         IReadOnlyDictionary<string, ResolvedRelation> outer, IReadOnlyDictionary<string, ResolvedRelation> inner)
     {
         var merged = new Dictionary<string, ResolvedRelation>(outer, StringComparer.OrdinalIgnoreCase);
@@ -69,11 +69,11 @@ protected static Dictionary<string, ResolvedRelation> MergeCtes(
 
     public override void ExplicitVisit(CreateOrAlterTriggerStatement node) => VisitTriggerBody(node, node.Name, node.TriggerObject);
 
-protected virtual void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+    protected virtual void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
     {
     }
 
-protected virtual void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+    protected virtual void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase node)
     {
     }
 
@@ -87,14 +87,14 @@ protected virtual void OnLeaveProcedureOrFunctionBody(ProcedureStatementBodyBase
         OnLeaveProcedureOrFunctionBody(node);
     }
 
-protected virtual void OnEnterTriggerBody(TriggerStatementBody node)
+    protected virtual void OnEnterTriggerBody(TriggerStatementBody node)
     {
     }
 
     private const string DdlOrLogonTriggerConstructKind = "DDL/LOGON trigger";
     private const string TriggerInsertedDeletedConstructKind = "trigger inserted/deleted";
 
-private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
+    private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject)
     {
         OnEnterTriggerBody(node);
         var previousScope = CurrentProcScope;
@@ -117,7 +117,7 @@ private void VisitTriggerBody(TriggerStatementBody node, SchemaObjectName name, 
         CurrentProcScope = previousScope;
     }
 
-protected IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
+    protected IReadOnlyDictionary<string, ResolvedRelation> BuildTriggerPseudoTableRelations(SchemaObjectName targetTableName, TSqlFragment node)
     {
         var qualifiedName = SchemaObjectNameHelper.Qualify(targetTableName);
 

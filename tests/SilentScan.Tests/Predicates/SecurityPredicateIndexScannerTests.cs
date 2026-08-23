@@ -52,6 +52,7 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void BoundColumnLeadsOnlyADisabledIndex_StillFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "T", [Column("Id"), Column("TenantId")],
@@ -66,6 +67,7 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void BoundColumnIsNotTheLeadingKeyColumn_StillFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "T", [Column("Id"), Column("TenantId"), Column("OtherKey")],
@@ -92,6 +94,7 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void BlockPredicate_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "T", [Column("Id"), Column("TenantId")], []));
         catalog.AddSecurityPredicate(new CatalogSecurityPredicate(
@@ -128,6 +131,7 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void PredicateFunctionCalledWithNoColumnArgument_NeverGuesses()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "T", [Column("Id"), Column("TenantId")], []));
         catalog.AddSecurityPredicate(new CatalogSecurityPredicate(
@@ -151,6 +155,7 @@ public sealed class SecurityPredicateIndexScannerTests
     [Fact]
     public void AtLeastOneBoundColumnIndexed_OtherUnindexedColumnStillDoesNotFireAlone()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "T", [Column("Id"), Column("TenantId"), Column("RegionId")],
@@ -162,7 +167,7 @@ public sealed class SecurityPredicateIndexScannerTests
         Assert.Empty(SecurityPredicateIndexScanner.Scan(catalog));
     }
 
-[Fact]
+    [Fact]
     public async Task LiveDeployment_UnindexedFilterPredicateColumn_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

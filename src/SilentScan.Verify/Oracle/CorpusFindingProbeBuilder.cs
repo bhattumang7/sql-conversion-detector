@@ -6,7 +6,7 @@ namespace SilentScan.Verify.Oracle;
 
 public static class CorpusFindingProbeBuilder
 {
-public static string? Build(TypedPredicateFinding finding, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments = null)
+    public static string? Build(TypedPredicateFinding finding, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments = null)
     {
         var table = FormatTableReference(finding.Column.ImmediateRelationQualifiedName ?? finding.Column.TableQualifiedName, functionArguments);
         var column = Bracket(finding.Column.ImmediateColumnName ?? finding.Column.ColumnName);
@@ -33,7 +33,7 @@ public static string? Build(TypedPredicateFinding finding, IReadOnlyDictionary<s
         return scaffolding is null ? probeBody : scaffolding + probeBody;
     }
 
-private static string? FormatTableReference(string qualifiedName, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments)
+    private static string? FormatTableReference(string qualifiedName, IReadOnlyDictionary<string, IReadOnlyList<SqlType>>? functionArguments)
     {
         var bracketed = BracketQualifiedName(qualifiedName);
         if (functionArguments is null || !functionArguments.TryGetValue(qualifiedName, out var parameterTypes))
@@ -56,8 +56,9 @@ private static string? FormatTableReference(string qualifiedName, IReadOnlyDicti
         return $"{bracketed}({string.Join(", ", arguments)})";
     }
 
-private static string? BuildTempTableScaffolding(TypedPredicateFinding finding)
+    private static string? BuildTempTableScaffolding(TypedPredicateFinding finding)
     {
+
         var tables = new List<(string QualifiedName, List<(string ColumnName, SqlType Type)> Columns)>();
 
         AddTempTableColumn(
@@ -90,6 +91,7 @@ private static string? BuildTempTableScaffolding(TypedPredicateFinding finding)
     private static void AddTempTableColumn(
         string qualifiedName, string columnName, SqlType? type, List<(string QualifiedName, List<(string ColumnName, SqlType Type)> Columns)> tables)
     {
+
         if (!qualifiedName.StartsWith('#') || type is null || SqlTypeSyntaxFormatter.Format(type) is null)
         {
             return;
@@ -114,6 +116,7 @@ private static string? BuildTempTableScaffolding(TypedPredicateFinding finding)
     {
         if (operand.IsLiteral)
         {
+
             return operand.LiteralText is { } literalText
                 ? $"SELECT 1 FROM {table} WHERE {column} {op} {literalText};"
                 : null;

@@ -39,7 +39,7 @@ public static partial class GoBatchSplitter
         return batches;
     }
 
-public static IReadOnlyList<(int Start, int Length, string Text)> SplitWithSpans(string script)
+    public static IReadOnlyList<(int Start, int Length, string Text)> SplitWithSpans(string script)
     {
         var spans = new List<(int Start, int Length, string Text)>();
         var state = LexState.Default;
@@ -151,7 +151,7 @@ public static IReadOnlyList<(int Start, int Length, string Text)> SplitWithSpans
         }
     }
 
-private static (string Line, LexState EndState, int EndCommentDepth) ScanLine(string line, LexState startState, int startCommentDepth)
+    private static (string Line, LexState EndState, int EndCommentDepth) ScanLine(string line, LexState startState, int startCommentDepth)
     {
         var state = startState;
         var commentDepth = startCommentDepth;
@@ -196,13 +196,14 @@ private static (string Line, LexState EndState, int EndCommentDepth) ScanLine(st
 
         if (i + 1 < line.Length && line[i] == '-' && line[i + 1] == '-')
         {
+
             return (line.Length, LexState.Default, 0);
         }
 
         return (i + 1, LexState.Default, 0);
     }
 
-private static (int NextIndex, LexState NextState, int CommentDepth) ScanInDelimited(string line, int i, char delimiter, LexState inState)
+    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInDelimited(string line, int i, char delimiter, LexState inState)
     {
         if (line[i] != delimiter)
         {
@@ -214,7 +215,7 @@ private static (int NextIndex, LexState NextState, int CommentDepth) ScanInDelim
             : (i + 1, LexState.Default, 0);
     }
 
-private static (int NextIndex, LexState NextState, int CommentDepth) ScanInBracket(string line, int i)
+    private static (int NextIndex, LexState NextState, int CommentDepth) ScanInBracket(string line, int i)
     {
         if (line[i] != ']')
         {

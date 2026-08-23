@@ -58,6 +58,7 @@ public sealed class CrossTableTypeDriftScannerTests
     {
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", "CustomerId", new SqlType(SqlTypeCategory.Int)));
+
         catalog.AddForeignKey(new ForeignKeyRelationship("FK_Test", "dbo.Orders", "CustomerId", "dbo.Customers", "CustomerId"));
 
         var findings = CrossTableTypeDriftScanner.Scan(catalog);

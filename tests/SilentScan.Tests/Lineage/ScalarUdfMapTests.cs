@@ -139,6 +139,7 @@ public sealed class ScalarUdfMapTests
     [Fact]
     public void MultiStatementTvfBody_IsNeverACarrier()
     {
+
         var (catalog, views) = Build("""
             CREATE FUNCTION dbo.fn_Compute(@x INT)
             RETURNS INT
@@ -193,6 +194,7 @@ public sealed class ScalarUdfMapTests
     [Fact]
     public void ViewSelectingFromInlineTvfThatCallsScalarUdf_InheritsTheCarrierFlag()
     {
+
         var (catalog, views) = Build("""
             CREATE FUNCTION dbo.fn_Compute(@x INT)
             RETURNS INT

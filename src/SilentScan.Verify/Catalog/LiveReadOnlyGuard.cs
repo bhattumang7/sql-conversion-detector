@@ -6,7 +6,7 @@ namespace SilentScan.Verify.Catalog;
 
 public static class LiveReadOnlyGuard
 {
-public const int DefaultCommandTimeoutSeconds = 300;
+    public const int DefaultCommandTimeoutSeconds = 300;
 
     public static void AssertSelectOnly(string sql)
     {
@@ -19,7 +19,7 @@ public const int DefaultCommandTimeoutSeconds = 300;
         }
     }
 
-public static void AssertDescribeFirstResultSetProbeOnly(string sql)
+    public static void AssertDescribeFirstResultSetProbeOnly(string sql)
     {
         var statements = ParseSingleBatch(sql);
         var disallowed = statements.FirstOrDefault(s => s is not SelectStatement
@@ -43,7 +43,7 @@ public static void AssertDescribeFirstResultSetProbeOnly(string sql)
         return batches.SelectMany(b => b.Statements);
     }
 
-public static SqlCommand CreateReadOnlyCommand(
+    public static SqlCommand CreateReadOnlyCommand(
         this SqlConnection connection,
         string commandText,
         int commandTimeoutSeconds = DefaultCommandTimeoutSeconds)

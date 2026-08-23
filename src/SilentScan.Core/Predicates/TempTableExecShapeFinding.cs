@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum TempTableExecShapeFindingKind
 {
-ColumnCountMismatch,
+    ColumnCountMismatch,
 
-ColumnTypeMismatch,
+    ColumnTypeMismatch,
 }
 
 public sealed record TempTableExecShapeFinding(

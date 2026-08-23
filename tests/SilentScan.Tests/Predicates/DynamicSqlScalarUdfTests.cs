@@ -60,6 +60,7 @@ public sealed class DynamicSqlScalarUdfTests
         Assert.Equal(ScalarUdfFindingKind.PredicateInvocation, finding.Kind);
         Assert.Equal("dbo.fn_IsActive", finding.FunctionQualifiedName);
         Assert.Equal("app.sql", finding.SourcePath);
+
         Assert.Equal(5, finding.Line);
         Assert.NotNull(finding.DynamicSqlCallSite);
         Assert.Equal(4, finding.DynamicSqlCallSite!.Value.Line);

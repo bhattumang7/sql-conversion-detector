@@ -5,7 +5,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class IdentityRangeScanner
 {
-public const decimal NearExhaustionRemainingFraction = 0.9m;
+    public const decimal NearExhaustionRemainingFraction = 0.9m;
 
     public static IReadOnlyList<IdentityRangeFinding> Scan(DatabaseCatalog catalog)
     {
@@ -39,7 +39,7 @@ public const decimal NearExhaustionRemainingFraction = 0.9m;
         ];
     }
 
-private static void ScanSeedOrIncrementAnomaly(CatalogTable table, CatalogColumn column, List<IdentityRangeFinding> findings)
+    private static void ScanSeedOrIncrementAnomaly(CatalogTable table, CatalogColumn column, List<IdentityRangeFinding> findings)
     {
         var seed = column.IdentitySeed;
         var increment = column.IdentityIncrement;
@@ -61,13 +61,14 @@ private static void ScanSeedOrIncrementAnomaly(CatalogTable table, CatalogColumn
             FindingConfidence.Low));
     }
 
-private static void ScanNearExhaustion(CatalogTable table, CatalogColumn column, List<IdentityRangeFinding> findings)
+    private static void ScanNearExhaustion(CatalogTable table, CatalogColumn column, List<IdentityRangeFinding> findings)
     {
         if (column.IdentityCurrentValue is not { } current
             || column.IdentitySeed is not { } seed
             || column.Type is not { } type
             || TypeBound(type, ascending: column.IdentityIncrement is not { } inc || inc >= 0) is not { } bound)
         {
+
             return;
         }
 
@@ -93,12 +94,13 @@ private static void ScanNearExhaustion(CatalogTable table, CatalogColumn column,
             table.SourceLine));
     }
 
-private static decimal? TypeBound(SqlType type, bool ascending) => type.Category switch
+    private static decimal? TypeBound(SqlType type, bool ascending) => type.Category switch
     {
         SqlTypeCategory.TinyInt => ascending ? 255m : 0m,
         SqlTypeCategory.SmallInt => ascending ? 32_767m : -32_768m,
         SqlTypeCategory.Int => ascending ? 2_147_483_647m : -2_147_483_648m,
         SqlTypeCategory.BigInt => ascending ? 9_223_372_036_854_775_807m : -9_223_372_036_854_775_808m,
+
         SqlTypeCategory.Decimal when type is { Precision: { } precision, Scale: 0 } =>
             ascending ? DecimalMax(precision) : -DecimalMax(precision),
         _ => null,

@@ -45,6 +45,7 @@ public static class PredicateSurvivalAnalyzer
 
                 if (neverTrue)
                 {
+
                     var alwaysFalse = verdicts.Any(v => v.AlwaysFalse) || (contradiction && contradictionColumnConfirmedNotNull);
                     return (true, false, alwaysFalse);
                 }
@@ -122,7 +123,7 @@ public static class PredicateSurvivalAnalyzer
         _ => false,
     };
 
-private static void MarkDead(BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts, HashSet<TSqlFragment> dead)
+    private static void MarkDead(BooleanExpression node, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts, HashSet<TSqlFragment> dead)
     {
         var (neverTrue, alwaysTrue, _) = Classify(node, resolveColumnFacts);
         if (neverTrue || alwaysTrue)
@@ -156,10 +157,12 @@ private static void MarkDead(BooleanExpression node, Func<ColumnReferenceExpress
                 break;
 
             case BooleanNotExpression:
+
                 break;
 
             default:
-                break;        }
+                break;
+        }
     }
 
     private static List<BooleanExpression> Flatten(BooleanExpression node, BooleanBinaryExpressionType type)
@@ -187,7 +190,7 @@ private static void MarkDead(BooleanExpression node, Func<ColumnReferenceExpress
         return result;
     }
 
-private static void MarkAllLeavesDead(BooleanExpression node, HashSet<TSqlFragment> dead)
+    private static void MarkAllLeavesDead(BooleanExpression node, HashSet<TSqlFragment> dead)
     {
         switch (node)
         {
@@ -214,6 +217,7 @@ private static void MarkAllLeavesDead(BooleanExpression node, HashSet<TSqlFragme
             && TryGetNumericLiteral(between.ThirdExpression) is { } upper
             && lower > upper)
         {
+
             var alwaysFalse = between.FirstExpression is ColumnReferenceExpression colRef
                 && resolveColumnFacts(colRef).IsNotNull == true;
             return (true, false, alwaysFalse);
@@ -222,7 +226,7 @@ private static void MarkAllLeavesDead(BooleanExpression node, HashSet<TSqlFragme
         return (false, false, false);
     }
 
-private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonExpression cmp)
+    private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonExpression cmp)
     {
         var op = ToCmpOp(cmp.ComparisonType);
         if (op is null)
@@ -272,7 +276,8 @@ private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonEx
     {
         CmpOp.Eq => string.Equals(a, b, StringComparison.Ordinal),
         CmpOp.Ne => !string.Equals(a, b, StringComparison.Ordinal),
-        _ => null,    };
+        _ => null,
+    };
 
     private static CmpOp? ToCmpOp(BooleanComparisonType type) => type switch
     {
@@ -282,6 +287,7 @@ private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonEx
         BooleanComparisonType.LessThanOrEqualTo or BooleanComparisonType.NotGreaterThan => CmpOp.Le,
         BooleanComparisonType.GreaterThan => CmpOp.Gt,
         BooleanComparisonType.GreaterThanOrEqualTo or BooleanComparisonType.NotLessThan => CmpOp.Ge,
+
         _ => null,
     };
 
@@ -306,6 +312,7 @@ private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonEx
         IntegerLiteral lit => ParseDecimal(lit.Value),
         NumericLiteral lit => ParseDecimal(lit.Value),
         MoneyLiteral lit => ParseDecimal(lit.Value),
+
         UnaryExpression { UnaryExpressionType: UnaryExpressionType.Negative } unary =>
             TryGetNumericLiteral(unary.Expression) is { } v ? -v : null,
         UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary =>
@@ -345,11 +352,12 @@ private static (bool, bool, bool) ClassifyConstantComparison(BooleanComparisonEx
     }
 
     private static (decimal? Numeric, string? Str) TryGetLiteralValue(ScalarExpression expr) =>
+
         expr is NullLiteral ? (null, null) : (TryGetNumericLiteral(expr), TryGetStringLiteral(expr));
 
     private static bool HasLiteralValue((decimal? Numeric, string? Str) value) => value.Numeric is not null || value.Str is not null;
 
-private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
+    private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
         IReadOnlyList<BooleanExpression> conjuncts, Func<ColumnReferenceExpression, ColumnFacts> resolveColumnFacts)
     {
         foreach (var leaves in GroupByColumn(conjuncts).Select(group => group.Value))
@@ -406,6 +414,7 @@ private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
             var notNullSeen = leaves.Any(c => c.IsNotNull);
             if (nullSeen && notNullSeen)
             {
+
                 return true;
             }
 
@@ -472,7 +481,7 @@ private static (bool Found, bool ColumnConfirmedNotNull) DetectContradiction(
 
     private readonly record struct GroupedLeaf(bool IsNull, bool IsNotNull, LiteralConstraint? Constraint, ColumnReferenceExpression ColumnRef);
 
-private static Dictionary<ColumnKey, List<GroupedLeaf>> GroupByColumn(IReadOnlyList<BooleanExpression> members)
+    private static Dictionary<ColumnKey, List<GroupedLeaf>> GroupByColumn(IReadOnlyList<BooleanExpression> members)
     {
         var groups = new Dictionary<ColumnKey, List<GroupedLeaf>>();
 

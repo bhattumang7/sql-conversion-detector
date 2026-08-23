@@ -7,10 +7,10 @@ namespace SilentScan.Live.Catalog;
 
 public static class LiveDescribeProbeBuilder
 {
-public static string BuildViewProbe(string qualifiedName) =>
+    public static string BuildViewProbe(string qualifiedName) =>
         $"SELECT * FROM {BracketQualifiedName(qualifiedName)};";
 
-public static (string? Probe, string? UnrenderableReason) BuildFunctionProbe(
+    public static (string? Probe, string? UnrenderableReason) BuildFunctionProbe(
         string qualifiedName, IReadOnlyList<FunctionParameterSpec> parameters)
     {
         var arguments = new List<string>(parameters.Count);
@@ -33,7 +33,7 @@ public static (string? Probe, string? UnrenderableReason) BuildFunctionProbe(
         return ($"SELECT * FROM {BracketQualifiedName(qualifiedName)}({string.Join(", ", arguments)});", null);
     }
 
-public static (string? Probe, string? UnrenderableReason) BuildProcedureProbe(
+    public static (string? Probe, string? UnrenderableReason) BuildProcedureProbe(
         string qualifiedName, IReadOnlyList<ProcedureParameterSpec> parameters)
     {
         foreach (var parameter in parameters)

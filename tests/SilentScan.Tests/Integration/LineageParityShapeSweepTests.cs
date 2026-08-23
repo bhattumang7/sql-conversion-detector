@@ -688,7 +688,7 @@ public sealed class LineageParityShapeSweepTests
         Assert.Empty(result.LineageParity.Mismatches);
     }
 
-[Fact]
+    [Fact]
     public async Task DeliberatelyWrongInferredType_IsReportedAsAMismatch()
     {
         const string sql = """

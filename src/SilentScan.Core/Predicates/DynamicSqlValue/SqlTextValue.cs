@@ -8,24 +8,25 @@ public sealed record GuardedAlternative(string GuardText, SqlTextValue.Template 
 
 public abstract record SqlTextValue
 {
-public SqlType? DeclaredType { get; init; }
+    public SqlType? DeclaredType { get; init; }
 
-public IReadOnlyList<GuardedAlternative>? GuardedAlternatives { get; init; }
+    public IReadOnlyList<GuardedAlternative>? GuardedAlternatives { get; init; }
 
     public sealed record Template(IReadOnlyList<TemplatePiece> Pieces) : SqlTextValue;
 
     public sealed record Tainted(string Reason, SourceSpan Location) : SqlTextValue;
 
-public const string CardinalityCapReason = "diverges-across-if-branches:cardinality-cap";
+    public const string CardinalityCapReason = "diverges-across-if-branches:cardinality-cap";
 
-public const string DivergesInControlFlowGraphReason = "diverges-in-control-flow-graph";
+    public const string DivergesInControlFlowGraphReason = "diverges-in-control-flow-graph";
 
-public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
+    public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
     {
         if (a is Tainted taintedA)
         {
             if (taintedA.GuardedAlternatives is { Count: > 0 } alternatives && b is Template)
             {
+
                 var extended = alternatives.Select(alt => alt with { Value = WithoutOwnAlternatives((Template)Concat(alt.Value, b)) }).ToList();
                 return taintedA with { GuardedAlternatives = extended };
             }
@@ -42,6 +43,7 @@ public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
         {
             if (taintedB.GuardedAlternatives is { Count: > 0 } alternativesB && a is Template)
             {
+
                 var extended = alternativesB.Select(alt => alt with { Value = WithoutOwnAlternatives((Template)Concat(a, alt.Value)) }).ToList();
                 return taintedB with { GuardedAlternatives = extended };
             }
@@ -82,9 +84,9 @@ public static SqlTextValue Concat(SqlTextValue a, SqlTextValue b)
         return (Template)combined;
     }
 
-public const int MaxGuardedAlternatives = 8;
+    public const int MaxGuardedAlternatives = 8;
 
-public static SqlTextValue WithGuardedAlternative(SqlTextValue value, string guardText, Template branchValue)
+    public static SqlTextValue WithGuardedAlternative(SqlTextValue value, string guardText, Template branchValue)
     {
         var existing = value.GuardedAlternatives ?? [];
         var combined = existing.Where(a => !string.Equals(a.GuardText, guardText, StringComparison.Ordinal)).ToList();
@@ -102,7 +104,7 @@ public static SqlTextValue WithGuardedAlternative(SqlTextValue value, string gua
         };
     }
 
-private static Tainted MergeAlternatives(Tainted a, Tainted b)
+    private static Tainted MergeAlternatives(Tainted a, Tainted b)
     {
         var merged = (SqlTextValue)a;
         var ownGuards = new HashSet<string>((a.GuardedAlternatives ?? []).Select(alt => alt.GuardText), StringComparer.Ordinal);
@@ -114,10 +116,10 @@ private static Tainted MergeAlternatives(Tainted a, Tainted b)
         return (Tainted)merged;
     }
 
-private static Template WithoutOwnAlternatives(Template template) =>
+    private static Template WithoutOwnAlternatives(Template template) =>
         template.GuardedAlternatives is { Count: > 0 } ? template with { GuardedAlternatives = null } : template;
 
-public static SqlTextValue Join(SqlTextValue a, SqlTextValue b, string guardText, int cap, SourceSpan at)
+    public static SqlTextValue Join(SqlTextValue a, SqlTextValue b, string guardText, int cap, SourceSpan at)
     {
         if (StructurallyEqual(a, b))
         {
@@ -149,10 +151,11 @@ public static SqlTextValue Join(SqlTextValue a, SqlTextValue b, string guardText
             (Tainted onlyA, Template bOnly) => WithGuardedAlternative(onlyA with { DeclaredType = carriedType }, guardText, bOnly),
             (Template aOnly, Tainted onlyB) => WithGuardedAlternative(onlyB with { DeclaredType = carriedType }, guardText, aOnly),
             (Tainted bothTaintedA, Tainted bothTaintedB) => MergeAlternatives(bothTaintedA with { DeclaredType = carriedType }, bothTaintedB),
-            _ => new Tainted(DivergesInControlFlowGraphReason, at) { DeclaredType = carriedType },        };
+            _ => new Tainted(DivergesInControlFlowGraphReason, at) { DeclaredType = carriedType },
+        };
     }
 
-private static Template MergeAsChoice(Template a, Template b, string guardText)
+    private static Template MergeAsChoice(Template a, Template b, string guardText)
     {
         var aAlternatives = AsChoiceAlternatives(a, guardText);
         var bAlternatives = AsChoiceAlternatives(b, guardText);
@@ -173,14 +176,14 @@ private static Template MergeAsChoice(Template a, Template b, string guardText)
             ? choice.Alternatives
             : null;
 
-public static bool StructurallyEqual(SqlTextValue a, SqlTextValue b) => (a, b) switch
+    public static bool StructurallyEqual(SqlTextValue a, SqlTextValue b) => (a, b) switch
     {
         (Tainted x, Tainted y) => x.Reason == y.Reason && x.Location.Equals(y.Location) && x.DeclaredType == y.DeclaredType && GuardedAlternativesEqual(x.GuardedAlternatives, y.GuardedAlternatives),
         (Template x, Template y) => x.DeclaredType == y.DeclaredType && PiecesEqual(x.Pieces, y.Pieces) && GuardedAlternativesEqual(x.GuardedAlternatives, y.GuardedAlternatives),
         _ => false,
     };
 
-private static bool GuardedAlternativesEqual(IReadOnlyList<GuardedAlternative>? a, IReadOnlyList<GuardedAlternative>? b)
+    private static bool GuardedAlternativesEqual(IReadOnlyList<GuardedAlternative>? a, IReadOnlyList<GuardedAlternative>? b)
     {
         if (a is null or { Count: 0 } && b is null or { Count: 0 })
         {
@@ -210,7 +213,7 @@ private static bool GuardedAlternativesEqual(IReadOnlyList<GuardedAlternative>? 
     private static bool AlternativesEqual(IReadOnlyList<Template> a, IReadOnlyList<Template> b) =>
         a.Count == b.Count && a.Zip(b, StructurallyEqual).All(equal => equal);
 
-public static SqlTextValue Widen(SqlTextValue value, int cap, SourceSpan at)
+    public static SqlTextValue Widen(SqlTextValue value, int cap, SourceSpan at)
     {
         if (value is Tainted)
         {
@@ -254,11 +257,11 @@ public static SqlTextValue Widen(SqlTextValue value, int cap, SourceSpan at)
             : new Tainted(CardinalityCapReason, at) { DeclaredType = value.DeclaredType };
     }
 
-public const string ExpansionSizeCapReason = "expanded-assembly-size-cap";
+    public const string ExpansionSizeCapReason = "expanded-assembly-size-cap";
 
-public const long MaxExpandedPieceTotal = 1L << 20;
+    public const long MaxExpandedPieceTotal = 1L << 20;
 
-public static long ExpandedPieceTotal(Template template)
+    public static long ExpandedPieceTotal(Template template)
     {
         long count = 1;
         long total = 0;
@@ -286,7 +289,7 @@ public static long ExpandedPieceTotal(Template template)
         return total;
     }
 
-public static long ExpansionCount(Template template)
+    public static long ExpansionCount(Template template)
     {
         long count = 1;
         foreach (var piece in template.Pieces)
@@ -300,7 +303,7 @@ public static long ExpansionCount(Template template)
         return count;
     }
 
-public static IReadOnlyList<IReadOnlyList<FlatPiece>> Expand(Template template, int maxAssemblies)
+    public static IReadOnlyList<IReadOnlyList<FlatPiece>> Expand(Template template, int maxAssemblies)
     {
         var assemblies = new List<List<FlatPiece>> { new() };
 
@@ -329,7 +332,7 @@ public static IReadOnlyList<IReadOnlyList<FlatPiece>> Expand(Template template, 
         return assemblies;
     }
 
-private static List<List<FlatPiece>> ForkAssemblies(List<List<FlatPiece>> assemblies, TemplatePiece.Choice choice, int maxAssemblies)
+    private static List<List<FlatPiece>> ForkAssemblies(List<List<FlatPiece>> assemblies, TemplatePiece.Choice choice, int maxAssemblies)
     {
         var forked = new List<List<FlatPiece>>();
         foreach (var prefix in assemblies)
@@ -351,7 +354,7 @@ private static List<List<FlatPiece>> ForkAssemblies(List<List<FlatPiece>> assemb
 
     public static bool ContainsHole(IReadOnlyList<FlatPiece> assembly) => assembly.Any(p => p is FlatPiece.Hole);
 
-public static SqlType? TryGetUniformType(SqlTextValue a, SqlTextValue b) => TryGetUniformType([a, b]);
+    public static SqlType? TryGetUniformType(SqlTextValue a, SqlTextValue b) => TryGetUniformType([a, b]);
 
     public static SqlType? TryGetUniformType(IEnumerable<SqlTextValue> values)
     {

@@ -62,6 +62,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
     [Fact]
     public async Task ComputedColumnBuiltInFunctionExpression_ClassifiesInsteadOfStayingUnknown()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync(BuiltinFunctionSql, "SQL_Latin1_General_CP1_CI_AS");
 
         Assert.Empty(report.TypedFindings);
@@ -71,6 +72,7 @@ public sealed class ComputedColumnPipelineTests : OracleTestFixture
     [Fact]
     public async Task IsNullExpression_TypesIdenticallyWhetherAsPredicateOperandOrViewColumn_OracleConfirmed()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync(IsNullParitySql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");

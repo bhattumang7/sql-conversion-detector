@@ -141,6 +141,7 @@ public static class FormattingScanner
 
         public override void ExplicitVisit(BeginEndBlockStatement node)
         {
+
             if (node.StatementList is not null)
             {
                 CheckStatements(node.StatementList.Statements);
@@ -189,6 +190,7 @@ public static class FormattingScanner
         {
             if (node.Expression is BooleanParenthesisExpression)
             {
+
                 Findings.Add(new FormattingFinding(
                     FormattingFindingKind.RedundantParentheses, _currentModule, sourcePath, node.StartLine, node.StartColumn));
             }
@@ -278,6 +280,7 @@ public static class FormattingScanner
         {
             if (body is null or BeginEndBlockStatement or IfStatement)
             {
+
                 return;
             }
 

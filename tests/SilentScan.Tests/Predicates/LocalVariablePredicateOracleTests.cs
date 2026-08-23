@@ -61,6 +61,7 @@ public sealed class LocalVariablePredicateOracleTests : OracleTestFixture
 
     private static double ExtractEstimateRows(string planXml)
     {
+
         const string Marker = "EstimateRows=\"";
         var start = planXml.IndexOf(Marker, StringComparison.Ordinal);
         Assert.True(start >= 0, "expected the plan XML to contain an EstimateRows attribute.");

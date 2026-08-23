@@ -44,6 +44,7 @@ public sealed class SarifReportWriterTests
             + report.BareTopNoOrderByFindings.Count
             + report.StringConcatNullFindings.Count
             + report.AggregateDivisionColumnstoreFindings.Count
+
             + report.DatabaseConfigurationFindings.Count;
         Assert.Equal(expectedCount, results.GetArrayLength());
         Assert.True(expectedCount > 0);
@@ -163,6 +164,7 @@ public sealed class SarifReportWriterTests
     [Fact]
     public void Write_ScanForcedFindingOnUnindexedColumn_DowngradesToWarningLevel()
     {
+
         var report = new ScanReport(
             new ParseHealthReport([]),
             [],

@@ -29,7 +29,7 @@ public static class PostExpansionJoinWidthScanner
     {
         public List<PostExpansionJoinWidthFinding> Findings { get; } = [];
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -68,6 +68,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
                 var qualifiedName = entry.Relation.QualifiedName;
                 if (qualifiedName is null)
                 {
+
                     partiallyUnexpanded = true;
                     continue;
                 }

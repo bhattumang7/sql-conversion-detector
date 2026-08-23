@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum ModuleCompileFlagFindingKind
 {
-RecompilesEveryCall,
+    RecompilesEveryCall,
 
-TableValuedFunctionReturnUsesDatabaseCollation,
+    TableValuedFunctionReturnUsesDatabaseCollation,
 }
 
 public sealed record ModuleCompileFlagFinding(

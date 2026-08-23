@@ -17,6 +17,7 @@ public sealed class IndexAccessDetectorTests
     [Fact]
     public void HasIndexSeek_RealSeekPlanFragment_ReturnsTrue()
     {
+
         var xml = Wrap("""
             <RelOp PhysicalOp="Index Seek" LogicalOp="Index Seek">
               <IndexScan>
@@ -31,6 +32,7 @@ public sealed class IndexAccessDetectorTests
     [Fact]
     public void HasIndexSeek_RealScanPlanFragmentAgainstSameIndex_ReturnsFalse()
     {
+
         var xml = Wrap("""
             <RelOp PhysicalOp="Index Scan" LogicalOp="Index Scan">
               <IndexScan Ordered="0">

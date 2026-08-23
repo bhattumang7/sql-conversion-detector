@@ -10,6 +10,7 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
     [Fact]
     public void ThreeRoundOutputChain_EnumeratesSourceNoMoreThanASingleRoundWould()
     {
+
         const string Sql = """
             CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);
             GO
@@ -49,7 +50,7 @@ public sealed class ScanReportBuilderDynamicSqlReparseTests
             $"expected the source to be enumerated a small, round-count-independent number of times (measured: 51 with every fix/stream landed to date), but it was enumerated {countingSource.EnumerationCount} time(s) - the dynamic-SQL fixpoint loop likely regressed back to reparsing the corpus fresh on every round instead of materializing once and reusing it across rounds.");
     }
 
-private sealed class EnumerationCountingSource(IReadOnlyList<SqlParseResult> items) : IEnumerable<SqlParseResult>
+    private sealed class EnumerationCountingSource(IReadOnlyList<SqlParseResult> items) : IEnumerable<SqlParseResult>
     {
         public int EnumerationCount { get; private set; }
 

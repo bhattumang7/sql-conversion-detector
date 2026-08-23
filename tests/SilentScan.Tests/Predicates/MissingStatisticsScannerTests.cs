@@ -78,6 +78,7 @@ public sealed class MissingStatisticsScannerTests
     [Fact]
     public void AutoCreateStatsOff_PredicateColumnIsNonLeadingKeyOfMultiColumnStatistic_StillFires()
     {
+
         var statistics = new[] { new CatalogStatisticsInfo("IX_Region_Status", NoRecompute: false, IsAutoCreated: false, ["Region", "Status"]) };
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE Status = 5;", Catalog(isAutoCreateStatsOn: false, statistics));
 

@@ -28,6 +28,7 @@ public static class IndexCoverageScanner
 
         protected override void InspectStatement(ConstrainedStatement statement)
         {
+
             var allReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, allReferencedColumns);
             statement.Node.Accept(referenceVisitor);

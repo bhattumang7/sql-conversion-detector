@@ -15,5 +15,5 @@ public sealed record SqlParseResult(
 
     public bool HasErrors => Errors.Count > 0;
 
-public int BatchCount => Fragment is TSqlScript script ? script.Batches.Count : 0;
+    public int BatchCount => Fragment is TSqlScript script ? script.Batches.Count : 0;
 }

@@ -69,6 +69,7 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_BaseColumnWrongLength_ReportsLengthMismatch()
     {
+
         var lineage = Catalog(
             "dbo.vw_Orders", "OrderCode",
             new ColumnProvenance.BaseColumn("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 50, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))));
@@ -84,6 +85,7 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_CastProvenanceMatchesRealView_NoMismatch()
     {
+
         var lineage = Catalog(
             "dbo.vw_CastOrders", "OrderCode",
             new ColumnProvenance.Cast(
@@ -115,6 +117,7 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_SqlVariantBaseColumnMatchesRealCatalog_NoMismatch()
     {
+
         var lineage = Catalog(
             "dbo.vw_VariantOrders", "Attribute",
             new ColumnProvenance.BaseColumn("dbo.Orders", "Attribute", new SqlType(SqlTypeCategory.SqlVariant)));
@@ -127,6 +130,7 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_ExpressionProvenanceWithNoInferredType_SkipsRatherThanGuessing()
     {
+
         var lineage = Catalog(
             "dbo.vw_ExprOrders", "OrderCode",
             new ColumnProvenance.Expression(
@@ -159,6 +163,7 @@ public sealed class LineageParityCheckerTests : IAsyncLifetime
     [Fact]
     public async Task CheckAsync_NullInferredCollation_SkipsFacetRatherThanReportingMismatch()
     {
+
         var lineage = Catalog(
             "dbo.vw_Orders", "OrderCode",
             new ColumnProvenance.BaseColumn("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null)));

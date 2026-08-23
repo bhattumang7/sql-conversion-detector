@@ -4,21 +4,21 @@ namespace SilentScan.Core.Predicates;
 
 public enum CodeMetricFindingKind
 {
-LineTooLong,
+    LineTooLong,
 
-ModuleTooLong,
+    ModuleTooLong,
 
-RoutineTooLong,
+    RoutineTooLong,
 
-TooManyParameters,
+    TooManyParameters,
 
-NestingTooDeep,
+    NestingTooDeep,
 
-TooManyConditionalOperators,
+    TooManyConditionalOperators,
 
-TooManyCaseBranches,
+    TooManyCaseBranches,
 
-CaseBranchTooLong,
+    CaseBranchTooLong,
 }
 
 public sealed record CodeMetricFinding(

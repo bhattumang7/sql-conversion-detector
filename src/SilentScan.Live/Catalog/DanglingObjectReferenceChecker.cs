@@ -38,7 +38,7 @@ public sealed class DanglingObjectReferenceChecker
         return findings;
     }
 
-private static async Task<List<Candidate>> ReadCandidatesAsync(SqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<List<Candidate>> ReadCandidatesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT
@@ -76,7 +76,7 @@ private static async Task<List<Candidate>> ReadCandidatesAsync(SqlConnection con
         return candidates;
     }
 
-private static async Task<bool> IsStillUnresolvedLiveAsync(SqlConnection connection, Candidate candidate, CancellationToken cancellationToken)
+    private static async Task<bool> IsStillUnresolvedLiveAsync(SqlConnection connection, Candidate candidate, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT r.referenced_entity_name, r.referenced_schema_name
@@ -109,20 +109,23 @@ private static async Task<bool> IsStillUnresolvedLiveAsync(SqlConnection connect
         }
         catch (SqlException ex) when (ex.Number == 2020)
         {
+
         }
         catch (SqlException ex) when (ex.Number == 208)
         {
+
             stillUnresolved = ex.Message.Contains(candidate.ReferencedEntityName, StringComparison.OrdinalIgnoreCase);
         }
         catch (SqlException ex) when (ex.Number == 207)
         {
+
             stillUnresolved = ex.Message.Contains(candidate.ReferencedEntityName, StringComparison.OrdinalIgnoreCase);
         }
 
         return stillUnresolved;
     }
 
-private static string DescribeModuleType(string typeDesc) => typeDesc switch
+    private static string DescribeModuleType(string typeDesc) => typeDesc switch
     {
         "SQL_STORED_PROCEDURE" => "stored procedure",
         "VIEW" => "view",

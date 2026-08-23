@@ -21,6 +21,7 @@ public sealed class CorpusFindingVerifier
     public async Task<CorpusFindingResult> VerifyAsync(
         string database, TypedPredicateFinding finding, CancellationToken cancellationToken = default)
     {
+
         if (finding.Verdict == Verdict.Unknown)
         {
             return new CorpusFindingResult(finding, CorpusFindingOutcome.NotApplicable, "Verdict is Unknown - makes no claim for the oracle to confirm or refute.");
@@ -52,6 +53,7 @@ public sealed class CorpusFindingVerifier
 
         if (finding.Verdict == Verdict.SeekPreserved)
         {
+
             return columnConverts
                 ? new CorpusFindingResult(finding, CorpusFindingOutcome.NotConfirmed, DescribeMismatch(finding.Verdict, columnConverts: true, planXml, conversions))
                 : new CorpusFindingResult(finding, CorpusFindingOutcome.Confirmed, Detail: null);
@@ -64,6 +66,7 @@ public sealed class CorpusFindingVerifier
 
         if (finding.Verdict is not (Verdict.ScanForced or Verdict.RangeSeek))
         {
+
             return new CorpusFindingResult(finding, CorpusFindingOutcome.Confirmed, Detail: null);
         }
 
@@ -85,7 +88,7 @@ public sealed class CorpusFindingVerifier
             Detail: confirmed ? null : DescribeMismatch(finding.Verdict, columnConverts, planXml, conversions));
     }
 
-private async Task<CorpusFindingResult?> TryConfirmViaScratchIndexAsync(
+    private async Task<CorpusFindingResult?> TryConfirmViaScratchIndexAsync(
         string database, TypedPredicateFinding finding, string probe, CancellationToken cancellationToken)
     {
         var indexName = await _indexChecker.TryDeployScratchIndexAsync(
@@ -143,7 +146,7 @@ private async Task<CorpusFindingResult?> TryConfirmViaScratchIndexAsync(
             ? "Literal operand could not be reconstructed as SQL text; declined to substitute a parameter, which would misrepresent probe fidelity."
             : "Other operand's type could not be rendered as T-SQL syntax.";
 
-private async Task<IReadOnlyDictionary<string, IReadOnlyList<SqlType>>?> ResolveFunctionArgumentsAsync(
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<SqlType>>?> ResolveFunctionArgumentsAsync(
         string database, TypedPredicateFinding finding, CancellationToken cancellationToken)
     {
         Dictionary<string, IReadOnlyList<SqlType>>? result = null;

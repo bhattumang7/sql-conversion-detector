@@ -72,6 +72,7 @@ public sealed class SecurityScannerTests
     [Fact]
     public void VariableNameContainingPwdAsSubstringNotWholeWord_NeverFires()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -86,6 +87,7 @@ public sealed class SecurityScannerTests
     [Fact]
     public void VariableNameWithPwdAsWholeWord_NeverFires()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN

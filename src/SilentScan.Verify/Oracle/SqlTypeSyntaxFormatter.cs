@@ -5,7 +5,7 @@ namespace SilentScan.Verify.Oracle;
 
 public static class SqlTypeSyntaxFormatter
 {
-public static string? Format(SqlType type)
+    public static string? Format(SqlType type)
     {
         var keyword = CategoryKeyword(type.Category);
         if (keyword is null)
@@ -16,7 +16,7 @@ public static string? Format(SqlType type)
         return $"{keyword}{FormatFacet(type)}";
     }
 
-public static string FormatCollateClause(SqlType type) =>
+    public static string FormatCollateClause(SqlType type) =>
         type.Collation is { } c ? $" COLLATE {c.Name}" : string.Empty;
 
     private static string FormatFacet(SqlType type) => type.Category switch

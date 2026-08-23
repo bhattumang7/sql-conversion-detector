@@ -7,7 +7,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class CrossModuleLockOrderScanner
 {
-private sealed record ProcedureWriteOrder(
+    private sealed record ProcedureWriteOrder(
         string ProcedureQualifiedName, string SourcePath, int ProcedureLine, IReadOnlyList<(string TableQualifiedName, int Line)> Writes);
 
     public static IReadOnlyList<CrossModuleLockOrderFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
@@ -27,6 +27,7 @@ private sealed record ProcedureWriteOrder(
             {
                 if (string.Equals(procedures[i].ProcedureQualifiedName, procedures[j].ProcedureQualifiedName, StringComparison.OrdinalIgnoreCase))
                 {
+
                     continue;
                 }
 
@@ -57,6 +58,7 @@ private sealed record ProcedureWriteOrder(
                 var bYIndex = IndexOfTable(b.Writes, tableY.TableQualifiedName);
                 if (bXIndex < 0 || bYIndex < 0 || bXIndex < bYIndex)
                 {
+
                     continue;
                 }
 
@@ -91,7 +93,7 @@ private sealed record ProcedureWriteOrder(
         return -1;
     }
 
-private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
+    private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
         public List<ProcedureWriteOrder> Orderings { get; } = [];
 
@@ -115,6 +117,7 @@ private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlF
 
         public override void ExplicitVisit(CommitTransactionStatement node)
         {
+
 #pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
@@ -127,6 +130,7 @@ private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlF
 
         public override void ExplicitVisit(RollbackTransactionStatement node)
         {
+
 #pragma warning disable S2583
             if (_openTransactionDepth > 0)
             {
@@ -178,7 +182,7 @@ private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlF
             _writes = null;
         }
 
-private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
+        private void RecordWrite(TableReference? target, int line, WithCtesAndXmlNamespaces? withCtes)
         {
             if (_writes is null || _openTransactionDepth == 0 || target is not NamedTableReference named)
             {

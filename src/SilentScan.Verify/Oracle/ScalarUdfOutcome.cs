@@ -2,11 +2,11 @@ namespace SilentScan.Verify.Oracle;
 
 public enum ScalarUdfOutcome
 {
-Confirmed,
+    Confirmed,
 
-NotConfirmed,
+    NotConfirmed,
 
-NotProbeable,
+    NotProbeable,
 
-ProbeFailed,
+    ProbeFailed,
 }

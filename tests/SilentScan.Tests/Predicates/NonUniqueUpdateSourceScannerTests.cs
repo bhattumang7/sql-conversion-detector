@@ -53,6 +53,7 @@ public sealed class NonUniqueUpdateSourceScannerTests
     [Fact]
     public void UpdateThroughCteNamedLikeTheRealTargetTable_NeverFires()
     {
+
         var findings = Scan(
             "WITH TargetT AS (SELECT Id, Val FROM dbo.TargetT) " +
             "UPDATE t SET t.Val = s.Val FROM TargetT t JOIN dbo.SourceNonUnique s ON t.Id = s.TargetId;");
@@ -72,6 +73,7 @@ public sealed class NonUniqueUpdateSourceScannerTests
     [Fact]
     public void CompositeUniqueSuperset_JoinOnSubsetOnly_StillFires()
     {
+
         var findings = Scan(
             "UPDATE t SET t.Val = s.Val FROM dbo.TargetT t JOIN dbo.SourceCompositeUnique s ON t.Id = s.TargetId;");
 
@@ -81,6 +83,7 @@ public sealed class NonUniqueUpdateSourceScannerTests
     [Fact]
     public void SubsetOfCompositeJoin_UniqueOnSubsetAlone_NeverFires()
     {
+
         var findings = Scan(
             "UPDATE t SET t.Val = s.Val FROM dbo.TargetT t JOIN dbo.SourceUnique s ON t.Id = s.TargetId AND t.Val = s.Val;");
 
@@ -106,6 +109,7 @@ public sealed class NonUniqueUpdateSourceScannerTests
     [Fact]
     public void SelfJoin_NonUniqueSourceSide_Fires()
     {
+
         var findings = Scan(
             "UPDATE t1 SET t1.Val = t2.Val FROM dbo.TargetT t1 JOIN dbo.TargetT t2 ON t1.Id = t2.Val;");
 
@@ -136,6 +140,7 @@ public sealed class NonUniqueUpdateSourceScannerTests
     [Fact]
     public void IndirectJoinNotTouchingTarget_NeverFires()
     {
+
         var findings = Scan(
             "UPDATE t SET t.Val = b.Val FROM dbo.TargetT t JOIN dbo.SourceUnique a ON t.Id = a.TargetId JOIN dbo.SourceNonUnique b ON a.TargetId = b.TargetId;",
             extraDdl: "");

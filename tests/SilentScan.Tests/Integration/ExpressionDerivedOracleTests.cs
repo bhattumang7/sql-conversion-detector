@@ -47,6 +47,7 @@ public sealed class ExpressionDerivedOracleTests : IAsyncLifetime
     [Fact]
     public async Task DirectQueryOnBaseColumn_UsesIndexSeek()
     {
+
         var planXml = await _planXmlCapture.CaptureAsync(DatabaseName, "SELECT OrderId FROM dbo.Orders WHERE CustomerId = 5;");
 
         Assert.True(IndexAccessDetector.HasIndexSeek(planXml, IndexName));

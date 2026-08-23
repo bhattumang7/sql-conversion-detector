@@ -28,7 +28,7 @@ public static class IndexHintScanner
     {
         public List<IndexHintFinding> Findings { get; } = [];
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -100,7 +100,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
             }
         }
 
-private void InspectNamedTable(NamedTableReference namedTable, IReadOnlyDictionary<string, ScopeEntry> byAlias, HashSet<(string Table, string Column)> anyReferencedColumns)
+        private void InspectNamedTable(NamedTableReference namedTable, IReadOnlyDictionary<string, ScopeEntry> byAlias, HashSet<(string Table, string Column)> anyReferencedColumns)
         {
             var indexHints = namedTable.TableHints.OfType<IndexTableHint>().ToList();
             if (indexHints.Count == 0)
@@ -130,6 +130,7 @@ private void InspectNamedTable(NamedTableReference namedTable, IReadOnlyDictiona
         {
             foreach (var indexValue in hint.IndexValues)
             {
+
                 var hintedName = indexValue.Identifier?.Value;
                 if (hintedName is null)
                 {

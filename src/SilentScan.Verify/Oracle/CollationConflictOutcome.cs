@@ -2,9 +2,9 @@ namespace SilentScan.Verify.Oracle;
 
 public enum CollationConflictOutcome
 {
-Confirmed,
+    Confirmed,
 
-NotConfirmed,
+    NotConfirmed,
 
-ProbeFailed,
+    ProbeFailed,
 }

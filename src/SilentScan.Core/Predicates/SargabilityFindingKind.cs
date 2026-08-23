@@ -2,19 +2,19 @@ namespace SilentScan.Core.Predicates;
 
 public enum SargabilityFindingKind
 {
-FunctionWrappedColumn,
+    FunctionWrappedColumn,
 
-CastOrConvertOnColumn,
+    CastOrConvertOnColumn,
 
-ColumnArithmetic,
+    ColumnArithmetic,
 
-LeadingWildcardLike,
+    LeadingWildcardLike,
 
-LikePatternNotLiteral,
+    LikePatternNotLiteral,
 
-CaseFoldOnColumn,
+    CaseFoldOnColumn,
 
-DateFunctionOnColumn,
+    DateFunctionOnColumn,
 
-CharindexOrLeftOnColumn,
+    CharindexOrLeftOnColumn,
 }

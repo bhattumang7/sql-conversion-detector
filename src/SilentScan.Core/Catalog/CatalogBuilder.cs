@@ -10,7 +10,7 @@ public static class CatalogBuilder
 {
     private const string SpRenameConstructKind = "sp_rename";
 
-public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
+    public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
     {
         var catalog = new DatabaseCatalog();
         var results = parseResults as IReadOnlyList<SqlParseResult> ?? parseResults.ToList();
@@ -52,7 +52,7 @@ public static DatabaseCatalog Build(IEnumerable<SqlParseResult> parseResults, st
         }
     }
 
-private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
+    private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
     {
         var caseSensitive = new[] { catalog.DefaultCollation, catalog.TempdbCollation }
             .Where(c => c is { IsCaseSensitive: true })
@@ -68,7 +68,7 @@ private static void WarnIfCaseSensitive(DatabaseCatalog catalog)
         }
     }
 
-private static Collation? ResolveDefaultCollation(IReadOnlyList<SqlParseResult> results, string? manifestDeclaredCollation)
+    private static Collation? ResolveDefaultCollation(IReadOnlyList<SqlParseResult> results, string? manifestDeclaredCollation)
     {
         if (FindExplicitDatabaseCollation(results) is { } explicitName)
         {
@@ -80,7 +80,7 @@ private static Collation? ResolveDefaultCollation(IReadOnlyList<SqlParseResult> 
             : null;
     }
 
-private static string? FindExplicitDatabaseCollation(IReadOnlyList<SqlParseResult> results)
+    private static string? FindExplicitDatabaseCollation(IReadOnlyList<SqlParseResult> results)
     {
         string? found = null;
         foreach (var result in results)
@@ -116,7 +116,7 @@ private static string? FindExplicitDatabaseCollation(IReadOnlyList<SqlParseResul
         ApplyEverythingElse,
     }
 
-private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
+    private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPhase phase) : TSqlFragmentVisitor
     {
         private string? _currentScope;
 
@@ -130,7 +130,7 @@ private sealed class Visitor(DatabaseCatalog catalog, string sourcePath, BuildPh
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(CreateTypeTableStatement node)
+        public override void ExplicitVisit(CreateTypeTableStatement node)
         {
             if (phase == BuildPhase.CollectTypeAliases)
             {
@@ -151,7 +151,7 @@ public override void ExplicitVisit(CreateTypeTableStatement node)
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(CreateSynonymStatement node)
+        public override void ExplicitVisit(CreateSynonymStatement node)
         {
             if (phase == BuildPhase.CollectTypeAliases)
             {
@@ -302,7 +302,7 @@ public override void ExplicitVisit(CreateSynonymStatement node)
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(DropTableStatement node)
+        public override void ExplicitVisit(DropTableStatement node)
         {
             if (phase == BuildPhase.CollectTables)
             {
@@ -312,7 +312,7 @@ public override void ExplicitVisit(DropTableStatement node)
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(DropIndexStatement node)
+        public override void ExplicitVisit(DropIndexStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -322,7 +322,7 @@ public override void ExplicitVisit(DropIndexStatement node)
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(DropFunctionStatement node)
+        public override void ExplicitVisit(DropFunctionStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -338,7 +338,7 @@ public override void ExplicitVisit(DropFunctionStatement node)
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(ExecuteStatement node)
+        public override void ExplicitVisit(ExecuteStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -348,7 +348,7 @@ public override void ExplicitVisit(ExecuteStatement node)
             node.AcceptChildren(this);
         }
 
-public override void ExplicitVisit(UseStatement node)
+        public override void ExplicitVisit(UseStatement node)
         {
             if (phase == BuildPhase.ApplyEverythingElse)
             {
@@ -467,7 +467,7 @@ public override void ExplicitVisit(UseStatement node)
             _currentScope = previous;
         }
 
-private void RegisterTableValuedParameters(IList<ProcedureParameter> parameters)
+        private void RegisterTableValuedParameters(IList<ProcedureParameter> parameters)
         {
             foreach (var parameter in parameters)
             {
@@ -488,7 +488,7 @@ private void RegisterTableValuedParameters(IList<ProcedureParameter> parameters)
             }
         }
 
-private void RegisterProcedureParameters(IList<ProcedureParameter> parameters)
+        private void RegisterProcedureParameters(IList<ProcedureParameter> parameters)
         {
             var registered = new List<ProcedureParameterInfo>(parameters.Count);
             foreach (var parameter in parameters)
@@ -502,7 +502,7 @@ private void RegisterProcedureParameters(IList<ProcedureParameter> parameters)
             catalog.AddProcedureParameters(_currentScope!, registered);
         }
 
-private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name, FunctionReturnType returnType)
+        private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name, FunctionReturnType returnType)
         {
             if (phase == BuildPhase.ApplyEverythingElse && returnType is ScalarFunctionReturnType scalarReturn)
             {
@@ -641,6 +641,7 @@ private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name
                 var qualifiedName = SchemaObjectNameHelper.Qualify(target);
                 if (catalog.Find(qualifiedName, _currentScope) is null)
                 {
+
                     RecordUnresolvedTarget("DROP TABLE", qualifiedName, dropTable);
                     continue;
                 }
@@ -653,6 +654,7 @@ private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name
         {
             foreach (var clause in dropIndex.DropIndexClauses)
             {
+
                 var (tableName, indexName) = clause switch
                 {
                     DropIndexClause modern => (modern.Object, modern.Index.Value),
@@ -692,7 +694,7 @@ private void VisitFunctionBody(FunctionStatementBody node, SchemaObjectName name
             }
         }
 
-private void VisitPossibleSpRename(ExecuteStatement execute)
+        private void VisitPossibleSpRename(ExecuteStatement execute)
         {
             if (execute.ExecuteSpecification?.ExecutableEntity is not ExecutableProcedureReference
                 {
@@ -814,9 +816,9 @@ private void VisitPossibleSpRename(ExecuteStatement execute)
             catalog.AddOrReplace(existing with { Indexes = updatedIndexes }, writeScope);
         }
 
-private const string UnresolvableSchema = "\0unresolvable";
+        private const string UnresolvableSchema = "\0unresolvable";
 
-private static (string? Schema, string QualifiedName) SplitTableTarget(string name)
+        private static (string? Schema, string QualifiedName) SplitTableTarget(string name)
         {
             if (name.StartsWith('#'))
             {
@@ -832,7 +834,7 @@ private static (string? Schema, string QualifiedName) SplitTableTarget(string na
             };
         }
 
-private static (string Container, string Element) SplitLastSegment(string name)
+        private static (string Container, string Element) SplitLastSegment(string name)
         {
             var lastDot = name.LastIndexOf('.');
             return lastDot < 0 ? (name, name) : (name[..lastDot], name[(lastDot + 1)..]);
@@ -842,6 +844,7 @@ private static (string Container, string Element) SplitLastSegment(string name)
         {
             if (createTable.Definition is null)
             {
+
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, createTable.StartLine, createTable.StartColumn,
                     "CREATE TABLE", $"'{SchemaObjectNameHelper.Qualify(createTable.SchemaObjectName)}': no inline column list (CTAS / AS CLONE OF form) - column shape not modeled");
@@ -925,6 +928,7 @@ private static (string Container, string Element) SplitLastSegment(string name)
             var existingColumn = existing.FindColumn(columnName);
             if (existingColumn is null)
             {
+
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, alterColumn.StartLine, alterColumn.StartColumn,
                     "ALTER TABLE ALTER COLUMN", $"column '{columnName}' on '{qualifiedName}' not found in catalog");
@@ -1027,6 +1031,7 @@ private static (string Container, string Element) SplitLastSegment(string name)
             var body = declareTableVar.Body;
             if (body.Definition is null)
             {
+
                 catalog.Skipped.Record(
                     AnalysisPass.Catalog, sourcePath, declareTableVar.StartLine, declareTableVar.StartColumn,
                     "table variable", $"'{body.VariableName?.Value}' has no table definition to catalog");
@@ -1090,7 +1095,7 @@ private static (string Container, string Element) SplitLastSegment(string name)
             return indexes;
         }
 
-private static List<CatalogColumn> ApplyPrimaryKeyNotNull(List<CatalogColumn> columns, List<CatalogIndex> indexes)
+        private static List<CatalogColumn> ApplyPrimaryKeyNotNull(List<CatalogColumn> columns, List<CatalogIndex> indexes)
         {
             var primaryKeyColumns = indexes
                 .Where(i => i.Kind == CatalogIndexKind.PrimaryKey)
@@ -1106,7 +1111,7 @@ private static List<CatalogColumn> ApplyPrimaryKeyNotNull(List<CatalogColumn> co
         }
     }
 
-public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
+    public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
         TableDefinition definition, Collation? defaultCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null, string? sourcePath = null) =>
         BuildColumns(definition, defaultCollation, typeAliases, ledger, sourcePath).Columns;
 
@@ -1131,7 +1136,7 @@ public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
         return (columns, inlineIndexes);
     }
 
-private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath);
+    private readonly record struct ColumnBuildContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger, string? SourcePath);
 
     private static CatalogColumn BuildColumn(
         ColumnDefinition columnDefinition, ColumnBuildContext context,
@@ -1149,6 +1154,7 @@ private readonly record struct ColumnBuildContext(Collation? DefaultCollation, I
         var resolvedType = declaredType is null ? null : SqlTypeReferenceResolver.Resolve(declaredType, columnDefinition.Collation, context.TypeAliases);
         if (resolvedType is null && context.SourcePath is not null && declaredType is not null)
         {
+
             context.Ledger?.Record(
                 AnalysisPass.Catalog, context.SourcePath, columnDefinition.StartLine, columnDefinition.StartColumn,
                 "column type", $"column '{name}' has type '{SchemaObjectNameHelper.Qualify(declaredType.Name)}' which could not be resolved");
@@ -1156,6 +1162,7 @@ private readonly record struct ColumnBuildContext(Collation? DefaultCollation, I
 
         if (resolvedType is { IsStringFamily: true, Collation: null } && context.DefaultCollation is not null)
         {
+
             resolvedType = resolvedType with { Collation = context.DefaultCollation };
         }
 
@@ -1175,7 +1182,7 @@ private readonly record struct ColumnBuildContext(Collation? DefaultCollation, I
             EncryptionType: ResolveEncryptionType(columnDefinition.Encryption));
     }
 
-private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefinition? encryption) =>
+    private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefinition? encryption) =>
         encryption?.Parameters.OfType<ColumnEncryptionTypeParameter>().FirstOrDefault() is { } typeParameter
             ? typeParameter.EncryptionType switch
             {
@@ -1185,7 +1192,7 @@ private static ColumnEncryptionType ResolveEncryptionType(ColumnEncryptionDefini
             }
             : ColumnEncryptionType.None;
 
-private static List<CatalogColumn> ResolveComputedColumnTypes(
+    private static List<CatalogColumn> ResolveComputedColumnTypes(
         List<CatalogColumn> columns, Dictionary<string, ScalarExpression> computedExpressions, Dictionary<string, (int Line, int Column)> computedColumnLines, ColumnBuildContext context)
     {
         columns = ComputedColumnTypeResolver.ResolveAll(columns, computedExpressions, context.TypeAliases);
@@ -1214,7 +1221,7 @@ private static List<CatalogColumn> ResolveComputedColumnTypes(
         return columns;
     }
 
-private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes)
+    private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, string columnName, List<CatalogIndex> inlineIndexes)
     {
         var isNullable = true;
 
@@ -1251,7 +1258,7 @@ private static bool BuildColumnConstraints(ColumnDefinition columnDefinition, st
     private static bool IsColumnstoreIndexType(IndexType? indexType) =>
         indexType?.IndexTypeKind is IndexTypeKind.ClusteredColumnStore or IndexTypeKind.NonClusteredColumnStore;
 
-private static CatalogIndex BuildInlineIndex(IndexDefinition inlineIndex, string columnName) => new(
+    private static CatalogIndex BuildInlineIndex(IndexDefinition inlineIndex, string columnName) => new(
         inlineIndex.Name?.Value,
         CatalogIndexKind.Index,
         inlineIndex.Unique,

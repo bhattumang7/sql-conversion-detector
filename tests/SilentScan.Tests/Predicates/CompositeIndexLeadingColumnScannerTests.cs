@@ -56,6 +56,7 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     [Fact]
     public void PredicateOnLeadingColumnWithDifferentCasingThanDdl_StillSuppresses()
     {
+
         var findings = Scan("SELECT 1 FROM DBO.ORDERS WHERE Region = 1 AND Status = 5;", CatalogWithComposite());
 
         Assert.Empty(findings);
@@ -64,6 +65,7 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     [Fact]
     public void CteSharesNameWithIndexedBaseTable_NeverBindsToTheBaseTable()
     {
+
         var findings = Scan(
             "WITH Orders AS (SELECT 1 AS Region, 2 AS Status) SELECT 1 FROM Orders WHERE Status = 5;",
             CatalogWithComposite());
@@ -74,6 +76,7 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     [Fact]
     public void LeadingColumnReferencedOnlyInsideOrBranch_StillSuppresses()
     {
+
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE Status = 5 AND (Region = 1 OR Region = 2);", CatalogWithComposite());
 
         Assert.Empty(findings);
@@ -82,6 +85,7 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     [Fact]
     public void PredicateOnNonLeadingColumnOnlyReachableThroughOr_NeverFires()
     {
+
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE Status = 5 OR OrderId = 1;", CatalogWithComposite());
 
         Assert.Empty(findings);
@@ -99,6 +103,7 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     [Fact]
     public void SingleColumnIndex_NeverConsidered()
     {
+
         var findings = Scan("SELECT 1 FROM dbo.Orders WHERE OrderId = 5;", CatalogWithComposite());
 
         Assert.Empty(findings);
@@ -147,6 +152,7 @@ public sealed class CompositeIndexLeadingColumnScannerTests
     [Fact]
     public void WildcardColumnReferenceInsideNestedSubquery_NeverCrashes()
     {
+
         var findings = Scan(
             """
             SELECT 1 FROM dbo.Orders

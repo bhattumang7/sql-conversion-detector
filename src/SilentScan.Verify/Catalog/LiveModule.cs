@@ -11,5 +11,5 @@ public sealed record LiveModule(
     bool IsRecompiled,
     bool UsesDatabaseCollation)
 {
-public string QualifiedName => $"{SchemaName}.{ObjectName}";
+    public string QualifiedName => $"{SchemaName}.{ObjectName}";
 }

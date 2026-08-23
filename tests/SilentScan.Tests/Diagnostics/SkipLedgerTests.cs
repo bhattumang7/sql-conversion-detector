@@ -30,6 +30,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void CatalogBuilder_AlterTableBeforeCreateTable_TwoPhaseBuildResolvesRegardlessOfOrder()
     {
+
         var alterFirst = SqlScriptParser.ParseText("02_alter.sql", "ALTER TABLE dbo.Users ADD Email VARCHAR(200) NULL;");
         var createSecond = SqlScriptParser.ParseText("01_create.sql", "CREATE TABLE dbo.Users (Id INT NOT NULL);");
 
@@ -54,6 +55,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void CatalogBuilder_AlterOrIndexWithNoMatchingTableAnywhere_StillRecordsSkip()
     {
+
         var alterOnly = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.Ghost ADD Email VARCHAR(200) NULL;");
 
         var catalog = CatalogBuilder.Build([alterOnly]);
@@ -78,6 +80,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void LineageResolver_ViewOverUnknownTable_RecordsSkip()
     {
+
         var view = SqlScriptParser.ParseText("view.sql", "CREATE VIEW dbo.vw_Ghost AS SELECT g.Id FROM dbo.Ghost AS g;");
 
         var catalog = CatalogBuilder.Build([view]);
@@ -104,6 +107,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void TypedPredicateExtractor_UpdateWhereClause_ResolvesInsteadOfSkipping()
     {
+
         var sql = """
             CREATE TABLE dbo.Users (Id INT NOT NULL, DisplayName VARCHAR(40) NOT NULL);
             GO
@@ -130,6 +134,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void TypedPredicateExtractor_BareIfComparison_StillRecordsSkip()
     {
+
         var sql = """
             CREATE PROCEDURE dbo.usp_Check @Flag INT
             AS
@@ -168,6 +173,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void ScanReportBuilder_AggregatesSkippedConstructsAcrossAllPasses()
     {
+
         var sql = """
             CREATE TABLE dbo.Users (Id INT NOT NULL, DisplayName VARCHAR(40) NOT NULL);
             GO
@@ -191,12 +197,14 @@ public sealed class SkipLedgerTests
 
         Assert.Contains(report.SkippedConstructs, e => e.Pass == AnalysisPass.Lineage);
         Assert.Contains(report.SkippedConstructs, e => e.Pass == AnalysisPass.Predicates);
+
         Assert.Equal(report.SkippedConstructs.OrderBy(e => e.Pass).ThenBy(e => e.SourcePath, StringComparer.Ordinal).ThenBy(e => e.Line), report.SkippedConstructs);
     }
 
     [Fact]
     public void DatabaseCatalog_MergeFileModeExtras_CarriesFileModeCatalogsSkippedEntriesForward()
     {
+
         var alterOnly = SqlScriptParser.ParseText("test.sql", "ALTER TABLE dbo.Ghost ADD Email VARCHAR(200) NULL;");
         var fileModeCatalog = CatalogBuilder.Build([alterOnly]);
         Assert.Single(fileModeCatalog.Skipped.Entries);
@@ -212,6 +220,7 @@ public sealed class SkipLedgerTests
     [Fact]
     public void TypedPredicateExtractor_UnrecognizedComparisonOperator_NeverThrows()
     {
+
         var sql = "CREATE TABLE dbo.T (Col INT NOT NULL);\nGO\nSELECT Col FROM dbo.T WHERE Col = 1;";
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors);

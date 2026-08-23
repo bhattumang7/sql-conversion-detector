@@ -74,6 +74,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_LiteralOperand_RendersTheLiteralInsteadOfADeclare()
     {
+
         var column = new PredicateOperand.Column("dbo.Users", "DisplayName", new SqlType(SqlTypeCategory.VarChar, Length: 40), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 5), IsLiteral: true, LiteralText: "N'Alice'");
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -96,6 +97,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_InOperator_NormalizesToEqualityForProbeSyntax()
     {
+
         var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "IN", "file.sql", 1, 1);
@@ -111,6 +113,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnHasImmediateRelation_QueriesTheViewNotTheBaseTable()
     {
+
         var column = new PredicateOperand.Column(
             "dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 1, Provenance,
             ImmediateRelationQualifiedName: "dbo.vw_Orders", ImmediateColumnName: "Code");
@@ -144,6 +147,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_NoImmediateRelation_FallsBackToBaseTable()
     {
+
         var column = new PredicateOperand.Column("dbo.T", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 10));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -156,6 +160,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnIsTempTable_PrependsACreateTableDeclaration()
     {
+
         var column = new PredicateOperand.Column("#TraceStatus", "TraceFlag", new SqlType(SqlTypeCategory.VarChar, Length: 10), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -188,6 +193,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnVsColumnSelfJoinOnSameTempTable_DeclaresBothColumnsOnOneCreateTable()
     {
+
         var column = new PredicateOperand.Column("#T", "ColA", new SqlType(SqlTypeCategory.Int), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Column("#T", "ColB", new SqlType(SqlTypeCategory.BigInt), Indexed: false, Depth: 0, Provenance);
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -203,6 +209,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_ColumnIsOrdinaryTable_NoCreateTableDeclarationPrepended()
     {
+
         var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -215,6 +222,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_TableIsAFunction_RendersDummyTypedArgumentList()
     {
+
         var column = new PredicateOperand.Column("dbo.SplitStrings_CTE", "Item", new SqlType(SqlTypeCategory.NVarChar, Length: 4000), Indexed: false, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.VarChar, Length: 10));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);
@@ -250,6 +258,7 @@ public sealed class CorpusFindingProbeBuilderTests
     [Fact]
     public void Build_FunctionArgumentsProvidedButTableNotInIt_LeavesReferenceBare()
     {
+
         var column = new PredicateOperand.Column("dbo.Orders", "Status", new SqlType(SqlTypeCategory.VarChar, Length: 20), Indexed: true, Depth: 0, Provenance);
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.NVarChar, Length: 20));
         var finding = new TypedPredicateFinding(Verdict.ScanForced, column, other, "=", "file.sql", 1, 1);

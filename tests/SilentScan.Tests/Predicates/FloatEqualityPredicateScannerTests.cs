@@ -11,6 +11,7 @@ public sealed class FloatEqualityPredicateScannerTests
         var ddl =
             "CREATE TABLE dbo.Prices (Id INT NOT NULL PRIMARY KEY, Amount FLOAT NOT NULL, Rate REAL NOT NULL, Name VARCHAR(50) NOT NULL);" +
             "CREATE TABLE dbo.Other (Id INT NOT NULL PRIMARY KEY, Amount FLOAT NOT NULL);" +
+
             (extraDdl.Length > 0 ? $"\nGO\n{extraDdl}" : string.Empty);
         var result = SqlScriptParser.ParseText("test.sql", $"{ddl}\nGO\n{sql}");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
@@ -82,6 +83,7 @@ public sealed class FloatEqualityPredicateScannerTests
     [Fact]
     public void PositionedUpdateWhereCurrentOfCursor_NullSearchCondition_NeverThrows()
     {
+
         var findings = Scan(
             "DECLARE cur CURSOR FOR SELECT Id FROM dbo.Prices; "
             + "OPEN cur; FETCH NEXT FROM cur; "
@@ -114,6 +116,7 @@ public sealed class FloatEqualityPredicateScannerTests
     [Fact]
     public void RangeComparisonAgainstFloatColumn_NeverFires()
     {
+
         var findings = Scan("SELECT * FROM dbo.Prices WHERE Amount > 1.5;");
 
         Assert.Empty(findings);
@@ -132,6 +135,7 @@ public sealed class FloatEqualityPredicateScannerTests
     [Fact]
     public void EqualityAgainstFloatColumn_ThroughView_NotAnalyzed()
     {
+
         var findings = Scan(
             "SELECT * FROM dbo.PricesView WHERE Amount = 1.5;",
             extraDdl: "CREATE VIEW dbo.PricesView AS SELECT Amount FROM dbo.Prices;");

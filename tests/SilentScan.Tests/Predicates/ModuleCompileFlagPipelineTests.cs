@@ -85,6 +85,7 @@ public sealed class ModuleCompileFlagPipelineTests
     [Fact]
     public async Task SchemaBoundFunction_ExcludedDespiteUsesDatabaseCollationFlag()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync("""
             CREATE FUNCTION dbo.fn_PureMath(@x INT)
             RETURNS INT

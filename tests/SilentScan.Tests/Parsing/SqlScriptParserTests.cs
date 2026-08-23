@@ -76,6 +76,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseFile_OneBadBatchAmongGoodOnes_RetainsTheGoodBatches()
     {
+
         var path = WriteTempFile(Encoding.UTF8.GetBytes(
             """
             CREATE TABLE dbo.A (Id INT NOT NULL);
@@ -109,6 +110,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseFile_QuotedIdentifierRequiredForSchemaQualifiedName_RecoversViaRetry()
     {
+
         var path = WriteTempFile(Encoding.UTF8.GetBytes("SELECT Id FROM dbo.\"Orders\";\nGO\n"));
 
         try
@@ -126,6 +128,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseFile_Windows1252EncodedIdentifier_DecodesCorrectlyInsteadOfUtf8Mojibake()
     {
+
         var sql = "CREATE TABLE dbo.Café (Id INT NOT NULL);\nGO\n";
         var path = WriteTempFile(Encoding.Latin1.GetBytes(sql));
 
@@ -169,6 +172,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_QuotedIdentifierOff_ParsesLegacyExecStringLiteralCleanly()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", "EXEC(\"SELECT 1\");", initialQuotedIdentifiers: false);
 
         Assert.False(result.HasErrors);
@@ -177,6 +181,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_QuotedIdentifierOn_RejectsLegacyExecStringLiteralAsUnclosedIdentifier()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", "EXEC(\"SELECT 1\");", initialQuotedIdentifiers: true);
 
         Assert.True(result.HasErrors);
@@ -185,6 +190,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void DecodeFile_Windows1252EncodedIdentifier_DecodesCorrectlyInsteadOfUtf8Mojibake()
     {
+
         var sql = "CREATE TABLE dbo.Café (Id INT NOT NULL);\nGO\n";
         var path = WriteTempFile(Encoding.Latin1.GetBytes(sql));
 
@@ -221,6 +227,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_DropTableIfExists_UnknownCompatLevel_UsesNewestDialectAndSucceeds()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: null);
 
         Assert.False(result.HasErrors);
@@ -229,6 +236,7 @@ public sealed class SqlScriptParserTests
     [Fact]
     public void ParseText_DropTableIfExists_CompatLevelBelow100_FloorsToOldestParserRatherThanGuessingNewer()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", DropTableIfExists, initialQuotedIdentifiers: true, compatibilityLevel: 80);
 
         Assert.True(result.HasErrors);

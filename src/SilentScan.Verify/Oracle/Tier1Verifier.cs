@@ -26,6 +26,7 @@ public sealed class Tier1Verifier
 
         if (finding.Indexed == true)
         {
+
             var indexName = await _indexChecker.TryGetLeadingKeyIndexNameAsync(
                 database, finding.TableQualifiedName!, finding.ColumnName, cancellationToken);
             return await CaptureAndClassifyAsync(database, finding, probe, indexName, cancellationToken);
@@ -65,6 +66,7 @@ public sealed class Tier1Verifier
 
         if (indexName is null)
         {
+
             return new Tier1Result(
                 finding, Tier1Outcome.NotProbeable,
                 $"'{finding.ColumnName}' was reported indexed but no leading-key index for it could be re-resolved live on {finding.TableQualifiedName} - the catalog and the live server disagree.");

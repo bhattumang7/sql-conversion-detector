@@ -8,7 +8,7 @@ public sealed class DynamicSqlParityTests
 {
     private const string SourcePath = "test.sql";
 
-[Fact]
+    [Fact]
     public void CursorFetchedTwice_FeedingCastInsideLoop_FoldsToTypedHole()
     {
         var sql = """
@@ -36,7 +36,7 @@ public sealed class DynamicSqlParityTests
         Assert.Equal(FindingConfidence.Medium, script.Confidence);
     }
 
-[Fact]
+    [Fact]
     public void IfWithOneTaintedBranch_RecoversTheKnownBranchAndReportsTheOtherAsAHole()
     {
         var sql = """
@@ -67,7 +67,7 @@ public sealed class DynamicSqlParityTests
         Assert.Equal(FindingConfidence.Medium, elseScript.Confidence);
     }
 
-[Fact]
+    [Fact]
     public void QuoteNameOverConcatenatedLiteralArgument_FoldsCompletely()
     {
         var sql = """

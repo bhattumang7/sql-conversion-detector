@@ -57,6 +57,7 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_EncryptedProcedure_IsReportedUnanalyzableNotSilentlyDropped()
     {
+
         const string encryptedProcSql = """
             CREATE PROCEDURE dbo.usp_EncryptedLookup WITH ENCRYPTION AS
                 SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'x';
@@ -75,6 +76,7 @@ public sealed class LiveScanRunnerTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_NumberedProcedureBodyBeyondFirst_IsReportedUnanalyzableNotSilentlyDropped()
     {
+
         const string numberedProcSql = """
             CREATE PROCEDURE dbo.usp_Numbered;1 AS SELECT OrderId FROM dbo.Orders WHERE OrderCode = 'x';
             GO

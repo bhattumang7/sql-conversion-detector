@@ -4,7 +4,7 @@ namespace SilentScan.Core.Predicates;
 
 internal static class ColumnAliasHelpers
 {
-public static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)
+    public static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, string alias)
     {
         if (expression is not ColumnReferenceExpression columnRef)
         {
@@ -17,7 +17,7 @@ public static string? ColumnNameIfQualifiedByAlias(ScalarExpression expression, 
             : null;
     }
 
-public sealed class RawColumnReferenceCollector : TSqlFragmentVisitor
+    public sealed class RawColumnReferenceCollector : TSqlFragmentVisitor
     {
         public List<ColumnReferenceExpression> References { get; } = [];
 

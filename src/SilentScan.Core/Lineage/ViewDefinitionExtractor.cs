@@ -9,11 +9,12 @@ namespace SilentScan.Core.Lineage;
 
 public static class ViewDefinitionExtractor
 {
-private readonly record struct TvfContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger);
+    private readonly record struct TvfContext(Collation? DefaultCollation, IReadOnlyDictionary<string, SqlType>? TypeAliases, SkipLedger? Ledger);
 
     public static (List<ViewDefinition> Views, List<MultiStatementTvfDefinition> MultiStatementTvfs) Extract(
         IEnumerable<SqlParseResult> parseResults, Collation? defaultCollation = null, IReadOnlyDictionary<string, SqlType>? typeAliases = null, SkipLedger? ledger = null)
     {
+
         var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         var tvfsByName = new Dictionary<string, MultiStatementTvfDefinition>(StringComparer.OrdinalIgnoreCase);
         var tvfContext = new TvfContext(defaultCollation, typeAliases, ledger);
@@ -34,7 +35,7 @@ private readonly record struct TvfContext(Collation? DefaultCollation, IReadOnly
         return ([.. viewsByName.Values], [.. tvfsByName.Values]);
     }
 
-private static void ApplyStatement(
+    private static void ApplyStatement(
         TSqlStatement statement, string sourcePath,
         Dictionary<string, ViewDefinition> viewsByName, Dictionary<string, MultiStatementTvfDefinition> tvfsByName, TvfContext tvfContext)
     {

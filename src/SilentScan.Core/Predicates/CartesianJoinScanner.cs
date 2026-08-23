@@ -141,6 +141,7 @@ public static class CartesianJoinScanner
             named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value;
 
         private static bool HasUnqualifiedColumnReference(BooleanExpression leaf) =>
+
             CollectColumnReferences(leaf).Any(c => c.MultiPartIdentifier is not { Identifiers.Count: >= 2 });
 
         private static HashSet<string> CollectQualifiers(BooleanExpression leaf) =>
@@ -155,7 +156,7 @@ public static class CartesianJoinScanner
             return collector.References;
         }
 
-private static IEnumerable<BooleanExpression> FlattenLeaves(BooleanExpression? expression)
+        private static IEnumerable<BooleanExpression> FlattenLeaves(BooleanExpression? expression)
         {
             switch (expression)
             {
@@ -197,7 +198,7 @@ private static IEnumerable<BooleanExpression> FlattenLeaves(BooleanExpression? e
             }
         }
 
-private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
+        private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
         {
             switch (tableReference)
             {
@@ -225,7 +226,7 @@ private static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableR
             }
         }
 
-private static IEnumerable<UnqualifiedJoin> FlattenUnqualifiedJoins(TableReference tableReference)
+        private static IEnumerable<UnqualifiedJoin> FlattenUnqualifiedJoins(TableReference tableReference)
         {
             switch (tableReference)
             {
@@ -266,7 +267,7 @@ private static IEnumerable<UnqualifiedJoin> FlattenUnqualifiedJoins(TableReferen
             }
         }
 
-private sealed class AliasUnionFind
+        private sealed class AliasUnionFind
         {
             private readonly Dictionary<string, string> _parent = new(StringComparer.OrdinalIgnoreCase);
 

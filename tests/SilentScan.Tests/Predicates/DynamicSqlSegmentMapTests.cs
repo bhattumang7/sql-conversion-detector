@@ -15,7 +15,8 @@ public sealed class DynamicSqlSegmentMapTests
 
         Assert.Equal("test.sql", span.SourcePath);
         Assert.Equal(1, span.Line);
-        Assert.Equal(14, span.Column);    }
+        Assert.Equal(14, span.Column);
+    }
 
     [Fact]
     public void Map_MultiLineLiteral_ResetsColumnAfterEachNewline()
@@ -26,7 +27,9 @@ public sealed class DynamicSqlSegmentMapTests
 
         var span = map.Map(innerLine: 2, innerColumn: 6);
 
-        Assert.Equal(6, span.Line);        Assert.Equal(6, span.Column);    }
+        Assert.Equal(6, span.Line);
+        Assert.Equal(6, span.Column);
+    }
 
     [Fact]
     public void Map_EscapedQuoteBeforeTarget_AccountsForRawWidening()
@@ -57,7 +60,8 @@ public sealed class DynamicSqlSegmentMapTests
         var span = map.Map(innerLine: 1, innerColumn: 8);
 
         Assert.Equal(1, span.Line);
-        Assert.Equal(20, span.Column);    }
+        Assert.Equal(20, span.Column);
+    }
 
     [Fact]
     public void Map_ConcatenatedLiterals_LocatesPositionInFirstSegmentAmongThree()
@@ -73,7 +77,8 @@ public sealed class DynamicSqlSegmentMapTests
         var span = map.Map(innerLine: 1, innerColumn: 1);
 
         Assert.Equal(1, span.Line);
-        Assert.Equal(7, span.Column);    }
+        Assert.Equal(7, span.Column);
+    }
 
     [Fact]
     public void Map_NationalPrefix_AccountsForTwoCharacterPrefix()
@@ -84,7 +89,8 @@ public sealed class DynamicSqlSegmentMapTests
 
         var span = map.Map(innerLine: 1, innerColumn: 1);
 
-        Assert.Equal(8, span.Column);    }
+        Assert.Equal(8, span.Column);
+    }
 
     [Fact]
     public void Map_LineBeyondInnerText_ClampsToEndOfText()
@@ -153,5 +159,6 @@ public sealed class DynamicSqlSegmentMapTests
 
         Assert.Equal("test.sql", span.SourcePath);
         Assert.Equal(1, span.Line);
-        Assert.Equal(41 + 1, span.Column);    }
+        Assert.Equal(41 + 1, span.Column);
+    }
 }

@@ -17,7 +17,7 @@ public static class ExpressionEvaluator
     private const string FnSubstring = "SUBSTRING";
     private const string NonLiteralOther = "non-literal-expression:other";
 
-private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["@@TRANCOUNT"] = new SqlType(SqlTypeCategory.Int),
         ["@@ROWCOUNT"] = new SqlType(SqlTypeCategory.Int),
@@ -28,7 +28,7 @@ private static readonly Dictionary<string, SqlType> GlobalVariableTypes = new(St
         ["@@FETCH_STATUS"] = new SqlType(SqlTypeCategory.Int),
     };
 
-public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
+    public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog = null)
     {
         switch (expression)
         {
@@ -45,6 +45,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
                 return Fold(paren.Expression, state, sourcePath, cap, catalog);
 
             case GlobalVariableExpression { Name: { } globalName } when GlobalVariableTypes.TryGetValue(globalName, out var globalType):
+
                 return new SqlTextValue.Template([new TemplatePiece.Hole(globalType, Span(sourcePath, expression), HoleKind.EnvironmentDependent)]);
 
             case UnaryExpression { UnaryExpressionType: UnaryExpressionType.Positive } unary:
@@ -58,6 +59,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
 
             case FunctionCall { FunctionName.Value: var functionName } isNullCall
                 when string.Equals(functionName, FnIsNull, StringComparison.OrdinalIgnoreCase) && isNullCall.Parameters.Count == 2:
+
                 return Fold(isNullCall.Parameters[0], state, sourcePath, cap, catalog);
 
             case CoalesceExpression { Expressions.Count: > 0 } coalesce:
@@ -74,6 +76,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
                     && FoldInteger(startExpr, state, sourcePath, cap, out var substringStart)
                     && substringStart >= 1
                     && TryTrimThroughAlternatives(Fold(sourceRef, state, sourcePath, cap, catalog), substringStart - 1, TryTrimLeadingCharacters) is { } trimmedFromStart:
+
                 return trimmedFromStart;
 
             case FunctionCall
@@ -87,6 +90,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
                     && FoldInteger(zeroStartExpr, state, sourcePath, cap, out var zeroStart)
                     && zeroStart == 0
                     && TryTrimThroughAlternatives(Fold(zeroStartSourceRef, state, sourcePath, cap, catalog), 1, TryTrimTrailingCharacters) is { } trimmedForZeroStart:
+
                 return trimmedForZeroStart;
 
             case FunctionCall
@@ -107,6 +111,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
                     && FoldInteger(trimCountExpr, state, sourcePath, cap, out var trimCount)
                     && trimCount >= 0
                     && TryTrimThroughAlternatives(Fold(trailingSourceRef, state, sourcePath, cap, catalog), trimCount, TryTrimTrailingCharacters) is { } trimmedFromEnd:
+
                 return trimmedFromEnd;
 
             case FunctionCall functionCall:
@@ -131,6 +136,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
                 return new SqlTextValue.Tainted("non-literal-expression:column-reference", Span(sourcePath, expression));
 
             case ScalarSubquery { QueryExpression: QuerySpecification { FromClause: not null } }:
+
                 return new SqlTextValue.Tainted("non-literal-expression:sql-loaded-from-table", Span(sourcePath, expression));
 
             case ScalarSubquery
@@ -141,6 +147,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
                     SelectElements: [SelectScalarExpression { Expression: { } wrappedExpression }],
                 },
             }:
+
                 return Fold(wrappedExpression, state, sourcePath, cap, catalog);
 
             case ScalarSubquery:
@@ -151,7 +158,7 @@ public static SqlTextValue Fold(ScalarExpression expression, Dictionary<string, 
         }
     }
 
-private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+    private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         var left = Fold(binary.FirstExpression, state, sourcePath, cap, catalog);
         var right = Fold(binary.SecondExpression, state, sourcePath, cap, catalog);
@@ -160,6 +167,7 @@ private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionar
 
     private static SqlTextValue FoldConditional(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
+
         IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)>? whenClauses = null;
         IEnumerable<ScalarExpression> thenExpressions = [];
         ScalarExpression? elseExpression = null;
@@ -207,7 +215,7 @@ private static SqlTextValue FoldConcatenation(BinaryExpression binary, Dictionar
         return union!;
     }
 
-private static List<ScalarExpression> ResolveDeterminableBranches(
+    private static List<ScalarExpression> ResolveDeterminableBranches(
         IReadOnlyList<(BooleanExpression Condition, ScalarExpression Then)> whenClauses, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog, out ScalarExpression? decided)
     {
         decided = null;
@@ -232,7 +240,7 @@ private static List<ScalarExpression> ResolveDeterminableBranches(
         return remaining;
     }
 
-private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+    private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (predicate is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals or BooleanComparisonType.NotEqualToExclamation or BooleanComparisonType.NotEqualToBrackets } comparison)
         {
@@ -250,7 +258,7 @@ private static bool? TryEvaluatePredicate(BooleanExpression predicate, Dictionar
         return comparison.ComparisonType == BooleanComparisonType.Equals ? equal : !equal;
     }
 
-private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+    private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (expression is CoalesceExpression { Expressions.Count: > 0 } coalesce)
         {
@@ -277,7 +285,7 @@ private static string? TryFoldToKnownLiteralText(ScalarExpression expression, Di
         return ToSqlTextValue(result, Span(sourcePath, site));
     }
 
-private sealed record FunctionCallFoldContext(
+    private sealed record FunctionCallFoldContext(
         string FunctionName, IList<ScalarExpression> Parameters, SourceSpan Site, Dictionary<string, SqlTextValue> State, string SourcePath, int Cap, DatabaseCatalog? Catalog);
 
     private static SqlTextValue FoldFunctionCall(
@@ -323,7 +331,7 @@ private sealed record FunctionCallFoldContext(
         return ToSqlTextValue(BuiltinRegistry.Fold(call), foldContext.Site);
     }
 
-private static bool TryFoldUserScalarFunction(FunctionCall site, DatabaseCatalog? catalog, string sourcePath, out SqlTextValue result)
+    private static bool TryFoldUserScalarFunction(FunctionCall site, DatabaseCatalog? catalog, string sourcePath, out SqlTextValue result)
     {
         result = null!;
         if (catalog is not { } knownCatalog)
@@ -341,7 +349,7 @@ private static bool TryFoldUserScalarFunction(FunctionCall site, DatabaseCatalog
         return true;
     }
 
-private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
+    private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
         result = null!;
         if (!string.Equals(context.FunctionName, "REPLACE", StringComparison.OrdinalIgnoreCase) || context.Parameters.Count != 3)
@@ -363,7 +371,7 @@ private static bool TryFoldReplaceWithMixedSource(FunctionCallFoldContext contex
         return true;
     }
 
-private static SqlTextValue FoldReplaceOverPiecesPreservingChoices(IReadOnlyList<TemplatePiece> pieces, BuiltinArgument patternArgument, BuiltinArgument replacementArgument, SourceSpan site)
+    private static SqlTextValue FoldReplaceOverPiecesPreservingChoices(IReadOnlyList<TemplatePiece> pieces, BuiltinArgument patternArgument, BuiltinArgument replacementArgument, SourceSpan site)
     {
         var newPieces = new List<TemplatePiece>();
         foreach (var piece in pieces)
@@ -406,9 +414,9 @@ private static SqlTextValue FoldReplaceOverPiecesPreservingChoices(IReadOnlyList
         return new SqlTextValue.Template(newPieces);
     }
 
-private sealed record EmbeddedChoice(int Index, IReadOnlyList<TemplatePiece> Prefix, TemplatePiece.Choice Choice, IReadOnlyList<TemplatePiece> Suffix);
+    private sealed record EmbeddedChoice(int Index, IReadOnlyList<TemplatePiece> Prefix, TemplatePiece.Choice Choice, IReadOnlyList<TemplatePiece> Suffix);
 
-private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
+    private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlTextValue?[] foldedArguments, out SqlTextValue result)
     {
         result = null!;
         var embedded = FindSoleChoiceArgument(foldedArguments);
@@ -421,7 +429,7 @@ private static bool TryFoldCrossProduct(FunctionCallFoldContext context, SqlText
         return true;
     }
 
-private static EmbeddedChoice? FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
+    private static EmbeddedChoice? FindSoleChoiceArgument(SqlTextValue?[] foldedArguments)
     {
         EmbeddedChoice? found = null;
         for (var i = 0; i < foldedArguments.Length; i++)
@@ -442,7 +450,7 @@ private static EmbeddedChoice? FindSoleChoiceArgument(SqlTextValue?[] foldedArgu
         return found;
     }
 
-private static bool TryExtractSoleEmbeddedChoice(SqlTextValue.Template template, int index, out EmbeddedChoice embedded)
+    private static bool TryExtractSoleEmbeddedChoice(SqlTextValue.Template template, int index, out EmbeddedChoice embedded)
     {
         embedded = null!;
         var choiceAt = -1;
@@ -471,7 +479,7 @@ private static bool TryExtractSoleEmbeddedChoice(SqlTextValue.Template template,
         return true;
     }
 
-private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, EmbeddedChoice embedded, SqlTextValue?[] foldedArguments)
+    private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext context, EmbeddedChoice embedded, SqlTextValue?[] foldedArguments)
     {
         SqlTextValue? union = null;
         foreach (var alternative in embedded.Choice.Alternatives)
@@ -498,7 +506,7 @@ private static SqlTextValue FoldOverChoiceAlternatives(FunctionCallFoldContext c
         return union!;
     }
 
-private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template splicedAlternative, SqlTextValue?[] foldedArguments)
+    private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context, int index, int choiceIndex, SqlTextValue.Template splicedAlternative, SqlTextValue?[] foldedArguments)
     {
         if (index == choiceIndex)
         {
@@ -510,7 +518,7 @@ private static BuiltinArgument ResolveArgumentAt(FunctionCallFoldContext context
             : FoldArgument(context.FunctionName, index, context.Parameters[index], context.State, context.SourcePath, context.Cap, context.Catalog);
     }
 
-private static readonly HashSet<(string Function, int Index)> IntegerArgumentPositions =
+    private static readonly HashSet<(string Function, int Index)> IntegerArgumentPositions =
     [
         (FnLeft, 1), (FnRight, 1),
         (FnSubstring, 1), (FnSubstring, 2),
@@ -519,7 +527,7 @@ private static readonly HashSet<(string Function, int Index)> IntegerArgumentPos
         ("REPLICATE", 1),
     ];
 
-private static BuiltinArgument FoldArgument(string functionName, int index, ScalarExpression parameter, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
+    private static BuiltinArgument FoldArgument(string functionName, int index, ScalarExpression parameter, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, DatabaseCatalog? catalog)
     {
         if (IntegerArgumentPositions.Contains((functionName.ToUpperInvariant(), index)))
         {
@@ -531,7 +539,7 @@ private static BuiltinArgument FoldArgument(string functionName, int index, Scal
         return ToBuiltinArgument(Fold(parameter, state, sourcePath, cap, catalog));
     }
 
-private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value switch
+    private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value switch
     {
         SqlTextValue.Tainted tainted => new BuiltinArgument.Unresolved(tainted.Reason, tainted.Location, tainted.DeclaredType),
         SqlTextValue.Template { Pieces: [TemplatePiece.Hole hole] } => new BuiltinArgument.Hole(hole.Type, hole.Kind),
@@ -547,7 +555,7 @@ private static BuiltinArgument ToBuiltinArgument(SqlTextValue value) => value sw
         _ => new SqlTextValue.Tainted(NonLiteralOther, site),
     };
 
-public static bool FoldInteger(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
+    public static bool FoldInteger(ScalarExpression expression, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
         switch (expression)
         {
@@ -595,7 +603,7 @@ public static bool FoldInteger(ScalarExpression expression, Dictionary<string, S
         }
     }
 
-internal static bool TryLiteralAsInteger(SqlTextValue value, out int result)
+    internal static bool TryLiteralAsInteger(SqlTextValue value, out int result)
     {
         if (value is SqlTextValue.Template { Pieces: [TemplatePiece.Lit lit] } && int.TryParse(lit.Text, out result))
         {
@@ -606,11 +614,12 @@ internal static bool TryLiteralAsInteger(SqlTextValue value, out int result)
         return false;
     }
 
-private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
+    private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<string, SqlTextValue> state, string sourcePath, int cap, out int value)
     {
         var folded = Fold(argument, state, sourcePath, cap);
         if (folded is not SqlTextValue.Template { Pieces.Count: > 0 } template || !template.Pieces.All(p => p is TemplatePiece.Lit))
         {
+
             value = 0;
             return false;
         }
@@ -619,7 +628,7 @@ private static bool TryFoldLenArgument(ScalarExpression argument, Dictionary<str
         return true;
     }
 
-private static SqlTextValue? TryTrimLeadingCharacters(SqlTextValue value, int count)
+    private static SqlTextValue? TryTrimLeadingCharacters(SqlTextValue value, int count)
     {
         if (count == 0)
         {
@@ -636,7 +645,7 @@ private static SqlTextValue? TryTrimLeadingCharacters(SqlTextValue value, int co
             : null;
     }
 
-private static List<TemplatePiece>? TrimLeadingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
+    private static List<TemplatePiece>? TrimLeadingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
     {
         var remaining = count;
         var index = 0;
@@ -672,7 +681,7 @@ private static List<TemplatePiece>? TrimLeadingFromPieces(IReadOnlyList<Template
         return null;
     }
 
-private static SqlTextValue? TryTrimTrailingCharacters(SqlTextValue value, int count)
+    private static SqlTextValue? TryTrimTrailingCharacters(SqlTextValue value, int count)
     {
         if (count == 0)
         {
@@ -689,7 +698,7 @@ private static SqlTextValue? TryTrimTrailingCharacters(SqlTextValue value, int c
             : null;
     }
 
-private static List<TemplatePiece>? TrimTrailingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
+    private static List<TemplatePiece>? TrimTrailingFromPieces(IReadOnlyList<TemplatePiece> pieces, int count)
     {
         var remaining = count;
         var index = pieces.Count - 1;
@@ -725,7 +734,7 @@ private static List<TemplatePiece>? TrimTrailingFromPieces(IReadOnlyList<Templat
         return null;
     }
 
-private static SqlTextValue? TryTrimThroughAlternatives(SqlTextValue value, int count, Func<SqlTextValue, int, SqlTextValue?> trim)
+    private static SqlTextValue? TryTrimThroughAlternatives(SqlTextValue value, int count, Func<SqlTextValue, int, SqlTextValue?> trim)
     {
         if (trim(value, count) is { } direct)
         {

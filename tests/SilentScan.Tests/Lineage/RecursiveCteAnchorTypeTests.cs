@@ -45,6 +45,7 @@ public sealed class RecursiveCteAnchorTypeTests
     [Fact]
     public async Task RecursionsOwnJoinPredicate_IsNowClassifiable()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Categories (
                 CategoryCode varchar(20) NOT NULL,
@@ -69,6 +70,7 @@ public sealed class RecursiveCteAnchorTypeTests
     [Fact]
     public async Task RecursiveCteWithNvarcharJoinMismatch_ClassifiesScanForced()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Categories (
                 CategoryCode nvarchar(20) NOT NULL,

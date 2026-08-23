@@ -24,6 +24,7 @@ public static class LiveTypeMapper
         "TEXT" => SqlTypeCategory.Text,
         "NCHAR" => SqlTypeCategory.NChar,
         "NVARCHAR" => SqlTypeCategory.NVarChar,
+
         "SYSNAME" => SqlTypeCategory.NVarChar,
         "NTEXT" => SqlTypeCategory.NText,
         "BINARY" => SqlTypeCategory.Binary,
@@ -44,7 +45,7 @@ public static class LiveTypeMapper
         SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
         or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
 
-public static SqlType? BuildType(string typeName, short maxLength, byte precision, byte scale, string? collationName)
+    public static SqlType? BuildType(string typeName, short maxLength, byte precision, byte scale, string? collationName)
     {
         var category = Map(typeName);
         if (category is null)

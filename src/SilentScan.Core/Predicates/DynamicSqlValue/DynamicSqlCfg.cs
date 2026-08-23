@@ -33,7 +33,7 @@ public sealed class DynamicSqlCfg
     private readonly Dictionary<int, SourceSpan> _blockSpan = [];
     private SourceSpan _defaultSpan;
 
-public DynamicSqlCfg(
+    public DynamicSqlCfg(
         string sourcePath, int cap, Func<TSqlStatement, IReadOnlyList<string>, Action<Dictionary<string, SqlTextValue>, bool>> compileLeaf,
         IReadOnlySet<string>? callerSeededVariableNames = null)
     {
@@ -43,13 +43,14 @@ public DynamicSqlCfg(
         _callerSeededVariableNames = callerSeededVariableNames ?? NoCallerSeededVariableNames;
     }
 
-public Dictionary<string, SqlTextValue> Solve(IList<TSqlStatement> statements, Dictionary<string, SqlTextValue> initialSeed)
+    public Dictionary<string, SqlTextValue> Solve(IList<TSqlStatement> statements, Dictionary<string, SqlTextValue> initialSeed)
     {
         _defaultSpan = statements.Count > 0 ? Span(statements[0]) : new SourceSpan(_sourcePath, 1, 1);
 
         PreRegisterLabels(statements);
         var entryBlock = NewBlock();
         var exitBlocks = new List<int>();
+
         if (BuildSequence(statements, entryBlock, exitBlocks, new Stack<(int Header, int After)>(), NoActiveGuards) is { } scopeFallthrough)
         {
             exitBlocks.Add(scopeFallthrough);
@@ -118,7 +119,7 @@ public Dictionary<string, SqlTextValue> Solve(IList<TSqlStatement> statements, D
         return working;
     }
 
-private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
+    private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
     {
         var hasThen = _thenPredecessorByJoinBlock.TryGetValue(joinBlock, out var thenPredecessor);
         var hasElse = _elsePredecessorByJoinBlock.TryGetValue(joinBlock, out var elsePredecessor);
@@ -165,12 +166,12 @@ private void ApplyGuardedAlternativeFixup(int joinBlock, Dictionary<string, SqlT
         }
     }
 
-private static SqlTextValue PropagateNestedGuardedAlternatives(SqlTextValue current, SqlTextValue? branchValue) =>
+    private static SqlTextValue PropagateNestedGuardedAlternatives(SqlTextValue current, SqlTextValue? branchValue) =>
         branchValue?.GuardedAlternatives is { Count: > 0 } nested
             ? nested.Aggregate(current, (value, alt) => SqlTextValue.WithGuardedAlternative(value, alt.GuardText, alt.Value))
             : current;
 
-private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
+    private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, SqlTextValue> working, Dictionary<string, SqlTextValue>?[] outStates)
     {
         if (!_conditionByJoinBlock.TryGetValue(joinBlock, out var condition)
             || !ConditionReferencesACallerSeededVariable(condition)
@@ -200,7 +201,7 @@ private void ApplyConstantConditionPruning(int joinBlock, Dictionary<string, Sql
         }
     }
 
-private bool ConditionReferencesACallerSeededVariable(BooleanExpression condition)
+    private bool ConditionReferencesACallerSeededVariable(BooleanExpression condition)
     {
         if (_callerSeededVariableNames.Count == 0)
         {
@@ -212,7 +213,7 @@ private bool ConditionReferencesACallerSeededVariable(BooleanExpression conditio
         return collector.Names.Any(_callerSeededVariableNames.Contains);
     }
 
-private bool? TryFoldBooleanCondition(BooleanExpression predicate, Dictionary<string, SqlTextValue> state) => predicate switch
+    private bool? TryFoldBooleanCondition(BooleanExpression predicate, Dictionary<string, SqlTextValue> state) => predicate switch
     {
         BooleanParenthesisExpression paren => TryFoldBooleanCondition(paren.Expression, state),
         BooleanNotExpression not when TryFoldBooleanCondition(not.Expression, state) is { } inner => !inner,
@@ -288,7 +289,7 @@ private bool? TryFoldBooleanCondition(BooleanExpression predicate, Dictionary<st
         }
     }
 
-private void RunFinalPass(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates, bool emit)
+    private void RunFinalPass(int entryBlock, Dictionary<string, SqlTextValue> initialSeed, List<int>[] predecessors, Dictionary<string, SqlTextValue>?[] outStates, bool emit)
     {
         for (var i = 0; i < _blocks.Count; i++)
         {
@@ -412,7 +413,7 @@ private void RunFinalPass(int entryBlock, Dictionary<string, SqlTextValue> initi
     private static IList<TSqlStatement> NormalizeToStatementList(TSqlStatement statement) =>
         statement is BeginEndBlockStatement block ? block.StatementList.Statements : [statement];
 
-private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<string> activeGuards)
+    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassStep(IfStatement ifStatement, IReadOnlyList<string> activeGuards)
     {
         if (ifStatement.ElseStatement is not null
             || NormalizeToStatementList(ifStatement.ThenStatement) is not [SetVariableStatement setVar]
@@ -439,7 +440,7 @@ private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildSelfTrimBypassSt
         };
     }
 
-private static bool MatchesRecognizedTrimShape(ScalarExpression startExpr, ScalarExpression thirdArg, string variableName) =>
+    private static bool MatchesRecognizedTrimShape(ScalarExpression startExpr, ScalarExpression thirdArg, string variableName) =>
         IsSelfLenReference(thirdArg, variableName)
         || (thirdArg is BinaryExpression { BinaryExpressionType: BinaryExpressionType.Subtract, FirstExpression: var lenSide }
             && IsSelfLenReference(lenSide, variableName)
@@ -469,7 +470,7 @@ private static bool MatchesRecognizedTrimShape(ScalarExpression startExpr, Scala
 
     private static readonly Dictionary<string, SqlTextValue> EmptyLiteralFoldState = new(StringComparer.OrdinalIgnoreCase);
 
-private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildEqualityGuardedReturnNarrowingStep(IfStatement ifStatement, int joinBlock)
+    private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildEqualityGuardedReturnNarrowingStep(IfStatement ifStatement, int joinBlock)
     {
         if (!_thenPredecessorByJoinBlock.ContainsKey(joinBlock)
             && TryGetSelfEqualityGuard(ifStatement.Predicate, out var variableName, out var literalExpression))
@@ -512,13 +513,14 @@ private Action<Dictionary<string, SqlTextValue>, bool>? TryBuildEqualityGuardedR
         return false;
     }
 
-private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private int? BuildSequence(IList<TSqlStatement> statements, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         var reachable = true;
         foreach (var statement in statements)
         {
             if (!reachable)
             {
+
                 current = NewBlock();
                 reachable = true;
             }
@@ -586,7 +588,7 @@ private int? BuildSequence(IList<TSqlStatement> statements, int current, List<in
         return reachable ? current : null;
     }
 
-private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
+    private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, List<int> exitBlocks, Stack<(int Header, int After)> loopStack, IReadOnlyList<string> activeGuards)
     {
         if (TryBuildSelfTrimBypassStep(ifStatement, activeGuards) is { } bypassStep)
         {
@@ -619,6 +621,7 @@ private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, L
         }
         else
         {
+
             elseExit = current;
         }
 
@@ -671,7 +674,7 @@ private int BuildIfWithNarrowingBypasses(IfStatement ifStatement, int current, L
         return after;
     }
 
-private static HashSet<string> FindUnboundedAccumulators(WhileStatement whileStatement)
+    private static HashSet<string> FindUnboundedAccumulators(WhileStatement whileStatement)
     {
         var selfAccumulating = new SelfAccumulatingVariableCollector();
         whileStatement.Statement.Accept(selfAccumulating);
@@ -687,7 +690,7 @@ private static HashSet<string> FindUnboundedAccumulators(WhileStatement whileSta
         return selfAccumulating.Names;
     }
 
-private Action<Dictionary<string, SqlTextValue>, bool> SeedUnboundedAccumulatorTaint(IReadOnlyCollection<string> names, WhileStatement whileStatement)
+    private Action<Dictionary<string, SqlTextValue>, bool> SeedUnboundedAccumulatorTaint(IReadOnlyCollection<string> names, WhileStatement whileStatement)
     {
         var span = Span(whileStatement);
         var captured = names.ToArray();
@@ -782,7 +785,7 @@ private Action<Dictionary<string, SqlTextValue>, bool> SeedUnboundedAccumulatorT
         return join;
     }
 
-private Action<Dictionary<string, SqlTextValue>, bool> SeedTryOnlyDeclarations(TryCatchStatement tryCatch)
+    private Action<Dictionary<string, SqlTextValue>, bool> SeedTryOnlyDeclarations(TryCatchStatement tryCatch)
     {
         var collector = new DeclareVariableCollector();
         foreach (var statement in tryCatch.TryStatements.Statements)

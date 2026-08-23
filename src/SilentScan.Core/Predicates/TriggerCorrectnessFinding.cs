@@ -4,19 +4,19 @@ namespace SilentScan.Core.Predicates;
 
 public enum TriggerCorrectnessFindingKind
 {
-MultiRowUnsafeSingleRowAssignment,
+    MultiRowUnsafeSingleRowAssignment,
 
-MultiRowUnsafeKeyedDml,
+    MultiRowUnsafeKeyedDml,
 
-NoEarlyOutForEmptyInvocation,
+    NoEarlyOutForEmptyInvocation,
 
-DirectRecursiveTrigger,
+    DirectRecursiveTrigger,
 
-InsteadOfInsertFilteredNoRejectPath,
+    InsteadOfInsertFilteredNoRejectPath,
 
-UpdateFunctionWithoutValueComparison,
+    UpdateFunctionWithoutValueComparison,
 
-LogonTriggerHostNameGate,
+    LogonTriggerHostNameGate,
 }
 
 public sealed record TriggerCorrectnessFinding(

@@ -4,31 +4,31 @@ namespace SilentScan.Core.Predicates;
 
 public enum DeprecatedSyntaxFindingKind
 {
-TaskCommentTodo,
+    TaskCommentTodo,
 
-TaskCommentFixme,
+    TaskCommentFixme,
 
-NonAnsiComparisonOperator,
+    NonAnsiComparisonOperator,
 
-EqualsNullComparison,
+    EqualsNullComparison,
 
-NotEqualsNullComparison,
+    NotEqualsNullComparison,
 
-LikeWithNoWildcard,
+    LikeWithNoWildcard,
 
-LegacySystemCompatibilityView,
+    LegacySystemCompatibilityView,
 
-TableHintWithoutWith,
+    TableHintWithoutWith,
 
-NumberedProcedureDefinition,
+    NumberedProcedureDefinition,
 
-NumberedProcedureExecution,
+    NumberedProcedureExecution,
 
-StringLiteralColumnAlias,
+    StringLiteralColumnAlias,
 
-RemovedSecurityStoredProcedure,
+    RemovedSecurityStoredProcedure,
 
-DeprecatedSetRowcount,
+    DeprecatedSetRowcount,
 }
 
 public sealed record DeprecatedSyntaxFinding(

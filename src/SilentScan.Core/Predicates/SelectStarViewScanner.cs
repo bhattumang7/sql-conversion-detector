@@ -40,7 +40,7 @@ public static class SelectStarViewScanner
         return candidates;
     }
 
-private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
+    private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
         queryExpression switch
         {
             QueryParenthesisExpression parenthesis => FindOutermostStarLine(parenthesis.QueryExpression),
@@ -74,7 +74,7 @@ private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
         public override void ExplicitVisit(SelectStatement node)
         {
@@ -110,6 +110,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
 
                 if (wholeQueryStar is not null || AliasHasOwnStar(node, alias))
                 {
+
                     continue;
                 }
 
@@ -129,7 +130,7 @@ private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeSt
             node.SelectElements.OfType<SelectStarExpression>()
                 .Any(s => s.Qualifier is { Count: > 0 } q && string.Equals(q[^1].Value, alias, StringComparison.OrdinalIgnoreCase));
 
-private static List<string> CollectExplicitSelectedColumns(QuerySpecification node, string alias, bool isOnlySource, IReadOnlyList<string> fullColumns)
+        private static List<string> CollectExplicitSelectedColumns(QuerySpecification node, string alias, bool isOnlySource, IReadOnlyList<string> fullColumns)
         {
             var selected = new List<string>();
 

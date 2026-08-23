@@ -56,7 +56,7 @@ public static class SchemaDependencyScanner
         return findings;
     }
 
-private static TSqlFragment? TryParse(SchemaExpressionReference reference)
+    private static TSqlFragment? TryParse(SchemaExpressionReference reference)
     {
         var wrapped = reference.Kind == SchemaDependencyKind.CheckConstraint
             ? $"SELECT 1 WHERE {reference.DefinitionText};"

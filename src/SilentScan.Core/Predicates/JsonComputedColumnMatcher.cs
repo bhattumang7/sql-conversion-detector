@@ -11,7 +11,7 @@ internal static class JsonComputedColumnMatcher
 
     public static bool IsJsonPathFunction(string functionName) => JsonPathFunctionNames.Contains(functionName);
 
-public static bool HasIndexedMatchingComputedColumn(
+    public static bool HasIndexedMatchingComputedColumn(
         DatabaseCatalog catalog, string tableQualifiedName, string sourceColumnName, FunctionCall predicateCall)
     {
         if (!TryGetJsonPathLiteral(predicateCall, sourceColumnName, out var predicatePath))
@@ -43,6 +43,7 @@ public static bool HasIndexedMatchingComputedColumn(
             }
 
             if (string.Equals(definitionCall.FunctionName.Value, predicateCall.FunctionName.Value, StringComparison.OrdinalIgnoreCase)
+
                 && string.Equals(definitionPath, predicatePath, StringComparison.Ordinal))
             {
                 return true;
@@ -52,7 +53,7 @@ public static bool HasIndexedMatchingComputedColumn(
         return false;
     }
 
-private static bool TryGetJsonPathLiteral(FunctionCall call, string sourceColumnName, out string path)
+    private static bool TryGetJsonPathLiteral(FunctionCall call, string sourceColumnName, out string path)
     {
         path = string.Empty;
 
@@ -74,7 +75,7 @@ private static bool TryGetJsonPathLiteral(FunctionCall call, string sourceColumn
         return true;
     }
 
-private static FunctionCall? TryParseTopLevelFunctionCall(string definitionText)
+    private static FunctionCall? TryParseTopLevelFunctionCall(string definitionText)
     {
         var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
         if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectScalarExpression selectScalar] } } ] }] })

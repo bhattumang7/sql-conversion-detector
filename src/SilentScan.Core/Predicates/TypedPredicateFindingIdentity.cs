@@ -19,7 +19,7 @@ public static class TypedPredicateFindingIdentity
         return string.Concat(column.TableQualifiedName, "\u0001", column.ColumnName, "\u0001", operatorText, "\u0001", otherShape);
     }
 
-public static string ComputeFingerprint(PredicateOperand.Column column, PredicateOperand other, string operatorText)
+    public static string ComputeFingerprint(PredicateOperand.Column column, PredicateOperand other, string operatorText)
     {
         var key = ComputeKey(column, other, operatorText);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));

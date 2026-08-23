@@ -5,10 +5,10 @@ namespace SilentScan.Core.Rules;
 
 public static class VerdictClassifier
 {
-public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null) =>
+    public static Verdict Classify(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null) =>
         ClassifyWithReason(columnType, otherType, otherIsLiteral, operatorText).Verdict;
 
-public static (Verdict Verdict, string? UnknownReason) ClassifyWithReason(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null)
+    public static (Verdict Verdict, string? UnknownReason) ClassifyWithReason(SqlType? columnType, SqlType? otherType, bool otherIsLiteral = false, string? operatorText = null)
     {
         if (columnType is null || otherType is null)
         {
@@ -48,13 +48,14 @@ public static (Verdict Verdict, string? UnknownReason) ClassifyWithReason(SqlTyp
         return ClassifyCrossCategory(columnType, otherType, otherIsLiteral, operatorText);
     }
 
-public static bool HasGenuineCollationMismatch(SqlType? columnType, SqlType? otherType) =>
+    public static bool HasGenuineCollationMismatch(SqlType? columnType, SqlType? otherType) =>
         columnType is { IsStringFamily: true } && otherType is { IsStringFamily: true }
         && columnType.Collation is { } columnCollation && otherType.Collation is { } otherCollation
         && !string.Equals(columnCollation.Name, otherCollation.Name, StringComparison.OrdinalIgnoreCase);
 
-private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
+    private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(SqlType columnType, SqlType otherType, bool otherIsLiteral, string? operatorText)
     {
+
         if (IsLengthTriggeredUnicodePromotion(columnType, otherType))
         {
             return (Verdict.ScanForced, null);
@@ -71,6 +72,7 @@ private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(Sq
 
         if (outcome.CompileFailed)
         {
+
             return (Verdict.OperandClash, null);
         }
 
@@ -88,7 +90,7 @@ private static (Verdict Verdict, string? UnknownReason) ClassifyCrossCategory(Sq
         return (isNonLiteralLike ? Verdict.ScanForced : Verdict.RangeSeek, null);
     }
 
-private static bool IsLengthTriggeredUnicodePromotion(SqlType columnType, SqlType otherType) =>
+    private static bool IsLengthTriggeredUnicodePromotion(SqlType columnType, SqlType otherType) =>
         columnType.IsNonUnicodeString && !columnType.IsMax && columnType.Length is > 4000
         && otherType.IsUnicodeString && otherType.IsMax;
 
@@ -100,6 +102,7 @@ private static bool IsLengthTriggeredUnicodePromotion(SqlType columnType, SqlTyp
     {
         if (!columnType.IsStringFamily)
         {
+
             return (Verdict.SeekPreserved, null);
         }
 
@@ -110,11 +113,13 @@ private static bool IsLengthTriggeredUnicodePromotion(SqlType columnType, SqlTyp
 
         if (columnType.Collation is null)
         {
+
             return (Verdict.Unknown, "collation-unresolved");
         }
 
         if (otherType.Collation is null)
         {
+
             return (Verdict.SeekPreserved, null);
         }
 

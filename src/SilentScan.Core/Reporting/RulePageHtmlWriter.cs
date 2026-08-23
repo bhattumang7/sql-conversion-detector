@@ -145,7 +145,7 @@ public static class RulePageHtmlWriter
             </html>
             """);
 
-private static void AppendParagraphs(StringBuilder sb, string text)
+    private static void AppendParagraphs(StringBuilder sb, string text)
     {
         var paragraphs = text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var paragraph in paragraphs)

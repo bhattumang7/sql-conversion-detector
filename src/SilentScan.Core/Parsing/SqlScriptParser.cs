@@ -8,13 +8,13 @@ public static class SqlScriptParser
     public static SqlParseResult ParseText(string sourcePath, string sql) =>
         Parse(sourcePath, sql, initialQuotedIdentifiers: true, compatibilityLevel: null);
 
-public static SqlParseResult ParseText(string sourcePath, string sql, bool initialQuotedIdentifiers) =>
+    public static SqlParseResult ParseText(string sourcePath, string sql, bool initialQuotedIdentifiers) =>
         Parse(sourcePath, sql, initialQuotedIdentifiers, compatibilityLevel: null);
 
-public static SqlParseResult ParseText(string sourcePath, string sql, bool initialQuotedIdentifiers, int? compatibilityLevel) =>
+    public static SqlParseResult ParseText(string sourcePath, string sql, bool initialQuotedIdentifiers, int? compatibilityLevel) =>
         Parse(sourcePath, sql, initialQuotedIdentifiers, compatibilityLevel);
 
-public static SqlParseResult ParseFile(string path)
+    public static SqlParseResult ParseFile(string path)
     {
         var text = DecodeFile(path);
 
@@ -27,7 +27,7 @@ public static SqlParseResult ParseFile(string path)
         return best;
     }
 
-public static string DecodeFile(string path) => DecodeText(File.ReadAllBytes(path));
+    public static string DecodeFile(string path) => DecodeText(File.ReadAllBytes(path));
 
     private static SqlParseResult Parse(string sourcePath, string sql, bool initialQuotedIdentifiers, int? compatibilityLevel)
     {
@@ -38,7 +38,7 @@ public static string DecodeFile(string path) => DecodeText(File.ReadAllBytes(pat
         return new SqlParseResult(sourcePath, fragment, errors.ToList(), unanalyzedBatches);
     }
 
-private static List<UnanalyzedBatch> FindUnanalyzedBatches(string sourcePath, string sql, TSqlFragment fragment)
+    private static List<UnanalyzedBatch> FindUnanalyzedBatches(string sourcePath, string sql, TSqlFragment fragment)
     {
         if (fragment is not TSqlScript script)
         {
@@ -78,7 +78,7 @@ private static List<UnanalyzedBatch> FindUnanalyzedBatches(string sourcePath, st
         return line;
     }
 
-private static TSqlParser CreateParser(int? compatibilityLevel, bool initialQuotedIdentifiers) => compatibilityLevel switch
+    private static TSqlParser CreateParser(int? compatibilityLevel, bool initialQuotedIdentifiers) => compatibilityLevel switch
     {
         null => new TSql180Parser(initialQuotedIdentifiers),
         >= 180 => new TSql180Parser(initialQuotedIdentifiers),
@@ -97,6 +97,7 @@ private static TSqlParser CreateParser(int? compatibilityLevel, bool initialQuot
 
     private static string DecodeText(byte[] bytes)
     {
+
         foreach (var candidate in new[] { Encoding.UTF8, Encoding.Unicode, Encoding.BigEndianUnicode, Encoding.UTF32 })
         {
             var preamble = candidate.GetPreamble();

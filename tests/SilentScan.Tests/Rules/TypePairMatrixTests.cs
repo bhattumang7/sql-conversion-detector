@@ -19,11 +19,13 @@ public sealed class TypePairMatrixTests
 
     [Fact]
     public void Instance_HasAllExpectedEntries() =>
+
         Assert.Equal(790, TypePairMatrix.Instance.Entries.Count);
 
     [Fact]
     public void Instance_ProbesEveryDeclaredCollationWithTheSameEntryCount()
     {
+
         var entries = TypePairMatrix.Instance.Entries;
         var byCollation = entries.Where(e => e.CollationName is not null).ToLookup(e => e.CollationName);
 
@@ -31,6 +33,7 @@ public sealed class TypePairMatrixTests
         foreach (var collation in SilentScan.Verify.Oracle.TypeMatrixGenerator.Collations)
         {
             Assert.True(byCollation.Contains(collation), $"matrix has no entries for collation '{collation}'");
+
             Assert.Equal(92, byCollation[collation].Count());
         }
     }
@@ -93,6 +96,7 @@ public sealed class TypePairMatrixTests
 
     [Fact]
     public void TryGetOutcome_StringPairWithoutCollationArgument_DoesNotMatchCollationSpecificEntry() =>
+
         Assert.Null(TypePairMatrix.Instance.TryGetOutcome(SqlTypeCategory.VarChar, SqlTypeCategory.NVarChar));
 
     [Theory]
@@ -101,6 +105,7 @@ public sealed class TypePairMatrixTests
     public void TryGetOutcome_CharVsVarcharFamilyPairs_NeverConvertTheColumn(
         SqlTypeCategory column, SqlTypeCategory other, string collation, bool expectedColumnConverts)
     {
+
         var outcome = TypePairMatrix.Instance.TryGetOutcome(column, other, collation);
 
         Assert.NotNull(outcome);
@@ -127,6 +132,7 @@ public sealed class TypePairMatrixTests
     public void TryGetOutcome_CrossFamilyNonStringColumnVsStringValue_IsNotCollationKeyed(
         SqlTypeCategory column, SqlTypeCategory other, bool expectedColumnConverts)
     {
+
         var outcome = TypePairMatrix.Instance.TryGetOutcome(column, other, collationName: null);
 
         Assert.NotNull(outcome);
@@ -136,6 +142,7 @@ public sealed class TypePairMatrixTests
     [Fact]
     public void TryGetOutcomeAgreeingAcrossCollations_PairWhereEveryCollationAgrees_ReturnsThatOutcome()
     {
+
         var outcome = TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory.NVarChar, SqlTypeCategory.VarChar);
 
         Assert.NotNull(outcome);
@@ -145,6 +152,7 @@ public sealed class TypePairMatrixTests
     [Fact]
     public void TryGetOutcomeAgreeingAcrossCollations_PairWhereCollationChangesTheOutcome_ReturnsNull()
     {
+
         var outcome = TypePairMatrix.Instance.TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory.VarChar, SqlTypeCategory.NVarChar);
 
         Assert.Null(outcome);

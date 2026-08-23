@@ -28,6 +28,7 @@ public sealed class TriggerOrderScannerTests
     [Fact]
     public void ThreeTriggers_FirstAndLastPinned_MiddleSingleton_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddTriggerEvent(Event("trg1", "dbo.T", "INSERT", isFirst: true));
         catalog.AddTriggerEvent(Event("trg2", "dbo.T", "INSERT"));
@@ -105,6 +106,7 @@ public sealed class TriggerOrderScannerTests
     [Fact]
     public void DifferentEvents_AnalyzedIndependently()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddTriggerEvent(Event("trg1", "dbo.T", "INSERT"));
         catalog.AddTriggerEvent(Event("trg2", "dbo.T", "INSERT"));

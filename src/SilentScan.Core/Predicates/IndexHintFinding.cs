@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum IndexHintFindingKind
 {
-IndexDoesNotExist,
+    IndexDoesNotExist,
 
-HintedIndexNotSeekable,
+    HintedIndexNotSeekable,
 }
 
 public sealed record IndexHintFinding(

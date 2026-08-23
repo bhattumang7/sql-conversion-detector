@@ -4,7 +4,7 @@ namespace SilentScan.Core.Lineage;
 
 internal static class ScalarUdfContextRegions
 {
-public static ScalarUdfContext Resolve(
+    public static ScalarUdfContext Resolve(
         IEnumerable<(int Start, int End, ScalarUdfContext Context)> regions, TSqlFragment node)
     {
         var best = default((int Start, int End, ScalarUdfContext Context)?);

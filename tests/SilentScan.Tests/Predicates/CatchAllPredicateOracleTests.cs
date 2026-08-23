@@ -47,6 +47,7 @@ public sealed class CatchAllPredicateOracleTests : OracleTestFixture
         await using (var probeCommand = new SqlCommand(probe, connection))
         await using (var reader = await probeCommand.ExecuteReaderAsync())
         {
+
             planXml = string.Empty;
             do
             {

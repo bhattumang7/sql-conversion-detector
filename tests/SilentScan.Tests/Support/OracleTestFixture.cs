@@ -7,13 +7,13 @@ public abstract class OracleTestFixture : IAsyncLifetime
 {
     protected SqlServerOptions Options { get; } = SqlServerOptions.LocalDocker;
 
-protected abstract string DatabaseNameSeed { get; }
+    protected abstract string DatabaseNameSeed { get; }
 
-protected string DatabaseName => _databaseName ??= $"{DatabaseNameSeed}_{Guid.NewGuid():N}";
+    protected string DatabaseName => _databaseName ??= $"{DatabaseNameSeed}_{Guid.NewGuid():N}";
 
     private string? _databaseName;
 
-protected abstract string Ddl { get; }
+    protected abstract string Ddl { get; }
 
     public virtual async Task InitializeAsync()
     {

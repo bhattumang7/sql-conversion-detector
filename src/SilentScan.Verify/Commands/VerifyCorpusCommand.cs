@@ -66,7 +66,7 @@ public static class VerifyCorpusCommand
         return command;
     }
 
-internal readonly record struct VerifyCorpusOptions(string ManifestPath, string ClonesRoot, string? RepoFilter, string Confidence);
+    internal readonly record struct VerifyCorpusOptions(string ManifestPath, string ClonesRoot, string? RepoFilter, string Confidence);
 
     internal static async Task<int> RunAsync(
         VerifyCorpusOptions options,
@@ -155,6 +155,7 @@ internal readonly record struct VerifyCorpusOptions(string ManifestPath, string 
         await context.Provisioner.CreateFreshAsync(databaseName, collationName: repo.DeclaredCollation, cancellationToken: cancellationToken);
         try
         {
+
             var source = await LiveCorpusDeployer.DeployAndReadAsync(repo, repoRoot, databaseName, context.SqlOptions, cancellationToken);
             deploymentErrors.AddRange(source.DeploymentMessages);
 
@@ -302,6 +303,7 @@ public sealed record RepoVerificationSummary(
     IReadOnlyList<string> ModulesWithReparseErrors,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
+
     public ConfidenceTally ConfirmedByConfidence => ConfidenceTally.Of(Confirmed, r => r.Finding.Confidence);
 
     public ConfidenceTally ConfirmedUnindexedByConfidence => ConfidenceTally.Of(ConfirmedUnindexed, r => r.Finding.Confidence);

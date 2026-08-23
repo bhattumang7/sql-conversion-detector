@@ -69,6 +69,7 @@ public sealed class VerifyCorpusCommandTests : IDisposable
     [Fact]
     public async Task RunAsync_UnknownConfidence_ReturnsOneAndWritesError()
     {
+
         var stdout = new StringWriter();
         var stderr = new StringWriter();
 

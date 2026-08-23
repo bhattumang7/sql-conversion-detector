@@ -4,7 +4,7 @@ namespace SilentScan.Core.Reporting;
 
 public sealed record ParseHealthReport(IReadOnlyList<FileParseHealth> Files)
 {
-public const double MinimumAcceptableParseSuccessRate = 0.90;
+    public const double MinimumAcceptableParseSuccessRate = 0.90;
 
     public int TotalFiles => Files.Count;
 
@@ -12,7 +12,7 @@ public const double MinimumAcceptableParseSuccessRate = 0.90;
 
     public double ParseSuccessRate => TotalFiles == 0 ? 1.0 : (double)(TotalFiles - FilesWithErrors) / TotalFiles;
 
-public bool PassesDialectSniffing => ParseSuccessRate >= MinimumAcceptableParseSuccessRate;
+    public bool PassesDialectSniffing => ParseSuccessRate >= MinimumAcceptableParseSuccessRate;
 }
 
 public sealed record FileParseHealth(

@@ -65,7 +65,7 @@ public static class BuiltinFunctionTypeResolver
         ["@@CPU_BUSY"] = new SqlType(SqlTypeCategory.Int),
     };
 
-private static readonly Dictionary<string, int> ArgumentTypeFunctions = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, int> ArgumentTypeFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ISNULL"] = 0,
         ["UPPER"] = 0,
@@ -85,28 +85,28 @@ private static readonly Dictionary<string, int> ArgumentTypeFunctions = new(Stri
         ["DATEADD"] = 2,
     };
 
-private static readonly HashSet<string> IntegerWideningAggregates = new(StringComparer.OrdinalIgnoreCase) { "SUM", "AVG" };
+    private static readonly HashSet<string> IntegerWideningAggregates = new(StringComparer.OrdinalIgnoreCase) { "SUM", "AVG" };
 
-private static readonly HashSet<string> LengthUnknownAfterArgumentType = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> LengthUnknownAfterArgumentType = new(StringComparer.OrdinalIgnoreCase)
     {
         "LEFT", "RIGHT", "SUBSTRING", "STUFF", "REPLACE",
     };
 
-public static bool ResultLengthDiffersFromArgument(string functionName) =>
+    public static bool ResultLengthDiffersFromArgument(string functionName) =>
         LengthUnknownAfterArgumentType.Contains(functionName);
 
-public static SqlType ClearLengthIfUnknown(SqlType argumentType) =>
+    public static SqlType ClearLengthIfUnknown(SqlType argumentType) =>
         argumentType with { Length = null, LengthKnown = false };
 
-private static readonly HashSet<string> DemotesFixedWidthSourceCategory = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> DemotesFixedWidthSourceCategory = new(StringComparer.OrdinalIgnoreCase)
     {
         "UPPER", "LOWER", "LTRIM", "RTRIM", "REVERSE", "REPLACE", "LEFT", "RIGHT", "SUBSTRING", "STUFF",
     };
 
-public static bool DemotesFixedWidthArgumentCategory(string functionName) =>
+    public static bool DemotesFixedWidthArgumentCategory(string functionName) =>
         DemotesFixedWidthSourceCategory.Contains(functionName);
 
-public static SqlType DemoteFixedWidthCategory(SqlType argumentType) => argumentType.Category switch
+    public static SqlType DemoteFixedWidthCategory(SqlType argumentType) => argumentType.Category switch
     {
         SqlTypeCategory.Char => argumentType with { Category = SqlTypeCategory.VarChar },
         SqlTypeCategory.NChar => argumentType with { Category = SqlTypeCategory.NVarChar },
@@ -114,10 +114,10 @@ public static SqlType DemoteFixedWidthCategory(SqlType argumentType) => argument
         _ => argumentType,
     };
 
-public static bool RequiresDateAddResultAdjustment(string functionName) =>
+    public static bool RequiresDateAddResultAdjustment(string functionName) =>
         string.Equals(functionName, "DATEADD", StringComparison.OrdinalIgnoreCase);
 
-public static SqlType? AdjustArgumentTypeFunctionResult(string functionName, SqlType? argumentType)
+    public static SqlType? AdjustArgumentTypeFunctionResult(string functionName, SqlType? argumentType)
     {
         if (argumentType is null)
         {
@@ -147,25 +147,25 @@ public static SqlType? AdjustArgumentTypeFunctionResult(string functionName, Sql
         return argumentType;
     }
 
-public static SqlType ResolveDateAddResult(SqlType thirdArgumentType) =>
+    public static SqlType ResolveDateAddResult(SqlType thirdArgumentType) =>
         thirdArgumentType.IsDateTimeFamily
             ? thirdArgumentType
             : new SqlType(SqlTypeCategory.DateTime);
 
-public static SqlType? ResolveFixedReturnType(string functionName) =>
+    public static SqlType? ResolveFixedReturnType(string functionName) =>
         FixedReturnTypes.GetValueOrDefault(functionName);
 
-public static int? TryGetArgumentTypeIndex(string functionName) =>
+    public static int? TryGetArgumentTypeIndex(string functionName) =>
         ArgumentTypeFunctions.TryGetValue(functionName, out var index) ? index : null;
 
-public static bool WidensIntegerAggregateArgument(string functionName) =>
+    public static bool WidensIntegerAggregateArgument(string functionName) =>
         IntegerWideningAggregates.Contains(functionName);
 
-public static SqlType WidenIntegerAggregateResult(SqlType argumentType) =>
+    public static SqlType WidenIntegerAggregateResult(SqlType argumentType) =>
         argumentType.Category is SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt
             ? new SqlType(SqlTypeCategory.Int)
             : argumentType;
 
-public static SqlType? ResolveGlobalVariable(string name) =>
+    public static SqlType? ResolveGlobalVariable(string name) =>
         GlobalVariableTypes.GetValueOrDefault(name);
 }

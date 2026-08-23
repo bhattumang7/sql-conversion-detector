@@ -13,7 +13,7 @@ namespace SilentScan.Tests.Reporting;
 [Trait("Category", "Oracle")]
 public sealed class ReadableScanReportWriterTests
 {
-private const string LayeredSql = """
+    private const string LayeredSql = """
         CREATE TABLE dbo.Orders (
             OrderId INT NOT NULL PRIMARY KEY,
             OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
@@ -234,6 +234,7 @@ private const string LayeredSql = """
     [Fact]
     public void ExpressionDerivedFindings_TheOnesWithARealIndexUnderneathComeFirst()
     {
+
         var indexed = new ExpressionDerivedFinding(
             "Col", "z_indexed.sql", 10, 1, [], [new UnderlyingBaseColumn("dbo.T1", "Col1", Indexed: true)]);
         var notIndexed = new ExpressionDerivedFinding(
@@ -260,7 +261,7 @@ private const string LayeredSql = """
             "the finding with a real index underneath its expression must print before the one with none, regardless of source path order");
     }
 
-private static ScanReport ReportWithFindingAt(string sourcePath) => new(
+    private static ScanReport ReportWithFindingAt(string sourcePath) => new(
         new ParseHealthReport([]),
             [],
         [new TypedPredicateFinding(

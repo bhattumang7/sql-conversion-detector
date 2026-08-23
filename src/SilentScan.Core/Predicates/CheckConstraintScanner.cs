@@ -80,7 +80,7 @@ public static class CheckConstraintScanner
         }
     }
 
-private static BooleanExpression? TryParse(string definitionText)
+    private static BooleanExpression? TryParse(string definitionText)
     {
         var wrapped = $"SELECT 1 WHERE {definitionText};";
         var result = SqlScriptParser.ParseText("check-constraint.sql", wrapped);
@@ -98,7 +98,7 @@ private static BooleanExpression? TryParse(string definitionText)
             .FirstOrDefault(c => c is not null);
     }
 
-private sealed class ColumnNameCollector(HashSet<string> names) : TSqlFragmentVisitor
+    private sealed class ColumnNameCollector(HashSet<string> names) : TSqlFragmentVisitor
     {
         public override void ExplicitVisit(ColumnReferenceExpression node)
         {
@@ -112,7 +112,7 @@ private sealed class ColumnNameCollector(HashSet<string> names) : TSqlFragmentVi
         }
     }
 
-private sealed class NullGuardCollector(HashSet<string> names) : TSqlFragmentVisitor
+    private sealed class NullGuardCollector(HashSet<string> names) : TSqlFragmentVisitor
     {
         public override void ExplicitVisit(BooleanIsNullExpression node)
         {

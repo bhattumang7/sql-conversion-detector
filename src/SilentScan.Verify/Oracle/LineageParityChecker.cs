@@ -32,6 +32,7 @@ public sealed class LineageParityChecker
             }
             catch (Microsoft.Data.SqlClient.SqlException)
             {
+
                 continue;
             }
 
@@ -91,14 +92,14 @@ public sealed class LineageParityChecker
         }
     }
 
-private static string CategoryTypeName(SqlTypeCategory category) =>
+    private static string CategoryTypeName(SqlTypeCategory category) =>
         category == SqlTypeCategory.SqlVariant ? "sql_variant" : category.ToString();
 
     private static bool IsStringOrBinaryFamily(SqlTypeCategory category) =>
         category is SqlTypeCategory.Char or SqlTypeCategory.VarChar or SqlTypeCategory.NChar or SqlTypeCategory.NVarChar
             or SqlTypeCategory.Binary or SqlTypeCategory.VarBinary;
 
-private static bool LengthMatches(SqlType type, CatalogColumnInfo oracleColumn, out string inferredLength, out string actualLength)
+    private static bool LengthMatches(SqlType type, CatalogColumnInfo oracleColumn, out string inferredLength, out string actualLength)
     {
         inferredLength = string.Empty;
         actualLength = string.Empty;

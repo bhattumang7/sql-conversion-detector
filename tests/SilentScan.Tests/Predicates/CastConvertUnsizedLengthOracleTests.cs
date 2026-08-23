@@ -56,6 +56,7 @@ public sealed class CastConvertUnsizedLengthOracleTests : OracleTestFixture
     [Fact]
     public async Task ColumnComparedAgainstUnsizedConvertOfALongerValue_SilentlyExcludesTheRealMatch()
     {
+
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

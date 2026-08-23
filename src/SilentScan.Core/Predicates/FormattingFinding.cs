@@ -4,23 +4,23 @@ namespace SilentScan.Core.Predicates;
 
 public enum FormattingFindingKind
 {
-TabCharacterUsed,
+    TabCharacterUsed,
 
-MultipleStatementsOnSameLine,
+    MultipleStatementsOnSameLine,
 
-MultipleDeclarationsOnSameLine,
+    MultipleDeclarationsOnSameLine,
 
-MissingBeginEndBlock,
+    MissingBeginEndBlock,
 
-SingleLineConditionalBody,
+    SingleLineConditionalBody,
 
-DanglingStatementAfterUnbracedBody,
+    DanglingStatementAfterUnbracedBody,
 
-IfImmediatelyFollowingPriorBlockEnd,
+    IfImmediatelyFollowingPriorBlockEnd,
 
-RedundantParentheses,
+    RedundantParentheses,
 
-MissingFileHeaderComment,
+    MissingFileHeaderComment,
 }
 
 public sealed record FormattingFinding(

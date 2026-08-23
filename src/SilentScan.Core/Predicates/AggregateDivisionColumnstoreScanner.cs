@@ -71,7 +71,7 @@ public static class AggregateDivisionColumnstoreScanner
             base.ExplicitVisit(node);
         }
 
-private void InspectTopLevel(TSqlFragment root, CatalogTable columnstoreTable)
+        private void InspectTopLevel(TSqlFragment root, CatalogTable columnstoreTable)
         {
             var collector = new AggregateCallCollector();
             root.Accept(collector);
@@ -96,7 +96,7 @@ private void InspectTopLevel(TSqlFragment root, CatalogTable columnstoreTable)
             }
         }
 
-private static bool ContainsErrorProneDivision(CaseExpression caseExpression)
+        private static bool ContainsErrorProneDivision(CaseExpression caseExpression)
         {
             var resultExpressions = caseExpression switch
             {
@@ -141,6 +141,7 @@ private static bool ContainsErrorProneDivision(CaseExpression caseExpression)
 
             public override void ExplicitVisit(QuerySpecification node)
             {
+
             }
         }
 

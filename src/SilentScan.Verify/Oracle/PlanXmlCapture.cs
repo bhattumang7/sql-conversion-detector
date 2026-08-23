@@ -11,10 +11,10 @@ public sealed class PlanXmlCapture
         _options = options;
     }
 
-public Task<string> CaptureAsync(string database, string probeStatement, CancellationToken cancellationToken = default) =>
+    public Task<string> CaptureAsync(string database, string probeStatement, CancellationToken cancellationToken = default) =>
         CaptureCoreAsync(database, probeStatement, sessionSetStatements: null, cancellationToken);
 
-public Task<string> CaptureAsync(
+    public Task<string> CaptureAsync(
         string database, string probeStatement, IReadOnlyList<string> sessionSetStatements, CancellationToken cancellationToken = default) =>
         CaptureCoreAsync(database, probeStatement, sessionSetStatements, cancellationToken);
 

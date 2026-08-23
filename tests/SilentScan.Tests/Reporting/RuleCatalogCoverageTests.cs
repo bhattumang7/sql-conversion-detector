@@ -31,6 +31,7 @@ public sealed class RuleCatalogCoverageTests
     [Fact]
     public void RuleIdGeneratorMethods_FindsAtLeastTwentyMethods()
     {
+
         Assert.True(RuleIdGeneratorMethods().Count >= 20, $"Expected at least 20 rule-id generator methods, found {RuleIdGeneratorMethods().Count} - the reflection filter may no longer match SarifRuleCatalog's method shape.");
     }
 

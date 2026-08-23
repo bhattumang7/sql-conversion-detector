@@ -6,9 +6,9 @@ public enum CatalogTableKind
     TemporaryTable,
     TableVariable,
 
-TableType,
+    TableType,
 
-ClrTableValuedFunction,
+    ClrTableValuedFunction,
 }
 
 public sealed record CatalogTable(
@@ -29,19 +29,19 @@ public sealed record CatalogTable(
     bool HasFullTextIndex = false)
 {
 
-public string QualifiedName => SchemaName is null ? Name : $"{SchemaName}.{Name}";
+    public string QualifiedName => SchemaName is null ? Name : $"{SchemaName}.{Name}";
 
-public IReadOnlyList<CatalogStatisticsInfo> EffectiveStatistics => Statistics ?? [];
+    public IReadOnlyList<CatalogStatisticsInfo> EffectiveStatistics => Statistics ?? [];
 
     public CatalogColumn? FindColumn(string columnName) =>
         Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
 
-public bool IsIndexedColumn(string columnName) => FindIndexedColumn(columnName) is not null;
+    public bool IsIndexedColumn(string columnName) => FindIndexedColumn(columnName) is not null;
 
-public CatalogIndex? FindIndexedColumn(string columnName) =>
+    public CatalogIndex? FindIndexedColumn(string columnName) =>
         Indexes.FirstOrDefault(i => !i.IsFiltered && !i.IsColumnstore && !i.IsDisabled && i.KeyColumns.Count > 0
             && string.Equals(i.KeyColumns[0], columnName, StringComparison.OrdinalIgnoreCase));
 
-public bool HasSameShapeAs(CatalogTable other) =>
+    public bool HasSameShapeAs(CatalogTable other) =>
         Kind == other.Kind && Columns.SequenceEqual(other.Columns);
 }

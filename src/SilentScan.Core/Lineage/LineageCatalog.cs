@@ -6,9 +6,9 @@ public sealed class LineageCatalog(IReadOnlyDictionary<string, ResolvedRelation>
 {
     public IReadOnlySet<string> CyclicViews { get; } = cyclicViews;
 
-public SkipLedger Skipped { get; } = skipped;
+    public SkipLedger Skipped { get; } = skipped;
 
-public IReadOnlyDictionary<string, ResolvedRelation> AllRelations => relationsByQualifiedName;
+    public IReadOnlyDictionary<string, ResolvedRelation> AllRelations => relationsByQualifiedName;
 
     public ResolvedRelation? Find(string qualifiedName) =>
         relationsByQualifiedName.GetValueOrDefault(qualifiedName);

@@ -10,11 +10,11 @@ public static class BuiltinRegistry
     private const string SymbolicValueInFunctionArgument = "symbolic-value-in-function-argument";
     private const string NonLiteralFunctionCall = "non-literal-expression:function-call";
 
-private static readonly Dictionary<string, BuiltinSpec> Specs = BuildSpecs().ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, BuiltinSpec> Specs = BuildSpecs().ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
-public static bool IsKnownBuiltin(string name) => Specs.ContainsKey(name);
+    public static bool IsKnownBuiltin(string name) => Specs.ContainsKey(name);
 
-public static BuiltinFoldResult Fold(BuiltinCall call)
+    public static BuiltinFoldResult Fold(BuiltinCall call)
     {
         if (!Specs.TryGetValue(call.FunctionName, out var spec))
         {
@@ -47,7 +47,7 @@ public static BuiltinFoldResult Fold(BuiltinCall call)
             ?? (call.Arguments.Any(a => a is BuiltinArgument.Hole) ? SymbolicValueInFunctionArgument : NonLiteralFunctionCall));
     }
 
-public static BuiltinFoldResult FoldCastOrConvert(SqlType targetType, BuiltinArgument source, SourceSpan site)
+    public static BuiltinFoldResult FoldCastOrConvert(SqlType targetType, BuiltinArgument source, SourceSpan site)
     {
         if (targetType.Category is not (SqlTypeCategory.VarChar or SqlTypeCategory.NVarChar or SqlTypeCategory.Char or SqlTypeCategory.NChar))
         {
@@ -66,6 +66,7 @@ public static BuiltinFoldResult FoldCastOrConvert(SqlType targetType, BuiltinArg
 
         if (targetType.Category is SqlTypeCategory.Char or SqlTypeCategory.NChar)
         {
+
             if (targetType.Length is not { } charLength)
             {
                 return new BuiltinFoldResult.Fail("non-literal-expression:cast-target-not-pinned");
@@ -137,7 +138,7 @@ public static BuiltinFoldResult FoldCastOrConvert(SqlType targetType, BuiltinArg
         yield return FixedTypeSpec("SCOPE_IDENTITY", new SqlType(SqlTypeCategory.Decimal, Precision: 38, Scale: 0), HoleKind.EnvironmentDependent);
     }
 
-private static BuiltinSpec DateAdd() => new(
+    private static BuiltinSpec DateAdd() => new(
         "DATEADD",
         Evaluate: null,
         HoleTransfer: call => BuiltinFoldResult.OkHole(
@@ -150,7 +151,7 @@ private static BuiltinSpec DateAdd() => new(
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinSpec StuffSpec() => new(
+    private static BuiltinSpec StuffSpec() => new(
         "STUFF",
         Evaluate: null,
         HoleTransfer: PassThroughSingleArgumentType,
@@ -161,7 +162,7 @@ private static BuiltinSpec StuffSpec() => new(
     private static BuiltinSpec EnvironmentNameSpec(string name) =>
         FixedTypeSpec(name, new SqlType(SqlTypeCategory.NVarChar, Length: 128), HoleKind.EnvironmentDependent);
 
-private static BuiltinSpec CaseConversionSpec(string name, Func<string, string> convert) => new(
+    private static BuiltinSpec CaseConversionSpec(string name, Func<string, string> convert) => new(
         name,
         Evaluate: call =>
         {
@@ -177,12 +178,12 @@ private static BuiltinSpec CaseConversionSpec(string name, Func<string, string> 
 
     private static bool IsSafeToCaseConvert(string input) => input.All(c => c is not ('i' or 'I') && c <= 127);
 
-private static BuiltinFoldResult.Fail UnresolvedOrGeneric(IEnumerable<BuiltinArgument> arguments) =>
+    private static BuiltinFoldResult.Fail UnresolvedOrGeneric(IEnumerable<BuiltinArgument> arguments) =>
         arguments.OfType<BuiltinArgument.Unresolved>().FirstOrDefault() is { } unresolved
             ? new BuiltinFoldResult.Fail(unresolved.Reason)
             : new BuiltinFoldResult.Fail(SymbolicValueInFunctionArgument);
 
-private static BuiltinSpec TrimSpec(string name, Func<string, string> trim) => new(
+    private static BuiltinSpec TrimSpec(string name, Func<string, string> trim) => new(
         name,
         Evaluate: call => BuiltinFoldResult.OkText(trim(((BuiltinArgument.Text)call.Arguments[0]).Value), call.Site),
         HoleTransfer: PassThroughSingleArgumentType,
@@ -190,25 +191,25 @@ private static BuiltinSpec TrimSpec(string name, Func<string, string> trim) => n
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinFoldResult PassThroughSingleArgumentType(BuiltinCall call) => call.Arguments[0] switch
+    private static BuiltinFoldResult PassThroughSingleArgumentType(BuiltinCall call) => call.Arguments[0] switch
     {
         BuiltinArgument.Hole hole => BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind),
         BuiltinArgument.Unresolved { Type: { } declaredType } => BuiltinFoldResult.OkHole(declaredType, call.Site, HoleKind.ArgumentIndependentReturnType),
         _ => UnresolvedOrGeneric([call.Arguments[0]]),
     };
 
-private static BuiltinFoldResult PassThroughSourceType(BuiltinCall call, params ReadOnlySpan<BuiltinArgument> otherArguments) => call.Arguments[0] switch
+    private static BuiltinFoldResult PassThroughSourceType(BuiltinCall call, params ReadOnlySpan<BuiltinArgument> otherArguments) => call.Arguments[0] switch
     {
         BuiltinArgument.Hole hole => BuiltinFoldResult.OkHole(hole.Type, call.Site, hole.Kind),
         BuiltinArgument.Unresolved { Type: { } declaredType } => BuiltinFoldResult.OkHole(declaredType, call.Site, HoleKind.ArgumentIndependentReturnType),
         _ => UnresolvedOrGeneric([.. otherArguments, call.Arguments[0]]),
     };
 
-private static BuiltinSpec Left() => LeftOrRight("LEFT", (input, length) => input[..length]);
+    private static BuiltinSpec Left() => LeftOrRight("LEFT", (input, length) => input[..length]);
 
     private static BuiltinSpec Right() => LeftOrRight("RIGHT", (input, length) => input[^length..]);
 
-private static BuiltinSpec Replicate() => new(
+    private static BuiltinSpec Replicate() => new(
         "REPLICATE",
         Evaluate: call =>
         {
@@ -221,6 +222,7 @@ private static BuiltinSpec Replicate() => new(
             var input = ((BuiltinArgument.Text)call.Arguments[0]).Value;
             return BuiltinFoldResult.OkText(string.Concat(Enumerable.Repeat(input, count)), call.Site);
         },
+
         HoleTransfer: call => call.Arguments[1] is BuiltinArgument.Number { Value: < 0 }
             ? new BuiltinFoldResult.Fail("non-literal-expression:replicate-negative-count")
             : PassThroughSourceType(call, call.Arguments[1]),
@@ -228,7 +230,7 @@ private static BuiltinSpec Replicate() => new(
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinSpec Reverse() => new(
+    private static BuiltinSpec Reverse() => new(
         "REVERSE",
         Evaluate: call => BuiltinFoldResult.OkText(ReverseText(((BuiltinArgument.Text)call.Arguments[0]).Value), call.Site),
         HoleTransfer: PassThroughSingleArgumentType,
@@ -256,6 +258,7 @@ private static BuiltinSpec Reverse() => new(
             var input = ((BuiltinArgument.Text)call.Arguments[0]).Value;
             return BuiltinFoldResult.OkText(slice(input, Math.Min(length, input.Length)), call.Site);
         },
+
         HoleTransfer: call => call.Arguments[1] is BuiltinArgument.Number { Value: < 0 }
             ? new BuiltinFoldResult.Fail(NegativeLength)
             : PassThroughSourceType(call, call.Arguments[1]),
@@ -263,7 +266,7 @@ private static BuiltinSpec Reverse() => new(
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinSpec Substring() => new(
+    private static BuiltinSpec Substring() => new(
         "SUBSTRING",
         Evaluate: call =>
         {
@@ -282,6 +285,7 @@ private static BuiltinSpec Substring() => new(
             var clampedLength = Math.Min(length, input.Length - (start - 1));
             return BuiltinFoldResult.OkText(input.Substring(start - 1, clampedLength), call.Site);
         },
+
         HoleTransfer: call =>
         {
             if (call.Arguments[1] is BuiltinArgument.Number { Value: < 1 })
@@ -314,7 +318,7 @@ private static BuiltinSpec Substring() => new(
         return (start, length, null);
     }
 
-private static BuiltinSpec Replace() => new(
+    private static BuiltinSpec Replace() => new(
         "REPLACE",
         Evaluate: ReplaceEvaluate,
         HoleTransfer: ReplaceHoleTransfer,
@@ -322,7 +326,7 @@ private static BuiltinSpec Replace() => new(
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinFoldResult ReplaceEvaluate(BuiltinCall call)
+    private static BuiltinFoldResult ReplaceEvaluate(BuiltinCall call)
     {
         if (call.Arguments.Count != 3)
         {
@@ -344,7 +348,7 @@ private static BuiltinFoldResult ReplaceEvaluate(BuiltinCall call)
             : new BuiltinFoldResult.Fail("non-literal-expression:replace-collation-sensitive");
     }
 
-private static BuiltinFoldResult ReplaceHoleTransfer(BuiltinCall call)
+    private static BuiltinFoldResult ReplaceHoleTransfer(BuiltinCall call)
     {
         if (call.Arguments.Count != 3)
         {
@@ -401,7 +405,7 @@ private static BuiltinFoldResult ReplaceHoleTransfer(BuiltinCall call)
         return new BuiltinFoldResult.Ok(pieces);
     }
 
-private static BuiltinSpec QuoteName() => new(
+    private static BuiltinSpec QuoteName() => new(
         "QUOTENAME",
         Evaluate: call =>
         {
@@ -418,12 +422,13 @@ private static BuiltinSpec QuoteName() => new(
                 ? new BuiltinFoldResult.Fail("non-literal-expression:quotename-null-result")
                 : BuiltinFoldResult.OkText(quoted, call.Site);
         },
+
         HoleTransfer: call => QuoteNameHoleTransfer(call),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinFoldResult QuoteNameHoleTransfer(BuiltinCall call)
+    private static BuiltinFoldResult QuoteNameHoleTransfer(BuiltinCall call)
     {
         if (call.Arguments.Count is not (1 or 2))
         {
@@ -463,7 +468,7 @@ private static BuiltinFoldResult QuoteNameHoleTransfer(BuiltinCall call)
         return $"{open}{escaped}{close}";
     }
 
-private static BuiltinSpec CharOrNChar(string name, int maxCodePoint, SqlTypeCategory category) => new(
+    private static BuiltinSpec CharOrNChar(string name, int maxCodePoint, SqlTypeCategory category) => new(
         name,
         Evaluate: call =>
         {
@@ -472,12 +477,13 @@ private static BuiltinSpec CharOrNChar(string name, int maxCodePoint, SqlTypeCat
                 ? new BuiltinFoldResult.Fail("non-literal-expression:char-out-of-range")
                 : BuiltinFoldResult.OkText(((char)codePoint).ToString(), call.Site);
         },
+
         HoleTransfer: call => BuiltinFoldResult.OkHole(new SqlType(category, Length: 1), call.Site, HoleKind.ArgumentIndependentReturnType),
         ReturnType: null,
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinSpec Str() => new(
+    private static BuiltinSpec Str() => new(
         "STR",
         Evaluate: _ => new BuiltinFoldResult.Fail(NonLiteralFunctionCall),
         HoleTransfer: call =>
@@ -513,9 +519,9 @@ private static BuiltinSpec Str() => new(
         ReturnKind: default,
         UnconditionalFailReason: null);
 
-private static BuiltinSpec NonDeterministicTyped(string name, SqlType returnType) => FixedTypeSpec(name, returnType, HoleKind.NonDeterministicTyped);
+    private static BuiltinSpec NonDeterministicTyped(string name, SqlType returnType) => FixedTypeSpec(name, returnType, HoleKind.NonDeterministicTyped);
 
-private static BuiltinSpec FixedTypeSpec(string name, SqlType returnType, HoleKind kind) => new(
+    private static BuiltinSpec FixedTypeSpec(string name, SqlType returnType, HoleKind kind) => new(
         name, Evaluate: null, HoleTransfer: null, ReturnType: returnType, ReturnKind: kind, UnconditionalFailReason: null);
 }
 

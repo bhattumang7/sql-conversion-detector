@@ -47,6 +47,7 @@ public sealed class BareTopNoOrderByScannerTests
     [Fact]
     public void TopHundredPercent_NoOrderBy_NeverFires()
     {
+
         var findings = Scan("SELECT TOP (100) PERCENT * FROM dbo.T;");
 
         Assert.Empty(findings);
@@ -55,6 +56,7 @@ public sealed class BareTopNoOrderByScannerTests
     [Fact]
     public void TopNinetyNinePercent_NoOrderBy_Fires()
     {
+
         var findings = Scan("SELECT TOP (99) PERCENT * FROM dbo.T;");
 
         Assert.Single(findings);
@@ -63,6 +65,7 @@ public sealed class BareTopNoOrderByScannerTests
     [Fact]
     public void TopWithTies_AlwaysCarriesOrderBy_NeverFires()
     {
+
         var findings = Scan("SELECT TOP (5) WITH TIES * FROM dbo.T ORDER BY Id;");
 
         Assert.Empty(findings);
@@ -89,6 +92,7 @@ public sealed class BareTopNoOrderByScannerTests
     [Fact]
     public void BareTop_InsideView_OutermostQuery_Fires()
     {
+
         var findings = Scan("CREATE VIEW dbo.V AS SELECT TOP (10) Id FROM dbo.T;");
 
         Assert.Single(findings);

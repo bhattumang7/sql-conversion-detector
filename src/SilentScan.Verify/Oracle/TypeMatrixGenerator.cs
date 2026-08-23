@@ -7,7 +7,7 @@ namespace SilentScan.Verify.Oracle;
 
 public sealed class TypeMatrixGenerator
 {
-public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> NumericFamily =
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> NumericFamily =
     [
         (SqlTypeCategory.Bit, "BIT"),
         (SqlTypeCategory.TinyInt, "TINYINT"),
@@ -21,7 +21,7 @@ public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> 
         (SqlTypeCategory.Float, "FLOAT"),
     ];
 
-public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> DateTimeFamily =
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> DateTimeFamily =
     [
         (SqlTypeCategory.Time, "TIME"),
         (SqlTypeCategory.Date, "DATE"),
@@ -31,14 +31,14 @@ public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> 
         (SqlTypeCategory.DateTimeOffset, "DATETIMEOFFSET"),
     ];
 
-public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> BinaryFamily =
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> BinaryFamily =
     [
         (SqlTypeCategory.Binary, "BINARY(16)"),
         (SqlTypeCategory.VarBinary, "VARBINARY(16)"),
         (SqlTypeCategory.Timestamp, "ROWVERSION"),
     ];
 
-public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> StringFamily =
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> StringFamily =
     [
         (SqlTypeCategory.Char, "CHAR(40)"),
         (SqlTypeCategory.VarChar, "VARCHAR(40)"),
@@ -46,7 +46,7 @@ public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> 
         (SqlTypeCategory.NVarChar, "NVARCHAR(40)"),
     ];
 
-public static readonly IReadOnlyList<string> Collations =
+    public static readonly IReadOnlyList<string> Collations =
     [
         "SQL_Latin1_General_CP1_CI_AS",
         "Latin1_General_CI_AS",
@@ -54,7 +54,7 @@ public static readonly IReadOnlyList<string> Collations =
         "Latin1_General_BIN2",
     ];
 
-public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> CrossFamilyOther =
+    public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> CrossFamilyOther =
     [
         (SqlTypeCategory.Bit, "BIT"),
         (SqlTypeCategory.TinyInt, "TINYINT"),
@@ -89,7 +89,7 @@ public static readonly IReadOnlyList<(SqlTypeCategory Category, string Syntax)> 
         _capture = new PlanXmlCapture(options);
     }
 
-public async Task<(IReadOnlyList<TypePairProbeResult> Entries, string ServerVersion)> GenerateAsync(
+    public async Task<(IReadOnlyList<TypePairProbeResult> Entries, string ServerVersion)> GenerateAsync(
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> numericFamily,
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> dateTimeFamily,
         IReadOnlyList<(SqlTypeCategory Category, string Syntax)> stringFamily,
@@ -100,6 +100,7 @@ public async Task<(IReadOnlyList<TypePairProbeResult> Entries, string ServerVers
     {
         crossFamilyOther ??= [];
         binaryFamily ??= [];
+
         var entries = new System.Collections.Concurrent.ConcurrentBag<TypePairProbeResult>();
         string? serverVersion = null;
 
@@ -121,6 +122,7 @@ public async Task<(IReadOnlyList<TypePairProbeResult> Entries, string ServerVers
 
                 if (needsCrossFamilyProbing)
                 {
+
                     var missingColumnTables = crossFamilyOther
                         .Where(cf => !baseFamily.Any(b => b.Category == cf.Category))
                         .ToList();
@@ -189,7 +191,7 @@ public async Task<(IReadOnlyList<TypePairProbeResult> Entries, string ServerVers
         await _deployer.DeployAsync(script.ToString(), database, cancellationToken);
     }
 
-private const int MaxConcurrentProbes = 4;
+    private const int MaxConcurrentProbes = 4;
 
     private Task ProbeFamilyAsync(IReadOnlyList<(SqlTypeCategory Category, string Syntax)> family, ProbeContext context) =>
         ProbePairsAsync(
@@ -198,7 +200,7 @@ private const int MaxConcurrentProbes = 4;
                 .Where(p => p.Item1 != p.Item2),
             context);
 
-private async Task ProbePairsAsync(
+    private async Task ProbePairsAsync(
         IEnumerable<(SqlTypeCategory ColumnCategory, SqlTypeCategory OtherCategory, string OtherSyntax)> pairs, ProbeContext context)
     {
         await Parallel.ForEachAsync(
@@ -207,7 +209,7 @@ private async Task ProbePairsAsync(
             (pair, ct) => new ValueTask(ProbeOnePairAsync(pair.ColumnCategory, pair.OtherCategory, pair.OtherSyntax, context with { CancellationToken = ct })));
     }
 
-private static readonly HashSet<int> TypeIncompatibilityErrorNumbers = [206, 257, 260, 402];
+    private static readonly HashSet<int> TypeIncompatibilityErrorNumbers = [206, 257, 260, 402];
 
     private async Task ProbeOnePairAsync(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string otherSyntax, ProbeContext context)
     {
@@ -226,7 +228,7 @@ private static readonly HashSet<int> TypeIncompatibilityErrorNumbers = [206, 257
         }
     }
 
-private sealed record ProbeContext(
+    private sealed record ProbeContext(
         string Database, string? CollationName, System.Collections.Concurrent.ConcurrentBag<TypePairProbeResult> Entries,
         Action<string> RecordServerVersion, CancellationToken CancellationToken);
 

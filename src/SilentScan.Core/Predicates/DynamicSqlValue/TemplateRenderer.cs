@@ -9,9 +9,9 @@ public sealed record RenderedScript(
 
 public static class TemplateRenderer
 {
-public static RenderedScript Render(IReadOnlyList<FlatPiece> assembly) => RenderCore(assembly, elideAllHoles: false);
+    public static RenderedScript Render(IReadOnlyList<FlatPiece> assembly) => RenderCore(assembly, elideAllHoles: false);
 
-public static RenderedScript RenderElided(IReadOnlyList<FlatPiece> assembly) => RenderCore(assembly, elideAllHoles: true);
+    public static RenderedScript RenderElided(IReadOnlyList<FlatPiece> assembly) => RenderCore(assembly, elideAllHoles: true);
 
     private static RenderedScript RenderCore(IReadOnlyList<FlatPiece> assembly, bool elideAllHoles)
     {
@@ -42,5 +42,5 @@ public static RenderedScript RenderElided(IReadOnlyList<FlatPiece> assembly) => 
         return new RenderedScript(map.InnerText, map, placeholders);
     }
 
-private static string PlaceholderToken(int line, int column) => $"__silentscan_sym_L{line}C{column}__";
+    private static string PlaceholderToken(int line, int column) => $"__silentscan_sym_L{line}C{column}__";
 }

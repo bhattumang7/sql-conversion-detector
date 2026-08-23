@@ -94,6 +94,7 @@ public sealed class DynamicSqlTransferTests
     [Fact]
     public void Set_AddEquals_OnUninitializedDeclareHole_AppendsRatherThanTainting()
     {
+
         var result = Run("DECLARE @x NVARCHAR(50); SET @x += 'b';");
 
         var template = Assert.IsType<SqlTextValue.Template>(result["@x"]);
@@ -102,7 +103,7 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("b", Assert.IsType<TemplatePiece.Lit>(template.Pieces[1]).Text);
     }
 
-[Fact]
+    [Fact]
     public void Set_UnsupportedAssignmentKind_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run("DECLARE @x INT = 5; SET @x -= 1;");
@@ -129,7 +130,7 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("literal", LitText(result["@x"]));
     }
 
-[Fact]
+    [Fact]
     public void SelectAssignment_WithFromClause_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run("DECLARE @x NVARCHAR(50); SELECT @x = name FROM sys.tables;");
@@ -259,7 +260,7 @@ public sealed class DynamicSqlTransferTests
         Assert.Equal("non-literal-argument", Assert.Single(findings).Reason);
     }
 
-[Fact]
+    [Fact]
     public void OrdinaryProcedureCall_HavocsReferencedTrackedVariablesToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run(
@@ -268,13 +269,15 @@ public sealed class DynamicSqlTransferTests
             out var findings, out var scripts);
 
         Assert.Empty(scripts);
-        Assert.Empty(findings);        var template = Assert.IsType<SqlTextValue.Template>(result["@rc"]);
+        Assert.Empty(findings);
+        var template = Assert.IsType<SqlTextValue.Template>(result["@rc"]);
         var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
         Assert.Equal(HoleKind.HavocWrite, hole.Kind);
         Assert.Equal(new SqlType(SqlTypeCategory.Int), hole.Type);
-        Assert.Equal("kept", LitText(result["@unrelated"]));    }
+        Assert.Equal("kept", LitText(result["@unrelated"]));
+    }
 
-[Fact]
+    [Fact]
     public void SpExecuteSql_WithOutputArgument_HavocsCallerVariable()
     {
         var result = Run(
@@ -282,7 +285,8 @@ public sealed class DynamicSqlTransferTests
             "EXEC sp_executesql N'SELECT 1', N'@out nvarchar(50) OUTPUT', @out = @v OUTPUT;",
             out _, out var scripts);
 
-        Assert.NotEmpty(scripts);        var template = Assert.IsType<SqlTextValue.Template>(result["@v"]);
+        Assert.NotEmpty(scripts);
+        var template = Assert.IsType<SqlTextValue.Template>(result["@v"]);
         var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
         Assert.Equal(HoleKind.HavocWrite, hole.Kind);
         Assert.Equal(new SqlType(SqlTypeCategory.NVarChar, Length: 50), hole.Type);

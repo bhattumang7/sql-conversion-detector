@@ -14,7 +14,7 @@ public abstract record PredicateOperand
     {
     }
 
-public sealed record Column(
+    public sealed record Column(
         string TableQualifiedName,
         string ColumnName,
         SqlType? Type,
@@ -25,7 +25,7 @@ public sealed record Column(
         string? ImmediateColumnName = null,
         string? IndexName = null) : PredicateOperand;
 
-public sealed record Value(
+    public sealed record Value(
         SqlType? Type, bool IsLiteral = false, string? LiteralText = null,
         string? VariableName = null, bool IsFormalParameter = false) : PredicateOperand;
 }

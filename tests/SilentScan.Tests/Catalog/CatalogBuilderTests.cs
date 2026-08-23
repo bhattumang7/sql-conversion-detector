@@ -77,6 +77,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CompositeIndex_OnlyLeadingKeyColumnCountsAsIndexed()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.OrderLines
             (
@@ -194,6 +195,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnStringConcatenation_NvarcharSiblingWinsOverVarchar()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.People
             (
@@ -227,6 +229,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnReferencingAnotherComputedColumn_ResolvesViaFixedPoint()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Orders
             (
@@ -245,6 +248,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithUnresolvableExpression_StaysUnknownAndLedgered()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -262,6 +266,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithBuiltinFixedReturnTypeFunction_InfersType()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -279,6 +284,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithBuiltinFirstArgumentTypeFunction_InfersSiblingColumnType()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.T
             (
@@ -468,6 +474,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterColumnAfterCreateTable_YieldsPostAlterType()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);
@@ -511,6 +518,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ColumnDeclaredWithSysname_ResolvesToNVarChar128()
     {
+
         var catalog = BuildFrom("CREATE TABLE dbo.Objects (ObjectName sysname NOT NULL);");
 
         var column = catalog.Find("dbo.Objects")!.FindColumn("ObjectName")!;
@@ -535,6 +543,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TypeAliasDeclaredInLaterFile_StillResolvesForEarlierFilesTable()
     {
+
         var catalog = CatalogBuilder.Build(
         [
             Parse("CREATE TABLE dbo.Orders (OrderId dbo.MyIntAlias NOT NULL);"),
@@ -583,6 +592,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterTableAddOnScopedTempTable_UpdatesTheScopedEntryNotAnUnscopedCopy()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE PROCEDURE dbo.usp_Test
@@ -603,6 +613,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TempTablesInsideDifferentProcedures_SameNameDifferentShape_DoNotClobberEachOther()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE PROCEDURE dbo.usp_First
@@ -628,6 +639,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateOrAlterTriggerBody_TempTableScopedToTrigger()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders (Id INT NOT NULL);
@@ -674,6 +686,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Find_TableVariable_ScopeMiss_NeverFallsBackToAnUnrelatedScopesDeclaration()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE PROCEDURE dbo.usp_Declares
@@ -695,6 +708,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_MultiStatementTvfReturnVariable_CatalogedUnderFunctionScope()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE FUNCTION dbo.fn_GetCodes()
@@ -715,6 +729,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateTypeAsTable_RegistersColumnShapeIncludingInlineIndex()
     {
+
         var catalog = BuildFrom("""
             CREATE TYPE Website.OrderLineList AS TABLE
             (
@@ -758,6 +773,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ScalarParameter_NotRegisteredAsTableValued()
     {
+
         var catalog = BuildFrom(
             """
             CREATE PROCEDURE dbo.usp_Ordinary @Id INT
@@ -773,6 +789,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ClrTableValuedFunction_NoVariableNameToRegister_DoesNotThrow()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];")]);
 
@@ -821,6 +838,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TableLevelInlineIndexDefinition_CountsAsSeekable()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -849,6 +867,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TableLevelInlineFilteredIndex_NotCountedAsSeekableForRanking()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -865,6 +884,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_TableLevelInlineColumnstoreIndex_NotCountedAsSeekableForRanking()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -881,6 +901,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ColumnLevelInlineFilteredIndex_NotCountedAsSeekableForRanking()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -896,6 +917,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ColumnLevelInlineOrdinaryIndex_StillCountsAsSeekable()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders
@@ -931,6 +953,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SelectIntoFromCteSharingNameWithRealTable_TargetColumnHasNoGuessedType()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerName VARCHAR(40) NOT NULL);
@@ -951,6 +974,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SelectIntoWithAmbiguousUnaliasedJoinTables_QualifiedReferenceHasNoGuessedType()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(10) NOT NULL);
@@ -972,6 +996,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SelectIntoWithDistinctAliases_StillResolvesQualifiedReference()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE dbo.T (Id INT NOT NULL, Code VARCHAR(10) NOT NULL);
@@ -1029,6 +1054,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_SpatialColumn_TypeIsNullAndLedgered()
     {
+
         var catalog = BuildFrom("CREATE TABLE dbo.Cities (Id INT NOT NULL, Location GEOGRAPHY NULL);");
 
         Assert.Null(catalog.Find("dbo.Cities")!.FindColumn("Location")!.Type);
@@ -1038,6 +1064,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ComputedColumnWithNoDeclaredType_NotLedgered()
     {
+
         var catalog = BuildFrom("CREATE TABLE dbo.T (A INT NOT NULL, B AS (A + 1));");
 
         Assert.DoesNotContain(catalog.Skipped.Entries, e => e.ConstructKind == "column type");
@@ -1070,6 +1097,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateFullTextIndex_Ledgered()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Documents (Id INT NOT NULL PRIMARY KEY, Body NVARCHAR(MAX) NULL);
             GO
@@ -1082,6 +1110,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterFullTextIndex_Ledgered()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Documents2 (Id INT NOT NULL PRIMARY KEY, Body NVARCHAR(MAX) NULL);
             GO
@@ -1131,6 +1160,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterAssembly_Ledgered()
     {
+
         var catalog = BuildFrom("ALTER ASSEMBLY MyAssembly FROM 0x4D5A;");
 
         Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly" && e.Reason.Contains("MyAssembly", StringComparison.Ordinal) && e.Reason.Contains("ALTER ASSEMBLY", StringComparison.Ordinal));
@@ -1139,6 +1169,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterIndexDisable_ColumnNoLongerReportsIndexed()
     {
+
         var catalog = BuildFrom(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);
@@ -1184,6 +1215,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterIndexReorganize_StillLedgeredAsNotAffectingSeekability()
     {
+
         var catalog = BuildFrom(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);
@@ -1200,6 +1232,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateAssembly_DoesNotTripleCountAcrossThreeBuildPhases()
     {
+
         var catalog = BuildFrom("CREATE ASSEMBLY MyAssembly FROM 0x4D5A;");
 
         Assert.Single(catalog.Skipped.Entries, e => e.ConstructKind == "CLR assembly");
@@ -1219,6 +1252,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_DropTableThenRecreateWithDifferentShape_KeepsTheRecreatedShape()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
             DROP TABLE dbo.Orders;
@@ -1277,6 +1311,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_CreateTableWithNoInlineDefinition_LedgersRatherThanSilentlyDropping()
     {
+
         var catalog = BuildFrom("CREATE TABLE dbo.Likes AS EDGE;");
 
         Assert.Null(catalog.Find("dbo.Likes"));
@@ -1286,6 +1321,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_DropProcedure_DoesNotThrowAndLeavesUnrelatedCatalogDataIntact()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
             GO
@@ -1369,6 +1405,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_UseStatement_IsLedgeredNotSilentlySwallowed()
     {
+
         var catalog = BuildFrom("""
             USE OtherDb;
             CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
@@ -1416,6 +1453,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_ProcedureWithTableValuedParameter_RegistersItWithNullTypeAtItsRealPosition()
     {
+
         var catalog = BuildFrom("""
             CREATE TYPE dbo.CodeList AS TABLE (Code varchar(20) NOT NULL);
             GO
@@ -1433,6 +1471,7 @@ public sealed class CatalogBuilderTests
     [Fact]
     public void Build_AlterTableAddFromInsideProcOnBatchLevelTempTable_UpdatesTheOneTrueUnscopedEntry()
     {
+
         var catalog = CatalogBuilder.Build(
             [Parse("""
                 CREATE TABLE #t (Col1 INT NOT NULL);
@@ -1451,6 +1490,7 @@ public sealed class CatalogBuilderTests
                 """)]);
 
         var batchLevel = catalog.Find("#t");
+
         var seenFromUnrelatedScope = catalog.Find("#t", "dbo.usp_Unrelated");
 
         Assert.NotNull(batchLevel);

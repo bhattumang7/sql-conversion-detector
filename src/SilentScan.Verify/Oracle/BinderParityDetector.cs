@@ -11,6 +11,7 @@ public static class BinderParityDetector
         var doc = XDocument.Parse(planXml);
 
         return doc.Descendants(ShowPlanNs + "ColumnReference")
+
             .Where(c => !string.IsNullOrEmpty((string?)c.Attribute("Table")))
             .Select(c => new ResolvedColumnReference(
                 Database: TrimBrackets((string?)c.Attribute("Database")),

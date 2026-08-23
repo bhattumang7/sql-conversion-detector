@@ -34,6 +34,6 @@ public enum SqlTypeCategory
     SqlVariant,
     UserDefined,
 
-Json,
+    Json,
 }
 #pragma warning restore CA1720

@@ -6,7 +6,7 @@ public readonly record struct TvfLeafReference(SchemaObjectFunctionTableReferenc
 
 internal static class TvfReferenceWalker
 {
-public static (List<TvfLeafReference> FunctionRefs, List<NamedTableReference> NamedRefs) CollectFromClauses(TSqlFragment root)
+    public static (List<TvfLeafReference> FunctionRefs, List<NamedTableReference> NamedRefs) CollectFromClauses(TSqlFragment root)
     {
         var cteNames = CteNameCollector.Collect(root);
         var visitor = new FromClauseVisitor(cteNames);

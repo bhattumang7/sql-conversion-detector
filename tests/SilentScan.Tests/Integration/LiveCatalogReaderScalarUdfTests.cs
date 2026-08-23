@@ -187,6 +187,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionCallingGetDate_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_NotInlineable", out var info));
@@ -196,6 +197,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionUsingGoto_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Goto", out var info));
@@ -205,6 +207,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_PlainFunction_EngineReportsInlineableAsGotoFreeControl()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Plain", out var info));
@@ -214,6 +217,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionUsingCte_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Cte", out var info));
@@ -223,6 +227,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionWithTableValuedParameter_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Tvp", out var info));
@@ -232,6 +237,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionWithOrderByNoTop_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_OrderByNoTop", out var info));
@@ -250,6 +256,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionUsingXmlValueMethod_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlValue", out var info));
@@ -259,6 +266,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionDeclaringXmlVariableWithNoMethodCall_EngineReportsInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_XmlNoMethod", out var info));
@@ -268,6 +276,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionQueryingSystemCatalog_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_SysAccess", out var info));
@@ -286,6 +295,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionUsingStringAgg_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_StringAgg", out var info));
@@ -295,6 +305,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_FunctionWithSelectAccumulatorAssignment_EngineReportsNotInlineable()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         Assert.True(catalog.TryGetScalarUdfInfo("dbo.fn_Accum", out var info));
@@ -304,6 +315,7 @@ public sealed class LiveCatalogReaderScalarUdfTests : OracleTestFixture
     [Fact]
     public async Task MergeFileModeExtras_BackfillsBlockerReasonWithoutLosingEngineFlags()
     {
+
         var liveCatalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var parseResult = SqlScriptParser.ParseText("fn_NotInlineable.sql", """

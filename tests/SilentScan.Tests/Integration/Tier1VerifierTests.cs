@@ -61,6 +61,7 @@ public sealed class Tier1VerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_BareColumnOnIndexedColumn_IsNotConfirmed()
     {
+
         var finding = Finding(SargabilityFindingKind.FunctionWrappedColumn, "dbo.T1Indexed", "Code", indexed: true, "Code");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding, _catalog);
@@ -111,6 +112,7 @@ public sealed class Tier1VerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_TableNoLongerInDeployedSchema_ReturnsProbeFailed()
     {
+
         var finding = Finding(SargabilityFindingKind.LeadingWildcardLike, "dbo.DoesNotExist", "Code", indexed: true, "Code LIKE '%abc'");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding, _catalog);

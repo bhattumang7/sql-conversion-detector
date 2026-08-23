@@ -64,6 +64,7 @@ public sealed class VerifyCorpusCommandDialectSniffingTests : IDisposable
     [Fact]
     public async Task RunAsync_RepoAtOrAboveDialectSniffingThreshold_NoWarningAndReturnsZero()
     {
+
         var cloneDir = Path.Combine(_root, "clones", "example");
         File.Delete(Path.Combine(cloneDir, "not_tsql.sql"));
 

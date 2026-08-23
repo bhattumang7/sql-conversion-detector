@@ -106,6 +106,7 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void EmptyCatchBlock_ReportsARealLineNotASentinel()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -182,6 +183,7 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void CursorDefiningSelectInTrigger_NeverFiresTriggerOutput()
     {
+
         var findings = Scan("""
             CREATE TRIGGER dbo.Trg ON dbo.T AFTER INSERT AS
             BEGIN
@@ -198,6 +200,7 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void NoLockInsideCursorDefiningSelectInTrigger_StillFiresDirtyRead()
     {
+
         var findings = Scan("""
             CREATE TRIGGER dbo.Trg ON dbo.T AFTER INSERT AS
             BEGIN
@@ -404,6 +407,7 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void SearchedCaseWithNoElse_NeverFiresMissingElse()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN
@@ -475,6 +479,7 @@ public sealed class ControlFlowRiskScannerTests
     [Fact]
     public void GetDateAsSimpleCaseInput_NeverFiresNonDeterministic()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             BEGIN

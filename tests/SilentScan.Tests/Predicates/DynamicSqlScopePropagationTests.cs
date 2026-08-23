@@ -66,6 +66,7 @@ public sealed class DynamicSqlScopePropagationTests
     [Fact]
     public async Task TempTableDeclaredStatically_ResolvesTwoLevelsDeepInNestedDynamicSql()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Widgets (WidgetCode varchar(25) NOT NULL, INDEX IX_WidgetCode (WidgetCode));
             GO
@@ -84,6 +85,7 @@ public sealed class DynamicSqlScopePropagationTests
     [Fact]
     public async Task TriggerInsertedPseudoTable_ResolvesInsideExecStringLiteral()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Orders (OrderCode varchar(20) NOT NULL, INDEX IX_OrderCode (OrderCode));
             GO

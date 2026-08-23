@@ -2,11 +2,11 @@ namespace SilentScan.Core.Predicates;
 
 public enum ScalarUdfFindingKind
 {
-PredicateInvocation,
+    PredicateInvocation,
 
-NestedUnderViewOrTvf,
+    NestedUnderViewOrTvf,
 
-SchemaDependency,
+    SchemaDependency,
 
-ProjectionInvocation,
+    ProjectionInvocation,
 }

@@ -41,5 +41,6 @@ public sealed class SysnameOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task VarcharColumnVsSysnameVariable_ColumnConverts() =>
+
         Assert.True(await HasColumnConversion("DECLARE @p sysname = N'x'; SELECT Id FROM dbo.T WHERE Code = @p;"));
 }

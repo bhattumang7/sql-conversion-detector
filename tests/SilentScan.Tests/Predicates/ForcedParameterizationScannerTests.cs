@@ -95,6 +95,7 @@ public sealed class ForcedParameterizationScannerTests
     [Fact]
     public void OrderByBareOrdinalLiteral_NeverFires()
     {
+
         var findings = Scan("SELECT Id FROM dbo.T ORDER BY 1;");
 
         Assert.DoesNotContain(findings, f => f.Kind == ForcedParameterizationFindingKind.OrderByExpressionLiteral);

@@ -9,7 +9,7 @@ namespace SilentScan.Core.Lineage;
 
 public static class ScalarExpressionResolver
 {
-internal readonly record struct ExpressionContext(
+    internal readonly record struct ExpressionContext(
         IReadOnlyDictionary<string, ScopeEntry> Scope,
         IReadOnlyList<ScopeEntry> OrderedRelations,
         string SourcePath,
@@ -44,7 +44,7 @@ internal readonly record struct ExpressionContext(
         _ => ResolveGenericExpression(expression, context),
     };
 
-private static ColumnProvenance.Expression ResolveFunctionCall(FunctionCall functionCall, ExpressionContext context)
+    private static ColumnProvenance.Expression ResolveFunctionCall(FunctionCall functionCall, ExpressionContext context)
     {
         var inputs = CollectColumnInputs(functionCall, context);
         var name = functionCall.FunctionName.Value;
@@ -101,7 +101,7 @@ private static ColumnProvenance.Expression ResolveFunctionCall(FunctionCall func
         return new ColumnProvenance.Cast(type, inner, context.SourcePath, line);
     }
 
-private static ColumnProvenance.Expression ResolveGenericExpression(ScalarExpression expression, ExpressionContext context) =>
+    private static ColumnProvenance.Expression ResolveGenericExpression(ScalarExpression expression, ExpressionContext context) =>
         new(InferredType: null, CollectColumnInputs(expression, context), context.SourcePath, expression.StartLine);
 
     private static List<ColumnProvenance> CollectColumnInputs(ScalarExpression expression, ExpressionContext context)
@@ -117,22 +117,24 @@ private static ColumnProvenance.Expression ResolveGenericExpression(ScalarExpres
 
         public override void Visit(ColumnReferenceExpression node)
         {
+
             if (node.MultiPartIdentifier is { Identifiers.Count: > 0 })
             {
                 References.Add(node);
             }
         }
 
-public override void ExplicitVisit(ScalarSubquery node)
+        public override void ExplicitVisit(ScalarSubquery node)
         {
+
         }
     }
 
-internal static ColumnProvenance ResolveColumnReference(
+    internal static ColumnProvenance ResolveColumnReference(
         ColumnReferenceExpression columnRef, IReadOnlyDictionary<string, ScopeEntry> scope, IReadOnlyList<ScopeEntry> orderedRelations, string sourcePath, SkipLedger? ledger) =>
         ResolveColumnReference(columnRef, [(scope, orderedRelations)], sourcePath, ledger);
 
-internal static ColumnProvenance ResolveColumnReference(
+    internal static ColumnProvenance ResolveColumnReference(
         ColumnReferenceExpression columnRef,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
         string sourcePath,
@@ -187,7 +189,7 @@ internal static ColumnProvenance ResolveColumnReference(
         return Unresolved($"column '{columnName}' not found in FROM scope");
     }
 
-internal static (string RelationQualifiedName, string ExposedColumnName)? TryResolveImmediateRelation(
+    internal static (string RelationQualifiedName, string ExposedColumnName)? TryResolveImmediateRelation(
         ColumnReferenceExpression columnRef,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
     {
@@ -250,12 +252,14 @@ internal static (string RelationQualifiedName, string ExposedColumnName)? TryRes
             ColumnProvenance.Cast cast => cast with { Depth = cast.Depth + 1, Inner = BumpDepthIfViewLayer(cast.Inner, isViewLayer) },
             ColumnProvenance.Expression expr => expr with { Depth = expr.Depth + 1, Inputs = [.. expr.Inputs.Select(i => BumpDepthIfViewLayer(i, isViewLayer))] },
             ColumnProvenance.Declared declared => declared with { Depth = declared.Depth + 1 },
+
             ColumnProvenance.Union union => union with { Branches = [.. union.Branches.Select(b => BumpDepthIfViewLayer(b, isViewLayer))] },
+
             _ => provenance,
         };
     }
 
-private static ColumnProvenance ApplyExplicitCollate(ColumnReferenceExpression columnRef, ColumnProvenance provenance, string sourcePath)
+    private static ColumnProvenance ApplyExplicitCollate(ColumnReferenceExpression columnRef, ColumnProvenance provenance, string sourcePath)
     {
         if (columnRef.Collation is not { Value: { } explicitCollationName })
         {

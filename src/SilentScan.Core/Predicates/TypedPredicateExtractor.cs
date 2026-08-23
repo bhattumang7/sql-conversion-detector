@@ -12,6 +12,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class TypedPredicateExtractor
 {
+
     public static PredicateExtractionResult Extract(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, SqlType?>? externalVariables = null,
         DynamicSqlScope? enclosingScope = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
@@ -36,25 +37,25 @@ public static class TypedPredicateExtractor
         : ScopedSqlVisitorBase(sourcePath, catalog, resolvedViews, ledger, enclosingScope?.ProcScope, callerScopeByCalleeScope)
 #pragma warning restore CS9107
     {
-private const string PredicateOperandConstructKind = "predicate operand";
+        private const string PredicateOperandConstructKind = "predicate operand";
 
-private const string NonSeekableOperatorConstructKind = "non-seekable operator";
+        private const string NonSeekableOperatorConstructKind = "non-seekable operator";
 
-private const string WriteTargetConstructKind = "write target";
+        private const string WriteTargetConstructKind = "write target";
 
-private const string WriteSourceConstructKind = "write source";
+        private const string WriteSourceConstructKind = "write source";
 
-private const string OperandPositionConstructKind = "comparison inside scalar expression";
+        private const string OperandPositionConstructKind = "comparison inside scalar expression";
 
         private const string OperandPositionLedgerReason = "not a seek position - nested inside a CASE/IIF/COALESCE/NULLIF branch (or similar operand position) within an enclosing filter clause";
 
-private const string NoColumnOperandConstructKind = "no column operand";
+        private const string NoColumnOperandConstructKind = "no column operand";
 
-private const string UnresolvedColumnComparisonConstructKind = "unresolved column comparison";
+        private const string UnresolvedColumnComparisonConstructKind = "unresolved column comparison";
 
-private const string FoldableLiteralComparisonConstructKind = "foldable literal comparison";
+        private const string FoldableLiteralComparisonConstructKind = "foldable literal comparison";
 
-public void SeedEnclosingScope(TSqlFragment rootFragment)
+        public void SeedEnclosingScope(TSqlFragment rootFragment)
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {
@@ -62,22 +63,22 @@ public void SeedEnclosingScope(TSqlFragment rootFragment)
             }
         }
 
-private enum PredicatePosition
+        private enum PredicatePosition
         {
-NotSeekable,
+            NotSeekable,
 
-Seekable,
+            Seekable,
 
-SuppressedOperand,
+            SuppressedOperand,
         }
 
         private PredicatePosition _position;
 
-private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
+        private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
 
         private static readonly IReadOnlySet<TSqlFragment> EmptyDeadPredicateSet = new HashSet<TSqlFragment>();
 
-private IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
+        private IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
         {
             if (searchCondition is null || ScopeStack.Count == 0)
             {
@@ -88,7 +89,7 @@ private IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? sear
             return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
         }
 
-private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
             ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
@@ -111,13 +112,13 @@ private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
 
         private bool _negated;
 
-private TSqlFragment? _currentPredicateFragment;
+        private TSqlFragment? _currentPredicateFragment;
 
         private readonly Dictionary<string, SqlType?> _variables = externalVariables is null
             ? new Dictionary<string, SqlType?>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, SqlType?>(externalVariables, StringComparer.OrdinalIgnoreCase);
 
-private readonly HashSet<string> _formalParameterNames = externalVariables is null
+        private readonly HashSet<string> _formalParameterNames = externalVariables is null
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(externalVariables.Keys, StringComparer.OrdinalIgnoreCase);
 
@@ -139,7 +140,7 @@ private readonly HashSet<string> _formalParameterNames = externalVariables is nu
 
         public List<FilteredIndexParameterMismatchFinding> FilteredIndexParameterMismatchFindings { get; } = [];
 
-private Dictionary<(string Table, string Column), List<(string? IndexName, string LiteralText)>>? _literalEqualityFilteredIndexesByColumn;
+        private Dictionary<(string Table, string Column), List<(string? IndexName, string LiteralText)>>? _literalEqualityFilteredIndexesByColumn;
 
         private Dictionary<(string Table, string Column), List<(string? IndexName, string LiteralText)>> LiteralEqualityFilteredIndexesByColumn
         {
@@ -177,18 +178,19 @@ private Dictionary<(string Table, string Column), List<(string? IndexName, strin
             }
         }
 
-private bool _procedureHasWithRecompile;
+        private bool _procedureHasWithRecompile;
 
-private bool _statementHasOptionRecompile;
+        private bool _statementHasOptionRecompile;
 
         private bool HasActiveRecompileGuard => _procedureHasWithRecompile || _statementHasOptionRecompile;
 
-private IReadOnlyList<CatalogColumn?>? _pendingInsertTargetColumns;
+        private IReadOnlyList<CatalogColumn?>? _pendingInsertTargetColumns;
 
         private string? _pendingInsertTargetTable;
 
         public override void ExplicitVisit(SelectStatement node)
         {
+
             PushCteScope(node.WithCtesAndXmlNamespaces);
             var previousStatementHasOptionRecompile = BeginStatementOptimizerHints(node.OptimizerHints);
             base.ExplicitVisit(node);
@@ -251,7 +253,7 @@ private IReadOnlyList<CatalogColumn?>? _pendingInsertTargetColumns;
             _position = previous;
         }
 
-public override void ExplicitVisit(QualifiedJoin node)
+        public override void ExplicitVisit(QualifiedJoin node)
         {
             node.FirstTableReference?.Accept(this);
             node.SecondTableReference?.Accept(this);
@@ -312,7 +314,7 @@ public override void ExplicitVisit(QualifiedJoin node)
             PopCteScope();
         }
 
-public override void ExplicitVisit(MergeSpecification node)
+        public override void ExplicitVisit(MergeSpecification node)
         {
             node.Target?.Accept(this);
             node.TableReference?.Accept(this);
@@ -332,7 +334,7 @@ public override void ExplicitVisit(MergeSpecification node)
             node.OutputIntoClause?.Accept(this);
         }
 
-public override void ExplicitVisit(MergeActionClause node)
+        public override void ExplicitVisit(MergeActionClause node)
         {
             var previousPosition = _position;
             _position = PredicatePosition.Seekable;
@@ -370,7 +372,7 @@ public override void ExplicitVisit(MergeActionClause node)
             base.ExplicitVisit(node);
         }
 
-public override void ExplicitVisit(TSqlBatch node)
+        public override void ExplicitVisit(TSqlBatch node)
         {
             _variables.Clear();
             _formalParameterNames.Clear();
@@ -396,7 +398,7 @@ public override void ExplicitVisit(TSqlBatch node)
             base.ExplicitVisit(node);
         }
 
-public override void ExplicitVisit(BooleanNotExpression node)
+        public override void ExplicitVisit(BooleanNotExpression node)
         {
             _negated = !_negated;
             node.AcceptChildren(this);
@@ -413,14 +415,14 @@ public override void ExplicitVisit(BooleanNotExpression node)
 
         public override void ExplicitVisit(NullIfExpression node) => EnterOperandPosition(node);
 
-private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
+        private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
         {
             var previous = _statementHasOptionRecompile;
             _statementHasOptionRecompile = hints.Any(h => h.HintKind == OptimizerHintKind.Recompile);
             return previous;
         }
 
-private void EnterOperandPosition(TSqlFragment node)
+        private void EnterOperandPosition(TSqlFragment node)
         {
             var previousPosition = _position;
             _position = previousPosition == PredicatePosition.Seekable ? PredicatePosition.SuppressedOperand : PredicatePosition.NotSeekable;
@@ -428,7 +430,7 @@ private void EnterOperandPosition(TSqlFragment node)
             _position = previousPosition;
         }
 
-private bool SkipIfNotSeekable(TSqlFragment node)
+        private bool SkipIfNotSeekable(TSqlFragment node)
         {
             if (_position == PredicatePosition.Seekable)
             {
@@ -443,7 +445,7 @@ private bool SkipIfNotSeekable(TSqlFragment node)
             return true;
         }
 
-private void AnalyzeInsertWriteLoss(InsertSpecification spec)
+        private void AnalyzeInsertWriteLoss(InsertSpecification spec)
         {
             var table = ResolveWriteTargetTable(spec.Target);
             if (table is null)
@@ -496,7 +498,7 @@ private void AnalyzeInsertWriteLoss(InsertSpecification spec)
             return table;
         }
 
-private List<CatalogColumn?> ResolveInsertTargetColumns(InsertSpecification spec, CatalogTable table)
+        private List<CatalogColumn?> ResolveInsertTargetColumns(InsertSpecification spec, CatalogTable table)
         {
             if (spec.Columns.Count == 0)
             {
@@ -529,6 +531,7 @@ private List<CatalogColumn?> ResolveInsertTargetColumns(InsertSpecification spec
                 var count = Math.Min(columnValues.Count, targetColumns.Count);
                 for (var i = 0; i < count; i++)
                 {
+
                     if (targetColumns[i]?.Type is not { } targetType || columnValues[i] is DefaultLiteral)
                     {
                         continue;
@@ -547,6 +550,7 @@ private List<CatalogColumn?> ResolveInsertTargetColumns(InsertSpecification spec
             var count = Math.Min(selectElements.Count, targetColumns.Count);
             for (var i = 0; i < count; i++)
             {
+
                 var sourceExpression = ((SelectScalarExpression)selectElements[i]).Expression;
                 if (targetColumns[i]?.Type is not { } targetType)
                 {
@@ -571,7 +575,7 @@ private List<CatalogColumn?> ResolveInsertTargetColumns(InsertSpecification spec
                 sourcePath, sourceExpression.StartLine, sourceExpression.StartColumn));
         }
 
-protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
+        protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBase node)
         {
             _variables.Clear();
             _formalParameterNames.Clear();
@@ -653,6 +657,7 @@ protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBas
 
             if (node.NotDefined || _negated)
             {
+
                 if (ScopeStack.Count > 0 && _position == PredicatePosition.Seekable)
                 {
                     ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT LIKE is not sargable regardless of type match - not attributed to a type-conversion verdict");
@@ -689,6 +694,7 @@ protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBas
 
             if (node.NotDefined || _negated)
             {
+
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "NOT IN is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
@@ -697,6 +703,7 @@ protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBas
             _currentPredicateFragment = node;
             if (ResolveOperand(node.Expression, scopeChain) is not PredicateOperand.Column column)
             {
+
                 return;
             }
 
@@ -714,7 +721,7 @@ protected override void OnEnterProcedureOrFunctionBody(ProcedureStatementBodyBas
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
-public override void Visit(SubqueryComparisonPredicate node)
+        public override void Visit(SubqueryComparisonPredicate node)
         {
             if (IsDeadPredicate(node))
             {
@@ -745,6 +752,7 @@ public override void Visit(SubqueryComparisonPredicate node)
 
             if (isAllNotEquals)
             {
+
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "<> ALL is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
@@ -767,8 +775,9 @@ public override void Visit(SubqueryComparisonPredicate node)
             Findings.Add(new TypedPredicateFinding(verdict, column, new PredicateOperand.Value(otherType), "IN", sourcePath, node.StartLine, node.StartColumn));
         }
 
-public override void Visit(BooleanIsNullExpression node)
+        public override void Visit(BooleanIsNullExpression node)
         {
+
         }
 
         private static string? ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch
@@ -785,7 +794,7 @@ public override void Visit(BooleanIsNullExpression node)
             _ => null,
         };
 
-private static string Negate(string operatorText) => operatorText switch
+        private static string Negate(string operatorText) => operatorText switch
         {
             "=" => "<>",
             "<>" => "=",
@@ -811,6 +820,7 @@ private static string Negate(string operatorText) => operatorText switch
         {
             if (ScopeStack.Count == 0)
             {
+
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, "comparison outside FROM scope", "no FROM scope in effect (a bare IF/WHILE condition, or another comparison genuinely outside any FROM clause)");
                 return;
             }
@@ -822,6 +832,7 @@ private static string Negate(string operatorText) => operatorText switch
 
             if (operatorText == "<>")
             {
+
                 ledger.Record(AnalysisPass.Predicates, sourcePath, node.StartLine, node.StartColumn, NonSeekableOperatorConstructKind, "<> is not sargable regardless of type match - not attributed to a type-conversion verdict");
                 return;
             }
@@ -833,6 +844,7 @@ private static string Negate(string operatorText) => operatorText switch
 
             if (left is PredicateOperand.Column leftColumn && right is PredicateOperand.Column rightColumn)
             {
+
                 if (TryRecordCollationConflict(leftColumn, rightColumn, operatorText, node))
                 {
                     return;
@@ -867,7 +879,7 @@ private static string Negate(string operatorText) => operatorText switch
             AddFinding(column, other, operatorText, node);
         }
 
-private void RecordNoColumnOperand(ScalarExpression first, ScalarExpression second, TSqlFragment node)
+        private void RecordNoColumnOperand(ScalarExpression first, ScalarExpression second, TSqlFragment node)
         {
             if (first is ColumnReferenceExpression || second is ColumnReferenceExpression)
             {
@@ -910,7 +922,7 @@ private void RecordNoColumnOperand(ScalarExpression first, ScalarExpression seco
             TryAddFilteredIndexParameterMismatchFinding(column, other, operatorText, node);
         }
 
-private void TryAddLocalVariablePredicateFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        private void TryAddLocalVariablePredicateFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
         {
             if (HasActiveRecompileGuard || other is not PredicateOperand.Value { VariableName: { } variableName, IsFormalParameter: false })
             {
@@ -922,7 +934,7 @@ private void TryAddLocalVariablePredicateFinding(PredicateOperand.Column column,
                 variableName, operatorText, sourcePath, node.StartLine, node.StartColumn));
         }
 
-private void TryAddFilteredIndexParameterMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        private void TryAddFilteredIndexParameterMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
         {
             if (other is not PredicateOperand.Value { VariableName: { } variableName, IsFormalParameter: var isFormalParameter }
                 || !LiteralEqualityFilteredIndexesByColumn.TryGetValue((column.TableQualifiedName, column.ColumnName), out var candidates))
@@ -938,7 +950,7 @@ private void TryAddFilteredIndexParameterMismatchFinding(PredicateOperand.Column
             }
         }
 
-private void TryAddOversizedParameterFinding(PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, TSqlFragment node)
+        private void TryAddOversizedParameterFinding(PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, TSqlFragment node)
         {
             if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType }
                 || Rules.ParameterLengthClassifier.ClassifyOversized(column.Type, otherType) is not { } result)
@@ -950,7 +962,7 @@ private void TryAddOversizedParameterFinding(PredicateOperand.Column column, Pre
                 column.TableQualifiedName, column.ColumnName, result.ColumnLength, result.OtherLength, sourcePath, node.StartLine, node.StartColumn));
         }
 
-private void TryAddUnderLengthParameterFinding(
+        private void TryAddUnderLengthParameterFinding(
             PredicateOperand.Column column, PredicateOperand other, bool otherIsLiteral, string operatorText, TSqlFragment node)
         {
             if (otherIsLiteral || other is not PredicateOperand.Value { Type: { } otherType }
@@ -966,7 +978,7 @@ private void TryAddUnderLengthParameterFinding(
                 operatorText, changesRangeOrPatternShape, sourcePath, node.StartLine, node.StartColumn));
         }
 
-private void TryAddAnsiPaddingMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
+        private void TryAddAnsiPaddingMismatchFinding(PredicateOperand.Column column, PredicateOperand other, string operatorText, TSqlFragment node)
         {
             if (operatorText != "LIKE"
                 || column.Type is not { Category: SqlTypeCategory.VarChar or SqlTypeCategory.VarBinary }
@@ -986,7 +998,7 @@ private void TryAddAnsiPaddingMismatchFinding(PredicateOperand.Column column, Pr
                 column.TableQualifiedName, column.ColumnName, literalText, sourcePath, node.StartLine, node.StartColumn));
         }
 
-private static bool LiteralEndsWithSignificantWhitespace(string literalText)
+        private static bool LiteralEndsWithSignificantWhitespace(string literalText)
         {
             var firstQuote = literalText.IndexOf('\'');
             var lastQuote = literalText.LastIndexOf('\'');
@@ -999,7 +1011,7 @@ private static bool LiteralEndsWithSignificantWhitespace(string literalText)
             return content.Length > 0 && char.IsWhiteSpace(content[^1]);
         }
 
-private bool TryRecordCollationConflict(PredicateOperand.Column first, PredicateOperand.Column second, string operatorText, TSqlFragment node)
+        private bool TryRecordCollationConflict(PredicateOperand.Column first, PredicateOperand.Column second, string operatorText, TSqlFragment node)
         {
             if (!Rules.VerdictClassifier.HasGenuineCollationMismatch(first.Type, second.Type)
                 || first.Type?.Collation is not { } firstCollation || second.Type?.Collation is not { } secondCollation)
@@ -1052,6 +1064,7 @@ private bool TryRecordCollationConflict(PredicateOperand.Column first, Predicate
                         ExpressionTypeInferencer.Resolve(expression, e => OperandType(ResolveOperand(e, scopeChain)), catalog.TypeAliases));
 
                 default:
+
                     ledger.Record(
                         AnalysisPass.Predicates, sourcePath, expression.StartLine, expression.StartColumn,
                         PredicateOperandConstructKind, $"operand of kind '{expression.GetType().Name}' has no type resolution - resolved Unknown");
@@ -1059,14 +1072,14 @@ private bool TryRecordCollationConflict(PredicateOperand.Column first, Predicate
             }
         }
 
-private static SqlType? OperandType(PredicateOperand operand) => operand switch
+        private static SqlType? OperandType(PredicateOperand operand) => operand switch
         {
             PredicateOperand.Value v => v.Type,
             PredicateOperand.Column c => c.Type,
             _ => null,
         };
 
-private PredicateOperand.Value ResolveGlobalVariableOperand(GlobalVariableExpression globalVariable)
+        private PredicateOperand.Value ResolveGlobalVariableOperand(GlobalVariableExpression globalVariable)
         {
             var type = TypeInference.BuiltinFunctionTypeResolver.ResolveGlobalVariable(globalVariable.Name);
             if (type is null)
@@ -1079,7 +1092,7 @@ private PredicateOperand.Value ResolveGlobalVariableOperand(GlobalVariableExpres
             return new PredicateOperand.Value(type);
         }
 
-private PredicateOperand.Value ResolveFunctionCallOperand(
+        private PredicateOperand.Value ResolveFunctionCallOperand(
             FunctionCall functionCall, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             var name = functionCall.FunctionName.Value;
@@ -1117,11 +1130,12 @@ private PredicateOperand.Value ResolveFunctionCallOperand(
             return new PredicateOperand.Value(Type: null);
         }
 
-private PredicateOperand.Value ResolveCastOrConvertOperand(
+        private PredicateOperand.Value ResolveCastOrConvertOperand(
             DataTypeReference dataType, ScalarExpression parameter,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             TSqlFragment node)
         {
+
             var type = Parsing.SqlTypeReferenceResolver.Resolve(dataType, columnCollation: null, catalog.TypeAliases, unsizedStringOrBinaryDefaultLength: 30);
             if (type is null)
             {
@@ -1172,6 +1186,7 @@ private PredicateOperand.Value ResolveCastOrConvertOperand(
             var columns = QueryExpressionResolver.Resolve(subquery.QueryExpression, catalog, resolvedViews, sourcePath, ledger, innerCtes, CurrentProcScope);
             if (columns.Count != 1)
             {
+
                 return null;
             }
 
@@ -1181,13 +1196,16 @@ private PredicateOperand.Value ResolveCastOrConvertOperand(
         private PredicateOperand ResolveColumnOperand(
             ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
+
             var provenance = ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger);
             var columnName = columnRef.MultiPartIdentifier.Identifiers[^1].Value;
 
             if (provenance is ColumnProvenance.BaseColumn baseColumn)
             {
+
                 var tableEntry = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope);
                 var matchedIndex = tableEntry?.FindIndexedColumn(baseColumn.ColumnName);
+
                 bool? indexed = tableEntry is null ? null : matchedIndex is not null;
                 var immediateRelation = ScalarExpressionResolver.TryResolveImmediateRelation(columnRef, scopeChain);
                 return new PredicateOperand.Column(
@@ -1197,6 +1215,7 @@ private PredicateOperand.Value ResolveCastOrConvertOperand(
 
             if (provenance is ColumnProvenance.Declared declared)
             {
+
                 return new PredicateOperand.Column(declared.TableQualifiedName ?? "?", columnName, declared.Type, Indexed: false, declared.Depth, declared);
             }
 
@@ -1206,6 +1225,7 @@ private PredicateOperand.Value ResolveCastOrConvertOperand(
             }
             else if (provenance is ColumnProvenance.Union union)
             {
+
                 var agreedType = ColumnProvenanceAnalysis.TryGetScalarType(union);
                 if (agreedType is not null)
                 {
@@ -1230,6 +1250,7 @@ private PredicateOperand.Value ResolveCastOrConvertOperand(
 
             if (underlyingBaseColumns.Count == 0)
             {
+
                 ledger.Record(
                     AnalysisPass.Predicates, sourcePath, columnRef.StartLine, columnRef.StartColumn,
                     "expression-derived predicate", $"'{columnName}' is expression-derived but no underlying base column could be traced (e.g. ROW_NUMBER(), a derived-table alias over another expression, an XML shred) - nothing actionable to report");

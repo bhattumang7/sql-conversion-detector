@@ -13,6 +13,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SelectAssignmentFromSingleKnownTableColumn_FoldsToSymbolicPlaceholder()
     {
+
         var result = ScanWithCatalog(
             "CREATE TABLE dbo.SpecializedProcedureTemplates (SpecializedArea VARCHAR(50) NOT NULL, TemplateProcessorProcedureName VARCHAR(200) NOT NULL);",
             """
@@ -34,6 +35,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_ExecOfVariableDeclaredOnlyInsideOneIfBranch_AnalyzesBothTheKnownAndUnknownPath()
     {
+
         var result = Scan("""
             IF @flag = 1
             BEGIN
@@ -52,6 +54,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_ExecOfVariableDivergingAcrossIfElseIfBranches_AnalyzesEachBranchIndependently()
     {
+
         var result = Scan("""
             DECLARE @action VARCHAR(10) = 'X'
             DECLARE @table VARCHAR(50) = 'dbo.Foo'
@@ -79,6 +82,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringOfVariableWithLenOfSameVariableAsLength_TrimsLeadingLiteralPrefix()
     {
+
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @predicate VARCHAR(MAX) = ''
@@ -95,6 +99,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringOfVariableWithLenOfSameVariableAsLength_FirstPieceShorterThanTrim_FoldsToDeclaredTypeHole()
     {
+
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @predicate VARCHAR(MAX) = ''
@@ -111,6 +116,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringOfVariableFromOneToLenMinusConstant_TrimsTrailingLiteralSuffix()
     {
+
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @select VARCHAR(MAX) = ''
@@ -127,6 +133,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringOfVariableWithStartZeroToLen_TrimsExactlyOneTrailingCharacter()
     {
+
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @select VARCHAR(MAX) = ''
@@ -143,6 +150,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringOfVariableFromOneToLenMinusConstant_TrailingLiteralShorterThanTrim_FoldsToDeclaredTypeHole()
     {
+
         var result = Scan("""
             DECLARE @Name VARCHAR(50)
             DECLARE @select VARCHAR(MAX) = ''
@@ -159,6 +167,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringTrimOfVariableWithSeveralIndependentOptionalColumnGroups_TrimsThroughTheNestedChoice()
     {
+
         var result = Scan(
             "DECLARE @select VARCHAR(MAX) = ''; " +
             "IF @F1 = 1 BEGIN SET @select = @select + 'ColA,'; END; " +
@@ -180,6 +189,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_SubstringTrimOfVariableAlreadyTaintedWithAGuardedAlternative_StillAnalyzesRatherThanBreakingParse()
     {
+
         var result = Scan(
             "DECLARE @select VARCHAR(MAX) = ''; " +
             "IF 1 = 1 BEGIN SET @select = @select + 'ColA,'; END " +
@@ -195,6 +205,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_ParameterValidatedAgainstLiteralWithRaiserrorAndReturnOnMismatch_NarrowsToThatLiteralAfterward()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_Test (@SourceTable VARCHAR(50)) AS BEGIN " +
             "IF @SourceTable <> 'tblTripsActual' BEGIN " +
@@ -210,6 +221,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_ParameterValidatedAgainstLiteralWithLiteralOnTheLeft_StillNarrows()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_Test (@SourceTable VARCHAR(50)) AS BEGIN " +
             "IF 'tblTripsActual' <> @SourceTable BEGIN " +
@@ -225,6 +237,7 @@ public sealed class DynamicSqlScannerTests
     [Fact]
     public void Scan_InequalityGuardWithoutAnUnconditionalReturnInThen_DoesNotNarrow()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_Test (@SourceTable VARCHAR(50)) AS BEGIN " +
             "IF @SourceTable <> 'tblTripsActual' BEGIN " +
@@ -237,7 +250,7 @@ public sealed class DynamicSqlScannerTests
         Assert.Empty(result.AnalyzableScripts);
     }
 
-private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, string Column, string KeyColumn, string KeyValue), IReadOnlyList<string>> filteredValues, IReadOnlyDictionary<(string Table, string Column), IReadOnlyList<string>>? unfilteredValues = null) : ILiveRowValueFetcher
+    private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, string Column, string KeyColumn, string KeyValue), IReadOnlyList<string>> filteredValues, IReadOnlyDictionary<(string Table, string Column), IReadOnlyList<string>>? unfilteredValues = null) : ILiveRowValueFetcher
     {
         public List<(string TableQualifiedName, string SelectColumn, IReadOnlyList<(string Column, string LiteralValue)> EqualityKeys, int MaxRows)> Calls { get; } = [];
 
@@ -265,6 +278,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SelectAssignmentPinnedByLiteralEqualityKey_WithFetcher_ResolvesSingleRealValue()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -300,6 +314,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SelectAssignmentWithoutFetcher_StillFoldsToSymbolicPlaceholder_NotAffectedByFeature()
     {
+
         var result = ScanWithCatalog(
             "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);",
             """
@@ -316,6 +331,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SelectAssignmentWithFetcher_NoWhereClause_FetchesEveryDistinctValue()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -341,6 +357,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SelectAssignmentWithFetcher_MultipleMatchingRows_AnalyzesEachCandidateIndependently()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -367,6 +384,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SelectAssignmentWithFetcher_NonLiteralWhereCondition_StillFetchesIgnoringThatCondition()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -393,6 +411,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SelectAssignmentWithFetcher_ZeroRowsMatch_DeclinesRatherThanGuesses()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -415,6 +434,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_DeclareInitializerAsScalarSubqueryFromSingleKnownTable_WithFetcher_ResolvesRealValue()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -440,6 +460,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SetAssignmentAsScalarSubqueryFromSingleKnownTable_WithFetcher_ResolvesRealValue()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -465,6 +486,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SetAssignmentAsScalarSubqueryFilteredByTheSameVariableItAssigns_ResolvesToATypedHoleNotADecline()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.tblTrips (Reservation INT NOT NULL, CoordinatedReservation INT NULL, TripDate DATETIME NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var catalog = CatalogBuilder.Build([ddlResult]);
@@ -486,6 +508,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SetAssignmentFromSingleKnownTableWhereClauseIsAnUnfoldableNestedSubquery_ResolvesToATypedHoleNotADecline()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", """
             CREATE TABLE dbo.tblCoordinatingAgencies (AgencyRegisteredName VARCHAR(255) NOT NULL, DatabaseName VARCHAR(50) NOT NULL);
             CREATE TABLE dbo.tblCoordinatedTripAgencies (CoordinatedAgencyID INT NOT NULL, AgencyID INT NOT NULL);
@@ -520,6 +543,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_IfConditionOnACallerSeededBitmaskProvablyTrue_StillResolvesBothBranches()
     {
+
         var callGraph = new ProcCallGraph([new ProcCallEdge(
             null, "dbo.usp_Test", new SourceSpan("caller.sql", 1, 1),
             [new ProcCallArgument("@Bits", new SqlType(SqlTypeCategory.Int), false, null, true, new ProcCallLiteralArgument("2", "caller.sql", 1, 1, 0))])]);
@@ -544,6 +568,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_IfConditionWithNoCallerSeededVariableAtAll_NeverPrunesEvenWhenProvable()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", """
             CREATE PROCEDURE dbo.usp_Test AS
             BEGIN
@@ -589,6 +614,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecBuiltFromCursorFetchedVariables_TreatsFetchTargetsAsSymbolicPlaceholders()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Scratch AS
             BEGIN
@@ -614,6 +640,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecBuiltFromCursorFetchedVariablesDeclaredWithExplicitNullInitializer_TreatsFetchTargetsAsSymbolicPlaceholders()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Scratch AS
             BEGIN
@@ -639,6 +666,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfTableNameBuiltFromNewId_TreatsNewIdAsSymbolicPlaceholder()
     {
+
         var result = Scan("""
             DECLARE @tableName VARCHAR(50)
             SET @tableName = 'tbl_RILTemp_' + REPLACE(CAST(NEWID() AS VARCHAR(36)), '-', '')
@@ -653,6 +681,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableDeclaredOnlyInsideTryBlock_ReferencedInsideCatchBlock_FoldsToSymbolicPlaceholder()
     {
+
         var result = Scan("""
             BEGIN TRY
                 DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'
@@ -670,6 +699,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecInsideTryBlock_AnalyzesUsingOnlyTrySideState_UnaffectedByLaterCatchReassignment()
     {
+
         var result = Scan("""
             DECLARE @SQL NVARCHAR(MAX) = N'SELECT 1'
             BEGIN TRY
@@ -688,6 +718,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfLocallyDeclaredLiteralVariable_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -698,6 +729,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfUndeclaredVariable_Unanalyzable()
     {
+
         var result = Scan("EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -709,6 +741,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromFunctionCall_Unanalyzable()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = FORMAT(1, N'N'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -720,6 +753,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecStringListAtLinkedServer_DeclinesRatherThanAnalyzingAgainstTheLocalCatalog()
     {
+
         var result = Scan("EXEC ('SELECT Id FROM dbo.Orders WHERE CAST(Id AS varchar) = ''7''') AT REMOTE1;");
 
         var finding = Assert.Single(result.Findings);
@@ -731,6 +765,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromColumnReference_ReasonNamesColumnReference()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + SomeColumn; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -741,6 +776,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromScalarSubquery_ReasonNamesSqlLoadedFromTable()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = (SELECT TOP 1 SomeColumn FROM dbo.T); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -751,6 +787,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromFromLessScalarSubquery_UnwrapsAndFoldsTheInnerExpression()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = (SELECT CASE WHEN 1 = 1 THEN N'SELECT 1' ELSE N'SELECT 2' END); " +
             "EXEC(@sql);");
@@ -763,6 +800,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromMultiColumnFromLessSubquery_StillDeclinesAsSubquery()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = (SELECT 1 AS a, 2 AS b); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -780,6 +818,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [InlineData("@@FETCH_STATUS")]
     public void Scan_ExecOfVariableAssignedFromKnownSystemGlobalVariable_FoldsToEnvironmentDependentHole(string globalVariable)
     {
+
         var result = Scan($"DECLARE @sql NVARCHAR(MAX) = 'SELECT ' + CAST({globalVariable} AS VARCHAR); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -790,6 +829,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromUnknownSystemGlobalVariable_Declines()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = @@VERSION; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -800,6 +840,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedFromSubtraction_ReasonNamesUnsupportedOperator()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + (5 - 1); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -810,6 +851,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_SetCursorVariable_TaintsRatherThanCrashes()
     {
+
         var result = Scan(
             "DECLARE @c CURSOR; DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "SET @c = CURSOR FOR SELECT 1 AS x; SET @sql = N'SELECT 1'; EXEC(@sql);");
@@ -822,6 +864,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableReassignedInsideIfBranch_BothBranchAssembliesAnalyzed()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "IF 1 = 1 BEGIN SET @sql = N'SELECT 2'; END " +
@@ -836,6 +879,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableUntouchedByUnrelatedIfBranch_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @other INT = 0; " +
@@ -850,6 +894,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableInProcContainingGoto_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_Test AS BEGIN " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -866,6 +911,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterLabelThatCannotReachTheExec_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_Purge AS BEGIN " +
             "DECLARE @sql NVARCHAR(MAX) = N'DELETE FROM dbo.Orders WHERE RegionCode = ''EMEA'''; " +
@@ -883,6 +929,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableReassignedIdenticallyOnEveryPathThroughABackwardJump_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_ReadWithRetry AS BEGIN " +
             "DECLARE @sql NVARCHAR(MAX); " +
@@ -900,6 +947,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedIdenticallyOnEveryLoopIteration_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE PROCEDURE dbo.usp_RefreshBuckets AS BEGIN " +
             "DECLARE @i INT = 1; " +
@@ -920,6 +968,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfAccumulatedConcatenation_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 '; " +
             "SET @sql = @sql + N'WHERE 1 = 1'; " +
@@ -934,6 +983,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterWhileLoopThatAssignsTheSameLiteralEveryIteration_BothOutcomesAnalyzed()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @i INT = 0; " +
@@ -948,6 +998,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecInsideWhileLoopUsingPreLoopValue_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @i INT = 0; " +
@@ -961,6 +1012,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterTryCatchThatTouchesIt_BothOutcomeAssembliesAnalyzed()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "BEGIN TRY SET @sql = N'SELECT 2'; END TRY " +
@@ -991,6 +1043,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterOrdinaryPlainSelect_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "SELECT 1; " +
@@ -1004,6 +1057,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterUnrecognizedStatementNotMentioningIt_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col INT); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1018,6 +1072,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterUnrecognizedStatementMerelyReadingIt_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1032,6 +1087,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterPrintReferencingIt_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "PRINT @sql; " +
@@ -1045,6 +1101,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterQuirkyUpdateAssignsIt_FoldsToTypedHole()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1059,6 +1116,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAfterFetchIntoAssignsIt_FoldsToTypedHole()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1077,6 +1135,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfUnrelatedVariableAfterQuirkyUpdate_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col NVARCHAR(MAX)); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1092,6 +1151,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfUnrelatedVariableAfterUnrecognizedStatement_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col INT); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1107,6 +1167,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfPureSelectAssignment_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 '; " +
             "SELECT @sql = @sql + N'WHERE 1 = 1';" +
@@ -1133,6 +1194,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfSelectAssignmentWithFromClause_FoldsToTypedHole()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (Col NVARCHAR(50)); " +
             "DECLARE @sql NVARCHAR(MAX); " +
@@ -1147,6 +1209,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfSelectAssignmentMixedWithRealColumn_FoldsToTypedHole()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "SELECT @sql = N'SELECT 2', 1 AS RealColumn; " +
@@ -1160,6 +1223,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableWithNoInitializer_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -1171,6 +1235,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableWithNoInitializer_UnresolvableAliasType_StaysTainted()
     {
+
         var result = Scan("DECLARE @sql dbo.SqlTextType; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -1197,6 +1262,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableDeclaredOnlyInASiblingIfElseIfBranch_FoldsToTypedHole_NotVariableNotInScope()
     {
+
         var result = Scan("""
             DECLARE @kind INT = 1
             IF @kind = 1
@@ -1220,6 +1286,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfConcatenationWhereLeftOperandUndeclared_Unanalyzable()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = @undeclared + N'x'; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -1242,6 +1309,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_MultiStatementFunctionBody_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "CREATE FUNCTION dbo.udf_Test() RETURNS INT AS " +
             "BEGIN " +
@@ -1258,6 +1326,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecInAlterProcedureBody_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "ALTER PROCEDURE dbo.usp_Test AS BEGIN " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
@@ -1333,6 +1402,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExternalClrProcedure_NoStatementListBody_DoesNotThrow()
     {
+
         var result = Scan("CREATE PROCEDURE dbo.usp_Test AS EXTERNAL NAME Assembly.Class.Method;");
 
         Assert.Empty(result.Findings);
@@ -1342,6 +1412,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_InlineTableValuedFunction_NoStatementListBody_DoesNotThrow()
     {
+
         var result = Scan("CREATE FUNCTION dbo.udf_Test() RETURNS TABLE AS RETURN (SELECT 1 AS X);");
 
         Assert.Empty(result.Findings);
@@ -1372,6 +1443,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableAssignedWithSubtractEquals_FoldsToTypedHole()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; SET @sql -= N'x'; EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -1402,6 +1474,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfLiteralConcatenatedWithLocallyDeclaredVariable_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan("DECLARE @x NVARCHAR(10) = N'x'; EXEC('SELECT ' + @x);");
 
         Assert.Empty(result.Findings);
@@ -1463,6 +1536,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_RegularProcedureExec_NoFinding()
     {
+
         var result = Scan("EXEC dbo.usp_DoThing;");
 
         Assert.Empty(result.Findings);
@@ -1472,6 +1546,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableMutatedByPriorProcCallWithOutput_FoldsToTypedHole()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "EXEC dbo.BuildQuery @sql OUTPUT; " +
@@ -1485,6 +1560,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableUnrelatedToPriorProcCallWithOutput_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @other NVARCHAR(MAX); " +
@@ -1499,6 +1575,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariableMutatedByProcCallWithReturnAssignment_PreservesKnownValue_NotAnOutputArgument()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @rc INT; " +
@@ -1513,6 +1590,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfVariablePassedAsOutputArgument_FoldsToTypedHole()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "EXEC dbo.BuildQuery @sql OUTPUT; " +
@@ -1526,6 +1604,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecInsideWhileLoopThatSelfMutatesTheExecutedVariable_Unanalyzable()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "DECLARE @i INT = 0; " +
@@ -1539,6 +1618,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfSelectAssignmentWithWhereClause_FoldsToTypedHole()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX); " +
             "DECLARE @flag BIT = 1; " +
@@ -1568,6 +1648,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamSeededFromSingleCallerLiteral_ProducesAnalyzableScriptAndExternalCallerAlternative()
     {
+
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var graph = SingleCallerGraph(new ProcCallArgument("@Status", FormalParameterType: null, FormalParameterIsOutput: false, CallerVariableName: null, IsLiteral: true, literal));
 
@@ -1585,6 +1666,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithMultipleCallersPassingSameLiteral_StillAddsExternalCallerAlternative()
     {
+
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var argument = new ProcCallArgument("@Status", null, false, null, true, literal);
         var graph = new ProcCallGraph([
@@ -1621,6 +1703,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
             graph);
 
         Assert.Empty(result.Findings);
+
         Assert.Equal(3, result.AnalyzableScripts.Count);
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Active'");
         Assert.Contains(result.AnalyzableScripts, s => s.InnerText == "SELECT 1 WHERE Status = 'Archived'");
@@ -1629,6 +1712,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithMultipleCallers_OneCallerNonLiteral_FoldsToSymbolicPlaceholder()
     {
+
         var literalArgument = new ProcCallArgument(
             "@Status", null, false, null, true, new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2));
         var variableArgument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
@@ -1650,6 +1734,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithManyCallersPassingDistinctLiterals_CardinalityCapExceeded_CollapsesOverflowToTypedHole()
     {
+
         var edges = Enumerable.Range(0, 40)
             .Select(i => new ProcCallEdge(
                 null,
@@ -1702,6 +1787,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecWithKnownOutputSummary_CalleeCasingDiffersFromCallGraphEdge_StillSeedsCallerVariable()
     {
+
         var sql =
             "DECLARE @select varchar(max);\n" +
             "EXEC DBO.USP_BUILDSELECTCLAUSE @kind = 1, @out = @select OUTPUT;\n" +
@@ -1724,6 +1810,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecWithOutputArgumentButNoKnownSummary_FoldsToTypedHole()
     {
+
         var sql =
             "DECLARE @select varchar(max);\n" +
             "EXEC dbo.usp_BuildSelectClause @kind = 1, @out = @select OUTPUT;\n" +
@@ -1743,6 +1830,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecWithUnrelatedVariableAlongsideKnownOutputSummary_SeedsOutputBindingAndFoldsRcToTypedHole()
     {
+
         var sql =
             "DECLARE @select varchar(max);\n" +
             "DECLARE @rc int;\n" +
@@ -1767,6 +1855,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithSingleNonLiteralCaller_FoldsToSymbolicPlaceholder()
     {
+
         var argument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
         var graph = SingleCallerGraph(argument);
 
@@ -1783,6 +1872,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithSingleNonLiteralCaller_UnresolvableAliasType_StaysTainted()
     {
+
         var argument = new ProcCallArgument("@Status", null, false, "@callerVar", IsLiteral: false, LiteralArgument: null);
         var graph = SingleCallerGraph(argument);
 
@@ -1799,6 +1889,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithNoKnownCallers_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
+
         var graph = new ProcCallGraph([]);
 
         var result = ScanWithCallGraph(
@@ -1815,6 +1906,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamWithNoKnownCallers_UnresolvableAliasTypeStaysTainted()
     {
+
         var graph = new ProcCallGraph([]);
 
         var result = ScanWithCallGraph(
@@ -1830,6 +1922,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_OutputParamNeverSeededFromTheCallerSArgument_ButStillFoldsToASymbolicPlaceholder()
     {
+
         var literal = new ProcCallLiteralArgument("Active", "caller.sql", 10, 30, PrefixLength: 2);
         var argument = new ProcCallArgument("@Status", null, FormalParameterIsOutput: true, null, true, literal);
         var graph = SingleCallerGraph(argument);
@@ -1848,7 +1941,9 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamOmittedByCallerRelyingOnItsOwnLiteralDefault_SeedsFromThatDefaultAndWidens()
     {
+
         var graph = SingleCallerGraph();
+
         var result = ScanWithCallGraph(
             $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) = N'Active' AS " +
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
@@ -1863,7 +1958,9 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ProcParamOmittedByCallerWithNoDefaultDeclared_FoldsToSymbolicPlaceholder()
     {
+
         var graph = SingleCallerGraph();
+
         var result = ScanWithCallGraph(
             $"CREATE PROCEDURE {CalleeProcName} @Status NVARCHAR(20) AS " +
             "BEGIN DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 WHERE Status = ''' + @Status + N''''; EXEC(@sql); END",
@@ -1890,6 +1987,7 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_ExecOfQuoteNameOnFoldedVariable_TierC_FoldsToBracketedText()
     {
+
         var result = Scan(
             "DECLARE @table VARCHAR(50) = 'Orders'; " +
             "DECLARE @sql VARCHAR(MAX) = 'SELECT * FROM ' + QUOTENAME(@table); " +
@@ -1915,18 +2013,21 @@ private sealed class FakeRowValueFetcher(IReadOnlyDictionary<(string Table, stri
     [Fact]
     public void Scan_QuoteNameOnLiteral_EmbeddedOpenBracket_NeverEscaped()
     {
+
         var result = ScanQuoteName("QUOTENAME(N'ab[c')");
 
         var script = Assert.Single(result.AnalyzableScripts);
         Assert.Equal("[ab[c]", script.InnerText);
     }
 
-private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+    private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
 
     [Theory]
+
     [InlineData("'", "ab'c", "'ab''c'")]
     [InlineData("\"", "ab\"c", "\"ab\"\"c\"")]
-    [InlineData("(", "ab)c", "(ab))c)")]    [InlineData("<", "ab>c", "<ab>>c>")]
+    [InlineData("(", "ab)c", "(ab))c)")]
+    [InlineData("<", "ab>c", "<ab>>c>")]
     [InlineData("{", "ab}c", "{ab}}c}")]
     public void Scan_QuoteNameOnLiteral_RecognizedDelimiter_MatchesOracleEscaping(string delimiter, string inputWithEmbeddedCloseChar, string expected)
     {
@@ -1940,6 +2041,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_QuoteNameOnLiteral_UnrecognizedDelimiter_UnanalyzableWithNullResultReason()
     {
+
         var result = ScanQuoteName("QUOTENAME(N'abc', N'x')");
 
         var finding = Assert.Single(result.Findings);
@@ -1959,6 +2061,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_QuoteNameOnLiteral_InputOver128Characters_UnanalyzableWithNullResultReason()
     {
+
         var result = ScanQuoteName($"QUOTENAME(N'{new string('a', 129)}')");
 
         var finding = Assert.Single(result.Findings);
@@ -1987,6 +2090,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_QuoteNameOnColumnReference_FoldsToTypedHole()
     {
+
         var result = ScanQuoteName("QUOTENAME(SomeColumn)");
 
         Assert.Empty(result.Findings);
@@ -1997,6 +2101,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_QuoteNameWithThreeArguments_UnanalyzableAsFunctionCall()
     {
+
         var result = ScanQuoteName("QUOTENAME(N'a', N'[', N'extra')");
 
         var finding = Assert.Single(result.Findings);
@@ -2006,6 +2111,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_DbNameConcatenatedIntoDynamicSql_FoldsToTypedHole()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = 'SELECT * FROM ' + DB_NAME() + '.dbo.Orders'; EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2041,6 +2147,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_UnmodeledScalarUdfWithoutSchemaQualification_StillResolvesAgainstDefaultDboSchema()
     {
+
         var result = ScanWithCatalog(
             "CREATE FUNCTION dbo.udf_Unqualified(@raw VARCHAR(50)) RETURNS VARCHAR(50) AS BEGIN RETURN @raw END;",
             "DECLARE @sql NVARCHAR(MAX) = udf_Unqualified(@SomeParam); EXEC(@sql);");
@@ -2053,6 +2160,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_CallToFunctionNotInCatalog_StillDeclinesAsUnrecognized()
     {
+
         var result = ScanWithCatalog(
             "CREATE TABLE dbo.Unrelated (Id INT NOT NULL);",
             "DECLARE @sql NVARCHAR(MAX) = dbo.udf_NeverDefined(@SomeParam); EXEC(@sql);");
@@ -2064,6 +2172,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_UnmodeledScalarUdfWithNoCatalogSupplied_DeclinesRatherThanGuessing()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = dbo.udf_FormatCode(@SomeParam); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2101,9 +2210,12 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     }
 
     [Theory]
-    [InlineData("UPPER(N'select id')")]    [InlineData("UPPER(N'SELECT Id')")]    [InlineData("LOWER(N'select ID')")]
+    [InlineData("UPPER(N'select id')")]
+    [InlineData("UPPER(N'SELECT Id')")]
+    [InlineData("LOWER(N'select ID')")]
     public void Scan_CaseConversionOnInputContainingI_Declines_TurkishCollationAmbiguity(string expression)
     {
+
         var result = Scan($"DECLARE @sql NVARCHAR(MAX) = {expression}; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2123,6 +2235,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LtrimOnSpacePaddedLiteral_TrimsOnlySpace_NotTab()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = LTRIM(N'  " + '\t' + "x'); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2152,6 +2265,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LeftLengthBeyondInput_ClampsToWholeString()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = LEFT(N'abc', 10); EXEC(@sql);");
 
         var script = Assert.Single(result.AnalyzableScripts);
@@ -2170,6 +2284,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LeftWithNegativeLength_Declines()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = LEFT(N'abc', -1); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2179,6 +2294,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LeftWithLengthCarriedInIntVariable_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan("DECLARE @n INT = 3; DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdef', @n); EXEC(@sql);");
 
         var script = Assert.Single(result.AnalyzableScripts);
@@ -2197,6 +2313,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SubstringLengthBeyondInput_ClampsToRemainder()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', 2, 100); EXEC(@sql);");
 
         var script = Assert.Single(result.AnalyzableScripts);
@@ -2206,6 +2323,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SubstringStartBeyondInput_FoldsToEmptyString()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'X' + SUBSTRING(N'abcdef', 10, 5); EXEC(@sql);");
 
         var script = Assert.Single(result.AnalyzableScripts);
@@ -2224,6 +2342,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SubstringWithStartBelowOne_Declines()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', -2, 5); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2233,6 +2352,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SubstringWithStartCarriedInIntVariable_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan("DECLARE @n INT = 2; DECLARE @sql NVARCHAR(MAX) = SUBSTRING(N'abcdef', @n, 3); EXEC(@sql);");
 
         var script = Assert.Single(result.AnalyzableScripts);
@@ -2242,6 +2362,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LeftOnFoldedVariable_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @table VARCHAR(50) = 'OrdersTable'; " +
             "DECLARE @sql VARCHAR(MAX) = 'SELECT * FROM ' + LEFT(@table, 6); " +
@@ -2254,6 +2375,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_IntVariableChainThroughArithmetic_ResolvesCorrectSum_NotStringConcat()
     {
+
         var result = Scan(
             "DECLARE @i INT = 5; DECLARE @j INT = @i + 1; " +
             "DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdefg', @j); EXEC(@sql);");
@@ -2265,6 +2387,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_IntVariableAddEquals_ResolvesArithmeticSum_NotStringConcat()
     {
+
         var result = Scan(
             "DECLARE @i INT = 5; SET @i += 2; " +
             "DECLARE @sql NVARCHAR(MAX) = LEFT(N'abcdefg', @i); EXEC(@sql);");
@@ -2276,6 +2399,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_IntVariableFromUnfoldableExpression_StillDeclines_NotAGuess()
     {
+
         var result = Scan(
             "CREATE TABLE dbo.T (N INT NOT NULL); " +
             "DECLARE @n INT; SELECT @n = N FROM dbo.T; " +
@@ -2298,6 +2422,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ReplaceWhereOrdinalAndCaseInsensitiveDisagree_Declines()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = REPLACE(N'AbcABC', N'abc', N'X'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2325,6 +2450,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ReplaceOnVariableDivergedAcrossIfBranches_CrossProductsIntoUnionedAssemblies()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1 '; " +
             "IF 1 = 1 SET @sql = @sql + N'AND t.col = ''$X$'' '; " +
@@ -2339,6 +2465,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ReplaceOnVariableDivergedAcrossIfBranches_DeclinesWholeFoldIfAnyCombinationCollationDiverges()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'AbcABC'; " +
             "IF 1 = 1 SET @sql = N'plain'; " +
@@ -2352,6 +2479,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ReplaceWithReplicateAsReplacementArgument_FoldsCompletely()
     {
+
         var result = Scan(
             "DECLARE @Path NVARCHAR(MAX) = N'C:\\Backup''s\\file.bak'; " +
             "DECLARE @sql NVARCHAR(MAX) = REPLACE(@Path, N'''', REPLICATE(N'''', 2)); " +
@@ -2366,6 +2494,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_FunctionArgumentWithChoiceEmbeddedAmongLiteralPieces_CrossProductsAcrossBothBranches()
     {
+
         var result = Scan(
             "DECLARE @FileListParamSQL NVARCHAR(4000) = N'INSERT INTO t (a, b'; " +
             "IF @MajorVersion >= 13 BEGIN SET @FileListParamSQL += N', SnapshotUrl'; END; " +
@@ -2387,8 +2516,10 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ChainedReplaceCallsEachSplicingAHole_SubsequentReplaceStillFoldsAroundExistingHoles()
     {
+
         var result = Scan(
-            "DECLARE @DatabaseName NVARCHAR(128); " +            "DECLARE @SchemaName NVARCHAR(128); " +
+            "DECLARE @DatabaseName NVARCHAR(128); " +
+            "DECLARE @SchemaName NVARCHAR(128); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT * FROM @@@Database@@@.@@@Schema@@@.T'; " +
             "SET @sql = REPLACE(@sql, N'@@@Database@@@', @DatabaseName); " +
             "SET @sql = REPLACE(@sql, N'@@@Schema@@@', @SchemaName); " +
@@ -2403,6 +2534,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ChainedReplaceCalls_CollationSensitiveSegmentStillDeclinesWithSpecificReason()
     {
+
         var result = Scan(
             "DECLARE @Value NVARCHAR(128); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT AbcABC FROM @@@Marker@@@ WHERE x = 1'; " +
@@ -2417,8 +2549,10 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ReplaceSourceMixingChoiceAndHole_PreservesChoiceStructureThenSplicesEachLeaf()
     {
+
         var result = Scan(
-            "DECLARE @TableName NVARCHAR(128); " +            "DECLARE @sql NVARCHAR(MAX) = N'CREATE TABLE @@@Table@@@ (a INT'; " +
+            "DECLARE @TableName NVARCHAR(128); " +
+            "DECLARE @sql NVARCHAR(MAX) = N'CREATE TABLE @@@Table@@@ (a INT'; " +
             "IF @IncludeExtra = 1 BEGIN SET @sql += N', b INT'; END; " +
             "SET @sql += N')'; " +
             "SET @sql = REPLACE(@sql, N'@@@Table@@@', @TableName); " +
@@ -2434,6 +2568,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ReplaceSourceWithTwoIndependentChoices_NoLongerDeclinesOutright()
     {
+
         var result = Scan(
             "DECLARE @DB_Name NVARCHAR(50); " +
             "DECLARE @a NVARCHAR(MAX) = N''; " +
@@ -2453,6 +2588,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_CastOfFoldedVariableToNVarcharWithTruncation_TierC_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @raw NVARCHAR(MAX) = N'HelloWorld'; " +
             "DECLARE @sql NVARCHAR(MAX) = CAST(@raw AS NVARCHAR(5)); " +
@@ -2485,6 +2621,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_CastToCharTargetWithExplicitLength_BlankPadsToTheTargetLength()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'[' + CAST(N'ab' AS CHAR(5)) + N']'; EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2495,6 +2632,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_CastToCharTargetWithNoExplicitLength_DeclinesRatherThanGuessingTheDefaultLength()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = CAST(N'ab' AS CHAR); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2504,6 +2642,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfNewIdCastToString_TreatsNewIdAsSymbolicPlaceholder()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'DROP TABLE tbl_' + CAST(NEWID() AS NVARCHAR(36)); " +
             "EXEC(@sql);");
@@ -2516,6 +2655,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfGetDate_TreatsGetDateAsSymbolicPlaceholder()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = CONVERT(VARCHAR(30), GETDATE()); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2526,6 +2666,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfChecksumBuiltFromColumns_TreatsChecksumAsSymbolicPlaceholder()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + CAST(CHECKSUM('a', 'b') AS VARCHAR(20)); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2561,6 +2702,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SearchedCaseWithNoElse_Declines()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = CASE WHEN @flags = 1 THEN N'SELECT A' END; EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2570,6 +2712,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_CaseWithOneUnfoldableBranch_UnfoldableArmDegradesToTypedHole()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = CASE WHEN @flags = 1 THEN N'SELECT A' ELSE CONVERT(VARCHAR(30), SYSDATETIME()) END; " +
             "EXEC(@sql);");
@@ -2612,6 +2755,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SearchedCaseWithUndeterminedGuard_StillUnionsBothBranches()
     {
+
         var result = Scan(
             "DECLARE @LastEditedByColumnName NVARCHAR(50); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + " +
@@ -2657,6 +2801,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_TenIndependentOptionalFilters_CardinalityCapExceeded_CollapsesOverflowToTypedHole()
     {
+
         var filters = string.Concat(Enumerable.Range(0, 10)
             .Select(i => $"IF @f{i} = 1 BEGIN SET @sql = @sql + N' AND c{i} = 1'; END "));
         var declares = string.Concat(Enumerable.Range(0, 10).Select(i => $"DECLARE @f{i} BIT = 0; "));
@@ -2675,6 +2820,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SixIndependentOptionalFiltersWithMixedDeclaredTypes_DeclinesRatherThanSilentlyDroppingTheCallSite()
     {
+
         var declares = string.Concat(Enumerable.Range(0, 6).Select(i =>
             $"DECLARE @c{i} {(i % 2 == 0 ? "VARCHAR(50)" : "NVARCHAR(50)")} = N''; DECLARE @f{i} BIT = 0; "));
         var sets = string.Concat(Enumerable.Range(0, 6).Select(i =>
@@ -2692,6 +2838,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_IfBranchOwnFoldFails_ElseBranchFine_RecoversTheKnownBranchAsAGuardedAlternative()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "IF 1 = 1 BEGIN SET @sql = FORMAT(2, N'N'); END " +
@@ -2706,6 +2853,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LiteralPrefixConcatenatedOntoAGuardedAlternative_PrefixSurvivesInTheRecoveredScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'2'; " +
             "IF 1 = 1 BEGIN SET @sql = FORMAT(2, N'N'); END " +
@@ -2720,6 +2868,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_IfBranchesProduceByteIdenticalAssemblies_CollapseToOneScript()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1'; " +
             "IF 1 = 1 BEGIN SET @sql = N'SELECT 2'; END " +
@@ -2747,6 +2896,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LenTrimsTrailingSpacesBeforeCounting()
     {
+
         var result = Scan(
             "DECLARE @sql VARCHAR(MAX) = 'abc  '; " +
             "DECLARE @out VARCHAR(MAX) = LEFT(@sql, LEN(@sql)); " +
@@ -2759,6 +2909,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LeftLengthIsLenMinusLen_StripsTrailingDelimiter()
     {
+
         var result = Scan(
             "DECLARE @delim VARCHAR(10) = ' AND '; " +
             "DECLARE @sql VARCHAR(MAX) = 'a = 1' + @delim + 'b = 2' + @delim; " +
@@ -2773,6 +2924,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_LenOfNonLiteralExpression_DeclinesLeft()
     {
+
         var result = Scan("DECLARE @sql VARCHAR(MAX) = LEFT(N'abcdef', LEN(@undeclared)); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2811,6 +2963,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_GuardedSetThenDifferentGuardExec_UnionsLiteralWithSymbolicPlaceholder()
     {
+
         var result = Scan(
             "DECLARE @sql VARCHAR(MAX); " +
             "IF @mode = 1 SET @sql = 'SELECT 1'; " +
@@ -2828,6 +2981,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_GuardedSetThenDifferentGuardExec_UnresolvableAliasType_StaysTainted()
     {
+
         var result = Scan(
             "DECLARE @sql dbo.SqlTextType; " +
             "IF @mode = 1 SET @sql = 'SELECT 1'; " +
@@ -2881,6 +3035,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfReplaceWithSymbolicSourceArgument_TransfersPlaceholderType()
     {
+
         var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = REPLACE(@sym, 'a', 'b'); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2891,6 +3046,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfReplaceWithSymbolicPatternArgument_StillRefuses()
     {
+
         var result = Scan("DECLARE @pattern NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = REPLACE('source text', @pattern, 'b'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2912,6 +3068,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfCastOfSymbolicVariableToVarchar_TransfersExplicitTargetType()
     {
+
         var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql VARCHAR(MAX) = CAST(@sym AS VARCHAR(50)); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2922,6 +3079,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfCastOfSymbolicVariableToInt_StillRefuses()
     {
+
         var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = CAST(@sym AS INT); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2933,6 +3091,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfUpperOfMixedLiteralAndSymbolicConcatenation_StillRefuses()
     {
+
         var result = Scan("DECLARE @sym NVARCHAR(MAX); DECLARE @sql NVARCHAR(MAX) = UPPER('prefix' + @sym); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2944,6 +3103,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfNCharCrLfConcatenation_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @CrLf NVARCHAR(2) = NCHAR(13) + NCHAR(10); " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT 1' + @CrLf + N'WHERE 1 = 1'; " +
@@ -2957,6 +3117,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfCharOutOfRange_Unanalyzable()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'x' + CHAR(256); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -2968,6 +3129,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfNCharOfNonLiteralArgument_FoldsToFixedWidthTypedHole()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = NCHAR(@undeclaredCodePoint); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -2978,6 +3140,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfIsNullOfFoldedFirstArgument_ProducesAnalyzableScript()
     {
+
         var result = Scan(
             "DECLARE @suffix NVARCHAR(20) = N'Active'; " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + ISNULL(@suffix, N'fallback'); " +
@@ -2991,6 +3154,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfIsNullOfUnfoldableFirstArgument_PropagatesFirstArgumentReason()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = ISNULL(@undeclared, N'fallback'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -3015,6 +3179,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfNullIf_StillRefuses()
     {
+
         var result = Scan(
             "DECLARE @a NVARCHAR(20) = N'x'; " +
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + NULLIF(@a, N'y'); " +
@@ -3029,6 +3194,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfServerPropertyCastToVarchar_FoldsToTypedHole()
     {
+
         var result = Scan(
             "DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128)); " +
             "EXEC(@sql);");
@@ -3041,6 +3207,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfGenuinelyUnsupportedFunction_StillReportsGenericFunctionCall()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + SOUNDEX(N'x'); EXEC(@sql);");
 
         var finding = Assert.Single(result.Findings);
@@ -3052,6 +3219,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecDropDatabaseBuiltFromLiteralPlusParameter_InsideIfExists_ProducesAnalyzableScript()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_DropDatabase @DbName SYSNAME AS
             BEGIN
@@ -3070,6 +3238,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SpExecuteSqlOfVariableAssignedInsideCursorLoopViaIfElseBranching_ProducesAnalyzableScripts()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Scratch AS
             BEGIN
@@ -3099,6 +3268,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfStringBuiltFromCharOfLiteralCodePoint_FoldsToLiteralValue()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Scratch AS
             BEGIN
@@ -3114,6 +3284,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfStrOfChecksumPlaceholder_TransfersPlaceholderTypeAsFixedLengthChar()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + STR(CHECKSUM('a', 'b'), 10); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -3124,6 +3295,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfCastOfChecksumPlaceholderToChar_TransfersPlaceholderTypeAsFixedLengthChar()
     {
+
         var result = Scan("DECLARE @sql NVARCHAR(MAX) = N'SELECT ' + CAST(CHECKSUM('a', 'b') AS CHAR(10)); EXEC(@sql);");
 
         Assert.Empty(result.Findings);
@@ -3134,6 +3306,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfReplaceOfLiteralTemplateWithSymbolicProcParam_SplicesPlaceholderIntoTemplate()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_DropFn @FunctionNamePrefix SYSNAME AS
             BEGIN
@@ -3149,6 +3322,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Analyze_ExecOfDropFunctionNamedFromSymbolicProcParam_TreatsIdentifierPositionAsSafe()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Drop @FunctionName SYSNAME AS
             BEGIN
@@ -3186,6 +3360,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfConvertVarcharOfProcParamDateSplicedIntoLiteralTemplate_FoldsToTypedPlaceholder()
     {
+
         var result = ScanWithCatalog(
             "CREATE TABLE dbo.T (TripDate VARCHAR(20) NOT NULL);",
             """
@@ -3203,6 +3378,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Analyze_ExecOfOptionalFilterFragmentAppendedMidStatement_PartiallyAnalyzesTheKnownStructure()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE TABLE dbo.tblEvents (v_marker INT NOT NULL);
             GO
@@ -3223,6 +3399,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfSymbolicTableNameConcatenatedIntoFromClause_FoldsToSymbolicPlaceholder()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Lookup @LookupTable SYSNAME AS
             BEGIN
@@ -3238,6 +3415,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfVariableSetInsideIfBranchNestedInsideAnotherIfBranch_FoldsEachLeafPathIndependently()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Nested @TypeA INT, @SubType NVARCHAR(10) AS
             BEGIN
@@ -3263,6 +3441,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfStringConcatenatedWithCaseExpressionOnProcParam_FoldsEachCaseBranch()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_CaseConcat @co_id INT AS
             BEGIN
@@ -3282,6 +3461,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfVariableSetInsideIfNestedInsideBitwiseGatedIf_FoldsToAnalyzableScripts()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Bitflags @ColumnControlBits INT AS
             BEGIN
@@ -3303,6 +3483,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfVariableSetAcrossThreeWayIfElseIfElseChain_FoldsAllThreeBranchesWithoutHittingCardinalityCap()
     {
+
         var result = ScanWithEmptyCallGraph("""
             CREATE PROCEDURE dbo.usp_Merge @mode INT AS
             BEGIN
@@ -3324,6 +3505,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_ExecOfSqlTextLoadedViaSubqueryFromRealTable_NoFetcher_FoldsToSymbolicPlaceholder()
     {
+
         var result = ScanWithCatalog(
             "CREATE TABLE dbo.tblScheduleAnalysisIssueSolutions (issue_id INT NOT NULL, solution_id INT NOT NULL, solution_sql NVARCHAR(4000) NOT NULL);",
             """
@@ -3342,6 +3524,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Analyze_ExecOfCursorBodyEntirelyFromSymbolicVariable_ElidesToATrivialQuery()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_CursorQuery @Query NVARCHAR(MAX) AS
             BEGIN
@@ -3358,6 +3541,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Analyze_TwoSymbolicPlaceholdersOneLoadBearingOneOptional_TargetedElisionKeepsTheLoadBearingOne()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_BuildReport @TableNameParam SYSNAME, @HintParam NVARCHAR(50) AS
             BEGIN
@@ -3374,6 +3558,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Analyze_PlaceholderStandsForEntireMissingSearchCondition_ElidesToTautologyAndAnalyzesTheRest()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Report @Filter NVARCHAR(200) AS
             BEGIN
@@ -3545,6 +3730,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SelectAssignmentSelfAppendsUnresolvableAggregateFromUncatalogedTable_PreservesKnownPrefix()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Test AS
             BEGIN
@@ -3574,6 +3760,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_UnfoldableFragmentConcatenatedOntoALiteralWhereClause_PreservesTheSurroundingLiteralAsPartiallyAnalyzed()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Test AS
             BEGIN
@@ -3599,6 +3786,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SelectAssignmentSelfAppendWithUninitializedPriorValue_ConcatenatesTwoHolesSoundly()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Test AS
             BEGIN
@@ -3619,6 +3807,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SelectAssignmentSelfAppendsThroughAThreeTermAdditionChain_PreservesKnownPrefix()
     {
+
         var (extraction, pipeline) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Test AS
             BEGIN
@@ -3638,6 +3827,7 @@ private static string AsSqlStringLiteral(string value) => "N'" + value.Replace("
     [Fact]
     public void Scan_SelectAssignmentAppendsToADifferentVariableThanTheOneOnTheLeft_StaysOrdinaryHavoc()
     {
+
         var (extraction, _) = ProbePipeline("""
             CREATE PROCEDURE dbo.usp_Test AS
             BEGIN

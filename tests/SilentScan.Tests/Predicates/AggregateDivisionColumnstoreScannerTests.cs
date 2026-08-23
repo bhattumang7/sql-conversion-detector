@@ -58,6 +58,7 @@ public sealed class AggregateDivisionColumnstoreScannerTests
     [Fact]
     public void CaseGuardedDivision_OnRowstoreTable_NoColumnstoreIndex_NeverFires()
     {
+
         var findings = Scan(
             "SELECT SUM(CASE WHEN Denom <> 0 THEN Num / Denom ELSE 0 END) FROM dbo.Ratios;",
             withColumnstoreIndex: false);
@@ -68,6 +69,7 @@ public sealed class AggregateDivisionColumnstoreScannerTests
     [Fact]
     public void DivisionByLiteralConstant_NeverFires()
     {
+
         var findings = Scan("SELECT SUM(CASE WHEN Denom <> 0 THEN Num / 100 ELSE 0 END) FROM dbo.Ratios;");
 
         Assert.Empty(findings);

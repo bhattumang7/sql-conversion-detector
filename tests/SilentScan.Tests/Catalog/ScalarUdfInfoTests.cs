@@ -103,6 +103,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionUsingGoto_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_Goto (@x INT)
             RETURNS INT
@@ -126,6 +127,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithIfElseAndSetOnly_NoGotoNoBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_NoGoto (@x INT)
             RETURNS INT
@@ -148,6 +150,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionUsingCte_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_Cte (@x INT)
             RETURNS INT
@@ -167,6 +170,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithNoCte_NoBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_NoCte (@x INT)
             RETURNS INT
@@ -183,6 +187,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithTableValuedParameter_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE TYPE dbo.IntList AS TABLE (v INT);
             GO
@@ -203,6 +208,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithOrderByAndNoTop_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.OrderSource (v INT NOT NULL);
             GO
@@ -223,6 +229,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithOrderByAndTop_NoBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.OrderSource (v INT NOT NULL);
             GO
@@ -246,6 +253,7 @@ public sealed class ScalarUdfInfoTests
     [InlineData("DECLARE @c BIT = @doc.exist('/a');", "exist")]
     public void Build_FunctionUsingXmlInstanceMethod_RecordsInlineabilityBlocker(string statement, string methodName)
     {
+
         var catalog = BuildFrom($$"""
             CREATE FUNCTION dbo.fn_XmlMethod (@x INT)
             RETURNS INT
@@ -301,6 +309,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionDeclaringXmlVariableWithNoMethodCall_NoBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_XmlNoMethod (@x INT)
             RETURNS INT
@@ -318,6 +327,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionQueryingSystemCatalog_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_SysAccess (@x INT)
             RETURNS INT
@@ -336,6 +346,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionCallingSystemFunctionOnly_NoBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_SuserName (@x INT)
             RETURNS INT
@@ -353,6 +364,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionUsingStringAgg_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE TABLE dbo.AggSource (grp INT NOT NULL, s VARCHAR(50) NOT NULL);
             GO
@@ -373,6 +385,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithSelectAccumulatorAssignment_RecordsInlineabilityBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_Accum (@x INT)
             RETURNS VARCHAR(200)
@@ -393,6 +406,7 @@ public sealed class ScalarUdfInfoTests
     [Fact]
     public void Build_FunctionWithPlainSelectAssignmentFromTable_NoAccumulatorBlocker()
     {
+
         var catalog = BuildFrom("""
             CREATE FUNCTION dbo.fn_PlainSelect (@x INT)
             RETURNS INT

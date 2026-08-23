@@ -42,6 +42,7 @@ public sealed class CatalogLifecycleOracleTests : OracleTestFixture
     [Fact]
     public async Task RealServer_DropTableThenRecreateWithDifferentType_HasTheRecreatedType()
     {
+
         var real = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var table = Assert.Single(real.Tables, t => t.Name == "Orders");

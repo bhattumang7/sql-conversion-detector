@@ -45,7 +45,7 @@ public static class DmlTargetTableScanner
             base.ExplicitVisit(node);
         }
 
-private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
+        private void RecordWrite(TableReference? target, WithCtesAndXmlNamespaces? withCtes)
         {
             if (target is not NamedTableReference named)
             {

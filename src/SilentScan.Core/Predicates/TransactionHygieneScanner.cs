@@ -44,6 +44,7 @@ public static class TransactionHygieneScanner
 
         private void AnalyzeScope(StatementList? statementList)
         {
+
             if (statementList is null)
             {
                 return;
@@ -104,6 +105,7 @@ public static class TransactionHygieneScanner
                         return state with { OpenSite = null };
 
                     case GoToStatement:
+
                         return FlowState.DeclinedState;
 
                     case BeginEndBlockStatement block:
@@ -123,6 +125,7 @@ public static class TransactionHygieneScanner
                         break;
 
                     default:
+
                         break;
                 }
             }

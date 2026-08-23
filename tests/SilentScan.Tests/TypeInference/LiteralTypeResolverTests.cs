@@ -59,6 +59,7 @@ public sealed class LiteralTypeResolverTests
     [Fact]
     public void Resolve_OutOfIntRangeIntegerValuedLiteral_ParsesAsNumericWithZeroScale()
     {
+
         var type = LiteralTypeResolver.Resolve(ParseLiteral("99999999999999999999"));
 
         Assert.Equal(SqlTypeCategory.Decimal, type!.Category);
@@ -94,6 +95,7 @@ public sealed class LiteralTypeResolverTests
     [Fact]
     public void Resolve_StringLiteralWithNoCollateClause_HasNullCollation()
     {
+
         var type = LiteralTypeResolver.Resolve(ParseLiteral("'hello'"));
 
         Assert.Null(type!.Collation);
@@ -119,6 +121,7 @@ public sealed class LiteralTypeResolverTests
     [Fact]
     public void Resolve_EmptyStringLiteral_ResolvesToLengthOneNotZero()
     {
+
         var type = LiteralTypeResolver.Resolve(ParseLiteral("''"));
 
         Assert.Equal(SqlTypeCategory.VarChar, type!.Category);
@@ -137,6 +140,7 @@ public sealed class LiteralTypeResolverTests
     [Fact]
     public void Resolve_ScientificNotationLiteral_ResolvesToFloat()
     {
+
         var type = LiteralTypeResolver.Resolve(ParseLiteral("1.5e10"));
 
         Assert.Equal(SqlTypeCategory.Float, type!.Category);
@@ -153,6 +157,7 @@ public sealed class LiteralTypeResolverTests
     [Fact]
     public void Resolve_IntMaxValuePlusOneIntegerValuedLiteral_ResolvesToDecimalNotBigInt()
     {
+
         var type = LiteralTypeResolver.Resolve(ParseLiteral("2147483648"));
 
         Assert.Equal(SqlTypeCategory.Decimal, type!.Category);

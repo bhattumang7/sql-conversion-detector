@@ -125,5 +125,6 @@ public sealed class LiveReadOnlyGuardTests
 
     [Fact]
     public void AssertSelectOnly_NamedProcedureExec_StillThrows() =>
+
         Assert.Throws<InvalidOperationException>(() => LiveReadOnlyGuard.AssertSelectOnly("EXEC [dbo].[usp_AllOrders];"));
 }

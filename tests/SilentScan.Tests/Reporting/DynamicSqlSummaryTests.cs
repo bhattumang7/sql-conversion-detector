@@ -52,6 +52,7 @@ public sealed class DynamicSqlSummaryTests
     [Fact]
     public void From_MultipleAssembliesFromSameCallSite_CountsOneCallSiteNotOnePerAssembly()
     {
+
         var findings = new[]
         {
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.AnalyzedLiteral, null),
@@ -72,6 +73,7 @@ public sealed class DynamicSqlSummaryTests
     [Fact]
     public void From_RepeatedUnanalyzableAtSameCallSite_ReasonCountedOncePerSite()
     {
+
         var findings = new[]
         {
             new DynamicSqlFinding("a.sql", 10, 5, DynamicSqlOutcome.Unanalyzable, "goto-or-label-in-scope"),

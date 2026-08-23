@@ -79,6 +79,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_TableValuedParameterPositionallyPrecedingScalar_KeepsLaterScalarAligned()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE TYPE dbo.CodeList AS TABLE (Code varchar(20) NOT NULL);
             GO
@@ -107,6 +108,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_SpExecuteSqlCall_ProducesNoEdge()
     {
+
         var (graph, ledger) = BuildFrom("EXEC sp_executesql N'SELECT 1';");
 
         Assert.Empty(graph.Edges);
@@ -145,6 +147,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableWithSingleUnconditionalLiteralAssignment_PropagatesLiteral()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -166,6 +169,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableReassignedInsideIf_DoesNotPropagateLiteral()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -187,6 +191,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedTwiceAtTopLevel_PropagatesTheLastAssignmentBeforeTheCall()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -206,6 +211,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedAgainAfterTheCall_DoesNotPropagateTheLaterAssignment()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -225,6 +231,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedNonLiterallyThenLiterallyBeforeTheCall_PropagatesTheLastLiteral()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Status nvarchar(20)) AS SELECT 1;
             GO
@@ -244,6 +251,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_DirectIntegerLiteralArgument_PopulatesLiteralArgument()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Mask int) AS SELECT 1;
             GO
@@ -259,6 +267,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableAssignedIntegerLiteralAtTopLevel_PropagatesTheIntegerLiteral()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Mask int) AS SELECT 1;
             GO
@@ -278,6 +287,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_DirectDecimalLiteralArgument_DoesNotPopulateLiteralArgument()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@d decimal(10,2)) AS SELECT 1;
             GO
@@ -328,6 +338,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_CallerVariableUndeclared_CallerArgumentTypeStaysNull()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
             GO
@@ -342,6 +353,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void Build_ScopeChange_DoesNotLeakVariableTypesAcrossProcedures()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@P int) AS SELECT 1;
             GO
@@ -362,6 +374,7 @@ public sealed class ProcCallGraphBuilderTests
     [Fact]
     public void RealCallerCalleePair_MatchingDeclaredTypes_ArgumentMismatchScannerNeverFires()
     {
+
         var (graph, _) = BuildFrom("""
             CREATE PROCEDURE dbo.Callee (@Code varchar(20)) AS SELECT @Code;
             GO

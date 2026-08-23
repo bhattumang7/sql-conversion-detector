@@ -149,7 +149,7 @@ public sealed class LiveCatalogReader
         return catalog;
     }
 
-private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadScalarUdfInfoAsync(
+    private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadScalarUdfInfoAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const int InvalidColumnNameErrorNumber = 207;
@@ -202,7 +202,7 @@ private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> Read
         return [.. tSqlUdfs, .. clrUdfs];
     }
 
-private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadClrScalarUdfInfoAsync(
+    private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> ReadClrScalarUdfInfoAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string namesSql = """
@@ -262,7 +262,7 @@ private static async Task<List<(string QualifiedName, ScalarUdfInfo Info)>> Read
         }
     }
 
-private static async Task<List<(string QualifiedName, TableValuedFunctionKind Kind)>> ReadTableValuedFunctionKindsAsync(
+    private static async Task<List<(string QualifiedName, TableValuedFunctionKind Kind)>> ReadTableValuedFunctionKindsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -296,7 +296,7 @@ private static async Task<List<(string QualifiedName, TableValuedFunctionKind Ki
         return kinds;
     }
 
-private static async Task<List<SchemaExpressionReference>> ReadSchemaExpressionsAsync(
+    private static async Task<List<SchemaExpressionReference>> ReadSchemaExpressionsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -351,7 +351,7 @@ private static async Task<List<SchemaExpressionReference>> ReadSchemaExpressions
         return references;
     }
 
-private static async Task<List<ForeignKeyRelationship>> ReadForeignKeysAsync(
+    private static async Task<List<ForeignKeyRelationship>> ReadForeignKeysAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -420,7 +420,7 @@ private static async Task<List<ForeignKeyRelationship>> ReadForeignKeysAsync(
         return constraints;
     }
 
-private static async Task<List<CatalogTriggerEvent>> ReadTriggerEventsAsync(
+    private static async Task<List<CatalogTriggerEvent>> ReadTriggerEventsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -456,7 +456,7 @@ private static async Task<List<CatalogTriggerEvent>> ReadTriggerEventsAsync(
         return triggerEvents;
     }
 
-private static async Task<List<CatalogSecurityPredicate>> ReadSecurityPredicatesAsync(
+    private static async Task<List<CatalogSecurityPredicate>> ReadSecurityPredicatesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -488,7 +488,7 @@ private static async Task<List<CatalogSecurityPredicate>> ReadSecurityPredicates
         return predicates;
     }
 
-private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(
+    private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -515,7 +515,7 @@ private static async Task<List<TemporalTablePair>> ReadTemporalTablePairsAsync(
         return pairs;
     }
 
-private static async Task<List<(string SchemaName, string FunctionName, List<CatalogColumn> Columns)>> ReadClrTableValuedFunctionShapesAsync(
+    private static async Task<List<(string SchemaName, string FunctionName, List<CatalogColumn> Columns)>> ReadClrTableValuedFunctionShapesAsync(
         SqlConnection connection, SkipLedger skipLedger, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -567,7 +567,7 @@ private static async Task<List<(string SchemaName, string FunctionName, List<Cat
         return [.. byFunction.Values];
     }
 
-private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> ReadClrScalarFunctionReturnTypesAsync(
+    private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> ReadClrScalarFunctionReturnTypesAsync(
         SqlConnection connection, string? databaseDefaultCollationName, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -627,7 +627,7 @@ private static async Task<List<(string QualifiedName, SqlType? ReturnType)>> Rea
         return result is bool isOn ? isOn : null;
     }
 
-private static async Task<bool?> ReadIsNestedTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<bool?> ReadIsNestedTriggersEnabledAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateReadOnlyCommand(
             "SELECT value_in_use FROM sys.configurations WHERE name = 'nested triggers';");
@@ -676,7 +676,7 @@ private static async Task<bool?> ReadIsNestedTriggersEnabledAsync(SqlConnection 
         return aliases;
     }
 
-private static async Task<List<(string QualifiedName, string TargetQualifiedName)>> ReadSynonymsAsync(
+    private static async Task<List<(string QualifiedName, string TargetQualifiedName)>> ReadSynonymsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -703,7 +703,7 @@ private static async Task<List<(string QualifiedName, string TargetQualifiedName
         return synonyms;
     }
 
-private static string? TryParseSchemaObjectName(string rawName)
+    private static string? TryParseSchemaObjectName(string rawName)
     {
         var result = SqlScriptParser.ParseText("synonym-target", $"SELECT * FROM {rawName};");
         if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } }] }] })
@@ -828,6 +828,7 @@ private static string? TryParseSchemaObjectName(string rawName)
     private static async Task<Dictionary<int, List<CatalogIndex>>> ReadIndexesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
+
         const string sql = """
             SELECT i.object_id, i.index_id, i.name AS index_name, i.type_desc, i.is_unique,
                    i.is_primary_key, i.is_unique_constraint, i.has_filter, i.is_disabled,
@@ -895,6 +896,7 @@ private static string? TryParseSchemaObjectName(string rawName)
 
         if (await reader.IsDBNullAsync(15, cancellationToken))
         {
+
             return;
         }
 
@@ -906,6 +908,7 @@ private static string? TryParseSchemaObjectName(string rawName)
         }
         else
         {
+
             var isDescending = reader.GetBoolean(16);
             row.KeyColumns.Add((reader.GetByte(12), columnName, isDescending));
         }
@@ -955,7 +958,7 @@ private static string? TryParseSchemaObjectName(string rawName)
         return indexesByTable;
     }
 
-private static async Task<Dictionary<int, List<CatalogStatisticsInfo>>> ReadStatisticsAsync(
+    private static async Task<Dictionary<int, List<CatalogStatisticsInfo>>> ReadStatisticsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1008,7 +1011,7 @@ private static async Task<Dictionary<int, List<CatalogStatisticsInfo>>> ReadStat
         return statisticsByTable;
     }
 
-private static async Task<Dictionary<int, (string Name, bool IsReadOnly)>> ReadTableFilegroupsAsync(
+    private static async Task<Dictionary<int, (string Name, bool IsReadOnly)>> ReadTableFilegroupsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1031,7 +1034,7 @@ private static async Task<Dictionary<int, (string Name, bool IsReadOnly)>> ReadT
         return filegroupByTable;
     }
 
-private static async Task<Dictionary<int, string>> ReadTablePartitionSchemesAsync(
+    private static async Task<Dictionary<int, string>> ReadTablePartitionSchemesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1054,7 +1057,7 @@ private static async Task<Dictionary<int, string>> ReadTablePartitionSchemesAsyn
         return schemeByTable;
     }
 
-private static async Task<List<(string SchemeName, int PartitionNumber, string FilegroupName)>> ReadPartitionFilegroupsAsync(
+    private static async Task<List<(string SchemeName, int PartitionNumber, string FilegroupName)>> ReadPartitionFilegroupsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1076,7 +1079,7 @@ private static async Task<List<(string SchemeName, int PartitionNumber, string F
         return results;
     }
 
-private static async Task<HashSet<int>> ReadRuleConstraintTablesAsync(
+    private static async Task<HashSet<int>> ReadRuleConstraintTablesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1115,7 +1118,7 @@ private static async Task<HashSet<int>> ReadRuleConstraintTablesAsync(
         return tables;
     }
 
-private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAsync(
+    private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string isCdcEnabledSql = "SELECT is_cdc_enabled FROM sys.databases WHERE database_id = DB_ID();";
@@ -1166,14 +1169,18 @@ private static async Task<HashSet<int>> ReadCdcPartitionSwitchDisallowedTablesAs
         bool IsDisabled,
         List<(int Ordinal, string Name, bool IsDescending)> KeyColumns,
         List<string> IncludedColumns,
+
         bool IsHypothetical = false,
+
         string? FilterDefinition = null,
+
         bool OptimizeForSequentialKey = false,
+
         string? PartitionSchemeName = null,
         string? PartitioningColumnName = null,
         bool IgnoreDupKey = false);
 
-private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadIndexedViewsAsync(
+    private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadIndexedViewsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -1223,6 +1230,7 @@ private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadI
             }
             else
             {
+
                 row.KeyColumns.Add((reader.GetByte(10), columnName, false));
             }
         }
@@ -1244,7 +1252,7 @@ private static async Task<Dictionary<string, IReadOnlyList<CatalogIndex>>> ReadI
         return indexesByView;
     }
 
-private static async Task<List<(string QualifiedName, List<string> ColumnNames)>> ReadViewCompiledColumnsAsync(
+    private static async Task<List<(string QualifiedName, List<string> ColumnNames)>> ReadViewCompiledColumnsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """

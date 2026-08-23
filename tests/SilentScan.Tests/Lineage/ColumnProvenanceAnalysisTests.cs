@@ -34,12 +34,14 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void IsExpressionDerived_Unknown_False()
     {
+
         Assert.False(ColumnProvenanceAnalysis.IsExpressionDerived(new ColumnProvenance.Unknown("reason")));
     }
 
     [Fact]
     public void IsExpressionDerived_UnionWithOneExpressionDerivedBranch_True()
     {
+
         var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.VarChar, Length: 20));
         var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
         var union = new ColumnProvenance.Union([other, cast]);
@@ -59,6 +61,7 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void IsExpressionDerived_NestedUnionWithExpressionDerivedBranch_True()
     {
+
         var other = new ColumnProvenance.BaseColumn("dbo.Orders", "CustomerId", new SqlType(SqlTypeCategory.Int));
         var cast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
         var nested = new ColumnProvenance.Union([new ColumnProvenance.Union([Base, other]), cast]);
@@ -77,6 +80,7 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void FindUnderlyingBaseColumns_CastOfCastOfBaseColumn_ReturnsTheBaseColumn()
     {
+
         var innerCast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.VarChar, Length: 20), Base);
         var outerCast = new ColumnProvenance.Cast(new SqlType(SqlTypeCategory.Int), innerCast);
 
@@ -154,6 +158,7 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void TryGetScalarType_UnionOfDifferingLengthStringBranches_WidensToTheWider()
     {
+
         var narrow = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 10));
         var wide = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.VarChar, Length: 200));
         var union = new ColumnProvenance.Union([narrow, wide]);
@@ -190,6 +195,7 @@ public sealed class ColumnProvenanceAnalysisTests
     [Fact]
     public void TryGetScalarType_UnionOfDecimalBranches_WidensPrecisionAndScale()
     {
+
         var a = new ColumnProvenance.BaseColumn("dbo.A", "Col", new SqlType(SqlTypeCategory.Decimal, Precision: 5, Scale: 3));
         var b = new ColumnProvenance.BaseColumn("dbo.B", "Col", new SqlType(SqlTypeCategory.Decimal, Precision: 10, Scale: 1));
         var union = new ColumnProvenance.Union([a, b]);

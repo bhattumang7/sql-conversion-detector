@@ -27,10 +27,12 @@ public static partial class StatisticsCapture
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+
             }
 
             while (await reader.NextResultAsync(cancellationToken))
             {
+
             }
         }
         finally

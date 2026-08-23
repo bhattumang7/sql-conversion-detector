@@ -4,6 +4,7 @@ public static class RuleDocCatalog
 {
     public static IReadOnlyDictionary<string, RuleDocContent> ByRuleId { get; } = new Dictionary<string, RuleDocContent>(StringComparer.Ordinal)
     {
+
         [Tier1.FunctionWrappedColumn.RuleId] = Tier1.FunctionWrappedColumn.Content,
         [Tier1.CastOrConvertOnColumn.RuleId] = Tier1.CastOrConvertOnColumn.Content,
         [Tier1.ColumnArithmetic.RuleId] = Tier1.ColumnArithmetic.Content,

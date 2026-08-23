@@ -85,7 +85,7 @@ public sealed class DeprecatedSyntaxScannerTests
         Assert.Contains(findings, f => f.Kind == DeprecatedSyntaxFindingKind.EqualsNullComparison);
     }
 
-[Fact]
+    [Fact]
     public void EqualsNull_ModuleUsesAnsiNullsOff_Suppressed()
     {
         var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
@@ -114,6 +114,7 @@ public sealed class DeprecatedSyntaxScannerTests
     [Fact]
     public void EqualsNull_ModuleFlagUnresolved_StillFires()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", "CREATE PROCEDURE dbo.usp_Find AS SELECT * FROM dbo.T WHERE Col = NULL;");
         Assert.False(result.HasErrors);
 

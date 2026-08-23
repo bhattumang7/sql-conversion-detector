@@ -13,18 +13,18 @@ namespace SilentScan.Core.Predicates;
 
 public static partial class DynamicSqlPipeline
 {
-private const int MaxNestingDepth = 5;
+    private const int MaxNestingDepth = 5;
 
     private static readonly IReadOnlyDictionary<string, SqlType?> NoDeclaredParameters = new Dictionary<string, SqlType?>();
 
-[GeneratedRegex(@"\$[A-Za-z_][A-Za-z0-9_]*\$")]
+    [GeneratedRegex(@"\$[A-Za-z_][A-Za-z0-9_]*\$")]
     private static partial Regex TemplatePlaceholderRegex();
 
     private static readonly IReadOnlyDictionary<string, TvfFenceOrigin> NoTvfFenceMap = new Dictionary<string, TvfFenceOrigin>();
 
     private static readonly IReadOnlyDictionary<string, ScalarUdfOrigin> NoScalarUdfMap = new Dictionary<string, ScalarUdfOrigin>();
 
-private readonly record struct PipelineContext(
+    private readonly record struct PipelineContext(
         DatabaseCatalog Catalog,
         LineageCatalog Lineage,
         IReadOnlyDictionary<string, TvfFenceOrigin> TvfFenceMap,
@@ -35,15 +35,15 @@ private readonly record struct PipelineContext(
         IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
         Analyze(scripts, new PipelineContext(catalog, lineage, NoTvfFenceMap, NoScalarUdfMap, callerScopeByCalleeScope), depth: 1, seeds: null);
 
-public static DynamicSqlPipelineResult Analyze(
+    public static DynamicSqlPipelineResult Analyze(
         IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, TvfFenceOrigin> tvfFenceMap, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
         Analyze(scripts, catalog, lineage, tvfFenceMap, NoScalarUdfMap, callerScopeByCalleeScope);
 
-public static DynamicSqlPipelineResult Analyze(
+    public static DynamicSqlPipelineResult Analyze(
         IReadOnlyList<DynamicSqlScript> scripts, DatabaseCatalog catalog, LineageCatalog lineage, IReadOnlyDictionary<string, TvfFenceOrigin> tvfFenceMap, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap, IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
         Analyze(scripts, new PipelineContext(catalog, lineage, tvfFenceMap, scalarUdfMap, callerScopeByCalleeScope), depth: 1, seeds: null);
 
-private static DynamicSqlPipelineResult Analyze(
+    private static DynamicSqlPipelineResult Analyze(
         IReadOnlyList<DynamicSqlScript> scripts,
         PipelineContext context,
         int depth,
@@ -74,7 +74,7 @@ private static DynamicSqlPipelineResult Analyze(
         return accumulator.ToResult();
     }
 
-private static List<SargabilityFinding> DedupeTier1(List<SargabilityFinding> findings)
+    private static List<SargabilityFinding> DedupeTier1(List<SargabilityFinding> findings)
     {
         var seen = new HashSet<(SargabilityFindingKind Kind, string ColumnName, string? Detail, string? TableQualifiedName)>();
         return findings.Where(finding => seen.Add(Tier1Key(finding))).ToList();
@@ -86,7 +86,7 @@ private static List<SargabilityFinding> DedupeTier1(List<SargabilityFinding> fin
     private static string TypedKey(TypedPredicateFinding finding) =>
         TypedPredicateFindingIdentity.ComputeKey(finding.Column, finding.OtherOperand, finding.Operator);
 
-private static List<ExpressionDerivedFinding> DedupeExpressionDerived(List<ExpressionDerivedFinding> findings)
+    private static List<ExpressionDerivedFinding> DedupeExpressionDerived(List<ExpressionDerivedFinding> findings)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         return findings.Where(finding => seen.Add(ExpressionDerivedKey(finding))).ToList();
@@ -144,11 +144,11 @@ private static List<ExpressionDerivedFinding> DedupeExpressionDerived(List<Expre
     private static (ScalarUdfFindingKind, string, string, ScalarUdfContext) ScalarUdfKey(ScalarUdfFinding finding) =>
         (finding.Kind, finding.FunctionQualifiedName, finding.ReferencedObjectQualifiedName, finding.Context);
 
-private static List<T> PreferBestConfidencePerKey<T, TKey>(List<T> findings, Func<T, TKey> key, Func<T, FindingConfidence> confidence)
+    private static List<T> PreferBestConfidencePerKey<T, TKey>(List<T> findings, Func<T, TKey> key, Func<T, FindingConfidence> confidence)
         where TKey : notnull =>
         [.. findings.GroupBy(key).SelectMany(group => group.OrderBy(confidence))];
 
-private sealed class ResultAccumulator
+    private sealed class ResultAccumulator
     {
         public List<DynamicSqlFinding> Findings { get; } = [];
 
@@ -174,7 +174,7 @@ private sealed class ResultAccumulator
             new(Findings, Tier1, Typed, ExpressionDerived, CollationConflicts, WriteLoss, TvfFence, ScalarUdf, Unparameterized, Skipped);
     }
 
-private static bool TryParseAndClassify(
+    private static bool TryParseAndClassify(
         DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence>? placeholders, ResultAccumulator accumulator,
         [NotNullWhen(true)] out SqlParseResult? innerParseResult,
         out Func<int, int, SourceSpan>? elisionMap)
@@ -184,6 +184,7 @@ private static bool TryParseAndClassify(
 
         if (placeholders is { Count: > 0 } && IsEntirelyPlaceholder(script.InnerText, placeholders))
         {
+
             accumulator.Findings.Add(new DynamicSqlFinding(
                 script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                 DynamicSqlOutcome.Unanalyzable, "symbolic-value-not-positionable:whole-statement"));
@@ -197,6 +198,7 @@ private static bool TryParseAndClassify(
         {
             if (placeholders is { Count: > 0 })
             {
+
                 if (TryReparseWithTargetedElision(script, placeholders, parseResult.Errors, out var elidedParseResult, out var map))
                 {
                     innerParseResult = elidedParseResult;
@@ -210,6 +212,7 @@ private static bool TryParseAndClassify(
             }
             else if (TemplatePlaceholderRegex().IsMatch(script.InnerText))
             {
+
                 accumulator.Findings.Add(new DynamicSqlFinding(
                     script.CallSite.SourcePath, script.CallSite.Line, script.CallSite.Column,
                     DynamicSqlOutcome.Unanalyzable, "template-placeholder-not-instantiated"));
@@ -228,13 +231,13 @@ private static bool TryParseAndClassify(
         return true;
     }
 
-private static string PlaceholderToken(PlaceholderOccurrence occurrence) =>
+    private static string PlaceholderToken(PlaceholderOccurrence occurrence) =>
         $"__silentscan_sym_L{occurrence.Origin.Line}C{occurrence.Origin.Column}__";
 
-[GeneratedRegex(@"__silentscan_sym_L\d+C\d+__")]
+    [GeneratedRegex(@"__silentscan_sym_L\d+C\d+__")]
     private static partial Regex PlaceholderTokenRegex();
 
-private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL", "(SELECT 1)"];
+    private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL", "(SELECT 1)"];
 
     private static bool TryReparseWithTargetedElision(
         DynamicSqlScript script, IReadOnlyList<PlaceholderOccurrence> placeholders, IReadOnlyList<ParseError> originalErrors,
@@ -295,7 +298,7 @@ private static readonly string[] ElisionFillerCandidates = [" ", "1=1", "NULL", 
         return false;
     }
 
-private sealed class NeutralElisionVariant
+    private sealed class NeutralElisionVariant
     {
         private readonly string _innerText;
         private readonly int[] _neutralOffsetToInnerOffset;
@@ -481,7 +484,7 @@ private sealed class NeutralElisionVariant
         accumulator.Skipped.AddRange(nested.SkippedConstructs);
     }
 
-private static void DetectUnparameterizedConcatenation(DynamicSqlScript script, SqlParseResult innerParseResult, ResultAccumulator accumulator)
+    private static void DetectUnparameterizedConcatenation(DynamicSqlScript script, SqlParseResult innerParseResult, ResultAccumulator accumulator)
     {
         var boundaries = script.SegmentMap.ConcatenationBoundaryOffsets;
         if (boundaries.Count == 0)
@@ -509,7 +512,7 @@ private static void DetectUnparameterizedConcatenation(DynamicSqlScript script, 
         }
     }
 
-private static void FoldFenceAndScalarUdfFindings(
+    private static void FoldFenceAndScalarUdfFindings(
         SqlParseResult innerParseResult, PipelineContext context, DynamicSqlScript script, Func<int, int, SourceSpan> map, ResultAccumulator accumulator)
     {
         foreach (var tvfFenceFinding in TvfFenceScanner.Scan(innerParseResult, context.Catalog, context.TvfFenceMap))
@@ -530,6 +533,7 @@ private static void FoldFenceAndScalarUdfFindings(
         PipelineContext context,
         int depth)
     {
+
         var nestedExtraction = DynamicSqlScannerV2.Scan(innerParseResult, script.Scope, catalog: context.Catalog);
         var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, script)).ToList();
 
@@ -540,6 +544,7 @@ private static void FoldFenceAndScalarUdfFindings(
 
         if (depth >= MaxNestingDepth)
         {
+
             findings.AddRange(nestedExtraction.AnalyzableScripts
                 .Select(nestedScript => script.SegmentMap.Map(nestedScript.CallSite.Line, nestedScript.CallSite.Column))
                 .Select(callSite => new DynamicSqlFinding(callSite.SourcePath, callSite.Line, callSite.Column, DynamicSqlOutcome.Unanalyzable, "max-nesting-depth-exceeded")));
@@ -564,7 +569,7 @@ private static void FoldFenceAndScalarUdfFindings(
             [.. nestedResult.SkippedConstructs.Select(s => Remap(s, script))]);
     }
 
-private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult innerParseResult, DynamicSqlScript script, Func<int, int, SourceSpan> map)
+    private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult innerParseResult, DynamicSqlScript script, Func<int, int, SourceSpan> map)
     {
         var nestedExtraction = DynamicSqlScannerV2.Scan(innerParseResult, script.Scope);
         var findings = nestedExtraction.Findings.Select(f => RemapFinding(f, map)).ToList();
@@ -575,7 +580,7 @@ private static DynamicSqlPipelineResult RefuseNestedCandidates(SqlParseResult in
         return new DynamicSqlPipelineResult(findings, [], [], [], [], [], [], [], [], []);
     }
 
-private static bool IsEntirelyPlaceholder(string innerText, IReadOnlyList<PlaceholderOccurrence> occurrences)
+    private static bool IsEntirelyPlaceholder(string innerText, IReadOnlyList<PlaceholderOccurrence> occurrences)
     {
         var remaining = innerText;
         foreach (var occurrence in occurrences.OrderByDescending(o => o.InnerStartOffset))
@@ -586,7 +591,7 @@ private static bool IsEntirelyPlaceholder(string innerText, IReadOnlyList<Placeh
         return string.IsNullOrWhiteSpace(remaining);
     }
 
-private static Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? BuildArgumentBindingSeeds(
+    private static Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? BuildArgumentBindingSeeds(
         IReadOnlyList<DynamicSqlScript> nestedScripts, IReadOnlyDictionary<string, SqlType?> outerDeclaredParameters)
     {
         Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?>>? seeds = null;
@@ -617,7 +622,7 @@ private static Dictionary<DynamicSqlScript, IReadOnlyDictionary<string, SqlType?
         return seeds;
     }
 
-private static Dictionary<string, SqlType?> MergeSeededParameters(
+    private static Dictionary<string, SqlType?> MergeSeededParameters(
         IReadOnlyDictionary<string, SqlType?> ownDeclaredParameters, IReadOnlyDictionary<string, SqlType?> seed)
     {
         var merged = new Dictionary<string, SqlType?>(ownDeclaredParameters, StringComparer.OrdinalIgnoreCase);
@@ -644,9 +649,9 @@ private static Dictionary<string, SqlType?> MergeSeededParameters(
     private static SourceSpan? RemapCallSite(SourceSpan? callSite, DynamicSqlScript outerScript) =>
         callSite is { } span ? outerScript.SegmentMap.Map(span.Line, span.Column) : null;
 
-private static FindingConfidence Worse(FindingConfidence a, FindingConfidence b) => (FindingConfidence)Math.Max((int)a, (int)b);
+    private static FindingConfidence Worse(FindingConfidence a, FindingConfidence b) => (FindingConfidence)Math.Max((int)a, (int)b);
 
-private static TFinding Remap<TFinding>(TFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
+    private static TFinding Remap<TFinding>(TFinding finding, DynamicSqlScript script, Func<int, int, SourceSpan> map)
         where TFinding : IRelocatableFinding<TFinding>
     {
         var span = map(finding.Line, finding.PositionColumn);
@@ -662,14 +667,14 @@ private static TFinding Remap<TFinding>(TFinding finding, DynamicSqlScript scrip
         return entry with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column };
     }
 
-private static TFinding RemapNested<TFinding>(TFinding finding, DynamicSqlScript outerScript)
+    private static TFinding RemapNested<TFinding>(TFinding finding, DynamicSqlScript outerScript)
         where TFinding : IRelocatableFinding<TFinding>
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.PositionColumn);
         return finding.Relocated(span, RemapCallSite(finding.DynamicSqlCallSite, outerScript), Worse(finding.Confidence, outerScript.Confidence));
     }
 
-private static UnparameterizedDynamicSqlFinding RemapNested(UnparameterizedDynamicSqlFinding finding, DynamicSqlScript outerScript)
+    private static UnparameterizedDynamicSqlFinding RemapNested(UnparameterizedDynamicSqlFinding finding, DynamicSqlScript outerScript)
     {
         var span = outerScript.SegmentMap.Map(finding.Line, finding.Column);
         return finding with { SourcePath = span.SourcePath, Line = span.Line, Column = span.Column };

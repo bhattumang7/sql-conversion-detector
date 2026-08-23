@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum UnparameterizedDynamicSqlFindingKind
 {
-ConcatenatedValueInConstantSql,
+    ConcatenatedValueInConstantSql,
 
-ExecStringConcatenatesParameterizableValue,
+    ExecStringConcatenatesParameterizableValue,
 }
 
 public sealed record UnparameterizedDynamicSqlFinding(

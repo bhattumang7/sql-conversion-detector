@@ -17,6 +17,7 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task StaleCachedMetadata_BaseColumnRetypedAfterTheViewWasCreated_IsNotAMismatch()
     {
+
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (Amount TINYINT NOT NULL);
@@ -42,6 +43,7 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task GenuineInferenceBug_OnAStaleObject_IsStillReportedAsAMismatch()
     {
+
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (Amount TINYINT NOT NULL);
@@ -63,6 +65,7 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task UncompilableView_IsReportedAsUncompilable_NotAsAMismatch()
     {
+
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Total INT NOT NULL);
@@ -78,6 +81,7 @@ public sealed class LiveLineageParityLiveVerificationTests
         Assert.Empty(report.Mismatches);
         var broken = Assert.Single(report.UncompilableObjects);
         Assert.Equal("dbo.vw_Orders", broken.QualifiedViewName);
+
         Assert.Equal(11501, broken.ErrorNumber);
         Assert.Equal("The batch could not be analyzed because of compile errors.", broken.ErrorMessage);
     }
@@ -105,6 +109,7 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task InlineTvf_WithATableValuedParameter_IsReportedAsUnverified()
     {
+
         var report = await CheckAsync(
             """
             CREATE TYPE dbo.IntListType AS TABLE (Value INT NOT NULL);
@@ -128,6 +133,7 @@ public sealed class LiveLineageParityLiveVerificationTests
     [Fact]
     public async Task MultiStatementTvf_MismatchIsStillReportedDirectlyAgainstItsAuthoredShape()
     {
+
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL);

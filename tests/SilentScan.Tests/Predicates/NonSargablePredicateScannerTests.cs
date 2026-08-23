@@ -59,6 +59,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_IsNullSargableRewrite_DoesNotFire()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_isnull_clean.sql");
 
         Assert.Empty(findings);
@@ -86,6 +87,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_CaseWhenTestWrapsColumn_Fires()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_case_when_test_fires.sql");
 
         var finding = Assert.Single(findings);
@@ -281,7 +283,7 @@ public sealed class NonSargablePredicateScannerTests
         Assert.Empty(findings);
     }
 
-[Fact]
+    [Fact]
     public void ColumnArithmetic_ReversedOperandOrder_StillFires()
     {
         var sql = """
@@ -314,6 +316,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void LikePattern_LiteralWithoutLeadingWildcard_DoesNotFire()
     {
+
         var findings = ScanFixture("LIKE_PATTERN_NOT_LITERAL_clean.sql");
 
         Assert.Empty(findings);
@@ -322,6 +325,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void WildcardColumnInFunction_HavingCountStar_DoesNotCrashAndDoesNotFire()
     {
+
         var findings = ScanFixture("WILDCARD_COLUMN_IN_FUNCTION_clean.sql");
 
         Assert.Empty(findings);
@@ -330,6 +334,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_AggregateInHaving_DoesNotFire()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_aggregate_clean.sql");
 
         Assert.Empty(findings);
@@ -338,6 +343,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_ScalarFunctionInHaving_StillFires()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_fires.sql");
 
         var finding = Assert.Single(findings);
@@ -349,6 +355,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_HavingDateRange_DoesNotFire()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_having_scalar_clean.sql");
 
         Assert.Empty(findings);
@@ -357,6 +364,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_InsideSelectListCase_DoesNotFire()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_select_list_case_clean.sql");
 
         Assert.Empty(findings);
@@ -365,6 +373,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_InJoinOnClause_StillFires()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_fires.sql");
 
         var finding = Assert.Single(findings);
@@ -376,6 +385,7 @@ public sealed class NonSargablePredicateScannerTests
     [Fact]
     public void FunctionWrappedColumn_JoinOnDateRange_DoesNotFire()
     {
+
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_clean.sql");
 
         Assert.Empty(findings);

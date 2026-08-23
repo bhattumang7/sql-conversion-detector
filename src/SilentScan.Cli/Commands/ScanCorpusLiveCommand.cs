@@ -161,7 +161,7 @@ public static class ScanCorpusLiveCommand
         return hadMissingRepo || hadUnexpectedFailure ? 1 : 0;
     }
 
-private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(
+    private static async Task<CorpusLiveRepoResult?> ScanOneRepoAsync(
         CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions, TextWriter stderr, FindingConfidence minimumConfidence,
         CancellationToken cancellationToken = default)
     {

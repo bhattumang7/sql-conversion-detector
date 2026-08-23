@@ -41,6 +41,7 @@ public sealed class WindowFrameScannerTests
     [Fact]
     public void NoOrderByAtAll_NeverFires()
     {
+
         var findings = Scan("SELECT SUM(Amt) OVER (PARTITION BY GroupId) FROM dbo.Sales;");
 
         Assert.Empty(findings);
@@ -49,6 +50,7 @@ public sealed class WindowFrameScannerTests
     [Fact]
     public void RowNumberWithOrderByNoFrame_FiresAsImplicitDefaultRange()
     {
+
         var findings = Scan("SELECT ROW_NUMBER() OVER (PARTITION BY GroupId ORDER BY D) FROM dbo.Sales;");
 
         var finding = Assert.Single(findings);

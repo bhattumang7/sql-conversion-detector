@@ -45,6 +45,7 @@ public sealed class NonPersistedComputedColumnScannerTests
     [Fact]
     public void PersistedAndIndexedComputedColumn_NeverFires()
     {
+
         var findings = Scan(
             """
             CREATE TABLE dbo.Orders (Qty INT NOT NULL, Price MONEY NOT NULL, Total AS (Qty * Price) PERSISTED);

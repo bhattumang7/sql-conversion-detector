@@ -2,11 +2,11 @@ namespace SilentScan.Core.Diagnostics;
 
 public enum ConstructCoverageStatus
 {
-Handled,
+    Handled,
 
-Ledgered,
+    Ledgered,
 
-Gap,
+    Gap,
 }
 
 public sealed record ConstructCoverageEntry(

@@ -51,6 +51,7 @@ public sealed class FromScopeResolverClrTvfTests
     [Fact]
     public void ViewOverUnregisteredTvf_StillLedgersUnresolved()
     {
+
         var lineage = BuildLineageWithClrTvf(
             new CatalogTable("dbo", "Split", CatalogTableKind.ClrTableValuedFunction, [], [], "dbo.Split", 0),
             "CREATE VIEW dbo.vw_Unknown AS SELECT u.x FROM dbo.NotRegisteredTvf('a') AS u;");

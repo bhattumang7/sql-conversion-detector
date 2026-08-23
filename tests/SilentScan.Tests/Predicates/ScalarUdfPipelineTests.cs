@@ -44,6 +44,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
     [Fact]
     public void UnqualifiedFunctionCall_ResolvesUnderDefaultDboSchema()
     {
+
         var sql = """
             CREATE TABLE dbo.Accounts (Code varchar(50) NOT NULL, INDEX IX_Code (Code));
             GO
@@ -65,6 +66,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
     [Fact]
     public async Task SameFamilyAndCollationAgainstUdf_ClassifiesSeekPreserved()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync("""
             CREATE TABLE dbo.Accounts (Code varchar(50) NOT NULL, INDEX IX_Code (Code));
             GO
@@ -81,6 +83,7 @@ public sealed class ScalarUdfPipelineTests : OracleTestFixture
     [Fact]
     public async Task UnregisteredFunction_StillResolvesUnknown()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync(MissingFunctionSql, "SQL_Latin1_General_CP1_CI_AS");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code");

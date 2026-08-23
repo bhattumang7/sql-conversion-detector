@@ -19,6 +19,7 @@ public sealed class CorpusTemplatePreprocessorTests
     [Fact]
     public void Apply_SubstitutionMap_ReplacesEveryToken()
     {
+
         var substitutions = new Dictionary<string, string>
         {
             ["{databaseOwner}"] = "dbo.",

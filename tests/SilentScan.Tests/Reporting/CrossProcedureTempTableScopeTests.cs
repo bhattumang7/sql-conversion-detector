@@ -42,6 +42,7 @@ public sealed class CrossProcedureTempTableScopeTests
     [Fact]
     public async Task SubProcedureQueriesTempTable_TwoCallersAgreeingOnShape_Resolves()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_Sub AS
             BEGIN
@@ -64,12 +65,14 @@ public sealed class CrossProcedureTempTableScopeTests
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Col");
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
         Assert.Equal("#Results", finding.Column.TableQualifiedName);
+
         Assert.Null(finding.Column.Indexed);
     }
 
     [Fact]
     public async Task SubProcedureQueriesTempTable_TwoCallersWithDifferentShapes_StaysUnresolved()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_Sub AS
             BEGIN
@@ -96,6 +99,7 @@ public sealed class CrossProcedureTempTableScopeTests
     [Fact]
     public async Task SubProcedureQueriesCallersTempTable_InsideDynamicSql_SingleKnownCaller_Resolves()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_Sub AS
             BEGIN

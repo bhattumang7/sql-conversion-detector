@@ -8,7 +8,7 @@ public static class DynamicSqlTempTableDiscovery
 {
     private const string CreateTableMarker = "CREATE TABLE";
 
-public static DatabaseCatalog Discover(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
+    public static DatabaseCatalog Discover(IEnumerable<SqlParseResult> parseResults, string? manifestDeclaredCollation = null, string? manifestTempdbCollation = null)
     {
         var wrapped = new List<SqlParseResult>();
         foreach (var result in parseResults)
@@ -36,7 +36,7 @@ public static DatabaseCatalog Discover(IEnumerable<SqlParseResult> parseResults,
         return wrapped.Count == 0 ? new DatabaseCatalog() : CatalogBuilder.Build(wrapped, manifestDeclaredCollation, manifestTempdbCollation);
     }
 
-private static SqlParseResult? TryWrapAsScopedProcedure(string innerText, string scope, string sourcePath)
+    private static SqlParseResult? TryWrapAsScopedProcedure(string innerText, string scope, string sourcePath)
     {
         var dotIndex = scope.IndexOf('.', StringComparison.Ordinal);
         if (dotIndex <= 0 || dotIndex == scope.Length - 1)

@@ -54,6 +54,7 @@ public sealed class CollationConflictVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_SameCollationOnBothColumns_IsNotConfirmed()
     {
+
         var finding = new CollationConflictFinding(
             "dbo.CC1", "Code", "SQL_Latin1_General_CP1_CI_AS",
             "dbo.CC3", "Code", "SQL_Latin1_General_CP1_CI_AS",

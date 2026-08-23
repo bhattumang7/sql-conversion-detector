@@ -2,7 +2,7 @@ namespace SilentScan.Core.Predicates;
 
 public enum OutputParameterFindingKind
 {
-UnassignedOnSomePath,
+    UnassignedOnSomePath,
 }
 
 public sealed record OutputParameterFinding(

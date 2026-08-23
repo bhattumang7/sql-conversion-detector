@@ -77,6 +77,7 @@ public sealed class UnindexedTempTableUsageScannerTests
     [Fact]
     public void CreateTableTempThenJoin_NotSelectInto_NeverFires()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.usp_Foo AS
             BEGIN

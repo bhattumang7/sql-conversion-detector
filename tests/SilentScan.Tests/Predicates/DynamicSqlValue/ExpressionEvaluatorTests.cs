@@ -34,7 +34,7 @@ public sealed class ExpressionEvaluatorTests
 
     private static string TaintReason(SqlTextValue value) => Assert.IsType<SqlTextValue.Tainted>(value).Reason;
 
-private static string FlattenLitText(SqlTextValue value)
+    private static string FlattenLitText(SqlTextValue value)
     {
         var template = Assert.IsType<SqlTextValue.Template>(value);
         return string.Concat(template.Pieces.Select(p => Assert.IsType<TemplatePiece.Lit>(p).Text));
@@ -80,6 +80,7 @@ private static string FlattenLitText(SqlTextValue value)
     [Fact]
     public void Concatenation_TaintedLeftOperandWithNoAlternatives_KeepsItsOwnReason()
     {
+
         Assert.Equal("variable-not-in-scope", TaintReason(Fold("@unknown + 'b'")));
     }
 
@@ -104,6 +105,7 @@ private static string FlattenLitText(SqlTextValue value)
     [Fact]
     public void FunctionCall_Substring_IntegerArgumentFromVariable_DeclinesFunctionCallArgumentDiverges()
     {
+
         Assert.Equal("non-literal-expression:function-call-argument-diverges", TaintReason(Fold("SUBSTRING('abcdef', @start, 3)")));
     }
 
@@ -180,12 +182,14 @@ private static string FlattenLitText(SqlTextValue value)
     [Fact]
     public void SearchedCase_OneBranchDoesNotFold_DeclinesWithThatBranchsOwnReason()
     {
+
         Assert.Equal("variable-not-in-scope", TaintReason(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END")));
     }
 
     [Fact]
     public void SearchedCase_OneBranchDoesNotFold_PreservesTheKnownBranchAsGuardedAlternative()
     {
+
         var tainted = Assert.IsType<SqlTextValue.Tainted>(Fold("CASE WHEN 1 = 1 THEN @unknown ELSE 'c' END"));
 
         var alternative = Assert.Single(tainted.GuardedAlternatives!);
@@ -196,6 +200,7 @@ private static string FlattenLitText(SqlTextValue value)
     [Fact]
     public void ColumnReference_Declines()
     {
+
         Assert.Equal("non-literal-expression:column-reference", TaintReason(Fold("SomeColumn")));
     }
 

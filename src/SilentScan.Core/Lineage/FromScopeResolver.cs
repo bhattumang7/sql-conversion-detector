@@ -8,9 +8,9 @@ namespace SilentScan.Core.Lineage;
 
 public static class FromScopeResolver
 {
-private const string FromTableReferenceConstructKind = "FROM table reference";
+    private const string FromTableReferenceConstructKind = "FROM table reference";
 
-internal readonly record struct ResolutionContext(
+    internal readonly record struct ResolutionContext(
         DatabaseCatalog Catalog,
         IReadOnlyDictionary<string, ResolvedRelation> ResolvedViews,
         string SourcePath,
@@ -19,7 +19,7 @@ internal readonly record struct ResolutionContext(
         string? ProcScope,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? CallerScopeByCalleeScope = null);
 
-public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
+    public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(
         FromClause? fromClause,
         DatabaseCatalog catalog,
         IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
@@ -29,7 +29,7 @@ public static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)
         string? procScope) =>
         Resolve(fromClause, new ResolutionContext(catalog, resolvedViews, sourcePath, ledger, cteRelations, procScope));
 
-internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(FromClause? fromClause, ResolutionContext context)
+    internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) Resolve(FromClause? fromClause, ResolutionContext context)
     {
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<ScopeEntry>();
@@ -47,7 +47,7 @@ internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordere
         return (byAlias, ordered);
     }
 
-internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForDataModification(
+    internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForDataModification(
         TableReference target, FromClause? extraFromClause, ResolutionContext context)
     {
         if (extraFromClause is not null)
@@ -61,7 +61,7 @@ internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordere
         return (byAlias, ordered);
     }
 
-internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForMerge(
+    internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered) ResolveForMerge(
         TableReference target, Identifier? targetAlias, TableReference source, ResolutionContext context)
     {
         var byAlias = new Dictionary<string, ScopeEntry>(StringComparer.OrdinalIgnoreCase);
@@ -83,6 +83,7 @@ internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordere
             {
                 if (byAlias.ContainsKey(alias))
                 {
+
                     context.Ledger?.Record(
                         AnalysisPass.Lineage, context.SourcePath, tableReference.StartLine, tableReference.StartColumn,
                         "FROM alias", $"'{alias}' is exposed by more than one table reference in this FROM clause - ambiguous, references to it resolve Unknown");
@@ -98,7 +99,7 @@ internal static (Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordere
         }
     }
 
-private static IReadOnlyList<ResolvedColumn> ResolveFlattenedSourceColumns(TableReference source, ResolutionContext context) =>
+    private static IReadOnlyList<ResolvedColumn> ResolveFlattenedSourceColumns(TableReference source, ResolutionContext context) =>
         [.. FlattenJoins(source).SelectMany(leaf => ResolveTableReference(leaf, context, aliasOverride: null).Entry.Relation.Columns)];
 
     private static IEnumerable<TableReference> FlattenJoins(TableReference tableReference)
@@ -143,7 +144,7 @@ private static IReadOnlyList<ResolvedColumn> ResolveFlattenedSourceColumns(Table
         _ => ResolveUnsupportedTableReference(tableReference, context),
     };
 
-private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "master", "model", "msdb", "tempdb",
     };
@@ -213,7 +214,7 @@ private static readonly HashSet<string> SystemDatabaseNames = new(StringComparer
         return (alias, new ScopeEntry(relation, isViewLayer));
     }
 
-internal static CatalogTable? TryResolveFromCallerScopes(DatabaseCatalog catalog, string qualifiedName, IReadOnlyList<string> callerScopes)
+    internal static CatalogTable? TryResolveFromCallerScopes(DatabaseCatalog catalog, string qualifiedName, IReadOnlyList<string> callerScopes)
     {
         CatalogTable? resolved = null;
         foreach (var callerScope in callerScopes)
@@ -250,6 +251,7 @@ internal static CatalogTable? TryResolveFromCallerScopes(DatabaseCatalog catalog
             }
             else
             {
+
                 ledger?.Record(
                     AnalysisPass.Lineage, sourcePath, derived.StartLine, derived.StartColumn, "derived table column list",
                     $"declares {derived.Columns.Count} column name(s) but its query resolved {innerColumns.Count} - column identity can't be trusted");
@@ -277,6 +279,7 @@ internal static CatalogTable? TryResolveFromCallerScopes(DatabaseCatalog catalog
         var tvfQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(tvf.SchemaObject));
         if (!resolvedViews.TryGetValue(tvfQualifiedName, out var tvfRelation))
         {
+
             var clrTvf = catalog.Find(tvfQualifiedName, scope: null);
             if (clrTvf is { Kind: CatalogTableKind.ClrTableValuedFunction })
             {
@@ -295,7 +298,7 @@ internal static CatalogTable? TryResolveFromCallerScopes(DatabaseCatalog catalog
         return (tvfAlias, new ScopeEntry(tvfRelation, IsViewLayer: true));
     }
 
-private static (string? Alias, ScopeEntry Entry) ResolvePivotedTableReference(PivotedTableReference pivot, ResolutionContext context)
+    private static (string? Alias, ScopeEntry Entry) ResolvePivotedTableReference(PivotedTableReference pivot, ResolutionContext context)
     {
         var (_, _, sourcePath, ledger, _, _, _) = context;
         var innerColumns = ResolveFlattenedSourceColumns(pivot.TableReference, context);
@@ -340,7 +343,7 @@ private static (string? Alias, ScopeEntry Entry) ResolvePivotedTableReference(Pi
         return (pivot.Alias?.Value, new ScopeEntry(new ResolvedRelation(QualifiedName: null, pivotedColumns), IsViewLayer: false));
     }
 
-private static (string? Alias, ScopeEntry Entry) ResolveUnpivotedTableReference(UnpivotedTableReference unpivot, ResolutionContext context)
+    private static (string? Alias, ScopeEntry Entry) ResolveUnpivotedTableReference(UnpivotedTableReference unpivot, ResolutionContext context)
     {
         var (_, _, sourcePath, ledger, _, _, _) = context;
         var innerColumns = ResolveFlattenedSourceColumns(unpivot.TableReference, context);
@@ -382,7 +385,7 @@ private static (string? Alias, ScopeEntry Entry) ResolveUnpivotedTableReference(
         return (unpivot.Alias?.Value, new ScopeEntry(new ResolvedRelation(QualifiedName: null, unpivotedColumns), IsViewLayer: false));
     }
 
-private static SqlType? ResolveAggregateResultType(string aggregateFunctionName, SqlType? valueType)
+    private static SqlType? ResolveAggregateResultType(string aggregateFunctionName, SqlType? valueType)
     {
         if (BuiltinFunctionTypeResolver.ResolveFixedReturnType(aggregateFunctionName) is { } fixedType)
         {
@@ -426,10 +429,11 @@ private static SqlType? ResolveAggregateResultType(string aggregateFunctionName,
         return ((tableReference as TableReferenceWithAlias)?.Alias?.Value, new ScopeEntry(ResolvedRelation.Empty, IsViewLayer: false));
     }
 
-internal static ResolvedRelation ToResolvedRelation(CatalogTable? table, string qualifiedName)
+    internal static ResolvedRelation ToResolvedRelation(CatalogTable? table, string qualifiedName)
     {
         if (table is null)
         {
+
             return new ResolvedRelation(qualifiedName, []);
         }
 
@@ -440,10 +444,10 @@ internal static ResolvedRelation ToResolvedRelation(CatalogTable? table, string 
                 : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
     }
 
-private static ResolvedRelation ToSystemCatalogRelation(IReadOnlyList<(string Name, SqlType Type)> columns, string qualifiedName) =>
+    private static ResolvedRelation ToSystemCatalogRelation(IReadOnlyList<(string Name, SqlType Type)> columns, string qualifiedName) =>
         new(qualifiedName, [.. columns.Select(c => new ResolvedColumn(c.Name, new ColumnProvenance.BaseColumn(qualifiedName, c.Name, c.Type)))]);
 
-internal static ResolvedRelation ToPseudoTableRelation(CatalogTable? table, string qualifiedName)
+    internal static ResolvedRelation ToPseudoTableRelation(CatalogTable? table, string qualifiedName)
     {
         if (table is null)
         {
@@ -457,7 +461,7 @@ internal static ResolvedRelation ToPseudoTableRelation(CatalogTable? table, stri
                 : new ColumnProvenance.Unknown($"column {c.Name} has an unresolved declared type")))]);
     }
 
-internal static ResolvedRelation ToPseudoTableRelation(ResolvedRelation viewRelation, string qualifiedName) =>
+    internal static ResolvedRelation ToPseudoTableRelation(ResolvedRelation viewRelation, string qualifiedName) =>
         new(qualifiedName, [.. viewRelation.Columns.Select(c => c.Provenance switch
         {
             ColumnProvenance.BaseColumn { Type: { } type } => c with { Provenance = new ColumnProvenance.Declared(type, qualifiedName) },

@@ -4,15 +4,15 @@ namespace SilentScan.Core.Predicates;
 
 public enum SecurityFindingKind
 {
-HardCodedCredential,
+    HardCodedCredential,
 
-HardCodedIpAddress,
+    HardCodedIpAddress,
 
-WeakHashAlgorithm,
+    WeakHashAlgorithm,
 
-WeakHashAlgorithmInSensitiveContext,
+    WeakHashAlgorithmInSensitiveContext,
 
-UnprovableDynamicSqlText,
+    UnprovableDynamicSqlText,
 }
 
 public sealed record SecurityFinding(

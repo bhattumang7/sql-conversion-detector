@@ -74,12 +74,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public void CleanTwin_SameParamFamilyAndCollation_ProducesNoActionableFinding()
     {
+
         Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "DisplayName");
     }
 
     [Fact]
     public void TypedPredicateSummary_ReflectsEveryClassifiedComparisonNotJustSurvivors()
     {
+
         var summary = _report.TypedPredicateSummary;
 
         Assert.True(summary.SeekPreservedCount > 0);
@@ -105,12 +107,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public void Tier1CleanTwin_SargableDateRange_ProducesNoFinding()
     {
+
         Assert.Single(_report.Tier1Findings);
     }
 
     [Fact]
     public void DynamicSqlUnanalyzable_IsPlantedAndFound()
     {
+
         var finding = Assert.Single(_report.DynamicSqlFindings, f => f.Outcome == DynamicSqlOutcome.Unanalyzable);
 
         Assert.Equal("symbolic-value-not-positionable:whole-statement", finding.Reason);
@@ -119,6 +123,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public void DynamicSqlLiteralOnly_NoInnerFinding_IsAnalyzedWithNoFurtherFindings()
     {
+
         var analyzed = _report.DynamicSqlFindings.Where(f => f.Outcome == DynamicSqlOutcome.AnalyzedLiteral).ToList();
 
         Assert.Equal(4, analyzed.Count);
@@ -127,12 +132,14 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public void DynamicSqlCleanTwin_OrdinaryProcCall_ProducesNoFinding()
     {
+
         Assert.Equal(5, _report.DynamicSqlFindings.Count);
     }
 
     [Fact]
     public async Task DynamicSqlTierCAccumulated_IsPlantedAndFound_OracleConfirmed()
     {
+
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "AccountCode");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -149,6 +156,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public async Task DynamicSqlSpExecuteSqlDeclaredParam_TierB_IsPlantedAndFound_OracleConfirmed()
     {
+
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Phone");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
@@ -163,6 +171,7 @@ public sealed class FullPipelineSyntheticMiniProjectTests : OracleTestFixture
     [Fact]
     public async Task DynamicSqlLiteral_InnerPredicateIsReparsedAndRemappedToSourceLine_OracleConfirmed()
     {
+
         var finding = Assert.Single(_report.TypedFindings, f => f.Column.ColumnName == "Email");
 
         Assert.Equal(Verdict.ScanForced, finding.Verdict);

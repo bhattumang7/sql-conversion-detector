@@ -141,6 +141,7 @@ public sealed class FormattingScannerTests
     [Fact]
     public void ChainedUnbracedIfsAtSameIndentation_NeverFiresDangling()
     {
+
         var sql = "CREATE PROCEDURE dbo.P AS\nBEGIN\nIF @a = 1\n    SELECT 1;\nIF @b = 1\n    SELECT 2;\nEND";
         var findings = Scan(sql);
 

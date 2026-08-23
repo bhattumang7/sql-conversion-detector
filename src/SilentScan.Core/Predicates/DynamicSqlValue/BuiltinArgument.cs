@@ -6,13 +6,13 @@ namespace SilentScan.Core.Predicates.DynamicSqlValue;
 
 public abstract record BuiltinArgument
 {
-public sealed record Text(string Value) : BuiltinArgument;
+    public sealed record Text(string Value) : BuiltinArgument;
 
-public sealed record Number(int Value) : BuiltinArgument;
+    public sealed record Number(int Value) : BuiltinArgument;
 
-public sealed record Hole(SqlType Type, HoleKind Kind) : BuiltinArgument;
+    public sealed record Hole(SqlType Type, HoleKind Kind) : BuiltinArgument;
 
-public sealed record Unresolved(string Reason, SourceSpan Location, SqlType? Type = null) : BuiltinArgument;
+    public sealed record Unresolved(string Reason, SourceSpan Location, SqlType? Type = null) : BuiltinArgument;
 }
 
 public sealed record BuiltinCall(string FunctionName, IReadOnlyList<BuiltinArgument> Arguments, SourceSpan Site);

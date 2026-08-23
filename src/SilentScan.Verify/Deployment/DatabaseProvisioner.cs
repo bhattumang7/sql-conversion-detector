@@ -20,7 +20,7 @@ public sealed partial class DatabaseProvisioner
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]{2,127}$")]
     private static partial Regex ValidCollationName();
 
-public async Task CreateFreshAsync(string databaseName, string? collationName = null, CancellationToken cancellationToken = default)
+    public async Task CreateFreshAsync(string databaseName, string? collationName = null, CancellationToken cancellationToken = default)
     {
         if (collationName is not null && !ValidCollationName().IsMatch(collationName))
         {
@@ -37,8 +37,9 @@ public async Task CreateFreshAsync(string databaseName, string? collationName = 
         await ExecuteAsync(connection, $"ALTER DATABASE [{databaseName}] SET QUERY_STORE = OFF;", cancellationToken);
     }
 
-public async Task DropIfExistsAsync(string databaseName, CancellationToken cancellationToken = default)
+    public async Task DropIfExistsAsync(string databaseName, CancellationToken cancellationToken = default)
     {
+
         using var targetConnection = new SqlConnection(_options.BuildConnectionString(databaseName));
         SqlConnection.ClearPool(targetConnection);
 
@@ -49,6 +50,7 @@ public async Task DropIfExistsAsync(string databaseName, CancellationToken cance
 
     private async Task<SqlConnection> OpenMasterConnectionAsync(string databaseName, CancellationToken cancellationToken)
     {
+
         if (!ValidIdentifier().IsMatch(databaseName))
         {
             throw new ArgumentException($"'{databaseName}' is not a safe SQL identifier for a disposable database name.", nameof(databaseName));

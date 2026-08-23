@@ -17,15 +17,15 @@ public abstract record ColumnProvenance
     {
     }
 
-public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0) : ColumnProvenance;
+    public sealed record BaseColumn(string TableQualifiedName, string ColumnName, SqlType? Type, int Depth = 0) : ColumnProvenance;
 
-public sealed record Declared(SqlType Type, string? TableQualifiedName = null, int Depth = 0) : ColumnProvenance;
+    public sealed record Declared(SqlType Type, string? TableQualifiedName = null, int Depth = 0) : ColumnProvenance;
 
-public sealed record Cast(SqlType ExplicitType, ColumnProvenance Inner, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
+    public sealed record Cast(SqlType ExplicitType, ColumnProvenance Inner, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
 
-public sealed record Expression(SqlType? InferredType, IReadOnlyList<ColumnProvenance> Inputs, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
+    public sealed record Expression(SqlType? InferredType, IReadOnlyList<ColumnProvenance> Inputs, string? OriginSourcePath = null, int OriginLine = 0, int Depth = 0) : ColumnProvenance;
 
-public sealed record Union(IReadOnlyList<ColumnProvenance> Branches) : ColumnProvenance;
+    public sealed record Union(IReadOnlyList<ColumnProvenance> Branches) : ColumnProvenance;
 
-public sealed record Unknown(string Reason) : ColumnProvenance;
+    public sealed record Unknown(string Reason) : ColumnProvenance;
 }

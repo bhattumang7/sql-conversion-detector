@@ -67,7 +67,7 @@ public static class NonUniqueUpdateSourceScanner
             }
         }
 
-private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
+        private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
@@ -86,7 +86,7 @@ private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlName
                 baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
-private static string? AliasOf(TableReference reference) =>
+        private static string? AliasOf(TableReference reference) =>
             reference is NamedTableReference named ? named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value : null;
 
         private void InspectJoin(
@@ -123,6 +123,7 @@ private static string? AliasOf(TableReference reference) =>
             var joinColumns = JoinKeyUniqueness.EqualityColumnsQualifiedBy(join.SearchCondition, sourceAlias);
             if (joinColumns.Count == 0)
             {
+
                 return;
             }
 
@@ -140,6 +141,7 @@ private static string? AliasOf(TableReference reference) =>
 
             if (setColumnNames.Count == 0)
             {
+
                 return;
             }
 

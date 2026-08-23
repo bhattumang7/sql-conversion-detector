@@ -4,17 +4,17 @@ namespace SilentScan.Core.Predicates;
 
 public enum SetOptionFindingKind
 {
-QuotedIdentifierOffBlocksIndexedFeature,
+    QuotedIdentifierOffBlocksIndexedFeature,
 
-NumericRoundabortOnBlocksIndexedFeature,
+    NumericRoundabortOnBlocksIndexedFeature,
 
-AnsiNullsOffBlocksIndexedFeature,
+    AnsiNullsOffBlocksIndexedFeature,
 
-AnsiWarningsOffBlocksIndexedFeature,
+    AnsiWarningsOffBlocksIndexedFeature,
 
-ConcatNullYieldsNullOffBlocksIndexedFeature,
+    ConcatNullYieldsNullOffBlocksIndexedFeature,
 
-AnsiPaddingOffBlocksIndexedFeature,
+    AnsiPaddingOffBlocksIndexedFeature,
 }
 
 public sealed record SetOptionFinding(

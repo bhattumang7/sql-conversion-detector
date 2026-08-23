@@ -56,6 +56,7 @@ public sealed class ProcCallArgumentMismatchScannerTests
     [Fact]
     public void LiteralArgument_NeverFires()
     {
+
         var argument = new ProcCallArgument(
             "@P", new SqlType(SqlTypeCategory.Int), FormalParameterIsOutput: false,
             CallerVariableName: null, IsLiteral: true, CallerArgumentType: null);

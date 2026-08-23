@@ -17,6 +17,7 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_ConvertOverRealColumn_IsReported()
     {
+
         var xml = Wrap("""
             <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
               <Convert DataType="nvarchar" Length="40" Style="0" Implicit="1">
@@ -37,6 +38,7 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_ImplicitAttributeAsLexicalTrue_IsReported()
     {
+
         var xml = Wrap("""
             <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
               <Convert DataType="nvarchar" Length="40" Style="0" Implicit="true">
@@ -54,6 +56,7 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_ConvertOverParameterReference_IsNotReported()
     {
+
         var xml = Wrap("""
             <ScalarOperator><Compare CompareOp="EQ"><ScalarOperator>
               <Convert DataType="bit" Style="0" Implicit="1">
@@ -96,6 +99,7 @@ public sealed class ConvertImplicitDetectorTests
     [Fact]
     public void FindColumnConversions_TwoConversionsInSamePlanOnlyOneRangeBound_AttributesPerNodeNotPlanWide()
     {
+
         var xml = $"""
             <ShowPlanXML xmlns="{ShowPlanNs}">
               <BatchSequence><Batch><Statements><StmtSimple>

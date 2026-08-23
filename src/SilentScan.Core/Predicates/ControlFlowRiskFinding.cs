@@ -4,23 +4,23 @@ namespace SilentScan.Core.Predicates;
 
 public enum ControlFlowRiskFindingKind
 {
-CursorFetchColumnCountMismatch,
+    CursorFetchColumnCountMismatch,
 
-EmptyCatchBlock,
+    EmptyCatchBlock,
 
-TriggerEmitsOutput,
+    TriggerEmitsOutput,
 
-DirtyReadIsolationHint,
+    DirtyReadIsolationHint,
 
-DuplicatedCallArgument,
+    DuplicatedCallArgument,
 
-LegacyIdentityIntrinsic,
+    LegacyIdentityIntrinsic,
 
-GotoUsage,
+    GotoUsage,
 
-CaseExpressionMissingElse,
+    CaseExpressionMissingElse,
 
-NonDeterministicCaseInput,
+    NonDeterministicCaseInput,
 }
 
 public sealed record ControlFlowRiskFinding(

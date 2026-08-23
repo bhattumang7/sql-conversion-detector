@@ -45,6 +45,7 @@ public sealed class TriggerCorrectnessScannerTests
     [Fact]
     public void SelectSetVariableFromInserted_WithWhere_NeverFires()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_T ON dbo.T AFTER UPDATE AS "
             + "BEGIN DECLARE @v INT; SELECT @v = Val FROM inserted WHERE Id = 1; PRINT @v; END;");
@@ -55,6 +56,7 @@ public sealed class TriggerCorrectnessScannerTests
     [Fact]
     public void SelectSetVariableFromInserted_AggregateExpression_NeverFires()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_T ON dbo.T AFTER UPDATE AS "
             + "BEGIN DECLARE @v INT; SELECT @v = COUNT(*) FROM inserted; PRINT @v; END;");
@@ -75,6 +77,7 @@ public sealed class TriggerCorrectnessScannerTests
 
         var finding = Assert.Single(findings, f => f.Kind == TriggerCorrectnessFindingKind.MultiRowUnsafeKeyedDml);
         Assert.Equal(FindingConfidence.High, finding.Confidence);
+
         Assert.DoesNotContain(findings, f => f.Kind == TriggerCorrectnessFindingKind.MultiRowUnsafeSingleRowAssignment);
     }
 
@@ -150,6 +153,7 @@ public sealed class TriggerCorrectnessScannerTests
     [Fact]
     public void SelfWritingTrigger_RecursiveTriggersUnknown_NeverFires()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS "
             + "BEGIN INSERT INTO dbo.T(Id, Val) SELECT Id + 1, Val FROM inserted; END;",
@@ -161,6 +165,7 @@ public sealed class TriggerCorrectnessScannerTests
     [Fact]
     public void TriggerWritingOtherTable_RecursiveTriggersOn_NeverFires()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS "
             + "BEGIN INSERT INTO dbo.Other(Id, Val) SELECT Id, Val FROM inserted; END;",

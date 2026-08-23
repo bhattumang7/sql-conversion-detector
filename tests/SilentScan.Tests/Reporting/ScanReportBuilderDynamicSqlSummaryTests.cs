@@ -10,6 +10,7 @@ public sealed class ScanReportBuilderDynamicSqlSummaryTests
     [Fact]
     public async Task BuildFromParseResults_MixOfAnalyzedAndUnanalyzableCallSites_PopulatesSummary()
     {
+
         var report = await EngineAuthoritativeScan.ScanAsync(
             """
             CREATE TABLE dbo.T (Col INT NOT NULL);

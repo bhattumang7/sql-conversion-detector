@@ -56,13 +56,14 @@ internal static class BaseColumnResolver
         }
     }
 
-public sealed class ColumnReferenceCollector(
+    public sealed class ColumnReferenceCollector(
         string sourcePath,
         IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
         HashSet<(string Table, string Column)> sink) : TSqlFragmentVisitor
     {
         public override void ExplicitVisit(ColumnReferenceExpression node)
         {
+
             if (node.ColumnType != ColumnType.Wildcard)
             {
                 var provenance = ScalarExpressionResolver.ResolveColumnReference(node, scopeChain, sourcePath, ledger: null);

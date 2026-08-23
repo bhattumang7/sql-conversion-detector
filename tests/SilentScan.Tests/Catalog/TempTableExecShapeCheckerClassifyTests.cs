@@ -74,6 +74,7 @@ public sealed class TempTableExecShapeCheckerClassifyTests
     [Fact]
     public void MatchingCountUnicodeDescribedIntoNonUnicodeDeclared_ColumnTypeMismatch()
     {
+
         var tempColumns = new List<CatalogColumn>
         {
             new("Name", new SqlType(SqlTypeCategory.VarChar, Length: 50), IsNullable: false, IsIdentity: false, IsComputed: false, IsPersisted: false),

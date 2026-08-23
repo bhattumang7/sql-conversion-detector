@@ -2,13 +2,13 @@ namespace SilentScan.Core.Predicates;
 
 public enum TvfFenceFindingKind
 {
-CorrelatedApply,
+    CorrelatedApply,
 
-NestedUnderViewOrTvf,
+    NestedUnderViewOrTvf,
 
-FromOrJoin,
+    FromOrJoin,
 
-InsertExec,
+    InsertExec,
 
-Standalone,
+    Standalone,
 }

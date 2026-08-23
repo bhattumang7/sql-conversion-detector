@@ -50,6 +50,7 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", """
             CREATE TABLE dbo.Orders (Id INT NOT NULL, Notes VARCHAR(200) NOT NULL);
             GO
@@ -69,6 +70,7 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_OnNonLeadingCompositeKeyColumn_ResolvesIndexedFalse()
     {
+
         var findings = ScanWithCatalog("""
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Notes VARCHAR(200) NOT NULL, CONSTRAINT PK_Orders PRIMARY KEY (OrderId, Notes));
             GO
@@ -82,6 +84,7 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_ReferencedThroughCteInsideInsertSelect_ResolvesIndexedTrue()
     {
+
         var findings = ScanWithCatalog("""
             CREATE TABLE dbo.Orders (OrderDate DATETIME NOT NULL);
             CREATE INDEX IX_Orders_OrderDate ON dbo.Orders(OrderDate);
@@ -101,6 +104,7 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_OnUnresolvableTable_RecordsSkipInsteadOfSilence()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", "SELECT 1 FROM dbo.Missing WHERE UPPER(Notes) = 'X';");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
@@ -117,6 +121,7 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
     [Fact]
     public void FunctionWrappedColumn_OnUnresolvableTable_LeavesIndexedNull()
     {
+
         var findings = ScanWithCatalog("SELECT 1 FROM dbo.Missing WHERE UPPER(Notes) = 'X';");
 
         var finding = Assert.Single(findings);

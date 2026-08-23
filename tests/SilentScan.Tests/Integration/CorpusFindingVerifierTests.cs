@@ -99,6 +99,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_Depth1FindingThroughView_ProbesTheViewAndConfirmsAgainstTheBaseColumn()
     {
+
         var baseColumnType = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"));
         var column = new PredicateOperand.Column(
             "dbo.Orders", "OrderCode", baseColumnType, Indexed: true, Depth: 1,
@@ -125,6 +126,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_WindowsCollationVarcharColumnVsNVarcharValue_RangeSeekVerdict_IsConfirmed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.RangeSeek,
             ColumnOperand("dbo.Customers", "CustomerCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS")), indexed: true),
@@ -142,6 +144,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_SqlCollationColumn_RangeSeekVerdictButPlanIsActuallyScanForced_IsNotConfirmed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.RangeSeek,
             ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")), indexed: true),
@@ -159,6 +162,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_WindowsCollationColumn_ScanForcedVerdictButPlanIsActuallyRangeSeek_IsNotConfirmed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Customers", "CustomerCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("Latin1_General_CI_AS")), indexed: true),
@@ -176,6 +180,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_LiteralOperand_ProbesTheReconstructedLiteralNotAVariable()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")), indexed: true),
@@ -193,6 +198,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_LiteralOperandThatCannotBeReconstructed_ReturnsNotProbeableWithFidelityCaveat()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Orders", "OrderId", new SqlType(SqlTypeCategory.Int), indexed: true),
@@ -211,6 +217,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_IntColumnVsBigIntValue_SameFamilyWidening_IsNotConfirmed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Orders", "OrderId", new SqlType(SqlTypeCategory.Int), indexed: true),
@@ -245,6 +252,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_UnprobeableOtherOperandType_ReturnsNotProbeable()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.CodeFrequency", "Code", new SqlType(SqlTypeCategory.Char, Length: 1)),
@@ -262,6 +270,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_ScanForcedColumnHasNoDeployedIndex_ConfirmsViaScratchIndex()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Unindexed", "UnindexedCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))),
@@ -280,6 +289,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_ScanForcedColumnTypeCannotBeIndexed_FallsBackToConfirmedUnindexed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.Unindexed", "UnindexedLob", new SqlType(SqlTypeCategory.VarChar, IsMax: true, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS"))),
@@ -299,6 +309,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_ScanForcedColumnNoLongerExistsInDeployedSchema_ReturnsProbeFailed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.DoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
@@ -316,6 +327,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_ColumnToColumnProbeAgainstUndeployedTable_ReturnsProbeFailed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.CodeFrequency", "Code", new SqlType(SqlTypeCategory.Char, Length: 1)),
@@ -333,6 +345,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_UnknownVerdictCausedByUnresolvedCollation_NeverConfirmedEvenThoughTheColumnActuallyConverts()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.Unknown,
             ColumnOperand("dbo.Orders", "OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: null), indexed: true),
@@ -350,6 +363,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_UnknownVerdict_NeverAttemptsAProbeAtAll()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.Unknown,
             ColumnOperand("dbo.DoesNotExist", "Missing", new SqlType(SqlTypeCategory.Int)),
@@ -367,6 +381,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_ColumnOnATempTable_ProbesSuccessfullyRatherThanProbeFailed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("#TraceStatus", "TraceFlag", new SqlType(SqlTypeCategory.VarChar, Length: 10)),
@@ -384,6 +399,7 @@ public sealed class CorpusFindingVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_ColumnOnAnInlineTableValuedFunction_ProbesSuccessfullyRatherThanProbeFailed()
     {
+
         var finding = new TypedPredicateFinding(
             Verdict.ScanForced,
             ColumnOperand("dbo.SplitStrings_CTE", "Item", new SqlType(SqlTypeCategory.NVarChar, Length: 4000)),

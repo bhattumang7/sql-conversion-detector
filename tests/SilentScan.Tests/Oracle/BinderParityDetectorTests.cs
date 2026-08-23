@@ -35,6 +35,7 @@ public sealed class BinderParityDetectorTests
     [Fact]
     public void FindAllColumnReferences_LocalVariableOrParameter_IsExcluded()
     {
+
         var xml = Wrap("""<ScalarOperator><Identifier><ColumnReference Column="@p" /></Identifier></ScalarOperator>""");
 
         var found = BinderParityDetector.FindAllColumnReferences(xml);
@@ -45,6 +46,7 @@ public sealed class BinderParityDetectorTests
     [Fact]
     public void FindAllColumnReferences_NotJustUnderConvert_UnlikeConvertImplicitDetector()
     {
+
         var xml = Wrap("""
             <ScalarOperator><Identifier><ColumnReference Database="[T]" Schema="[dbo]" Table="[Orders]" Column="OrderId" /></Identifier></ScalarOperator>
             """);

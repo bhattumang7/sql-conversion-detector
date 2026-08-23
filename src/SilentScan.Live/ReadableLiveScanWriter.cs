@@ -9,13 +9,14 @@ public static class ReadableLiveScanWriter
 {
     private const string ColumnHeading = "Column";
 
-public static string DescribeTarget(string connectionString)
+    public static string DescribeTarget(string connectionString)
     {
         try
         {
             var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
             if (string.IsNullOrEmpty(builder.DataSource))
             {
+
                 return string.IsNullOrEmpty(builder.InitialCatalog) ? "the connected database" : builder.InitialCatalog;
             }
 
@@ -44,7 +45,7 @@ public static string DescribeTarget(string connectionString)
         return ReadableDocumentRenderer.Render(new ReadableDocument(blocks), style);
     }
 
-private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
+    private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
         new($"{count.ToString(CultureInfo.InvariantCulture)} {noun}{(count == 1 ? string.Empty : "s")} - not listed individually here; re-run with --verbosity full to see each one.");
 
     private static IEnumerable<ReadableBlock> Connection(LiveScanResult result)
@@ -71,6 +72,7 @@ private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
 
         if (parity.Mismatches.Count > 0)
         {
+
             yield return new ReadableBlock.Heading(2, $"Column types this tool got wrong ({parity.Mismatches.Count})");
             yield return new ReadableBlock.Paragraph(
                 "Verified against the type the server computes for this object right now (sys.dm_exec_describe_first_result_set), not against its cached sys.columns metadata, so this is a genuine inference bug in this tool. Every finding below that touches one of these columns rests on a type the pipeline got wrong - read them as suspect until this is fixed. This is the only category that fails the scan.");
@@ -169,7 +171,7 @@ private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
         }
     }
 
-private static IEnumerable<ReadableBlock> WorkloadFindings(LiveScanResult result)
+    private static IEnumerable<ReadableBlock> WorkloadFindings(LiveScanResult result)
     {
         if (result.WorkloadFindings.Count == 0)
         {

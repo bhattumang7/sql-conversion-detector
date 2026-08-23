@@ -90,6 +90,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Concat_TaintedOperandWithNoDeclaredType_StillAbsorbsWithoutBecomingAHole()
     {
+
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin);
 
         var result = SqlTextValue.Concat(Lit("WHERE (a.ID = 1) AND "), tainted);
@@ -100,6 +101,7 @@ public sealed class SqlTextValueTests
     [Fact]
     public void Concat_TaintedOperandAgainstAnEmptyStartingTemplate_StillAbsorbsWithoutBecomingAHole()
     {
+
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin) { DeclaredType = NVarChar50 };
         var empty = new SqlTextValue.Template([]);
 
@@ -154,9 +156,10 @@ public sealed class SqlTextValueTests
 
         var template = (SqlTextValue.Template)secondJoin;
         var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(template.Pieces));
-        Assert.Equal(3, choice.Alternatives.Count);    }
+        Assert.Equal(3, choice.Alternatives.Count);
+    }
 
-[Fact]
+    [Fact]
     public void Join_TemplateAndTainted_WithNoDeclaredType_PreservesReasonAndKeepsKnownSideAsAlternative()
     {
         var template = Lit("A");
@@ -219,7 +222,7 @@ public sealed class SqlTextValueTests
         Assert.True(SqlTextValue.StructurallyEqual(value, widened));
     }
 
-private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredType = null)
+    private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredType = null)
     {
         var alternatives = Enumerable.Range(0, count).Select(i => Lit($"v{i}") with { DeclaredType = declaredType }).ToList();
         return new SqlTextValue.Template([new TemplatePiece.Choice("guard", alternatives)]) { DeclaredType = declaredType };
@@ -367,6 +370,7 @@ private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredT
     [Fact]
     public void WithGuardedAlternative_BranchValueCarryingAlternatives_StoresItFlattened()
     {
+
         var nestedBranch = WithAlternative(Lit("outer"), "inner-guard", Lit("inner"));
 
         var result = SqlTextValue.WithGuardedAlternative(Lit("base"), "outer-guard", nestedBranch);
@@ -374,12 +378,14 @@ private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredT
         var stored = Assert.Single(result.GuardedAlternatives!);
         Assert.Equal("outer-guard", stored.GuardText);
         Assert.Null(stored.Value.GuardedAlternatives);
+
         Assert.Equal("outer", ((TemplatePiece.Lit)Assert.Single(stored.Value.Pieces)).Text);
     }
 
     [Fact]
     public void Concat_TaintedLeftWithAlternatives_ExtendedStoredValuesStayFlat()
     {
+
         var tainted = new SqlTextValue.Tainted("non-literal-expression", Origin)
         {
             GuardedAlternatives = [new GuardedAlternative("g1", Lit("SELECT "))],
@@ -396,6 +402,7 @@ private static SqlTextValue.Template OverCapChoice(int count, SqlType? declaredT
     [Fact]
     public void Concat_TwoTemplatesEachCarryingAlternatives_PropagatedStoredValuesStayFlat()
     {
+
         var a = WithAlternative(Lit("SELECT "), "ga", Lit("SELECT TOP 1 "));
         var b = WithAlternative(Lit("* FROM T"), "gb", Lit("* FROM U"));
 

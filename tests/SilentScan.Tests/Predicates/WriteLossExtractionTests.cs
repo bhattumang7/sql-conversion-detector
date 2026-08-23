@@ -36,6 +36,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithAsciiOnlyUnicodeLiteralIntoVarchar_ProvablySafe_NoFinding()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
             "INSERT INTO dbo.T (VarCol) VALUES (N'hello');");
@@ -46,6 +47,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithUnicodeColumnIntoVarchar_NonLiteral_AlwaysFlagged()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Src (NCol NVARCHAR(20) NULL); CREATE TABLE dbo.Dst (VarCol VARCHAR(20) NULL);",
             "INSERT INTO dbo.Dst (VarCol) SELECT NCol FROM dbo.Src;");
@@ -58,6 +60,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithFractionalNumericLiteralIntoInt_FlagsNumericScaleNarrowing()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.T (IntCol INT NULL);",
             "INSERT INTO dbo.T (IntCol) VALUES (7.9);");
@@ -69,6 +72,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertValuesWithFractionalScientificNotationLiteralIntoInt_FlagsApproximateTruncation()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.T (IntCol INT NULL);",
             "INSERT INTO dbo.T (IntCol) VALUES (7.9e0);");
@@ -216,6 +220,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertSelectWithWhereClause_StillFindsPredicateAndWriteLoss()
     {
+
         var result = ExtractAll(
             """
             CREATE TABLE dbo.Src (Amount DECIMAL(10,4) NOT NULL, Flag INT NOT NULL);
@@ -274,6 +279,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertWithCteContainingSelectStar_DoesNotThrow()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Src (a INT NULL, b INT NULL, c INT NULL); CREATE TABLE dbo.T (a INT NULL, b INT NULL, c INT NULL);",
             "WITH cte AS (SELECT * FROM dbo.Src) INSERT INTO dbo.T (a, b, c) SELECT a, b, c FROM cte;");
@@ -284,6 +290,7 @@ public sealed class WriteLossExtractionTests
     [Fact]
     public void Extract_InsertWithCteContainingSelectStar_LossySource_FlagsWriteLoss()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Src (NCol NVARCHAR(20) NULL); CREATE TABLE dbo.T (VarCol VARCHAR(20) NULL);",
             "WITH cte AS (SELECT * FROM dbo.Src) INSERT INTO dbo.T (VarCol) SELECT NCol FROM cte;");

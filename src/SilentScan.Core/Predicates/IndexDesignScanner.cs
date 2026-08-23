@@ -7,27 +7,27 @@ namespace SilentScan.Core.Predicates;
 
 public static class IndexDesignScanner
 {
-public const int WideClusteredKeyMaxColumns = 3;
+    public const int WideClusteredKeyMaxColumns = 3;
 
-private const string UnnamedIndexPlaceholder = "<unnamed>";
+    private const string UnnamedIndexPlaceholder = "<unnamed>";
 
-public const int WideClusteredKeyMaxBytes = 16;
+    public const int WideClusteredKeyMaxBytes = 16;
 
-public const int ManyNonclusteredIndexesThreshold = 7;
+    public const int ManyNonclusteredIndexesThreshold = 7;
 
-public const int ManyKeyColumnsThreshold = 7;
+    public const int ManyKeyColumnsThreshold = 7;
 
-public const int WideTableMinColumns = 35;
+    public const int WideTableMinColumns = 35;
 
-public const int WideTableMaxNonLobBytes = 2000;
+    public const int WideTableMaxNonLobBytes = 2000;
 
-public const int RatioChecksMinColumns = 5;
+    public const int RatioChecksMinColumns = 5;
 
-public const double HighNullableColumnRatioThreshold = 0.8;
+    public const double HighNullableColumnRatioThreshold = 0.8;
 
-public const double HighStringColumnRatioThreshold = 0.8;
+    public const double HighStringColumnRatioThreshold = 0.8;
 
-public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
+    public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IReadOnlySet<string>? dmlTargetTables = null)
     {
         var defaultTextByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var expression in catalog.SchemaExpressions)
@@ -45,6 +45,7 @@ public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IR
 
         foreach (var table in catalog.Tables)
         {
+
             if (table.Kind != CatalogTableKind.Table)
             {
                 continue;
@@ -80,6 +81,7 @@ public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IR
 
     private static void ScanHeapFindings(CatalogTable table, List<IndexDesignFinding> findings)
     {
+
         if (table.IsMemoryOptimized)
         {
             return;
@@ -94,12 +96,14 @@ public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IR
         var activeNonclustered = table.Indexes.Where(i => !i.IsDisabled).ToList();
         if (activeNonclustered.Count == 0)
         {
+
             return;
         }
 
         var nonclusteredPrimaryKey = activeNonclustered.FirstOrDefault(i => i.Kind == CatalogIndexKind.PrimaryKey);
         if (nonclusteredPrimaryKey is not null)
         {
+
             findings.Add(new IndexDesignFinding(
                 IndexDesignFindingKind.HeapWithNonclusteredPrimaryKey,
                 table.QualifiedName,
@@ -123,6 +127,7 @@ public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IR
     private static void ScanClusteringKeyQuality(
         CatalogTable table, Dictionary<string, string> defaultTextByColumn, List<IndexDesignFinding> findings)
     {
+
         var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore);
         if (clusteredIndex is null || clusteredIndex.KeyColumns.Count == 0)
         {
@@ -161,6 +166,7 @@ public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IR
             var columnBytes = column?.Type is { } type ? EstimateColumnKeyBytes(type) : null;
             if (columnBytes is null)
             {
+
                 totalBytes = null;
                 break;
             }
@@ -210,7 +216,7 @@ public static IReadOnlyList<IndexDesignFinding> Scan(DatabaseCatalog catalog, IR
             table.SourceLine));
     }
 
-private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var candidates = table.Indexes
             .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0)
@@ -265,7 +271,7 @@ private static void ScanDuplicateAndSubsumedIndexes(CatalogTable table, List<Ind
     private static bool KeyColumnsEqual(IReadOnlyList<string> a, IReadOnlyList<string> b) =>
         a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
-private static bool IsProperPrefix(IReadOnlyList<string> shorter, IReadOnlyList<string> longer)
+    private static bool IsProperPrefix(IReadOnlyList<string> shorter, IReadOnlyList<string> longer)
     {
         if (shorter.Count == 0 || shorter.Count >= longer.Count)
         {
@@ -283,7 +289,7 @@ private static bool IsProperPrefix(IReadOnlyList<string> shorter, IReadOnlyList<
         return true;
     }
 
-private static void ScanDisabledAndHypotheticalIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanDisabledAndHypotheticalIndexes(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -310,7 +316,7 @@ private static void ScanDisabledAndHypotheticalIndexes(CatalogTable table, List<
         }
     }
 
-private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var activeNonclustered = table.Indexes.Where(i => !i.IsClustered && !i.IsDisabled).ToList();
         if (activeNonclustered.Count >= ManyNonclusteredIndexesThreshold)
@@ -342,7 +348,7 @@ private static void ScanOverIndexing(CatalogTable table, List<IndexDesignFinding
         }
     }
 
-private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var columnCount = table.Columns.Count;
         if (columnCount == 0)
@@ -353,6 +359,7 @@ private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> 
         var nonLobBytes = 0;
         foreach (var column in table.Columns)
         {
+
             nonLobBytes += column.Type is { } type ? EstimateColumnKeyBytes(type) ?? 0 : 0;
         }
 
@@ -402,7 +409,7 @@ private static void ScanTableShape(CatalogTable table, List<IndexDesignFinding> 
         }
     }
 
-private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<IndexDesignFinding> findings)
+    private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<IndexDesignFinding> findings)
     {
         var constraints = catalog.ForeignKeys
             .GroupBy(fk => (fk.ConstraintName, fk.ParentTableQualifiedName), fk => fk, TupleComparer.Instance);
@@ -412,6 +419,7 @@ private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<Index
             var parentTable = catalog.Find(group.Key.ParentTableQualifiedName);
             if (parentTable is null)
             {
+
                 continue;
             }
 
@@ -438,7 +446,7 @@ private static void ScanUnindexedForeignKeys(DatabaseCatalog catalog, List<Index
         }
     }
 
-private sealed class TupleComparer : IEqualityComparer<(string ConstraintName, string ParentTableQualifiedName)>
+    private sealed class TupleComparer : IEqualityComparer<(string ConstraintName, string ParentTableQualifiedName)>
     {
         public static readonly TupleComparer Instance = new();
 
@@ -452,7 +460,7 @@ private sealed class TupleComparer : IEqualityComparer<(string ConstraintName, s
                 obj.ParentTableQualifiedName.ToUpperInvariant());
     }
 
-private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -486,7 +494,7 @@ private static void ScanFilteredIndexColumnCoverage(CatalogTable table, List<Ind
         }
     }
 
-private static List<string>? TryExtractFilterColumnNames(string filterDefinition)
+    private static List<string>? TryExtractFilterColumnNames(string filterDefinition)
     {
         var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
         if (result.HasErrors
@@ -500,7 +508,7 @@ private static List<string>? TryExtractFilterColumnNames(string filterDefinition
         return [.. collector.Names];
     }
 
-public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition)
+    public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEqualityFilter(string filterDefinition)
     {
         var result = SqlScriptParser.ParseText("filter-definition.sql", $"SELECT 1 WHERE {filterDefinition};");
         if (result.HasErrors
@@ -544,7 +552,7 @@ public static (string ColumnName, string LiteralText)? TryExtractSimpleLiteralEq
         }
     }
 
-private static void ScanColumnTypeSignals(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanColumnTypeSignals(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var column in table.Columns)
         {
@@ -574,7 +582,7 @@ private static void ScanColumnTypeSignals(CatalogTable table, List<IndexDesignFi
         }
     }
 
-private static void ScanFloatOrRealIndexKeyColumns(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanFloatOrRealIndexKeyColumns(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -602,7 +610,7 @@ private static void ScanFloatOrRealIndexKeyColumns(CatalogTable table, List<Inde
         }
     }
 
-private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings) =>
+    private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesignFinding> findings) =>
         findings.AddRange(table.EffectiveStatistics.Where(s => s.NoRecompute).Select(stat => new IndexDesignFinding(
             IndexDesignFindingKind.NoRecomputeStatistics,
             table.QualifiedName,
@@ -612,11 +620,11 @@ private static void ScanNoRecomputeStatistics(CatalogTable table, List<IndexDesi
             table.SourceLine,
             Confidence: FindingConfidence.Medium)));
 
-public const int ClusteredKeyLimitBytes = 900;
+    public const int ClusteredKeyLimitBytes = 900;
 
-public const int NonclusteredKeyLimitBytes = 1700;
+    public const int NonclusteredKeyLimitBytes = 1700;
 
-private static void ScanVariableLengthKeyColumnWidth(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanVariableLengthKeyColumnWidth(CatalogTable table, List<IndexDesignFinding> findings)
     {
         foreach (var index in table.Indexes)
         {
@@ -654,7 +662,7 @@ private static void ScanVariableLengthKeyColumnWidth(CatalogTable table, List<In
         }
     }
 
-private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var candidates = table.Indexes
             .Where(i => !i.IsDisabled && !i.IsFiltered && !i.IsColumnstore && i.KeyColumns.Count > 0 && i.KeyColumnIsDescending.Count == i.KeyColumns.Count)
@@ -699,7 +707,7 @@ private static void ScanMergeableIncludeOnlyIndexes(CatalogTable table, List<Ind
             table.SourceLine));
     }
 
-private static void ScanColumnstoreOnDmlTargetTable(CatalogTable table, IReadOnlySet<string>? dmlTargetTables, List<IndexDesignFinding> findings)
+    private static void ScanColumnstoreOnDmlTargetTable(CatalogTable table, IReadOnlySet<string>? dmlTargetTables, List<IndexDesignFinding> findings)
     {
         if (dmlTargetTables is null || !dmlTargetTables.Contains(table.QualifiedName))
         {
@@ -722,7 +730,7 @@ private static void ScanColumnstoreOnDmlTargetTable(CatalogTable table, IReadOnl
             FindingConfidence.Medium));
     }
 
-private static void ScanMonotonicClusteredKeyMissingSequentialOptimization(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanMonotonicClusteredKeyMissingSequentialOptimization(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore && !i.IsDisabled);
         if (clusteredIndex is null || clusteredIndex.KeyColumns.Count == 0 || clusteredIndex.OptimizeForSequentialKey)
@@ -746,11 +754,12 @@ private static void ScanMonotonicClusteredKeyMissingSequentialOptimization(Catal
             FindingConfidence.Medium));
     }
 
-private static void ScanNonAlignedPartitionedIndex(CatalogTable table, List<IndexDesignFinding> findings)
+    private static void ScanNonAlignedPartitionedIndex(CatalogTable table, List<IndexDesignFinding> findings)
     {
         var clusteredIndex = table.Indexes.FirstOrDefault(i => i.IsClustered && !i.IsColumnstore);
         if (clusteredIndex?.PartitionSchemeName is not { } tablePartitionScheme)
         {
+
             return;
         }
 
@@ -781,7 +790,7 @@ private static void ScanNonAlignedPartitionedIndex(CatalogTable table, List<Inde
         }
     }
 
-public static int? EstimateColumnKeyBytes(SqlType type)
+    public static int? EstimateColumnKeyBytes(SqlType type)
     {
         if (type.IsMax)
         {
@@ -797,6 +806,7 @@ public static int? EstimateColumnKeyBytes(SqlType type)
             SqlTypeCategory.SmallMoney => 4,
             SqlTypeCategory.Money => 8,
             SqlTypeCategory.Real => 4,
+
             SqlTypeCategory.Float => type.Precision is { } p && p <= 24 ? 4 : 8,
             SqlTypeCategory.Decimal => EstimateDecimalBytes(type.Precision),
             SqlTypeCategory.Date => 3,
@@ -829,7 +839,7 @@ public static int? EstimateColumnKeyBytes(SqlType type)
         _ => baseBytes + 2,
     };
 
-private static bool IsNewIdDefault(string? definitionText)
+    private static bool IsNewIdDefault(string? definitionText)
     {
         if (definitionText is null)
         {

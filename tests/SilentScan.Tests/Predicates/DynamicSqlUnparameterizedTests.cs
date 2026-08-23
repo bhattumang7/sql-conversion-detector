@@ -49,12 +49,14 @@ public sealed class DynamicSqlUnparameterizedTests
         Assert.All(result.UnparameterizedFindings, f =>
         {
             Assert.Equal("app.sql", f.SourcePath);
-            Assert.Equal(4, f.Line);        });
+            Assert.Equal(4, f.Line);
+        });
     }
 
     [Fact]
     public void SpExecuteSqlConcatenatesLiteralValueIntoTextInsteadOfUsingParams_FiresGeneralKindOnly()
     {
+
         var appSql =
             "CREATE PROCEDURE dbo.usp_Find AS\n" +
             "BEGIN\n" +
@@ -82,6 +84,7 @@ public sealed class DynamicSqlUnparameterizedTests
     [Fact]
     public void ExecStringConcatenatesIdentifierNotValue_NeverFires()
     {
+
         var appSql =
             "CREATE PROCEDURE dbo.usp_Find AS\n" +
             "BEGIN\n" +

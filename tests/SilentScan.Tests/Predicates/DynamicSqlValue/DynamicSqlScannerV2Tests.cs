@@ -43,6 +43,7 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void StubThenAlterProcedurePattern_WalksTheAlteredBody()
     {
+
         var result = DynamicSqlScannerV2.Scan(Parse(
             "CREATE PROCEDURE dbo.usp_Test AS BEGIN RETURN 0; END;\nGO\n" +
             "ALTER PROCEDURE dbo.usp_Test AS BEGIN EXEC('SELECT 1'); END;"));
@@ -68,6 +69,7 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void UnseededFormalParameter_ReportsVariableNotInScope()
     {
+
         var result = DynamicSqlScannerV2.Scan(Parse(
             "CREATE PROCEDURE dbo.usp_Test @Status NVARCHAR(20) AS " +
             "BEGIN " +
@@ -112,6 +114,7 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void NestedProcedureScope_GetsFreshDeclaredTypesNotLeakedFromOuter()
     {
+
         var result = DynamicSqlScannerV2.Scan(Parse(
             "DECLARE @x INT = 1;\nGO\n" +
             "CREATE PROCEDURE dbo.usp_Test AS " +
@@ -124,7 +127,7 @@ public sealed class DynamicSqlScannerV2Tests
         Assert.Equal("SELECT inner", script.InnerText);
     }
 
-[Fact]
+    [Fact]
     public void FormalParameter_SingleKnownCallerWithLiteralArgument_SeedsChoiceOfLiteralAndExternalCallerPlaceholder()
     {
         var callGraph = new ProcCallGraph([
@@ -203,6 +206,7 @@ public sealed class DynamicSqlScannerV2Tests
     [Fact]
     public void OrdinaryCall_OutputArgument_SeededFromKnownCalleeSummary_InsteadOfTainted()
     {
+
         var callSite = new SourceSpan(SourcePath, 2, 1);
         var callGraph = new ProcCallGraph([
             new ProcCallEdge(null, "dbo.usp_Helper", callSite,

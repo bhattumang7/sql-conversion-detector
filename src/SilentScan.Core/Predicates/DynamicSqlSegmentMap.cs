@@ -11,16 +11,16 @@ public sealed class DynamicSqlSegmentMap
 
     public string InnerText => _innerText.ToString();
 
-public IReadOnlyList<int> ConcatenationBoundaryOffsets =>
+    public IReadOnlyList<int> ConcatenationBoundaryOffsets =>
         [.. _segments.Skip(1).Where(s => !s.IsPlaceholder).Select(s => s.InnerStart)];
 
-public void AppendLiteral(string sourcePath, int startLine, int startColumn, int prefixLength, string value)
+    public void AppendLiteral(string sourcePath, int startLine, int startColumn, int prefixLength, string value)
     {
         _segments.Add(new Segment(_innerText.Length, value, sourcePath, startLine, startColumn + prefixLength));
         _innerText.Append(value);
     }
 
-public int AppendPlaceholder(string sourcePath, int startLine, int startColumn, string value)
+    public int AppendPlaceholder(string sourcePath, int startLine, int startColumn, string value)
     {
         var innerStart = _innerText.Length;
         _segments.Add(new Segment(innerStart, value, sourcePath, startLine, startColumn, IsPlaceholder: true));
@@ -28,7 +28,7 @@ public int AppendPlaceholder(string sourcePath, int startLine, int startColumn, 
         return innerStart;
     }
 
-public SourceSpan Map(int innerLine, int innerColumn)
+    public SourceSpan Map(int innerLine, int innerColumn)
     {
         if (_segments.Count == 0)
         {
@@ -41,6 +41,7 @@ public SourceSpan Map(int innerLine, int innerColumn)
 
         if (segment.IsPlaceholder)
         {
+
             return new SourceSpan(segment.SourcePath, segment.StartLine, segment.ContentStartColumn);
         }
 
@@ -67,6 +68,7 @@ public SourceSpan Map(int innerLine, int innerColumn)
             }
             else if (value[i] == '\'')
             {
+
                 quotesSinceNewline++;
                 quotesTotal++;
             }
@@ -79,7 +81,7 @@ public SourceSpan Map(int innerLine, int innerColumn)
         return (lineDelta, column);
     }
 
-private Segment FindSegment(int offset)
+    private Segment FindSegment(int offset)
     {
         var candidate = _segments[0];
         foreach (var segment in _segments)

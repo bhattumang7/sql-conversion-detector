@@ -17,6 +17,7 @@ public static class ConvertImplicitDetector
             .Select(convert => new
             {
                 Convert = convert,
+
                 ColumnRef = convert.Descendants(ShowPlanNs + "ColumnReference")
                     .FirstOrDefault(c => !string.IsNullOrEmpty((string?)c.Attribute(TableAttributeName))),
             })

@@ -31,6 +31,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_LiteralComparison_CarriesLiteralTextForProbeReconstruction()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) NOT NULL);",
             "SELECT DisplayName FROM dbo.Users WHERE DisplayName = N'Alice';");
@@ -44,6 +45,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_VariableDeclaredInAnEarlierAdHocBatch_DoesNotLeakIntoALaterBatchWithNoDeclareOfItsOwn()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.T (Col INT NOT NULL);",
             "DECLARE @x INT = 1; SELECT 1;",
@@ -57,6 +59,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_UnknownVerdict_CarriesAStableReasonCode()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Docs (Payload sql_variant NOT NULL, Other sql_variant NOT NULL);",
             "SELECT 1 FROM dbo.Docs WHERE Payload = Other;");
@@ -140,6 +143,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DirectBaseTablePredicate_LeavesImmediateRelationNull()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);",
             "SELECT OrderCode FROM dbo.Orders WHERE OrderCode = N'x';");
@@ -153,6 +157,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_PredicateThroughViewWithRenamedColumn_ImmediateColumnNameIsTheViewsOwnAlias()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT Code AS OrderCode FROM dbo.Orders;",
@@ -168,6 +173,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ComparisonInSelectListCaseExpression_ProducesNoFinding()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT CASE WHEN Code = N'X' THEN 1 ELSE 0 END AS Flag FROM dbo.Orders;");
@@ -188,6 +194,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ComparisonInSelectListButQueryAlsoHasWhereClause_SelectListStillExcluded()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Status VARCHAR(10) NOT NULL);",
             "SELECT CASE WHEN Code = N'X' THEN 1 ELSE 0 END AS Flag FROM dbo.Orders WHERE Status = 'A';");
@@ -199,6 +206,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_BareIfComparisonOutsideAnyQuery_StillLedgeredAsSkip()
     {
+
         var result = ExtractAll(
             "CREATE PROCEDURE dbo.usp_Test @Id INT AS BEGIN IF @Id = 1 BEGIN RETURN; END END;");
 
@@ -208,6 +216,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_SameColumnContradiction_NoFindingAndLedgeredAsNormalizationEliminated()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Id INT NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE Id = 1 AND Id = 2;");
@@ -219,6 +228,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_SiblingConjunctOfAnUnsatisfiableAnd_AlsoEliminated()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Id INT NOT NULL, Other INT NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE Id = 1 AND Id = 2 AND Other = 5;");
@@ -230,6 +240,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_OrDisjunctOutsideTheContradiction_StillReportsNormally()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Id INT NOT NULL, Other INT NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE (Id = 1 AND Id = 2) OR Other = 5;");
@@ -264,6 +275,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_VariableWithNoDeclaration_ProducesUnknownVerdict()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);",
             "SELECT OrderCode FROM dbo.Orders WHERE OrderCode = @UndeclaredParam;");
@@ -275,6 +287,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_IntRoundTrippedThroughTwoViewsAndAProc_ReportsExpressionDerivedNotTyped()
     {
+
         var findings = ExtractExpressionDerived(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, CustomerId INT NOT NULL);
@@ -327,6 +340,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_PlainPassthroughThroughTwoViews_NoExpressionDerivedFinding()
     {
+
         var findings = ExtractExpressionDerived(
             "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL);",
             "CREATE VIEW dbo.vw_A AS SELECT CustomerId FROM dbo.Orders;",
@@ -339,6 +353,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_CastHiddenInLocalDerivedTable_ReportsExpressionDerived()
     {
+
         var findings = ExtractExpressionDerived(
             "CREATE TABLE dbo.T (Col INT NOT NULL);",
             """
@@ -370,6 +385,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_WildcardCountInViewFeedingAPredicate_DoesNotCrashAndIsNotReported()
     {
+
         var findings = ExtractExpressionDerived(
             "CREATE TABLE dbo.Orders (CustomerId INT NOT NULL);",
             "CREATE VIEW dbo.vw_OrderCounts AS SELECT CustomerId, COUNT(*) AS OrderCount FROM dbo.Orders GROUP BY CustomerId;",
@@ -381,6 +397,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_OpaqueExpressionWithNoTraceableColumn_NotReported()
     {
+
         var findings = ExtractExpressionDerived(
             "CREATE TABLE dbo.T (Id INT NOT NULL);",
             """
@@ -409,6 +426,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_UnionViewWithOneCastBranch_ReportsExpressionDerivedForMixedBranchColumn()
     {
+
         var findings = ExtractExpressionDerived(
             """
             CREATE TABLE dbo.Recent (Id INT NOT NULL);
@@ -426,6 +444,7 @@ public sealed class TypedPredicateExtractorTests
 
         var finding = Assert.Single(findings);
         Assert.Equal("Id", finding.ColumnName);
+
         Assert.Equal(2, finding.UnderlyingBaseColumns.Count);
         Assert.Contains(finding.UnderlyingBaseColumns, c => c.TableQualifiedName == "dbo.Recent" && c.ColumnName == "Id");
         Assert.Contains(finding.UnderlyingBaseColumns, c => c.TableQualifiedName == "dbo.Archive" && c.ColumnName == "IdStr");
@@ -434,6 +453,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_UnionViewWithAllPassthroughBranches_NoExpressionDerivedFinding()
     {
+
         var findings = ExtractExpressionDerived(
             "CREATE TABLE dbo.Recent (Id INT NOT NULL);",
             "CREATE TABLE dbo.Archive (Id INT NOT NULL);",
@@ -446,6 +466,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_UnionViewWithAllPassthroughBranchesAgreeingOnType_ReachesRealVerdict()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Recent (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Recent_Code (Code));",
             "CREATE TABLE dbo.Archive (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Archive_Code (Code));",
@@ -455,12 +476,14 @@ public sealed class TypedPredicateExtractorTests
         var finding = Assert.Single(findings);
         Assert.Equal("Code", finding.Column.ColumnName);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
+
         Assert.False(finding.Column.Indexed);
     }
 
     [Fact]
     public void Extract_QualifierNotInScope_NoFinding_NeverFallsBackToNameOnlyMatch()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
             "CREATE TABLE dbo.Shipments (Id INT NOT NULL, TrackingCode NVARCHAR(20) NOT NULL);",
@@ -481,6 +504,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InnerScopeAliasShadowsOuterOfSameName_ResolvesToInnerFirst()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
             "CREATE TABLE dbo.Archive (Id INT NOT NULL, CustomerId NVARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -501,6 +525,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_SameNamedTempTableInTwoProcedures_EachProcedureResolvesItsOwnShape()
     {
+
         var findings = Extract(
             """
             CREATE PROCEDURE dbo.usp_First
@@ -531,6 +556,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_TempTableCreatedOnlyInsideDynamicSql_LaterStaticPredicateResolvesItsShape()
     {
+
         var sql = """
             CREATE PROCEDURE dbo.usp_BuildRuns
             AS
@@ -580,6 +606,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DeclaredTableVariableInFromClause_Resolves()
     {
+
         var findings = Extract(
             """
             CREATE PROCEDURE dbo.usp_UseTableVar
@@ -598,6 +625,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_IndexedTempTableInsideProcedure_ReportsIndexedTrue()
     {
+
         var findings = Extract(
             """
             CREATE PROCEDURE dbo.usp_UseIndexedTemp
@@ -616,6 +644,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_MultiStatementTvfBody_PredicateAgainstOwnReturnVariable_Resolves()
     {
+
         var findings = Extract(
             """
             CREATE FUNCTION dbo.fn_GetCodes()
@@ -638,6 +667,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_TableValuedParameterInFromClause_Resolves()
     {
+
         var findings = Extract(
             "CREATE TYPE Website.OrderLineList AS TABLE (StockItemID INT NOT NULL, INDEX IX_OrderLineList (StockItemID));",
             """
@@ -658,6 +688,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnWrappedInCoalesceComparedToLiteral_NoTypedFinding_ButLedgered()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE COALESCE(Col, '') = N'x';");
@@ -669,6 +700,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InSubqueryWithMultipleOutputColumns_ResolvesUnknownAndLedgers_NotWrongColumn()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.Other (A INT NOT NULL, B INT NOT NULL);",
@@ -681,6 +713,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_CteThenInsertSelect_PredicateThroughCteClassifiesLikeBareSelect()
     {
+
         var viaInsert = ExtractAll(
             "CREATE TABLE dbo.Source (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.Target (Code VARCHAR(20) NOT NULL);",
@@ -708,6 +741,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_PredicateAgainstUntraceableExpressionDerivedColumn_NoFindingButLedgered()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Id INT NOT NULL);",
             """
@@ -724,6 +758,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InListWithNonLiteralElement_RecordsSkipInsteadOfGuessing()
     {
+
         var findings = ExtractAll(
             "CREATE TABLE dbo.T (Col INT NOT NULL, Other INT NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col IN (1, dbo.fn_NeverDeclared());");
@@ -735,6 +770,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotInList_IsNotAttributedToTypeConversionVerdict()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col NOT IN (N'a', N'b');");
@@ -746,6 +782,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ComparisonBetweenTwoUnresolvedColumnReferences_LedgersDistinctlyFromNoColumnOperand()
     {
+
         var result = ExtractAll(
             "SELECT * FROM OPENQUERY(RemoteServer, 'SELECT A, B FROM Remote') AS r WHERE r.A = r.B;");
 
@@ -757,6 +794,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ComparisonInsideCaseWhenBranchWithinWhere_NotAFinding_ButLedgered()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE CASE WHEN Col = N'X' THEN 1 ELSE 0 END = 1;");
@@ -770,6 +808,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ComparisonInsideIifPredicateWithinWhere_NotAFinding_ButLedgered()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE IIF(Col = N'X', 1, 0) = 1;");
@@ -781,6 +820,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_CaseInSelectList_StillSilentlyExcluded_NotLedgered()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT CASE WHEN Col = N'X' THEN 1 ELSE 0 END FROM dbo.T;");
@@ -792,6 +832,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_MergeUpdateSetClauseWithCase_NoFindingFromSetClause_OnAndActionConditionStillFire()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TargetMergeCase (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, Flag INT NOT NULL);",
             "CREATE TABLE dbo.SourceMergeCase (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);",
@@ -811,6 +852,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotExistsWithInnerComparison_ClassifiesNormally_NotNegated()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Orders (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.Flags (CustomerId NVARCHAR(20) NOT NULL);",
@@ -827,6 +869,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotEqualsOperator_IsNotAttributedToTypeConversionVerdict()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col <> N'a';",
@@ -839,6 +882,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotLikePredicate_IsNotAttributedToTypeConversionVerdict()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col NOT LIKE N'a%';");
@@ -850,6 +894,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotWrappedEqualsComparison_IsTreatedAsNotEqual_NotAsEquals()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE NOT (Col = N'a');");
@@ -861,6 +906,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotWrappedNotEqualsComparison_IsTreatedAsEquals()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE NOT (Col <> N'a');");
@@ -872,6 +918,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DoubleNotWrappedEqualsComparison_ResolvesBackToEquals()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE NOT (NOT (Col = N'a'));");
@@ -905,6 +952,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotBetweenKeyword_IsNotAttributedToTypeConversionVerdict()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col NOT BETWEEN N'a' AND N'z';");
@@ -916,6 +964,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotWrappedBetween_IsTreatedTheSameAsNotBetweenKeyword()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE NOT (Col BETWEEN N'a' AND N'z');");
@@ -927,6 +976,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DoubleNotWrappedBetween_ClassifiesAsOrdinaryBetween()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE NOT (NOT (Col BETWEEN N'a' AND N'z'));");
@@ -938,6 +988,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_IsNullPredicate_ProducesNoFindingAndNoLedgerNoise()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NULL);",
             "SELECT Col FROM dbo.T WHERE Col IS NULL;",
@@ -950,6 +1001,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_EqualsAnySubquery_ClassifiesLikeInSubquery()
     {
+
         var result = ExtractAll(
             """
             CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -965,6 +1017,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_EqualsSomeSubquery_ClassifiesTheSameAsEqualsAny()
     {
+
         var result = ExtractAll(
             """
             CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -979,6 +1032,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NotEqualsAllSubquery_IsNotAttributedToTypeConversionVerdict()
     {
+
         var result = ExtractAll(
             """
             CREATE TABLE dbo.T (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -993,6 +1047,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_GreaterThanAnySubquery_IsLedgeredNotModeled()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Amount INT NOT NULL); CREATE TABLE dbo.U (Amount INT NOT NULL);",
             "SELECT Amount FROM dbo.T WHERE Amount > ANY (SELECT Amount FROM dbo.U);");
@@ -1004,6 +1059,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToScalarSubquery_ResolvesSubqueryOutputColumnType()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Amount INT NOT NULL); CREATE TABLE dbo.Settings (SettingValue INT NOT NULL, SettingId INT NOT NULL);",
             "SELECT Amount FROM dbo.T WHERE Amount = (SELECT SettingValue FROM dbo.Settings WHERE SettingId = 1);");
@@ -1016,6 +1072,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToMultiColumnScalarSubquery_StaysUnknownNotAGuess()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Amount INT NOT NULL); CREATE TABLE dbo.Wide (A INT NOT NULL, B INT NOT NULL);",
             "SELECT Amount FROM dbo.T WHERE Amount = (SELECT A, B FROM dbo.Wide);");
@@ -1027,6 +1084,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_TriggerBody_InsertedPseudoTable_ResolvesToTargetTableColumn()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1047,6 +1105,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_TriggerBody_InsertedPseudoTable_DoesNotInheritTargetTablesRealIndex()
     {
+
         var findings = Extract(
             """
             CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -1116,6 +1175,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_CreateOrAlterTriggerBody_InsertedPseudoTable_Resolves()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1135,6 +1195,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InsteadOfTriggerBody_OnTable_InsertedPseudoTable_Resolves()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1154,6 +1215,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InsteadOfTriggerBody_OnView_InsertedPseudoTable_Resolves()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT Code FROM dbo.Orders;",
@@ -1167,6 +1229,7 @@ public sealed class TypedPredicateExtractorTests
             """);
 
         var finding = Assert.Single(findings);
+
         Assert.Equal("dbo.vw_Orders", finding.Column.TableQualifiedName);
         Assert.Equal(Verdict.ScanForced, finding.Verdict);
     }
@@ -1174,6 +1237,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_InsteadOfTriggerBody_OnView_InsertedPseudoTable_DoesNotClaimTheBaseColumnsIndex()
     {
+
         var findings = Extract(
             """
             CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -1196,6 +1260,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_TriggerBody_InsertedVisibleInsideNestedSubquery()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Orders (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1231,6 +1296,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DdlTrigger_OnDatabase_DoesNotThrowAndLedgersInsteadOfGuessing()
     {
+
         var findings = ExtractAll(
             """
             CREATE TRIGGER trg_DdlAudit
@@ -1267,6 +1333,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DdlTriggerBody_RealPredicateAgainstRealTable_StillAnalyzed()
     {
+
         var findings = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -1284,6 +1351,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToFunctionCall_ResolvesUnknownAndLedgersOperand()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.T WHERE Col = dbo.fn_DisplayName(1);");
@@ -1296,6 +1364,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToUnknownGlobalVariable_ResolvesUnknownAndLedgers()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Total INT NOT NULL);",
             "SELECT 1 FROM dbo.T WHERE Total = @@REMSERVER;");
@@ -1308,6 +1377,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToConvertToNvarcharOfVarcharColumn_PropagatesInputCollation()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.T (Code NVARCHAR(20) COLLATE Latin1_General_CI_AS NOT NULL);",
             "CREATE TABLE dbo.Raw (Value VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -1320,6 +1390,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_PredicateAgainstLegacySysobjectsCompatibilityView_ColumnSideConverts()
     {
+
         var result = ExtractAll(
             "CREATE PROCEDURE dbo.usp_Find @T NVARCHAR(2) AS BEGIN SELECT name FROM sysobjects WHERE xtype = @T; END");
 
@@ -1333,6 +1404,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_PredicateAgainstUnregisteredSystemView_StillRecordsSkip()
     {
+
         var result = ExtractAll(
             "SELECT session_id FROM sys.dm_exec_requests WHERE session_id = 1;");
 
@@ -1357,6 +1429,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ProcedureParameterLongerThanColumn_FiresOversizedParameter()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "CREATE PROCEDURE dbo.usp_FindCustomer @Code VARCHAR(4000) AS BEGIN SELECT 1 FROM dbo.Customers WHERE Code = @Code; END");
@@ -1379,6 +1452,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToLongerLiteral_NeverFires()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(5) NOT NULL);",
             "SELECT 1 FROM dbo.Customers WHERE Code = 'a much longer literal than the column';");
@@ -1389,6 +1463,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToLongerMaxTypedVariable_NeverFires()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @p VARCHAR(MAX) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
@@ -1399,6 +1474,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToLongerVariableOfDifferentCategory_NeverFires()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @p NVARCHAR(200) = N'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
@@ -1438,6 +1514,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToVariableWithNoExplicitLength_FiresImplicitDefault()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @p VARCHAR = 'A'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
@@ -1484,6 +1561,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToShorterLiteral_NeverFiresUnderLength()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "SELECT 1 FROM dbo.Customers WHERE Code = 'x';");
@@ -1494,6 +1572,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToShorterMaxTypedVariable_NeverFiresUnderLength()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @p VARCHAR(MAX) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
@@ -1504,6 +1583,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToShorterVariableOfDifferentCategory_NeverFiresUnderLength()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @p NVARCHAR(5) = N'ABC'; SELECT 1 FROM dbo.Customers WHERE Code = @p;");
@@ -1538,6 +1618,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToUnsizedConvert_ColumnShorterThan30_NeverFiresUnderLength()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CONVERT(VARCHAR, @x);");
@@ -1559,6 +1640,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToUnsizedConvertOfNarrowerColumn_FiresOversizedParameter()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(10) NOT NULL);",
             "DECLARE @x VARCHAR(50) = 'ABCDE'; SELECT 1 FROM dbo.Customers WHERE Code = CONVERT(VARCHAR, @x);");
@@ -1598,6 +1680,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NonPaddedColumnLikePatternEndingInWildcardAfterSpace_NeverFires()
     {
+
         var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code LIKE 'abc %';");
 
         Assert.Empty(findings);
@@ -1622,6 +1705,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NonPaddedColumnEqualityAgainstTrailingWhitespaceLiteral_NeverFires()
     {
+
         var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code = 'abc ';");
 
         Assert.Empty(findings);
@@ -1630,6 +1714,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_NonPaddedColumnLikeAgainstVariable_NeverFires()
     {
+
         var findings = ExtractAnsiPaddingMismatch(
             isAnsiPadded: false, "DECLARE @p VARCHAR(20) = 'abc '; SELECT 1 FROM dbo.Customers WHERE Code LIKE @p;");
 
@@ -1663,6 +1748,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToDeclaredLocalVariable_RangeOperator_StillFires()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);",
             "DECLARE @v VARCHAR(20) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE Code > @v;");
@@ -1710,6 +1796,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_SpExecutesqlSeededParameter_TreatedAsFormalParameter_NeverFiresLocalVariablePredicate()
     {
+
         var ddl = "CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);";
         var sql = "SELECT 1 FROM dbo.Customers WHERE Code = @p;";
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", ddl);
@@ -1765,6 +1852,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToFormalParameter_SameColumnHasLiteralFilteredIndex_AlsoFires()
     {
+
         var result = ExtractWithFilteredIndex(
             "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
             "([Status]='Active')",
@@ -1777,6 +1865,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToLiteral_NeverFiresFilteredIndexParameterMismatch()
     {
+
         var result = ExtractWithFilteredIndex(
             "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
             "([Status]='Active')",
@@ -1788,6 +1877,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_DifferentColumnComparedToVariable_NeverFiresFilteredIndexParameterMismatch()
     {
+
         var result = ExtractWithFilteredIndex(
             "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL, Code VARCHAR(20) NOT NULL);",
             "([Status]='Active')",
@@ -1799,6 +1889,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToVariable_OptionRecompile_StillFires()
     {
+
         var result = ExtractWithFilteredIndex(
             "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL);",
             "([Status]='Active')",
@@ -1810,6 +1901,7 @@ public sealed class TypedPredicateExtractorTests
     [Fact]
     public void Extract_ColumnComparedToVariable_MultiPredicateFilter_NeverGuessesMatch()
     {
+
         var result = ExtractWithFilteredIndex(
             "CREATE TABLE dbo.Customers (Status VARCHAR(20) NOT NULL, Region VARCHAR(20) NOT NULL);",
             "([Status]='Active' AND [Region]='West')",
@@ -1846,8 +1938,10 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         """,
         "CREATE TABLE dbo.OrdersLit (OrderId INT NOT NULL);",
         "CREATE TABLE dbo.TSysname (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
+
         "CREATE TYPE dbo.MyIntAlias FROM INT NOT NULL;",
         "CREATE TABLE dbo.OrdersAlias (OrderId dbo.MyIntAlias NOT NULL);",
+
         "CREATE TABLE dbo.OrdersView (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
         "CREATE VIEW dbo.vw_OrdersView AS SELECT OrderCode FROM dbo.OrdersView;",
         "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -1898,6 +1992,7 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         CREATE TABLE dbo.SourceMerge2 (Id INT NOT NULL);
         """,
         "CREATE TABLE dbo.OrdersCteUpdate (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, IsFlagged BIT NOT NULL);",
+
         "CREATE TABLE dbo.OrdersTvf (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
         "CREATE FUNCTION dbo.fn_GetOrdersTvf(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.OrdersTvf);",
         "CREATE FUNCTION dbo.fn_GetCodesMstvf(@Ignored INT) RETURNS @t TABLE (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL) AS BEGIN RETURN; END",
@@ -1932,7 +2027,7 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         "CREATE TABLE dbo.OrdersMaxSql (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(50) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_OrdersMaxSql_Code (Code));",
         "CREATE TABLE dbo.OrdersMaxWindows (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(50) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_OrdersMaxWindows_Code (Code));");
 
-private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
+    private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     {
         var probe = CorpusFindingProbeBuilder.Build(finding);
         Assert.NotNull(probe);
@@ -2007,6 +2102,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task SysnameVariableVsVarcharColumn_ScanForced_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TSysname (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -2069,6 +2165,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task UnionViewWithAllPassthroughBranchesAgreeingOnType_ColumnConverts_ScanForced_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.RecentUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.ArchiveUnion (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -2089,6 +2186,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task LikeColumnVsNvarcharPattern_ColumnConverts_ScanForced_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Code FROM dbo.OrdersLike WHERE Code LIKE N'ABC%';");
@@ -2117,6 +2215,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task SameComparisonMovedFromSelectListIntoWhere_NowProducesAFinding_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersLike (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Code FROM dbo.OrdersLike WHERE Code = N'X';");
@@ -2177,6 +2276,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
             "SELECT OrderDate FROM dbo.OrdersBetween WHERE OrderDate BETWEEN '20240101' AND '20240201';");
 
         Assert.Equal(2, findings.Count);
+
         Assert.All(findings, f => Assert.Equal(Verdict.SeekPreserved, f.Verdict));
 
         await AssertNoColumnConversionAsync(findings[0]);
@@ -2186,6 +2286,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task BetweenPredicate_UpperBoundAloneForcesConversion_IsReported_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersBetweenCode (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Code FROM dbo.OrdersBetweenCode WHERE Code BETWEEN 'A' AND N'Z';");
@@ -2202,6 +2303,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnVsColumnSameType_NoConversionAnywhere_SeekPreserved_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersColColCompare (OrderId INT NOT NULL, CustomerId INT NOT NULL);",
             "SELECT OrderId FROM dbo.OrdersColColCompare WHERE OrderId = CustomerId;");
@@ -2218,6 +2320,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task CorrectQualifier_SameShapeAsAboveNearMiss_ProducesFinding_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersQualifier (Id INT NOT NULL, CustomerId VARCHAR(20) NOT NULL);",
             "CREATE TABLE dbo.ShipmentsQualifier (Id INT NOT NULL, TrackingCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -2243,6 +2346,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task CorrelatedExistsSubquery_OuterAliasResolvesThroughScopeChain_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersExists (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.OrderDetailsExists (OrderId INT NOT NULL, Sku VARCHAR(20) NOT NULL);",
@@ -2268,6 +2372,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task AlterProcedureAfterCreateStub_UsesAlterProcsOwnParameterType_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.UsersAlterStub (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE PROCEDURE dbo.usp_FindUser AS RETURN 0;",
@@ -2310,6 +2415,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task TwoProceduresInSequence_SecondProcDoesNotInheritFirstProcsVariableTypes_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.IntsSeq (Col INT NOT NULL);",
             "CREATE TABLE dbo.StringsSeq (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
@@ -2342,6 +2448,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task PredicateInsideCte_ResolvesToRealBaseColumn_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.UsersCte (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -2386,6 +2493,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task CteVisibleInsideNestedSubquery_ResolvesCorrelatedReference_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersCteNested (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.FlagsCteNested (OrderId INT NOT NULL);",
@@ -2412,6 +2520,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task UpdateWhereClause_NoFromExtension_ResolvesAgainstTarget_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.UsersUpdate (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -2433,6 +2542,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task UpdateWithFromExtension_ResolvesJoinedTableAliases_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersUpdateFrom (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.FlagsUpdateFrom (OrderId INT NOT NULL, IsStale BIT NOT NULL);",
@@ -2505,6 +2615,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task MergeOnClause_ResolvesTargetAndSourceAliases_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TargetMerge (Id INT NOT NULL, Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.SourceMerge (Id INT NOT NULL, Code NVARCHAR(20) NOT NULL);",
@@ -2529,6 +2640,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task MergeActionClauseAdditionalCondition_Resolves_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TargetMerge2 (Id INT NOT NULL, Status VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.SourceMerge2 (Id INT NOT NULL);",
@@ -2575,6 +2687,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task InlineTvfInFromClause_PredicateResolvesToBaseColumnWithDepth_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersTvf (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE FUNCTION dbo.fn_GetOrdersTvf(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.OrdersTvf);",
@@ -2603,6 +2716,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task InlineTvfViaCrossApply_PredicateResolvesToBaseColumnWithDepth_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersTvf (Id INT NOT NULL, CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE FUNCTION dbo.fn_GetOrdersTvf(@Ignored INT) RETURNS TABLE AS RETURN (SELECT Id, CustomerId FROM dbo.OrdersTvf);",
@@ -2631,6 +2745,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task MultiStatementTvfInFromClause_UsesDeclaredReturnColumnType_OracleConfirmed()
     {
+
         var findings = Extract(
             """
             CREATE FUNCTION dbo.fn_GetCodesMstvf(@Ignored INT)
@@ -2662,6 +2777,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task InListHomogeneousVarchar_SqlCollation_SeekPreserved_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.TInList WHERE Col IN ('a', 'b', 'c');");
@@ -2676,6 +2792,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task InListOneNvarcharLiteralAmongVarchar_SqlCollation_ScanForced_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.TInList WHERE Col IN ('a', N'b', 'c');");
@@ -2690,6 +2807,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task InListHomogeneousNvarchar_AgainstVarcharColumn_ScanForced_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "SELECT Col FROM dbo.TInList WHERE Col IN (N'a', N'b', N'c');");
@@ -2726,6 +2844,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [InlineData("!>")]
     public async Task NotLessThanAndNotGreaterThan_ClassifyNormally_OracleConfirmed(string sqlOperator)
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.TInList (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             $"SELECT Col FROM dbo.TInList WHERE Col {sqlOperator} N'a';");
@@ -2759,6 +2878,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task EqualsAnySubquery_ClassifiesLikeInSubquery_OracleConfirmed()
     {
+
         var findings = Extract(
             """
             CREATE TABLE dbo.OrdersInSub (CustomerId VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
@@ -2777,6 +2897,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToBuiltinFunctionCall_ResolvesFixedReturnType_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.OrdersGetDate (CreatedOn DATETIME NOT NULL);",
             "SELECT 1 FROM dbo.OrdersGetDate WHERE CreatedOn > GETDATE();");
@@ -2791,6 +2912,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToLenOfNvarcharLiteral_MixedCategoryClassifiesNormally_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TLen (NameLength INT NOT NULL);",
             "SELECT 1 FROM dbo.TLen WHERE NameLength = LEN(N'hello');");
@@ -2804,6 +2926,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToObjectId_ResolvesFixedReturnType_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TObjectId (SourceObjectId INT NOT NULL);",
             "SELECT 1 FROM dbo.TObjectId WHERE SourceObjectId = OBJECT_ID(N'dbo.TObjectId');");
@@ -2818,6 +2941,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToObjectPropertyIsMSShipped_ResolvesFixedReturnType_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TObjectProperty (IsShipped INT NOT NULL);",
             "SELECT 1 FROM dbo.TObjectProperty WHERE IsShipped = OBJECTPROPERTY(OBJECT_ID(N'dbo.TObjectProperty'), N'IsMSShipped');");
@@ -2831,6 +2955,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToGlobalVariable_ResolvesFixedType_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
             "SELECT 1 FROM dbo.TRowcount WHERE Total = @@ROWCOUNT;");
@@ -2844,6 +2969,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToCursorRowsGlobalVariable_ResolvesFixedType_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TRowcount (Total INT NOT NULL);",
             "SELECT 1 FROM dbo.TRowcount WHERE Total = @@CURSOR_ROWS;");
@@ -2857,6 +2983,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToIsNullOfHigherPrecedenceLiteral_UsesFirstArgumentType_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TIsNull (Id INT NOT NULL);",
             """
@@ -2890,6 +3017,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task PredicateAgainstSysObjectsIntColumnVsNvarcharValue_ResolvesAndClassifies_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE PROCEDURE dbo.usp_Find @T VARCHAR(20) AS BEGIN SELECT name FROM sys.objects WHERE type_desc = @T; END");
 
@@ -2897,6 +3025,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
         Assert.Equal("sys.objects", finding.Column.TableQualifiedName);
         Assert.Equal("type_desc", finding.Column.ColumnName);
         Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
         Assert.Null(finding.Column.Indexed);
         Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
 
@@ -2906,6 +3035,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task PredicateAgainstInformationSchemaColumnsIntColumn_ResolvesAndClassifies_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE PROCEDURE dbo.usp_FindColumn @Pos INT AS BEGIN SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS WHERE ORDINAL_POSITION = @Pos; END");
 
@@ -2913,6 +3043,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
         Assert.Equal("INFORMATION_SCHEMA.COLUMNS", finding.Column.TableQualifiedName);
         Assert.Equal("ORDINAL_POSITION", finding.Column.ColumnName);
         Assert.Equal(Verdict.SeekPreserved, finding.Verdict);
+
         Assert.Null(finding.Column.Indexed);
         Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "FROM table reference");
 
@@ -2922,6 +3053,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task DoubleNotWrappedComparison_ClassifiesTheSameAsTheBareComparison_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.Users (DisplayName VARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -2943,6 +3075,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToUpperOfNvarcharParam_UsesFirstArgumentType_ScanForced_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TStringFn (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -2963,6 +3096,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToDateAddDayTruncationIdiom_ResolvesDateTimeNotInt_ScanForced_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TDateAddTrunc (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             """
@@ -2983,6 +3117,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task ColumnComparedToScalarSubquery_ResolvesSubqueryOutputColumnType_ScanForced_OracleConfirmed()
     {
+
         var result = ExtractAll(
             "CREATE TABLE dbo.TScalarSubquery (Code VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE TABLE dbo.SettingsScalarSubquery (SettingId INT NOT NULL);",
@@ -2998,6 +3133,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task IntColumnVsSqlVariantValue_HighestPrecedence_ScanForced_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersIntCol (OrderId INT NOT NULL PRIMARY KEY, Quantity INT NOT NULL, INDEX IX_OrdersIntCol_Quantity (Quantity));",
             "SELECT 1 FROM dbo.OrdersIntCol WHERE Quantity = CAST(5 AS SQL_VARIANT);");
@@ -3015,6 +3151,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [Fact]
     public async Task SqlVariantColumnVsIntValue_HighestPrecedence_SeekPreserved_OracleConfirmed()
     {
+
         var findings = Extract(
             "CREATE TABLE dbo.OrdersVariantCol (OrderId INT NOT NULL PRIMARY KEY, Tag SQL_VARIANT NOT NULL, INDEX IX_OrdersVariantCol_Tag (Tag));",
             "SELECT 1 FROM dbo.OrdersVariantCol WHERE Tag = 5;");
@@ -3033,6 +3170,7 @@ private async Task AssertNoColumnConversionAsync(TypedPredicateFinding finding)
     [InlineData("OrdersMaxWindows", "Latin1_General_CI_AS")]
     public async Task BoundedColumnVsMaxTypedParameter_RangeSeek_OracleConfirmed(string table, string collation)
     {
+
         var findings = Extract(
             $"CREATE TABLE dbo.{table} (OrderId INT NOT NULL PRIMARY KEY, Code VARCHAR(50) COLLATE {collation} NOT NULL, INDEX IX_{table}_Code (Code));",
             $"SELECT 1 FROM dbo.{table} WHERE Code = CAST('V1' AS VARCHAR(MAX));");

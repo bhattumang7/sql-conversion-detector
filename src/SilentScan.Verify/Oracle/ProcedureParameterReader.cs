@@ -14,7 +14,7 @@ public sealed class ProcedureParameterReader
         _options = options;
     }
 
-public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
+    public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
         string database, string qualifiedName, CancellationToken cancellationToken = default)
     {
         const string sql = """
@@ -41,6 +41,7 @@ public async Task<IReadOnlyList<SqlType>?> TryGetParameterTypesAsync(
             var isTableValued = reader.GetBoolean(5);
             if (isOutput || isTableValued)
             {
+
                 return null;
             }
 

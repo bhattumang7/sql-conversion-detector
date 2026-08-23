@@ -67,6 +67,7 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_EscapedQuoteInsideString_StaysInsideTheStringState()
     {
+
         var script = "INSERT INTO T (Note) VALUES ('it''s a GO test');\nGO\nSELECT 1;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -115,6 +116,7 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_GoInsideBracketedIdentifier_DoesNotSplit()
     {
+
         var script = "SELECT [Customer's\nGO\nOrder] FROM T;\nGO\nSELECT 2;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -128,6 +130,7 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_DoubledClosingBracketInsideIdentifier_StaysInsideTheBracketState()
     {
+
         var script = "SELECT [a]]b] FROM T;\nGO\nSELECT 1;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -138,6 +141,7 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void Split_NestedBlockComment_DoesNotSplitOnInnerClose()
     {
+
         var script = "/* outer /* inner */ still commented\nGO\nstill commented */\nSELECT 1;\nGO\nSELECT 2;";
 
         var batches = GoBatchSplitter.Split(script);
@@ -186,6 +190,7 @@ public sealed class GoBatchSplitterTests
     [Fact]
     public void SplitWithSpans_GoWithRepeatCount_ReturnsTheSegmentOnce()
     {
+
         var spans = GoBatchSplitter.SplitWithSpans("SELECT 1;\nGO 3");
 
         Assert.Single(spans);

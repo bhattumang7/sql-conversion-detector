@@ -87,11 +87,12 @@ public sealed class DynamicSqlPlaceholderConfidenceInvariantTests
         Assert.All(report.WriteLossFindings, f => Assert.NotEqual(FindingConfidence.High, f.Confidence));
     }
 
-private static readonly string[] AuthorizedConstructionSites = ["DynamicSqlTransfer.cs"];
+    private static readonly string[] AuthorizedConstructionSites = ["DynamicSqlTransfer.cs"];
 
     [Fact]
     public void EveryDynamicSqlScriptConstructor_ComputesConfidenceSolelyFromPlaceholderPresence()
     {
+
         foreach (var fileName in AuthorizedConstructionSites)
         {
             var source = File.ReadAllText(FindSourceFile(fileName));

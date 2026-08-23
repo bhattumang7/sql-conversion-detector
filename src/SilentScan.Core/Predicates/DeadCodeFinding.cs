@@ -4,15 +4,15 @@ namespace SilentScan.Core.Predicates;
 
 public enum DeadCodeFindingKind
 {
-UnreachableCode,
+    UnreachableCode,
 
-UnusedLabel,
+    UnusedLabel,
 
-UnusedLocalVariable,
+    UnusedLocalVariable,
 
-UnusedParameter,
+    UnusedParameter,
 
-RedundantJump,
+    RedundantJump,
 }
 
 public sealed record DeadCodeFinding(

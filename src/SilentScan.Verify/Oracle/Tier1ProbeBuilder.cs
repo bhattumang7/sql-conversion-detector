@@ -5,7 +5,7 @@ namespace SilentScan.Verify.Oracle;
 
 public static class Tier1ProbeBuilder
 {
-public static string? Build(SargabilityFinding finding, DatabaseCatalog catalog)
+    public static string? Build(SargabilityFinding finding, DatabaseCatalog catalog)
     {
         if (finding.PredicateFragmentText is not { } fragmentText || finding.TableQualifiedName is not { } tableQualifiedName)
         {
@@ -16,6 +16,7 @@ public static string? Build(SargabilityFinding finding, DatabaseCatalog catalog)
 
         if (finding.Kind is SargabilityFindingKind.LeadingWildcardLike or SargabilityFindingKind.LikePatternNotLiteral)
         {
+
             return $"SELECT 1 FROM {table} WHERE {fragmentText};";
         }
 

@@ -83,6 +83,7 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void NumericRoundabortOnInCommaSeparatedOptionList_StillFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 
@@ -112,6 +113,7 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void NumericRoundabortOn_TouchesFilteredIndexTableOnlyThroughAReferencedView_StillFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 
@@ -161,6 +163,7 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void QuotedIdentifierFlagUnknown_NeverGuesses()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 
@@ -173,6 +176,7 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void NoSetStatementAndQuotedIdentifierOn_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
 
         var findings = Scan("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END", catalog, usesQuotedIdentifier: true);
@@ -296,6 +300,7 @@ public sealed class SetOptionScannerTests
     [Fact]
     public void SingleStatementSettingMultipleOptionsOfTheSameState_FiresBothKinds()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(FilteredIndexTable("dbo", "Orders"));
 

@@ -6,7 +6,7 @@ namespace SilentScan.Core.Lineage;
 
 public static class CteResolver
 {
-public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
+    public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
         WithCtesAndXmlNamespaces? withClause, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, string sourcePath, SkipLedger? ledger, string? procScope = null)
     {
         var ctes = new Dictionary<string, ResolvedRelation>(StringComparer.OrdinalIgnoreCase);
@@ -30,6 +30,7 @@ public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
                 }
                 else
                 {
+
                     ledger?.Record(
                         AnalysisPass.Lineage, sourcePath, cte.StartLine, cte.StartColumn, "CTE column list",
                         $"'{name}' declares {cte.Columns.Count} column name(s) but its query resolved {columns.Count} - column identity can't be trusted");
@@ -45,7 +46,7 @@ public static IReadOnlyDictionary<string, ResolvedRelation> Resolve(
         return ctes;
     }
 
-private static List<ResolvedColumn> ResolveRecursiveAnchor(
+    private static List<ResolvedColumn> ResolveRecursiveAnchor(
         CommonTableExpression cte, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews,
         IReadOnlyDictionary<string, ResolvedRelation> priorCtes, string sourcePath, SkipLedger? ledger, string? procScope)
     {
@@ -57,12 +58,14 @@ private static List<ResolvedColumn> ResolveRecursiveAnchor(
         var branches = FlattenUnionBranches(cte.QueryExpression);
         if (branches.Count < 2 || ReferencesSelf(branches[0], name))
         {
+
             return [];
         }
 
         var anchorCount = branches.TakeWhile(b => !ReferencesSelf(b, name)).Count();
         if (anchorCount != 1 || !branches.Skip(1).All(b => ReferencesSelf(b, name)))
         {
+
             return [];
         }
 
@@ -73,13 +76,14 @@ private static List<ResolvedColumn> ResolveRecursiveAnchor(
             Provenance = c.Provenance switch
             {
                 ColumnProvenance.BaseColumn { Type: { } type } => new ColumnProvenance.Declared(type, TableQualifiedName: name),
+
                 ColumnProvenance.BaseColumn => new ColumnProvenance.Unknown($"recursive CTE '{name}' anchor column has an unresolved declared type"),
                 _ => c.Provenance,
             },
         })];
     }
 
-private static List<QueryExpression> FlattenUnionBranches(QueryExpression queryExpression)
+    private static List<QueryExpression> FlattenUnionBranches(QueryExpression queryExpression)
     {
         var unwrapped = UnwrapParentheses(queryExpression);
         if (unwrapped is not BinaryQueryExpression binary)
@@ -92,7 +96,7 @@ private static List<QueryExpression> FlattenUnionBranches(QueryExpression queryE
         return branches;
     }
 
-private static QueryExpression UnwrapParentheses(QueryExpression queryExpression) =>
+    private static QueryExpression UnwrapParentheses(QueryExpression queryExpression) =>
         queryExpression is QueryParenthesisExpression parenthesis ? UnwrapParentheses(parenthesis.QueryExpression) : queryExpression;
 
     internal static bool ReferencesSelf(QueryExpression queryExpression, string cteName)

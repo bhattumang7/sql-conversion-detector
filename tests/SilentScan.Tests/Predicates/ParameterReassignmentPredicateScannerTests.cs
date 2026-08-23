@@ -39,6 +39,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void CteSharesNameWithIndexedBaseTable_AttributesThroughToTheRealUnderlyingColumn()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -73,6 +74,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void PredicateUse_BeforeReassignment_NeverFires()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -97,6 +99,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void DeclaredLocalVariable_NotAFormalParameter_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN DECLARE @p VARCHAR(20) = 'A'; SET @p = 'B'; SELECT 1 FROM dbo.Customers WHERE Code = @p; END");
 
@@ -106,6 +109,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void DeclaredLocalVariable_ReassignedThenUsedInPredicate_NeverFires()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -122,6 +126,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void ReassignmentOnlyInOneIfBranch_MergedAfter_NeverFires()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20), @flag INT AS
@@ -174,6 +179,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void ReassignmentInsideWhileLoopBody_NeverPropagatesPastTheLoop()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -190,6 +196,7 @@ public sealed class ParameterReassignmentPredicateScannerTests
     [Fact]
     public void ReassignmentInTryBlock_CatchStartsFromPreTryState_NeverInheritsIt()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS

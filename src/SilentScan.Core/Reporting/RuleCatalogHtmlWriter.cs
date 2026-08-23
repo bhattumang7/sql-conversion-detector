@@ -65,7 +65,7 @@ public static class RuleCatalogHtmlWriter
         return sb.ToString();
     }
 
-private static string Family(RuleDefinition rule)
+    private static string Family(RuleDefinition rule)
     {
         var parts = rule.Id.Split('/');
         return parts.Length >= 2 ? parts[1] : rule.Id;

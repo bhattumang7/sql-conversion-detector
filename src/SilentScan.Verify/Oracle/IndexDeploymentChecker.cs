@@ -11,7 +11,7 @@ public sealed class IndexDeploymentChecker
         _options = options;
     }
 
-public async Task<bool> HasLeadingKeyIndexAsync(
+    public async Task<bool> HasLeadingKeyIndexAsync(
         string database, string schemaQualifiedTable, string columnName, CancellationToken cancellationToken = default)
     {
         const string sql = """
@@ -38,7 +38,7 @@ public async Task<bool> HasLeadingKeyIndexAsync(
         return count > 0;
     }
 
-public async Task<string?> TryGetLeadingKeyIndexNameAsync(
+    public async Task<string?> TryGetLeadingKeyIndexNameAsync(
         string database, string schemaQualifiedTable, string columnName, CancellationToken cancellationToken = default)
     {
         const string sql = """
@@ -64,7 +64,7 @@ public async Task<string?> TryGetLeadingKeyIndexNameAsync(
         return (string?)await command.ExecuteScalarAsync(cancellationToken);
     }
 
-public async Task<string?> TryDeployScratchIndexAsync(
+    public async Task<string?> TryDeployScratchIndexAsync(
         string database, string schemaQualifiedTable, string columnName, CancellationToken cancellationToken = default)
     {
         var indexName = $"IX_SilentScanScratch_{Guid.NewGuid():N}";
@@ -86,7 +86,7 @@ public async Task<string?> TryDeployScratchIndexAsync(
         }
     }
 
-public async Task DropIndexIfExistsAsync(
+    public async Task DropIndexIfExistsAsync(
         string database, string schemaQualifiedTable, string indexName, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqlConnection(_options.BuildConnectionString(database));
@@ -105,6 +105,7 @@ public async Task DropIndexIfExistsAsync(
         }
         catch (SqlException)
         {
+
         }
     }
 

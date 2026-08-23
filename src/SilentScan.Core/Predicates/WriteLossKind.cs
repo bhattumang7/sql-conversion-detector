@@ -2,11 +2,11 @@ namespace SilentScan.Core.Predicates;
 
 public enum WriteLossKind
 {
-UnicodeToNonUnicodeReplacement,
+    UnicodeToNonUnicodeReplacement,
 
-ApproximateToExactTruncation,
+    ApproximateToExactTruncation,
 
-NumericScaleNarrowing,
+    NumericScaleNarrowing,
 
-TemporalPrecisionLoss,
+    TemporalPrecisionLoss,
 }

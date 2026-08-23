@@ -12,39 +12,39 @@ namespace SilentScan.Core.Reporting.Readable;
 
 public static class ReadableScanReportWriter
 {
-private const string WhereHeader = "Where";
+    private const string WhereHeader = "Where";
 
-private const string ColumnHeader = "Column";
+    private const string ColumnHeader = "Column";
 
-private const string ModuleHeader = "Module";
+    private const string ModuleHeader = "Module";
 
-private const string IndexedHeader = "Indexed";
+    private const string IndexedHeader = "Indexed";
 
-private const string DetailHeader = "Detail";
+    private const string DetailHeader = "Detail";
 
-private const string ConstraintHeader = "Constraint";
+    private const string ConstraintHeader = "Constraint";
 
-private const string OperatorHeader = "Operator";
+    private const string OperatorHeader = "Operator";
 
-private const string ParameterHeader = "Parameter";
+    private const string ParameterHeader = "Parameter";
 
-private const string TableHeader = "Table";
+    private const string TableHeader = "Table";
 
-private const string IndexHeader = "Index";
+    private const string IndexHeader = "Index";
 
-private const string UnknownDisplay = "unknown";
+    private const string UnknownDisplay = "unknown";
 
     public static string Write(ScanReport report, string title, ReadableStyle style, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief) =>
         ReadableDocumentRenderer.Render(BuildDocument(report, title, pathBase, verbosity), style);
 
-public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
+    public static ReadableDocument BuildDocument(ScanReport report, string title, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         List<ReadableBlock> blocks = [new ReadableBlock.Heading(1, title)];
         blocks.AddRange(BuildSections(report, 2, pathBase, verbosity));
         return new ReadableDocument(blocks);
     }
 
-public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
+    public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int headingLevel, string? pathBase = null, ReadableVerbosity verbosity = ReadableVerbosity.Brief)
     {
         ArgumentNullException.ThrowIfNull(report);
 
@@ -158,7 +158,7 @@ public static IReadOnlyList<ReadableBlock> BuildSections(ScanReport report, int 
         return blocks;
     }
 
-private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
+    private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
         new($"{Count(count, noun)} - not listed individually here; re-run with --verbosity full to see each one.");
 
     private static IEnumerable<ReadableBlock> Summary(ScanReport report, int level)
@@ -1243,7 +1243,7 @@ private static ReadableBlock.Paragraph BriefPointer(int count, string noun) =>
             })]);
     }
 
-private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
+    private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => kind switch
     {
         IndexDesignFindingKind.UnindexedForeignKey
             or IndexDesignFindingKind.ManyNonclusteredIndexes
@@ -2468,7 +2468,7 @@ private static bool IsTableLevelIndexDesignKind(IndexDesignFindingKind kind) => 
             })]);
     }
 
-private static IEnumerable<ReadableBlock> UnanalyzedObjects(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
+    private static IEnumerable<ReadableBlock> UnanalyzedObjects(ScanReport report, int level, string? pathBase, ReadableVerbosity verbosity)
     {
         var unanalyzed = report.ParseHealth.Files.SelectMany(f => f.UnanalyzedBatches).ToList();
         if (unanalyzed.Count == 0)
@@ -2549,7 +2549,7 @@ private static IEnumerable<ReadableBlock> UnanalyzedObjects(ScanReport report, i
         return confidence == FindingConfidence.High ? withCallSite : $"{withCallSite} [{confidence.ToString().ToUpperInvariant()} CONFIDENCE]";
     }
 
-private static string Relative(string path, string? pathBase)
+    private static string Relative(string path, string? pathBase)
     {
         if (string.IsNullOrEmpty(pathBase))
         {
@@ -2583,7 +2583,7 @@ private static string Relative(string path, string? pathBase)
         _ => UnknownDisplay,
     };
 
-private static string DescribeOrigin(PredicateOperand.Column column, string? pathBase)
+    private static string DescribeOrigin(PredicateOperand.Column column, string? pathBase)
     {
         if (column.Depth == 0)
         {
@@ -2619,7 +2619,7 @@ private static string DescribeOrigin(PredicateOperand.Column column, string? pat
         _ => null,
     };
 
-internal static string Percent(double rate) =>
+    internal static string Percent(double rate) =>
         $"{(rate * 100).ToString("0.0", CultureInfo.InvariantCulture)}%";
 
     private static string Count(int value, string noun) =>

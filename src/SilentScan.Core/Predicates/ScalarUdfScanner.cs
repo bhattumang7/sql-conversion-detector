@@ -19,6 +19,7 @@ public static class ScalarUdfScanner
 
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog, IReadOnlyDictionary<string, ScalarUdfOrigin> scalarUdfMap) : TSqlFragmentVisitor
     {
+
         private readonly List<(int Start, int End, ScalarUdfContext Context)> _regions = [];
 
         private readonly HashSet<FunctionCall> _claimed = [];

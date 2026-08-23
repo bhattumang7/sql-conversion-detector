@@ -72,7 +72,7 @@ public static class ReadableCorpusReportWriter
         ];
     }
 
-private static string Occurrences(int occurrences, int distinct) =>
+    private static string Occurrences(int occurrences, int distinct) =>
         occurrences == distinct
             ? occurrences.ToString(CultureInfo.InvariantCulture)
             : $"{occurrences.ToString(CultureInfo.InvariantCulture)} ({distinct.ToString(CultureInfo.InvariantCulture)} distinct)";

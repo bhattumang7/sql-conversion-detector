@@ -34,6 +34,7 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void NullableColumn_PredicateWithOrBranchNullGuard_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Price", isNullable: true)]));
         catalog.AddCheckConstraint(new CatalogCheckConstraint(
@@ -48,6 +49,7 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void NullableColumn_PredicateWithIsNotNullGuard_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Price", isNullable: true)]));
         catalog.AddCheckConstraint(new CatalogCheckConstraint(
@@ -75,6 +77,7 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void MultiColumnTableLevelConstraint_OnlyUnguardedNullableColumnFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table(
             "dbo", "Orders",
@@ -155,6 +158,7 @@ public sealed class CheckConstraintScannerTests
     [Fact]
     public void UnknownColumnReferencedInDefinition_IsSkippedNotGuessed()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", []));
         catalog.AddCheckConstraint(new CatalogCheckConstraint(
@@ -163,7 +167,7 @@ public sealed class CheckConstraintScannerTests
         Assert.Empty(CheckConstraintScanner.Scan(catalog));
     }
 
-[Fact]
+    [Fact]
     public async Task LiveDeployment_NullableColumnCheckWithNoGuard_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

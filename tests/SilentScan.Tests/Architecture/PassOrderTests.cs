@@ -14,7 +14,7 @@ public sealed partial class PassOrderTests
         ["Reporting"] = 4,
     };
 
-private static readonly (string File, string LaterFolder)[] AllowedForwardReferences =
+    private static readonly (string File, string LaterFolder)[] AllowedForwardReferences =
     [
         (Path.Combine("Catalog", "DynamicSqlTempTableDiscovery.cs"), "Predicates"),
     ];

@@ -53,6 +53,7 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void DropThenAddShiftsIdentity_StillFires()
     {
+
         var view = View("CREATE VIEW dbo.V AS SELECT * FROM dbo.Base;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A", "C"]));
@@ -66,6 +67,7 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void ViewOverJoin_NeverFires()
     {
+
         var view = View("CREATE VIEW dbo.V AS SELECT * FROM dbo.Base b JOIN dbo.Other o ON b.Id = o.Id;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
@@ -77,6 +79,7 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void ViewSelectsFromOwnCteSharingNameWithUnrelatedRealTable_NeverMisattributed()
     {
+
         var view = View("CREATE VIEW dbo.V AS WITH Base AS (SELECT Id, X FROM dbo.Other) SELECT * FROM Base;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
@@ -99,6 +102,7 @@ public sealed class StaleSelectStarViewScannerTests
     [Fact]
     public void ViewCompiledColumnsUnknown_NeverGuesses()
     {
+
         var view = View("CREATE VIEW dbo.V AS SELECT * FROM dbo.Base;");
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Base", ["Id", "A"]));
@@ -106,7 +110,7 @@ public sealed class StaleSelectStarViewScannerTests
         Assert.Empty(StaleSelectStarViewScanner.Scan([view], catalog));
     }
 
-[Fact]
+    [Fact]
     public async Task LiveDeployment_BaseTableGainsColumnAfterViewCreated_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

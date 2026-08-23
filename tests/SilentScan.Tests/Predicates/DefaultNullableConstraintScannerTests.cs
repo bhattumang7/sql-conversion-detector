@@ -73,7 +73,7 @@ public sealed class DefaultNullableConstraintScannerTests
         Assert.Empty(DefaultNullableConstraintScanner.Scan(catalog));
     }
 
-[Fact]
+    [Fact]
     public async Task LiveDeployment_NullableColumnWithDefault_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

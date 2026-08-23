@@ -128,7 +128,7 @@ public static class SarifReportWriter
         return JsonSerializer.Serialize(log, JsonOptions);
     }
 
-private static List<SarifNotification> BuildParseHealthNotifications(ParseHealthReport parseHealth)
+    private static List<SarifNotification> BuildParseHealthNotifications(ParseHealthReport parseHealth)
     {
         var notifications = new List<SarifNotification>();
 
@@ -226,6 +226,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CollationConflictFinding finding)
     {
+
         var message = $"Collation conflict: '{finding.FirstTableQualifiedName}.{finding.FirstColumnName}' (COLLATE {finding.FirstCollationName}) {finding.Operator} '{finding.SecondTableQualifiedName}.{finding.SecondColumnName}' (COLLATE {finding.SecondCollationName}) does not compile.{DynamicSqlOriginNote(finding.DynamicSqlCallSite)}";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CollationConflictRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
@@ -235,6 +236,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ColumnCollationDriftFinding finding)
     {
+
         var kindNote = finding.IsTempObject ? "tempdb's effective" : "the database's default";
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (COLLATE {finding.ColumnCollationName}) differs from {kindNote} collation (COLLATE {finding.BaselineCollationName}) - a conversion seed for any future comparison against a column/literal carrying that collation.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnCollationDriftRuleId, finding.Confidence);
@@ -245,6 +247,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CrossTableTypeDriftFinding finding)
     {
+
         var message = $"FK '{finding.ConstraintName}': '{finding.ParentTableQualifiedName}.{finding.ParentColumnName}' ({finding.ParentTypeDisplay}) references '{finding.ReferencedTableQualifiedName}.{finding.ReferencedColumnName}' ({finding.ReferencedTypeDisplay}) - the types differ{(finding.CollationDiffers ? " (collation differs)" : string.Empty)}.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CrossTableTypeDriftRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
@@ -254,6 +257,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ProcCallArgumentMismatchFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ProcCallArgumentMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var callerLabel = finding.CallerScopeQualifiedName ?? "a top-level batch";
@@ -264,6 +268,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TemporalBoundaryPrecisionFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalBoundaryPrecisionRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (scale {finding.ColumnScale}) is compared with BETWEEN against upper bound '{finding.BoundaryLiteralText}' ({finding.BoundaryLiteralFractionalDigits} fractional digit(s)) - rows in the precision gap are silently excluded. Rewrite as >= start AND < (start of the next period).";
@@ -273,6 +278,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(MaxTypedColumnFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MaxTypedColumnRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = finding.Kind == NonIndexableColumnFindingKind.LegacyLargeObject
@@ -284,6 +290,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ColumnstoreUnsupportedColumnTypeFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnstoreUnsupportedColumnTypeRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} and participates in columnstore index '{finding.IndexName}' - this does not deploy (Msg 35343: a SQL_VARIANT column cannot participate in a columnstore index).";
@@ -331,6 +338,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(OversizedParameterFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OversizedParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' (length {finding.ColumnLength}) is compared against a parameter/variable/expression declared with length {finding.OtherOperandLength} - risks memory-grant inflation if the value feeds a sort/hash operator.";
@@ -340,6 +348,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(PartialCompositeForeignKeyJoinFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.PartialCompositeForeignKeyJoinRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var matched = string.Join(", ", finding.MatchedColumnPairs.Select(p => $"{p.ParentColumnName}={p.ReferencedColumnName}"));
@@ -351,6 +360,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(SetOptionFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SetOptionRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var touchedDisplay = DescribeTouchedObjectForSetOption(finding);
@@ -374,6 +384,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(UnderLengthParameterFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnderLengthParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var otherLengthDisplay = finding.IsImplicitDefault ? "no explicit length (defaults to 1)" : $"length {finding.OtherOperandLength}";
@@ -387,6 +398,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(AnsiPaddingMismatchFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AnsiPaddingMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-ANSI-padded column (trailing blanks stripped at INSERT) compared via LIKE against pattern {finding.PatternLiteralText}, whose trailing whitespace is significant - this predicate can never match any value the column could ever store.";
@@ -396,6 +408,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CatchAllPredicateFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CatchAllPredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(finding.Indexed ? LevelWarning : LevelNote, finding.Confidence);
         var indexedNote = finding.Indexed ? string.Empty : " (would defeat an index if one existed - none is confirmed indexed today)";
@@ -406,6 +419,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(LocalVariablePredicateFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.LocalVariablePredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} {finding.VariableName} - a DECLARE'd local, not a formal parameter, so its value is invisible to the cardinality estimator (falls back to average-density statistics). The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
@@ -415,6 +429,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(FilteredIndexParameterMismatchFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FilteredIndexParameterMismatchRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var operandKind = finding.IsFormalParameter ? "formal parameter" : "local variable";
@@ -425,6 +440,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ParameterReassignmentPredicateFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ParameterReassignmentPredicateRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' {finding.Operator} @{finding.ParameterName} - {finding.ParameterName} is a formal parameter reassigned at line {finding.ReassignmentLine} before this predicate runs, so the optimizer's compile-time sniffed value (the caller's original argument) is stale by the time this comparison executes. The predicate still seeks if the column is indexed; only the row-count estimate is at risk.";
@@ -434,6 +450,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CodeMetricFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CodeMetricRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = finding.Kind switch
@@ -461,6 +478,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(FormattingFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FormattingRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = finding.Kind switch
@@ -490,6 +508,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ForcedParameterizationFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForcedParameterizationRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         return BuildResult(ruleId, level, finding.DetailText, finding.SourcePath, finding.Line, startColumn: finding.Column);
@@ -504,6 +523,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(DeadCodeFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DeadCodeRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -526,6 +546,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(DuplicationFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DuplicationRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -568,6 +589,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(DeprecatedSyntaxFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DeprecatedSyntaxRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is DeprecatedSyntaxFindingKind.TaskCommentTodo or DeprecatedSyntaxFindingKind.TaskCommentFixme
             ? LevelNote
@@ -579,6 +601,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(StatementShapeFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.StatementShapeRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind == StatementShapeFindingKind.BareSelectStar ? LevelNote : LevelWarning;
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
@@ -588,6 +611,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ControlFlowRiskFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ControlFlowRiskRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is ControlFlowRiskFindingKind.CursorFetchColumnCountMismatch
             or ControlFlowRiskFindingKind.EmptyCatchBlock
@@ -602,6 +626,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(SecurityFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SecurityRuleId(finding.Kind), finding.Confidence);
         var baseLevel = finding.Kind is SecurityFindingKind.HardCodedIpAddress or SecurityFindingKind.WeakHashAlgorithm
             ? LevelError
@@ -613,6 +638,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(NotInNullableSubqueryFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NotInNullableSubqueryRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var outerColumnDisplay = finding.OuterColumnName ?? "<expression>";
@@ -623,6 +649,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(NonUniqueUpdateSourceFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NonUniqueUpdateSourceRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var joinColumns = string.Join(", ", finding.JoinColumnNames);
@@ -634,6 +661,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ForcedSerialFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ForcedSerialRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -650,6 +678,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(SelfReferencingDmlFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SelfReferencingDmlRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var viaDisplay = finding.Kind == SelfReferencingDmlFindingKind.ThroughView
@@ -662,6 +691,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(UntrustedConstraintFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UntrustedConstraintRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var kindDisplay = finding.Kind == UntrustedConstraintFindingKind.ForeignKey ? "foreign key" : "CHECK constraint";
@@ -672,6 +702,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CheckConstraintFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CheckConstraintRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = finding.Kind switch
@@ -688,6 +719,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(DefaultNullableConstraintFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DefaultNullableConstraintRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' carries a DEFAULT constraint ({finding.DefaultDefinitionText}) but is still nullable - a caller supplying NULL explicitly for this column bypasses the default entirely, silently, with no error.";
@@ -717,6 +749,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(BareTopNoOrderByFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.BareTopNoOrderByRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = "TOP with no ORDER BY anywhere in this query - SQL Server does not guarantee which rows TOP returns, or their order, without an ORDER BY; the returned row set can change run to run with plan choice, parallelism, or statistics drift.";
@@ -735,6 +768,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(AggregateDivisionColumnstoreFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AggregateDivisionColumnstoreRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"{finding.AggregateFunctionName}(...) on '{finding.TableQualifiedName}' (backed by a columnstore index) contains a CASE-guarded division by a non-constant divisor - historically reported as unreliable under batch-mode/vectorized execution's own CASE-branch evaluation, unlike rowstore scalar evaluation.";
@@ -744,6 +778,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(SecurityPredicateIndexFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.SecurityPredicateIndexRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var columns = string.Join(", ", finding.FilteredColumns);
@@ -754,6 +789,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(DanglingObjectReferenceFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.DanglingObjectReferenceRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var referencedName = finding.ReferencedSchemaName is { } schema ? $"{schema}.{finding.ReferencedEntityName}" : finding.ReferencedEntityName;
@@ -764,6 +800,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CascadingForeignKeyFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CascadingForeignKeyRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var actions = string.Join(", ", new[]
@@ -778,6 +815,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TemporalTableHistoryIndexGapFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TemporalTableHistoryIndexGapRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var indexDisplay = finding.CurrentIndexName is null ? "an unnamed index" : $"'{finding.CurrentIndexName}'";
@@ -789,6 +827,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ModuleCompileFlagFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ModuleCompileFlagRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -805,6 +844,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(WindowFrameFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WindowFrameRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -821,6 +861,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(WaitForFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.WaitForRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.IsInsideTransaction
@@ -832,6 +873,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TransactionHygieneFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TransactionHygieneRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message =
@@ -842,6 +884,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(OutputParameterFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.OutputParameterRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message =
@@ -852,6 +895,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(DatabaseConfigurationFinding finding)
     {
+
         var (ruleId, level, message) = finding.Kind switch
         {
             DatabaseConfigurationFindingKind.PageVerifyNotChecksum => (
@@ -892,6 +936,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CompositeIndexLeadingColumnFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CompositeIndexLeadingColumnRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var indexLabel = finding.IndexName ?? "(unnamed index)";
@@ -978,8 +1023,10 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ViewOrderingRuleId(finding.Kind), finding.Confidence);
         var message = finding.Kind switch
         {
+
             ViewOrderingFindingKind.TopPercentOrderByNeverLimits =>
                 $"'{finding.ObjectQualifiedName}' uses TOP (100) PERCENT ... ORDER BY - 100 PERCENT never excludes a row, so this ORDER BY exists only to satisfy T-SQL's view-ordering grammar rule and is not guaranteed to any consumer that doesn't apply its own ORDER BY.",
+
             ViewOrderingFindingKind.OrderByNotGuaranteedToConsumer =>
                 $"'{finding.ObjectQualifiedName}' uses a row-limiting TOP/OFFSET ... ORDER BY - the ORDER BY does decide which rows survive, but the final output order is not guaranteed to a consumer that doesn't apply its own ORDER BY.",
             _ => throw new ArgumentOutOfRangeException(nameof(finding), finding.Kind, null),
@@ -992,6 +1039,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(MultiReferencedCteFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MultiReferencedCteRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = $"CTE '{finding.CteName}' is referenced {finding.ReferenceCount} times downstream of its own WITH clause - each reference independently re-runs the CTE's own defining query, SQL Server does not materialize it once and reuse it.";
@@ -1030,6 +1078,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(UnparameterizedDynamicSqlFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.UnparameterizedDynamicSqlRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var message = finding.Kind switch
@@ -1044,6 +1093,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(NonPersistedComputedColumnFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.NonPersistedComputedColumnRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelNote, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is a non-persisted computed column ({finding.DefinitionText}) - recomputed from the base row on every read that touches it.";
@@ -1053,10 +1103,13 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(IndexDesignFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexDesignRuleId(finding.Kind), finding.Confidence);
+
         var baseLevel = finding.Kind switch
         {
             IndexDesignFindingKind.WideClusteredKey => LevelWarning,
+
             IndexDesignFindingKind.ColumnstoreIndexOnDmlTargetTable => LevelWarning,
             IndexDesignFindingKind.MonotonicClusteredKeyMissingSequentialOptimization => LevelWarning,
             IndexDesignFindingKind.TimestampColumnNaming => LevelNote,
@@ -1069,6 +1122,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(IdentityRangeFinding finding)
     {
+
         var baseLevel = finding.Kind == IdentityRangeFindingKind.IdentityRangeNearExhaustion ? LevelError : LevelNote;
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IdentityRangeRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(baseLevel, finding.Confidence);
@@ -1078,6 +1132,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(FloatEqualityFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.FloatEqualityRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.TypeDisplay}) is compared with = in this predicate - IEEE-754 floating-point representation error means two values a person would call the same number can compare unequal, silently returning the wrong rows.";
@@ -1087,6 +1142,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(AlwaysEncryptedOrderByFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.AlwaysEncryptedOrderByRuleId, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' ({finding.EncryptionTypeDisplay}) is referenced in this ORDER BY clause - an Always Encrypted column can never be sorted on; the statement does not compile.";
 
@@ -1115,6 +1171,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TriggerOrderFinding finding)
     {
+
         var triggerList = string.Join(", ", finding.UnorderedTriggerNames);
         var message = $"'{finding.TableQualifiedName}' has {finding.UnorderedTriggerNames.Count} AFTER {finding.EventTypeDescription} triggers with no sp_settriggerorder pin between them ({triggerList}) - their relative firing order is undefined by the engine.";
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerOrderRuleId, finding.Confidence);
@@ -1125,11 +1182,13 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(QueryAntiPatternFinding finding)
     {
+
         var baseLevel = finding.Kind switch
         {
             QueryAntiPatternFindingKind.TableVariableLowCompatEstimate => LevelError,
             QueryAntiPatternFindingKind.CountStarVariableExistenceCheck => LevelError,
             QueryAntiPatternFindingKind.NonAggregateHavingPredicate => LevelWarning,
+
             QueryAntiPatternFindingKind.MergeNonUniqueUsingSource => LevelError,
             QueryAntiPatternFindingKind.RecursiveCteMissingMaxRecursion => LevelError,
             _ => LevelWarning,
@@ -1142,6 +1201,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(IndexCoverageFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.IndexCoverageRuleId(finding.Kind), finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}' via index '{finding.IndexName ?? "<unnamed>"}' ({string.Join(", ", finding.IndexKeyColumns)}) does not cover ({string.Join(", ", finding.UncoveredColumns)}) - a matched row needs a Key/RID Lookup back to the base table.";
@@ -1151,6 +1211,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TriggerCorrectnessFinding finding)
     {
+
         var baseLevel = finding.Kind switch
         {
             TriggerCorrectnessFindingKind.MultiRowUnsafeSingleRowAssignment => LevelError,
@@ -1170,6 +1231,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(CrossModuleLockOrderFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.CrossModuleLockOrderRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var first = finding.FirstTableFirstOrdering;
@@ -1183,6 +1245,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TriggerRecursionCycleFinding finding)
     {
+
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.TriggerRecursionCycleRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelWarning, finding.Confidence);
         var firstHop = finding.Hops[0];
@@ -1198,6 +1261,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
         if (finding.Kind == TempTableExecShapeFindingKind.ColumnCountMismatch)
         {
+
             var level = FloorLevelForConfidence(LevelError, finding.Confidence);
             var message = $"INSERT INTO {finding.TempTableQualifiedName} EXEC {finding.ExecutedProcQualifiedName}: the temp table declares {finding.TempTableDeclaredColumnCount} column(s) but the executed proc's real result set describes {finding.DescribedColumnCount} - this raises a hard error (Msg 213/8164) every time it runs.";
             return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: finding.Column);
@@ -1220,6 +1284,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(TvfFenceFinding finding)
     {
+
         var level = finding.Kind switch
         {
             TvfFenceFindingKind.CorrelatedApply or TvfFenceFindingKind.NestedUnderViewOrTvf => LevelError,
@@ -1251,6 +1316,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
 
     private static SarifResult ToResult(ScalarUdfFinding finding)
     {
+
         var level = finding.Kind switch
         {
             ScalarUdfFindingKind.PredicateInvocation or ScalarUdfFindingKind.NestedUnderViewOrTvf => LevelError,
@@ -1326,7 +1392,7 @@ private static List<SarifNotification> BuildParseHealthNotifications(ParseHealth
         return $" - touches {featureKind} '{touched}'{indexSuffix}";
     }
 
-private static string FloorLevelForConfidence(string level, FindingConfidence confidence) =>
+    private static string FloorLevelForConfidence(string level, FindingConfidence confidence) =>
         confidence == FindingConfidence.High ? level : LevelNote;
 
     private static string DowngradeOneLevel(string level) => level switch
@@ -1340,7 +1406,7 @@ private static string FloorLevelForConfidence(string level, FindingConfidence co
     private const string TierContextual = "Contextual";
     private const string TierAdvisory = "Advisory";
 
-private static string DetermineTier(string level) => level switch
+    private static string DetermineTier(string level) => level switch
     {
         LevelError => TierProven,
         LevelWarning => TierContextual,
@@ -1390,7 +1456,7 @@ private static string DetermineTier(string level) => level switch
             [new SarifLocation(new SarifPhysicalLocation(new SarifArtifactLocation(ToUri(sourcePath)), new SarifRegion(line, startColumn)))],
             new SarifResultProperties(DetermineTier(level)));
 
-private static string ToUri(string sourcePath)
+    private static string ToUri(string sourcePath)
     {
         var normalized = sourcePath.Replace('\\', '/');
         if (Path.IsPathRooted(sourcePath))

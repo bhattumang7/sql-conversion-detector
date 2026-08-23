@@ -5,24 +5,25 @@ namespace SilentScan.Core.Lineage;
 
 public static class ColumnProvenanceAnalysis
 {
-public static bool IsExpressionDerived(ColumnProvenance provenance) => provenance switch
+    public static bool IsExpressionDerived(ColumnProvenance provenance) => provenance switch
     {
         ColumnProvenance.Cast or ColumnProvenance.Expression => true,
         ColumnProvenance.Union union => union.Branches.Any(IsExpressionDerived),
         _ => false,
     };
 
-public static SqlType? TryGetScalarType(ColumnProvenance provenance) => provenance switch
+    public static SqlType? TryGetScalarType(ColumnProvenance provenance) => provenance switch
     {
         ColumnProvenance.BaseColumn baseColumn => baseColumn.Type,
         ColumnProvenance.Declared declared => declared.Type,
         ColumnProvenance.Cast cast => cast.ExplicitType,
         ColumnProvenance.Expression expression => expression.InferredType,
         ColumnProvenance.Union union => AllBranchesAgree(union.Branches, out var agreedType) ? agreedType : null,
+
         _ => null,
     };
 
-private const int MaxDecimalPrecision = 38;
+    private const int MaxDecimalPrecision = 38;
 
     private static bool AllBranchesAgree(IReadOnlyList<ColumnProvenance> branches, out SqlType? agreedType)
     {
@@ -46,6 +47,7 @@ private const int MaxDecimalPrecision = 38;
             else if (agreedType.IsStringFamily
                 && !string.Equals(agreedType.Collation?.Name, branchType.Collation?.Name, StringComparison.OrdinalIgnoreCase))
             {
+
                 agreedType = agreedType with { Collation = null, Length = null, LengthKnown = false };
             }
             else if (agreedType.IsStringFamily)
@@ -61,7 +63,7 @@ private const int MaxDecimalPrecision = 38;
         return agreedType is not null;
     }
 
-private static SqlType WidenStringFacets(SqlType agreedType, SqlType branchType)
+    private static SqlType WidenStringFacets(SqlType agreedType, SqlType branchType)
     {
         if (agreedType.IsMax || branchType.IsMax)
         {
@@ -76,7 +78,7 @@ private static SqlType WidenStringFacets(SqlType agreedType, SqlType branchType)
         return agreedType with { Length = Math.Max(l, r) };
     }
 
-private static SqlType WidenDecimalFacets(SqlType agreedType, SqlType branchType)
+    private static SqlType WidenDecimalFacets(SqlType agreedType, SqlType branchType)
     {
         if (agreedType.Precision is not { } p1 || agreedType.Scale is not { } s1
             || branchType.Precision is not { } p2 || branchType.Scale is not { } s2)
@@ -90,7 +92,7 @@ private static SqlType WidenDecimalFacets(SqlType agreedType, SqlType branchType
         return agreedType with { Precision = precision, Scale = scale };
     }
 
-public static IReadOnlyList<ColumnProvenance.BaseColumn> FindUnderlyingBaseColumns(ColumnProvenance provenance) => provenance switch
+    public static IReadOnlyList<ColumnProvenance.BaseColumn> FindUnderlyingBaseColumns(ColumnProvenance provenance) => provenance switch
     {
         ColumnProvenance.BaseColumn baseColumn => [baseColumn],
         ColumnProvenance.Cast cast => FindUnderlyingBaseColumns(cast.Inner),
@@ -99,7 +101,7 @@ public static IReadOnlyList<ColumnProvenance.BaseColumn> FindUnderlyingBaseColum
         _ => [],
     };
 
-public static IReadOnlyList<TransformationSite> DescribeTransformationChain(ColumnProvenance provenance)
+    public static IReadOnlyList<TransformationSite> DescribeTransformationChain(ColumnProvenance provenance)
     {
         var sites = new List<TransformationSite>();
         Walk(provenance, sites);
@@ -125,6 +127,7 @@ public static IReadOnlyList<TransformationSite> DescribeTransformationChain(Colu
                 break;
 
             case ColumnProvenance.Union union:
+
                 foreach (var branch in union.Branches)
                 {
                     Walk(branch, sites);

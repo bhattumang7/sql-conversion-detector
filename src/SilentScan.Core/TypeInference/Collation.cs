@@ -2,20 +2,20 @@ namespace SilentScan.Core.TypeInference;
 
 public enum CollationSource
 {
-ColumnExplicit,
+    ColumnExplicit,
 
-DatabaseDefaultFromDdl,
+    DatabaseDefaultFromDdl,
 
-DatabaseDefaultFromManifest,
+    DatabaseDefaultFromManifest,
 }
 
 public sealed record Collation(string Name, CollationSource Source = CollationSource.ColumnExplicit)
 {
-public bool IsSqlFamily => Name.StartsWith("SQL_", StringComparison.OrdinalIgnoreCase);
+    public bool IsSqlFamily => Name.StartsWith("SQL_", StringComparison.OrdinalIgnoreCase);
 
     public bool IsWindowsFamily => !IsSqlFamily;
 
-public bool IsCaseSensitive =>
+    public bool IsCaseSensitive =>
         Name.Contains("_CS_", StringComparison.OrdinalIgnoreCase)
         || Name.EndsWith("_BIN", StringComparison.OrdinalIgnoreCase)
         || Name.Contains("_BIN_", StringComparison.OrdinalIgnoreCase)

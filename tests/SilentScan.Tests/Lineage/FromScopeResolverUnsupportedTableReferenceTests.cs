@@ -30,6 +30,7 @@ public sealed class FromScopeResolverUnsupportedTableReferenceTests
     [Fact]
     public void Pivot_ResolvesPivotedAndPassthroughColumns()
     {
+
         var lineage = BuildLineage(
             "CREATE TABLE dbo.Sales (OrderId INT NOT NULL, Quarter VARCHAR(2) NOT NULL, Amount TINYINT NOT NULL);",
             """
@@ -86,6 +87,7 @@ public sealed class FromScopeResolverUnsupportedTableReferenceTests
     [Fact]
     public void Pivot_OverAJoinSource_ResolvesPassthroughColumnsFromBothSides()
     {
+
         var lineage = BuildLineage(
             "CREATE TABLE dbo.Sales (OrderId INT NOT NULL, CustomerId INT NOT NULL, Quarter VARCHAR(2) NOT NULL, Amount TINYINT NOT NULL);",
             "CREATE TABLE dbo.Customers (CustomerId INT NOT NULL, CustomerName VARCHAR(50) NOT NULL);",
@@ -104,6 +106,7 @@ public sealed class FromScopeResolverUnsupportedTableReferenceTests
     [Fact]
     public void Unpivot_MismatchedInColumnTypes_DeclinesRatherThanGuesses()
     {
+
         var lineage = BuildLineage(
             "CREATE TABLE dbo.Wide (Id INT NOT NULL, Q1 TINYINT NOT NULL, Q2 INT NOT NULL);",
             """

@@ -4,7 +4,7 @@ namespace SilentScan.Core.Predicates;
 
 internal static class PredicateTreeWalker
 {
-public static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
+    public static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableReference)
     {
         switch (tableReference)
         {
@@ -32,7 +32,7 @@ public static IEnumerable<QualifiedJoin> FlattenJoinNodes(TableReference tableRe
         }
     }
 
-public static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
+    public static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expression)
     {
         switch (expression)
         {
@@ -66,7 +66,7 @@ public static IEnumerable<BooleanExpression> FlattenAnd(BooleanExpression? expre
         }
     }
 
-public static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
+    public static IEnumerable<NamedTableReference> FlattenNamedTables(TableReference tableReference)
     {
         switch (tableReference)
         {

@@ -57,6 +57,7 @@ public sealed class TriggerRecursionCycleScannerTests
     [Fact]
     public void TwoTableCycle_NestedTriggersUnknown_NeverFires()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_TA ON dbo.TA AFTER UPDATE AS "
             + "BEGIN UPDATE dbo.TB SET Id = Id WHERE Id = 1; END;"
@@ -89,6 +90,7 @@ public sealed class TriggerRecursionCycleScannerTests
     [Fact]
     public void OneWayChainNoCycle_NeverFires()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_TA ON dbo.TA AFTER UPDATE AS "
             + "BEGIN UPDATE dbo.TB SET Id = Id WHERE Id = 1; END;"
@@ -103,6 +105,7 @@ public sealed class TriggerRecursionCycleScannerTests
     [Fact]
     public void SelfWritingTriggerAlone_NeverFires_NotThisStream()
     {
+
         var findings = Scan(
             "CREATE TRIGGER dbo.trg_TA ON dbo.TA AFTER UPDATE AS "
             + "BEGIN UPDATE dbo.TA SET Id = Id WHERE Id = 1; END;",

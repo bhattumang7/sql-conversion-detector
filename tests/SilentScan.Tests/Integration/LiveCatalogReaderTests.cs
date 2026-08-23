@@ -102,6 +102,7 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_ComputedColumn_TypeIsEngineResolvedNotReDerived()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var table = Assert.Single(catalog.Tables, t => t.Name == "Customers");
@@ -164,6 +165,7 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
     [Fact]
     public async Task ReadAsync_MatchingForeignKey_CrossTableTypeDriftScannerNeverFires()
     {
+
         var catalog = await new LiveCatalogReader(Options.BuildConnectionString(DatabaseName)).ReadAsync();
 
         var findings = CrossTableTypeDriftScanner.Scan(catalog);
@@ -278,6 +280,7 @@ public sealed class LiveCatalogReaderTests : OracleTestFixture
 
         var history = catalog.Find("dbo.WidgetHistory");
         Assert.NotNull(history);
+
         Assert.DoesNotContain(history!.Indexes, i => i.KeyColumns.Contains("Code", StringComparer.OrdinalIgnoreCase));
     }
 

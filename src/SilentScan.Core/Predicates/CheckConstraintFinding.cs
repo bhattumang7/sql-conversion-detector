@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum CheckConstraintFindingKind
 {
-NullNotHandled,
+    NullNotHandled,
 
-ConstraintOnIdentityColumn,
+    ConstraintOnIdentityColumn,
 }
 
 public sealed record CheckConstraintFinding(

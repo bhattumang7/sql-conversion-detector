@@ -4,11 +4,11 @@ namespace SilentScan.Core.Predicates;
 
 public enum ForcedSerialFindingKind
 {
-TableVariableModification,
+    TableVariableModification,
 
-FastForwardCursor,
+    FastForwardCursor,
 
-NonParallelizableIntrinsic,
+    NonParallelizableIntrinsic,
 }
 
 public sealed record ForcedSerialFinding(

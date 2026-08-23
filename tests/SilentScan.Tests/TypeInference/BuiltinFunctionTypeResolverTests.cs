@@ -24,6 +24,7 @@ public sealed class BuiltinFunctionTypeResolverTests
     [InlineData("REVERSE")]
     public void ResultLengthDiffersFromArgument_FalseForDeclaredLengthPreservingFunctions(string functionName)
     {
+
         Assert.False(BuiltinFunctionTypeResolver.ResultLengthDiffersFromArgument(functionName));
     }
 
@@ -36,6 +37,7 @@ public sealed class BuiltinFunctionTypeResolverTests
 
         Assert.Null(result.Length);
         Assert.False(result.LengthKnown);
+
         Assert.Equal(SqlTypeCategory.VarChar, result.Category);
         Assert.NotNull(result.Collation);
     }
@@ -62,6 +64,7 @@ public sealed class BuiltinFunctionTypeResolverTests
     [InlineData("MAX")]
     public void DemotesFixedWidthArgumentCategory_FalseForNonTransformFunctions(string functionName)
     {
+
         Assert.False(BuiltinFunctionTypeResolver.DemotesFixedWidthArgumentCategory(functionName));
     }
 

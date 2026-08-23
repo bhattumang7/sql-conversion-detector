@@ -5,55 +5,55 @@ namespace SilentScan.Core.Predicates;
 
 public enum IndexDesignFindingKind
 {
-HeapWithNonclusteredIndexes,
+    HeapWithNonclusteredIndexes,
 
-HeapWithNonclusteredPrimaryKey,
+    HeapWithNonclusteredPrimaryKey,
 
-NonUniqueClusteredIndex,
+    NonUniqueClusteredIndex,
 
-WideClusteredKey,
+    WideClusteredKey,
 
-RandomClusteredKeyGuidDefault,
+    RandomClusteredKeyGuidDefault,
 
-DuplicateIndex,
+    DuplicateIndex,
 
-SubsumedIndex,
+    SubsumedIndex,
 
-UnindexedForeignKey,
+    UnindexedForeignKey,
 
-DisabledIndex,
+    DisabledIndex,
 
-HypotheticalIndex,
+    HypotheticalIndex,
 
-ManyNonclusteredIndexes,
+    ManyNonclusteredIndexes,
 
-ManyKeyColumnsIndex,
+    ManyKeyColumnsIndex,
 
-WideTable,
+    WideTable,
 
-HighNullableColumnRatio,
+    HighNullableColumnRatio,
 
-HighStringColumnRatio,
+    HighStringColumnRatio,
 
-FilterColumnNotInIndex,
+    FilterColumnNotInIndex,
 
-DeprecatedLobColumnType,
+    DeprecatedLobColumnType,
 
-TimestampColumnNaming,
+    TimestampColumnNaming,
 
-FloatOrRealIndexKeyColumn,
+    FloatOrRealIndexKeyColumn,
 
-NoRecomputeStatistics,
+    NoRecomputeStatistics,
 
-VariableLengthKeyColumnExceedsKeyLimit,
+    VariableLengthKeyColumnExceedsKeyLimit,
 
-MergeableIndexesDifferingIncludeOnly,
+    MergeableIndexesDifferingIncludeOnly,
 
-ColumnstoreIndexOnDmlTargetTable,
+    ColumnstoreIndexOnDmlTargetTable,
 
-MonotonicClusteredKeyMissingSequentialOptimization,
+    MonotonicClusteredKeyMissingSequentialOptimization,
 
-NonAlignedPartitionedIndex,
+    NonAlignedPartitionedIndex,
 }
 
 public sealed record IndexDesignFinding(

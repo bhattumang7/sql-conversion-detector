@@ -10,7 +10,7 @@ public static class DynamicSqlScannerV2
 {
     private const int Cap = 32;
 
-public static DynamicSqlExtractionResult Scan(
+    public static DynamicSqlExtractionResult Scan(
         SqlParseResult parseResult,
         DynamicSqlScope? enclosingScope = null,
         ProcCallGraph? callGraph = null,
@@ -37,7 +37,7 @@ public static DynamicSqlExtractionResult Scan(
         return new DynamicSqlExtractionResult(findings, scripts, outputSummaries);
     }
 
-private static void SolveBatch(TSqlBatch batch, TransferContext context)
+    private static void SolveBatch(TSqlBatch batch, TransferContext context)
     {
         var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
         DynamicSqlTransfer.SeedBatchDeclaredVariables(batch.Statements, context, seed);

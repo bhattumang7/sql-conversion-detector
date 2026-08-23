@@ -34,7 +34,7 @@ public sealed class BinderParityOracleTests : IAsyncLifetime
         await _provisioner.DropIfExistsAsync(DatabaseName);
     }
 
-private static ColumnProvenance.BaseColumn StaticallyResolvedOrderCodeProvenance()
+    private static ColumnProvenance.BaseColumn StaticallyResolvedOrderCodeProvenance()
     {
         var parseResult = SqlScriptParser.ParseText("lineage_probe_schema.sql", SchemaScript);
         Assert.False(parseResult.HasErrors, string.Join("; ", parseResult.Errors.Select(e => e.Message)));
@@ -52,6 +52,7 @@ private static ColumnProvenance.BaseColumn StaticallyResolvedOrderCodeProvenance
     [Fact]
     public void Static_CteShadowsRealTable_ResolvesToRealUnderlyingColumn_NotTheCte()
     {
+
         var baseColumn = StaticallyResolvedOrderCodeProvenance();
 
         Assert.Equal("dbo.Orders", baseColumn.TableQualifiedName, ignoreCase: true);

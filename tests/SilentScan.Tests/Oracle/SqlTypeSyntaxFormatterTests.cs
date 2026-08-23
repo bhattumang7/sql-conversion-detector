@@ -21,6 +21,7 @@ public sealed class SqlTypeSyntaxFormatterTests
     [Fact]
     public void Format_VarCharWithMissingLength_FallsBackToPermissiveDefault()
     {
+
         Assert.Equal("VARCHAR(4000)", SqlTypeSyntaxFormatter.Format(new SqlType(SqlTypeCategory.VarChar)));
     }
 
@@ -39,6 +40,7 @@ public sealed class SqlTypeSyntaxFormatterTests
     [Fact]
     public void Format_WithCollation_NeverAppendsCollateClause()
     {
+
         var type = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("Latin1_General_CI_AS"));
 
         Assert.Equal("VARCHAR(10)", SqlTypeSyntaxFormatter.Format(type));
@@ -67,6 +69,7 @@ public sealed class SqlTypeSyntaxFormatterTests
     [Fact]
     public void Format_UserDefinedType_ReturnsNull()
     {
+
         Assert.Null(SqlTypeSyntaxFormatter.Format(new SqlType(SqlTypeCategory.UserDefined)));
     }
 }

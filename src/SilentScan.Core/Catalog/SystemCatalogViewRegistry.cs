@@ -193,6 +193,6 @@ public static class SystemCatalogViewRegistry
             ["INFORMATION_SCHEMA.TABLES"] = InformationSchemaTablesColumns,
         };
 
-public static IReadOnlyList<(string Name, SqlType Type)>? TryResolve(string qualifiedName) =>
+    public static IReadOnlyList<(string Name, SqlType Type)>? TryResolve(string qualifiedName) =>
         ByQualifiedName.GetValueOrDefault(qualifiedName);
 }

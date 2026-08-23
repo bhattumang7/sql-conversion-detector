@@ -144,7 +144,7 @@ public static class ScanDbCommand
         return result.LineageParity.Mismatches.Count == 0 ? 0 : 1;
     }
 
-private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)
+    private static async Task WarnOnParseHealthAsync(LiveScanResult result, TextWriter stderr)
     {
         foreach (var file in result.Report.ParseHealth.Files)
         {

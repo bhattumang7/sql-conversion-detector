@@ -4,7 +4,7 @@ public static class SqlFileDiscovery
 {
     private static readonly IReadOnlyList<string> DefaultExtensions = [".sql"];
 
-public static IReadOnlyList<string> EnumerateSqlFiles(string rootPath, IReadOnlyList<string>? extensions = null)
+    public static IReadOnlyList<string> EnumerateSqlFiles(string rootPath, IReadOnlyList<string>? extensions = null)
     {
         if (File.Exists(rootPath))
         {

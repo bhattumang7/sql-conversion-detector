@@ -2,11 +2,11 @@ namespace SilentScan.Bench.Scenarios;
 
 public enum QuerySelectivity
 {
-SingleRow,
+    SingleRow,
 
-OnePercent,
+    OnePercent,
 
-TenPercent,
+    TenPercent,
 }
 
 public static class QuerySelectivityExtensions

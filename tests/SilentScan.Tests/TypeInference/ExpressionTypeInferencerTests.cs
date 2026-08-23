@@ -24,7 +24,7 @@ public sealed class ExpressionTypeInferencerTests
         return ((SelectScalarExpression)spec.SelectElements[0]).Expression;
     }
 
-private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> typesByName) =>
+    private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> typesByName) =>
         expression is ColumnReferenceExpression { MultiPartIdentifier.Identifiers: [.., { } last] }
             ? typesByName.GetValueOrDefault(last.Value)
             : null;
@@ -67,6 +67,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_MergesBranchesByPrecedence()
     {
+
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType, ["DecCol"] = DecimalType };
 
         var result = Resolve("CASE WHEN 1 = 1 THEN IntCol ELSE DecCol END", typesByName);
@@ -97,6 +98,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_Coalesce_OneUnresolvableBranch_NullsWholeResult()
     {
+
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType };
 
         Assert.Null(Resolve("COALESCE(IntCol, UnknownCol)", typesByName));
@@ -115,6 +117,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_NullIf_OracleVerified_AlwaysReturnsFirstExpressionType_NotPrecedenceMerge()
     {
+
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType, ["DecCol"] = DecimalType };
 
         var result = Resolve("NULLIF(IntCol, DecCol)", typesByName);
@@ -135,6 +138,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_BareNullBranchIsIgnoredNotMergeed()
     {
+
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType };
 
         var result = Resolve("CASE WHEN 1 = 1 THEN NULL ELSE IntCol END", typesByName);
@@ -165,6 +169,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_Coalesce_OneUnresolvableNonNullBranch_StillNullsWholeResult()
     {
+
         var typesByName = new Dictionary<string, SqlType?> { ["IntCol"] = IntType };
 
         Assert.Null(Resolve("COALESCE(NULL, IntCol, UnknownCol)", typesByName));
@@ -173,6 +178,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_SameCategoryDifferingLength_WidensToTheLonger()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
@@ -202,6 +208,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_OneBranchIsMax_ResultIsMaxRegardlessOfPosition()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["Nvarchar10Col"] = new SqlType(SqlTypeCategory.NVarChar, Length: 10),
@@ -218,6 +225,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_SearchedCase_OracleVerified_SameCategorySameLength_PreservesTheLength()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 20, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
@@ -232,6 +240,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_StringConcatenation_OracleVerified_SumsLengthsRatherThanMax()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 10, Collation: new Collation("SQL_Latin1_General_CP1_CI_AS")),
@@ -247,6 +256,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_StringConcatenation_OracleVerified_CapsAtHardMaximumRatherThanPromotingToMax()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, Length: 5000),
@@ -277,6 +287,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_StringConcatenation_EitherSideMax_ResultIsMax()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["A"] = new SqlType(SqlTypeCategory.VarChar, IsMax: true),
@@ -289,6 +300,7 @@ private static SqlType? StubLeaf(ScalarExpression expression, IReadOnlyDictionar
     [Fact]
     public void Resolve_CrossCategoryStringMerge_LengthUnknownRatherThanImplicitlyNulled()
     {
+
         var typesByName = new Dictionary<string, SqlType?>
         {
             ["NvarcharCol"] = new SqlType(SqlTypeCategory.NVarChar, Length: 20),

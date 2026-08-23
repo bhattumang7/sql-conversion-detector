@@ -24,6 +24,7 @@ public sealed class LiveLineageParityCheckerBatchingTests
             GO
             CREATE VIEW dbo.vw_Orders AS SELECT OrderId FROM dbo.Orders;
             """,
+
             lineageFor: "dbo.vw_Orders",
             columnName: "OrderId",
             inferredType: new SqlType(SqlTypeCategory.VarChar, Length: 50));
@@ -40,6 +41,7 @@ public sealed class LiveLineageParityCheckerBatchingTests
     [Fact]
     public async Task DeliberatelyWrongInferredType_IsReportedForANonDboSchemaView()
     {
+
         var report = await CheckAsync(
             """
             CREATE SCHEMA sales;
@@ -62,6 +64,7 @@ public sealed class LiveLineageParityCheckerBatchingTests
     [Fact]
     public async Task CorrectInferredType_ReportsNoMismatch()
     {
+
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL);
@@ -79,6 +82,7 @@ public sealed class LiveLineageParityCheckerBatchingTests
     [Fact]
     public async Task RelationThatIsNotARealServerObject_IsSkippedRatherThanReportedAsAMismatch()
     {
+
         var report = await CheckAsync(
             """
             CREATE TABLE dbo.Orders (OrderId INT NOT NULL);
@@ -96,6 +100,7 @@ public sealed class LiveLineageParityCheckerBatchingTests
     [Fact]
     public async Task CyclicView_IsNotFetchedOrCompared()
     {
+
         var lineage = BuildLineage(
             "dbo.vw_Orders", "OrderId", new SqlType(SqlTypeCategory.VarChar, Length: 50),
             cyclic: true);

@@ -4,7 +4,7 @@ namespace SilentScan.Verify.Oracle;
 
 public static class ExpressionDerivedProbeBuilder
 {
-public static string? Build(ExpressionDerivedFinding finding)
+    public static string? Build(ExpressionDerivedFinding finding)
     {
         if (finding.PredicateFragmentText is not { } text || finding.ImmediateRelationQualifiedName is not { } relation)
         {

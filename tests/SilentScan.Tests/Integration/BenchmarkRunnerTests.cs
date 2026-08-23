@@ -46,6 +46,7 @@ public sealed class BenchmarkRunnerTests : IAsyncLifetime
     [Fact]
     public async Task RunAsync_RangeSelectivity_ReadsScaleWithBandSizeNotJustPresenceOfAConversion()
     {
+
         const int largeRowCount = 200_000;
         var scenario = TypePairScenario.VarCharVsNVarChar("Latin1_General_CI_AS");
         var runner = new BenchmarkRunner(_options);
@@ -77,6 +78,7 @@ public sealed class BenchmarkRunnerTests : IAsyncLifetime
     [Fact]
     public async Task RunAsync_StampsTheStaticVerdictVerdictClassifierPredictsForEachCell()
     {
+
         var sqlFamily = TypePairScenario.VarCharVsNVarChar("SQL_Latin1_General_CP1_CI_AS");
         var windowsFamily = TypePairScenario.VarCharVsNVarChar("Latin1_General_CI_AS");
         var runner = new BenchmarkRunner(_options);

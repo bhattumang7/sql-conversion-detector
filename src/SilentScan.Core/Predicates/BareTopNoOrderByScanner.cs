@@ -32,7 +32,7 @@ public static class BareTopNoOrderByScanner
             base.ExplicitVisit(node);
         }
 
-private static bool IsHundredPercent(TopRowFilter top) =>
+        private static bool IsHundredPercent(TopRowFilter top) =>
             top.Percent && Unwrap(top.Expression) is IntegerLiteral { Value: "100" };
 
         private static ScalarExpression Unwrap(ScalarExpression expression) =>

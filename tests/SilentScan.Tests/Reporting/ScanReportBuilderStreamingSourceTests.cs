@@ -38,7 +38,7 @@ public sealed class ScanReportBuilderStreamingSourceTests
         Assert.Equal("dbo.Orders", finding.Column.TableQualifiedName);
     }
 
-private sealed class EnumerationCountingSource(IReadOnlyList<SqlParseResult> items) : IEnumerable<SqlParseResult>
+    private sealed class EnumerationCountingSource(IReadOnlyList<SqlParseResult> items) : IEnumerable<SqlParseResult>
     {
         public int EnumerationCount { get; private set; }
 

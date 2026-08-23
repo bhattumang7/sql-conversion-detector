@@ -65,6 +65,7 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void HintedTableReferencedWithDifferentCasingThanDdl_BoundLeadingColumnStillSuppresses()
     {
+
         var findings = Scan("SELECT 1 FROM DBO.ORDERS WITH (INDEX(IX_Orders_Status)) WHERE Status = 5;", CatalogWithIndex());
 
         Assert.Empty(findings);
@@ -73,6 +74,7 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void CteSharesNameWithHintedRealTable_NeverFires()
     {
+
         var findings = Scan(
             "WITH Orders AS (SELECT OrderId FROM dbo.Orders) " +
             "SELECT 1 FROM Orders WITH (INDEX(IX_Orders_Status));",
@@ -92,6 +94,7 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void OrdinalIndexHint_DeclinedAsOutOfScope()
     {
+
         var findings = Scan("SELECT 1 FROM dbo.Orders WITH (INDEX(0)) WHERE OrderId = 1;", CatalogWithIndex());
 
         Assert.Empty(findings);
@@ -100,6 +103,7 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void UpdateStatementTargetHint_Fires()
     {
+
         var findings = Scan("UPDATE o SET OrderId = OrderId FROM dbo.Orders o WITH (INDEX(IX_Orders_Status)) WHERE OrderId = 1;", CatalogWithIndex());
 
         var finding = Assert.Single(findings);
@@ -121,6 +125,7 @@ public sealed class IndexHintScannerTests
     [Fact]
     public void HintOnTableUnderCrossApply_Fires()
     {
+
         var catalog = CatalogWithIndex();
         catalog.AddOrReplace(Table("dbo", "OrderLines", [Col("OrderId")], []));
 

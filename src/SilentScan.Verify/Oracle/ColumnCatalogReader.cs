@@ -11,7 +11,7 @@ public sealed class ColumnCatalogReader
         _options = options;
     }
 
-public async Task<IReadOnlyList<CatalogColumnInfo>> ReadColumnsAsync(
+    public async Task<IReadOnlyList<CatalogColumnInfo>> ReadColumnsAsync(
         string database, string schemaQualifiedObjectName, CancellationToken cancellationToken = default)
     {
         const string sql = """

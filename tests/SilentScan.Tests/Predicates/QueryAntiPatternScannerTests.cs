@@ -108,6 +108,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void TableVariableReadAndWrittenInSameLoop_BelowCompat150_ReportsOnlyLowCompatKind()
     {
+
         var findings = Scan(
             "DECLARE @t TABLE (Id INT); DECLARE @i INT = 0; DECLARE @c INT; "
             + "WHILE @i < 5 BEGIN "
@@ -217,6 +218,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void InlineCountStarScalarSubquery_NeverFires()
     {
+
         var findings = Scan("IF (SELECT COUNT(*) FROM dbo.Big WHERE Col = 'x') > 0 SELECT 1;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
@@ -260,6 +262,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void HavingConditionMixingKeyAndAggregate_FiresForTheKeyOnlyBranch()
     {
+
         var findings = Scan("SELECT Col, COUNT(*) FROM dbo.Big GROUP BY Col HAVING Col = 'x' AND COUNT(*) > 1;");
 
         var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
@@ -269,6 +272,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void HavingConditionOredWithAggregate_NeverFires()
     {
+
         var findings = Scan("SELECT Col, COUNT(*) FROM dbo.Big GROUP BY Col HAVING Col = 'x' OR COUNT(*) > 1;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
@@ -569,6 +573,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void ThreePartReference_FileMode_NeverFires()
     {
+
         var findings = Scan("SELECT Id FROM OtherDb.dbo.T;");
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.LinkedServerOrCrossDatabaseReference);
@@ -591,6 +596,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void ThreePartReference_LiveMode_SystemDatabase_NeverFires()
     {
+
         var result = SqlScriptParser.ParseText("test.sql", $"{Ddl}\nGO\nSELECT object_id FROM tempdb.sys.objects;");
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         var catalog = CatalogBuilder.Build([result]);
@@ -651,6 +657,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void SingleRowInsert_IntoIgnoreDupKeyUniqueIndex_NeverFires()
     {
+
         var findings = ScanCoupon(
             "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10);",
             ignoreDupKey: true);
@@ -661,6 +668,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void MultiRowInsert_IntoOrdinaryUniqueIndex_NeverFires()
     {
+
         var findings = ScanCoupon(
             "INSERT INTO dbo.Coupon (Code, Pct) VALUES ('SAVE10', 10), ('SAVE20', 20), ('SAVE10', 15);",
             ignoreDupKey: false);
@@ -671,6 +679,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void MultiRowInsertSelect_IntoIgnoreDupKeyUniqueIndex_NeverFires()
     {
+
         var findings = ScanCoupon(
             "CREATE TABLE dbo.CouponSource (Code VARCHAR(20) NOT NULL, Pct INT NOT NULL); "
             + "INSERT INTO dbo.Coupon (Code, Pct) SELECT Code, Pct FROM dbo.CouponSource;",
@@ -830,6 +839,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_SourceHasExtraIndexTargetLacks_NeverFires()
     {
+
         var findings = ScanSwitchIndexes(
             sourceIndexes: [new CatalogIndex("IX_SwSrc_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [])],
             targetIndexes: []);
@@ -908,6 +918,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_SourceHasExtraCheckConstraintTargetLacks_NeverFires()
     {
+
         var findings = ScanSwitchConstraints(
             checkConstraints: [new CatalogCheckConstraint("CK_SwSrc", "dbo.SwSrc", IsNotTrusted: false, IsDisabled: false, DefinitionText: "([RegionId]>(0))")],
             foreignKeys: []);
@@ -997,6 +1008,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_SourceHasXmlIndexTargetDoesNot_NeverFires()
     {
+
         var findings = ScanSwitchTargetOnlyIndexes(
             sourceIndexes: [new CatalogIndex("PXML_SwSrc", CatalogIndexKind.Index, IsUnique: false, KeyColumns: [], IncludedColumns: [], IsXmlIndex: true)],
             targetIndexes: []);
@@ -1114,6 +1126,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_PartitionedTableUnknownFilegroup_NeverFires()
     {
+
         var findings = ScanSwitchFilegroups(null, sourceReadOnly: false, "FG_Orders", targetReadOnly: false);
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
@@ -1272,6 +1285,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_NoPartitionNumber_CdcDisallowedNeverFires()
     {
+
         var findings = ScanSwitchCdc(
             "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;",
             sourceDisallowed: false, targetDisallowed: true);
@@ -1362,6 +1376,7 @@ public sealed class QueryAntiPatternScannerTests
     [Fact]
     public void AlterTableSwitch_BothNonPartitioned_PartitionFilegroupCheckNeverFires()
     {
+
         var findings = ScanSwitchPartitionFilegroups(
             "ALTER TABLE dbo.SwSrc SWITCH TO dbo.SwTgt;",
             sourceScheme: null, targetScheme: null, mappings: []);

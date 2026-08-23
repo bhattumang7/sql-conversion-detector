@@ -7,6 +7,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class NamingScanner
 {
+
     private static readonly HashSet<string> ReservedKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "AUTHORIZATION", "BACKUP", "BEGIN",
@@ -198,6 +199,7 @@ public static class NamingScanner
 
         private void CheckReservedName(Identifier? identifier, string kindLabel)
         {
+
             if (identifier is not { } id || !ReservedKeywords.Contains(id.Value))
             {
                 return;

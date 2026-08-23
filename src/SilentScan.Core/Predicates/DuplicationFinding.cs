@@ -5,35 +5,35 @@ namespace SilentScan.Core.Predicates;
 
 public enum DuplicationFindingKind
 {
-CommentedOutCode,
+    CommentedOutCode,
 
-DuplicatedStringLiteral,
+    DuplicatedStringLiteral,
 
-SingleIterationLoop,
+    SingleIterationLoop,
 
-SelfAssignment,
+    SelfAssignment,
 
-IdenticalBinaryOperands,
+    IdenticalBinaryOperands,
 
-RepeatedUnaryOperator,
+    RepeatedUnaryOperator,
 
-NegatedComparisonAsOpposite,
+    NegatedComparisonAsOpposite,
 
-DuplicateSiblingCondition,
+    DuplicateSiblingCondition,
 
-IdenticalBranchBodies,
+    IdenticalBranchBodies,
 
-AllBranchesIdentical,
+    AllBranchesIdentical,
 
-RedundantAndCondition,
+    RedundantAndCondition,
 
-MutuallyExclusiveAndCondition,
+    MutuallyExclusiveAndCondition,
 
-CollapsibleNestedIf,
+    CollapsibleNestedIf,
 
-NestedConditionalExpression,
+    NestedConditionalExpression,
 
-AlwaysTrueOrFalseLiteralComparison,
+    AlwaysTrueOrFalseLiteralComparison,
 }
 
 public sealed record DuplicationFinding(

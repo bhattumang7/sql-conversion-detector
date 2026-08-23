@@ -48,7 +48,7 @@ public sealed class PredicateSurvivalAnalyzerTests
             : throw new InvalidOperationException("no WHERE clause parsed");
     }
 
-private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Leaves) Analyze(string whereExpr)
+    private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Leaves) Analyze(string whereExpr)
     {
         var condition = ParseCondition(whereExpr);
 
@@ -78,6 +78,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void SameColumnTouchingExclusiveBounds_MarkedDead()
     {
+
         var (dead, leaves) = Analyze("NotNullCol < 5 AND NotNullCol > 5");
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
@@ -85,6 +86,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void SameColumnAdjacentInclusiveBounds_NotDead()
     {
+
         var (dead, _) = Analyze("NotNullCol <= 5 AND NotNullCol >= 5");
         Assert.Empty(dead);
     }
@@ -120,6 +122,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void SelfJoinAliasesSameSchemaColumn_NeverConflated()
     {
+
         var (dead, _) = Analyze("t1.NotNullCol = 1 AND t2.NotNullCol = 2");
         Assert.Empty(dead);
     }
@@ -192,6 +195,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void DifferentLiteralsRequiredEquals_CaseInsensitiveOrUnknownCollation_NeverConcluded()
     {
+
         Assert.Empty(Analyze("CiCol = 'Foo' AND CiCol = 'foo'").Dead);
         Assert.Empty(Analyze("UnknownCollationCol = 'Foo' AND UnknownCollationCol = 'foo'").Dead);
     }
@@ -237,6 +241,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void EqualsOrNotEquals_SameLiteral_NullableColumn_NeverConcluded()
     {
+
         Assert.Empty(Analyze("NullableCol = 1 OR NullableCol <> 1").Dead);
     }
 
@@ -276,6 +281,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void NotOfContradiction_NotNullColumn_MarkedDead()
     {
+
         var (dead, leaves) = Analyze("NOT (NotNullCol = 1 AND NotNullCol = 2)");
         Assert.All(leaves, l => Assert.Contains(l, dead));
     }
@@ -283,6 +289,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void NotOfContradiction_NullableOrUnconfirmedColumn_NeverConcluded()
     {
+
         Assert.Empty(Analyze("NOT (NullableCol = 1 AND NullableCol = 2)").Dead);
         Assert.Empty(Analyze("NOT (UnknownNullCol = 1 AND UnknownNullCol = 2)").Dead);
     }
@@ -297,6 +304,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void NotOfOrContainingContradiction_InnerContradictionNeverConcluded()
     {
+
         Assert.Empty(Analyze("NOT ((NotNullCol = 1 AND NotNullCol = 2) OR NullableCol = 5)").Dead);
     }
 
@@ -335,6 +343,7 @@ private static (IReadOnlySet<TSqlFragment> Dead, IReadOnlyList<TSqlFragment> Lea
     [Fact]
     public void NullLiteralComparison_NeverConcluded()
     {
+
         Assert.Empty(Analyze("NullableCol = NULL AND NullableCol IS NOT NULL").Dead);
     }
 

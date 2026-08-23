@@ -79,7 +79,7 @@ internal static class ReportOutput
     internal static string UnknownVerbosityMessage(string verbosity) =>
         $"error: unknown --verbosity '{verbosity}' (expected 'brief' or 'full')";
 
-internal static bool Emit(string content, string? outputPath, TextWriter stdout, TextWriter stderr)
+    internal static bool Emit(string content, string? outputPath, TextWriter stdout, TextWriter stderr)
     {
         if (outputPath is null)
         {

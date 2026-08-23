@@ -53,6 +53,7 @@ public sealed class ViewOrderingScannerTests
     [Fact]
     public void View_TopNonHundredPercent_FiresAsNotGuaranteedNotNeverLimits()
     {
+
         var findings = Scan("CREATE VIEW dbo.v1 AS SELECT TOP (50) PERCENT Id, Amt FROM dbo.T ORDER BY Amt DESC;");
 
         var finding = Assert.Single(findings);
@@ -87,6 +88,7 @@ public sealed class ViewOrderingScannerTests
     [Fact]
     public void MultiStatementTvf_NeverFires()
     {
+
         var findings = Scan(@"
             CREATE FUNCTION dbo.fn1() RETURNS @t TABLE (Id INT)
             AS
@@ -114,6 +116,7 @@ public sealed class ViewOrderingScannerTests
     [Fact]
     public void PlainSelectNotInViewOrFunction_NeverFires()
     {
+
         var findings = Scan("SELECT TOP (100) PERCENT Id FROM dbo.T ORDER BY Id DESC;");
 
         Assert.Empty(findings);

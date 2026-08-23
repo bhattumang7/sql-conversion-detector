@@ -8,6 +8,7 @@ namespace SilentScan.Live.Catalog;
 
 public sealed class LivePlanCacheReader
 {
+
     private const string Sql = """
         WITH FilteredPlans AS (
             SELECT DISTINCT qs.plan_handle, qs.execution_count
@@ -31,7 +32,7 @@ public sealed class LivePlanCacheReader
         _connectionString = connectionString;
     }
 
-public async Task<PlanCacheEvidenceResult> ReadObservedConversionsAsync(
+    public async Task<PlanCacheEvidenceResult> ReadObservedConversionsAsync(
         int maxPlansToInspect = 1000, CancellationToken cancellationToken = default)
     {
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
@@ -44,6 +45,7 @@ public async Task<PlanCacheEvidenceResult> ReadObservedConversionsAsync(
             {
                 if (attempt == MaxAttempts)
                 {
+
                     return new PlanCacheEvidenceResult([], 0, ex.Message);
                 }
 
@@ -68,7 +70,7 @@ public async Task<PlanCacheEvidenceResult> ReadObservedConversionsAsync(
         return new PlanCacheEvidenceResult(evidence, accumulated.PlansInspected, UnavailableReason: null);
     }
 
-public async Task<IReadOnlyList<WorkloadFinding>> ReadWorkloadFindingsAsync(
+    public async Task<IReadOnlyList<WorkloadFinding>> ReadWorkloadFindingsAsync(
         DatabaseCatalog catalog, IReadOnlySet<(string TableQualifiedName, string ColumnName)> alreadyCoveredColumns,
         int maxPlansToInspect = 1000, CancellationToken cancellationToken = default)
     {
@@ -87,6 +89,7 @@ public async Task<IReadOnlyList<WorkloadFinding>> ReadWorkloadFindingsAsync(
             }
             catch (SqlException)
             {
+
                 if (attempt == MaxAttempts)
                 {
                     return [];
@@ -109,6 +112,7 @@ public async Task<IReadOnlyList<WorkloadFinding>> ReadWorkloadFindingsAsync(
     private async Task<(Dictionary<(string Table, string Column), ColumnAccumulation> ByColumn, int PlansInspected)> AccumulateAsync(
         int maxPlansToInspect, CancellationToken cancellationToken)
     {
+
         var byColumn = new Dictionary<(string Table, string Column), ColumnAccumulation>();
 
         await using var connection = new SqlConnection(_connectionString);

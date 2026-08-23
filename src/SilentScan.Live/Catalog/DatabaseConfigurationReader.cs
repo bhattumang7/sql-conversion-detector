@@ -41,6 +41,7 @@ public sealed class DatabaseConfigurationReader
         {
             if (!await reader.ReadAsync(cancellationToken))
             {
+
                 return [];
             }
 
@@ -150,6 +151,7 @@ public sealed class DatabaseConfigurationReader
                 }
                 else if (!string.Equals(captureModeDesc, "AUTO", StringComparison.OrdinalIgnoreCase))
                 {
+
                     findings.Add(new DatabaseConfigurationFinding(DatabaseConfigurationFindingKind.QueryStoreCaptureModeNotAuto, databaseName));
                 }
             }
@@ -162,7 +164,7 @@ public sealed class DatabaseConfigurationReader
         return findings;
     }
 
-public async Task<bool> ReadIsParameterizationForcedAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> ReadIsParameterizationForcedAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);

@@ -27,13 +27,13 @@ public static class StringConcatNullScanner
         ];
     }
 
-private enum LeafKind
+    private enum LeafKind
     {
-Unknown,
+        Unknown,
 
-String,
+        String,
 
-Guarded,
+        Guarded,
     }
 
     private readonly record struct Leaf(LeafKind Kind, bool IsNullableColumn, string? TableQualifiedName, string? ColumnName);
@@ -87,7 +87,7 @@ Guarded,
         private static List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChainOf(
             (IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered) resolved) => [resolved];
 
-private void InspectTopLevel(
+        private void InspectTopLevel(
             ScalarExpression root,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
@@ -108,11 +108,13 @@ private void InspectTopLevel(
 
             if (leaves.Any(l => l.Kind == LeafKind.Unknown))
             {
+
                 return;
             }
 
             if (!leaves.Any(l => l.Kind == LeafKind.String))
             {
+
                 return;
             }
 
@@ -126,7 +128,7 @@ private void InspectTopLevel(
                 nullableLeaf.TableQualifiedName, nullableLeaf.ColumnName!, sourcePath, chainRoot.StartLine, chainRoot.StartColumn));
         }
 
-private void FlattenAddChain(
+        private void FlattenAddChain(
             ScalarExpression expression,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             List<Leaf> sink)
@@ -155,6 +157,7 @@ private void FlattenAddChain(
                     var resolved = BaseColumnResolver.ResolveBaseColumn(columnRef, sourcePath, scopeChain);
                     if (resolved is not { } r || r.Type is not { } columnType || !StringCategories.Contains(columnType.Category))
                     {
+
                         return new Leaf(LeafKind.Unknown, false, null, null);
                     }
 
@@ -194,7 +197,7 @@ private void FlattenAddChain(
         private static ScalarExpression Unwrap(ScalarExpression expression) =>
             expression is ParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
 
-private sealed class ConcatChainRootCollector : TSqlFragmentVisitor
+        private sealed class ConcatChainRootCollector : TSqlFragmentVisitor
         {
             public List<BinaryExpression> Roots { get; } = [];
 
@@ -203,13 +206,14 @@ private sealed class ConcatChainRootCollector : TSqlFragmentVisitor
                 if (node.BinaryExpressionType == BinaryExpressionType.Add)
                 {
                     Roots.Add(node);
+
                     return;
                 }
 
                 base.ExplicitVisit(node);
             }
 
-public override void ExplicitVisit(FunctionCall node)
+            public override void ExplicitVisit(FunctionCall node)
             {
                 var name = node.FunctionName.Value;
                 if (string.Equals(name, "ISNULL", StringComparison.OrdinalIgnoreCase))
@@ -225,12 +229,14 @@ public override void ExplicitVisit(FunctionCall node)
                 base.ExplicitVisit(node);
             }
 
-public override void ExplicitVisit(CoalesceExpression node)
+            public override void ExplicitVisit(CoalesceExpression node)
             {
+
             }
 
             public override void ExplicitVisit(QuerySpecification node)
             {
+
             }
         }
     }

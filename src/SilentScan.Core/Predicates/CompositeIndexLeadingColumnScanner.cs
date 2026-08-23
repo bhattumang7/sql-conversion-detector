@@ -28,6 +28,7 @@ public static class CompositeIndexLeadingColumnScanner
 
         protected override void InspectStatement(ConstrainedStatement statement)
         {
+
             var anyReferencedColumns = new HashSet<(string Table, string Column)>(TableColumnKeyComparer.Instance);
             var referenceVisitor = new BaseColumnResolver.ColumnReferenceCollector(SourcePath, statement.ScopeChain, anyReferencedColumns);
             statement.WhereCondition?.Accept(referenceVisitor);
@@ -55,6 +56,7 @@ public static class CompositeIndexLeadingColumnScanner
                 var leadingColumn = index.KeyColumns[0];
                 if (anyReferencedColumns.Contains((table.QualifiedName, leadingColumn)))
                 {
+
                     continue;
                 }
 
@@ -77,7 +79,8 @@ public static class CompositeIndexLeadingColumnScanner
                     Findings.Add(new CompositeIndexLeadingColumnFinding(
                         table.QualifiedName, index.Name, index.KeyColumns, violatingColumn, position,
                         SourcePath, node.StartLine, node.StartColumn));
-                    break;                }
+                    break;
+                }
             }
         }
     }

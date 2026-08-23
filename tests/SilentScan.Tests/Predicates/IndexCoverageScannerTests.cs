@@ -48,6 +48,7 @@ public sealed class IndexCoverageScannerTests
     [Fact]
     public void QueryOnlyReferencingIndexedColumn_NeverFires()
     {
+
         var findings = Scan("SELECT A FROM dbo.T WHERE A = 5;");
 
         Assert.Empty(findings);
@@ -56,6 +57,7 @@ public sealed class IndexCoverageScannerTests
     [Fact]
     public void TwoCandidateIndexesForSameLeadingColumn_NeverFires()
     {
+
         var findings = Scan("SELECT Id, A, B FROM dbo.T3 WHERE A = 5;");
 
         Assert.Empty(findings);

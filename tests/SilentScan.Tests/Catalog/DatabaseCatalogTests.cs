@@ -8,6 +8,7 @@ public sealed class DatabaseCatalogTests
     [Fact]
     public void Find_ThreePartNameSelfReferencingTheScannedDatabase_ResolvesTheSameTableAsTheBareName()
     {
+
         var catalog = new DatabaseCatalog { CurrentDatabaseName = "RM_AZ_Sample" };
         catalog.AddOrReplace(new CatalogTable("dbo", "tblCoordinatingAgencies", CatalogTableKind.Table, [], [], "test.sql", 1));
 
@@ -30,6 +31,7 @@ public sealed class DatabaseCatalogTests
     [Fact]
     public void Find_ThreePartNameReferencingAGenuinelyDifferentDatabase_StaysUnresolved()
     {
+
         var catalog = new DatabaseCatalog { CurrentDatabaseName = "RM_AZ_Sample" };
         catalog.AddOrReplace(new CatalogTable("dbo", "tblCoordinatingAgencies", CatalogTableKind.Table, [], [], "test.sql", 1));
 
@@ -39,6 +41,7 @@ public sealed class DatabaseCatalogTests
     [Fact]
     public void Find_ThreePartNameWithNoCurrentDatabaseNameKnown_StaysUnresolved()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(new CatalogTable("dbo", "tblCoordinatingAgencies", CatalogTableKind.Table, [], [], "test.sql", 1));
 

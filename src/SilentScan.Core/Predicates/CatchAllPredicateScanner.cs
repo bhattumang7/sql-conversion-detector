@@ -181,7 +181,7 @@ public static class CatchAllPredicateScanner
                 baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
-private static IEnumerable<IReadOnlyList<BooleanExpression>> FlattenOr(BooleanExpression expression)
+        private static IEnumerable<IReadOnlyList<BooleanExpression>> FlattenOr(BooleanExpression expression)
         {
             switch (expression)
             {
@@ -251,6 +251,7 @@ private static IEnumerable<IReadOnlyList<BooleanExpression>> FlattenOr(BooleanEx
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain,
             IReadOnlySet<TSqlFragment> dead)
         {
+
             var isNullVariables = orLeaves
                 .OfType<BooleanIsNullExpression>()
                 .Where(n => !n.IsNot)

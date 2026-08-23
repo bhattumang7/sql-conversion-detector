@@ -10,7 +10,7 @@ namespace SilentScan.Core.Reporting;
 
 public static class ScanReportBuilder
 {
-public static ScanReport BuildFromParseResults(
+    public static ScanReport BuildFromParseResults(
         IEnumerable<SqlParseResult> allParseResults,
         DatabaseCatalog catalog,
         FindingConfidence minimumConfidence = FindingConfidence.High,
@@ -972,6 +972,7 @@ public static ScanReport BuildFromParseResults(
         IReadOnlyList<CrossModuleLockOrderFinding> crossModuleLockOrderFindings;
         using (var lockOrderStage = progress.Begin("scanning cross-module lock ordering"))
         {
+
             crossModuleLockOrderFindings = CrossModuleLockOrderScanner.Scan(usableParseResults, catalog);
             lockOrderStage.Complete($"{crossModuleLockOrderFindings.Count:N0} findings");
         }
@@ -980,6 +981,7 @@ public static ScanReport BuildFromParseResults(
         IReadOnlyList<TriggerRecursionCycleFinding> triggerRecursionCycleFindings;
         using (var triggerRecursionStage = progress.Begin("scanning multi-hop trigger recursion cycles"))
         {
+
             triggerRecursionCycleFindings = TriggerRecursionCycleScanner.Scan(usableParseResults, catalog);
             triggerRecursionStage.Complete($"{triggerRecursionCycleFindings.Count:N0} findings");
         }
@@ -1279,6 +1281,7 @@ public static ScanReport BuildFromParseResults(
             untrustedConstraintFindings, cascadingForeignKeyFindings, multiReferencedCteFindings,
             nestedViewDepthFindings, postExpansionJoinWidthFindings, selectStarViewFindings, unparameterizedDynamicSqlFindings,
             nonPersistedComputedColumnFindings,
+
             [],
             selfReferencingDmlFindings,
             temporalTableHistoryIndexGapFindings,
@@ -1287,6 +1290,7 @@ public static ScanReport BuildFromParseResults(
             compositeIndexLeadingColumnFindings, indexHintFindings,
             sessionDateSettingFindings, cartesianJoinFindings, undersizedDeclarationFindings, truncateSwallowedFindings, unindexedTempTableUsageFindings,
             outputParameterFindings,
+
             [],
             parameterReassignmentPredicateFindings,
             codeMetricFindings,
@@ -1298,7 +1302,9 @@ public static ScanReport BuildFromParseResults(
             statementShapeFindings,
             controlFlowRiskFindings,
             securityFindings,
+
             [],
+
             [],
             floatEqualityFindings,
             queryAntiPatternFindings,
@@ -1309,12 +1315,15 @@ public static ScanReport BuildFromParseResults(
             checkConstraintFindings,
             defaultNullableConstraintFindings,
             tryCastComputedColumnPredicateFindings,
+
             [],
             bareTopNoOrderByFindings,
             stringConcatNullFindings,
             aggregateDivisionColumnstoreFindings,
             securityPredicateIndexFindings,
+
             [],
+
             [],
             columnstoreBatchModeDisqualifyingTypeFindings,
             alwaysEncryptedOrderByFindings,
@@ -1356,10 +1365,12 @@ public static ScanReport BuildFromParseResults(
         IScanProgress progress)
     {
         const int maxOutputSummaryRounds = 5;
+
         var outputSummaryIndex = new Dictionary<(string, string), IReadOnlyList<string>>(TableColumnKeyComparer.Instance);
         List<DynamicSqlExtractionResult> dynamicSqlExtractions = [];
         using (var dynamicStage = progress.Begin("scanning dynamic SQL", usableCount * maxOutputSummaryRounds))
         {
+
             var forThisPhase = usableParseResults.ToList();
 
             var rounds = 0;

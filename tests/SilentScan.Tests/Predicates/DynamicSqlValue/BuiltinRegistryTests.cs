@@ -161,6 +161,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replace_CollationSensitiveMatch_Declines()
     {
+
         var result = BuiltinRegistry.Fold(Call(
             "REPLACE", new BuiltinArgument.Text("AbcABC"), new BuiltinArgument.Text("abc"), new BuiltinArgument.Text("X")));
 
@@ -192,6 +193,7 @@ public sealed class BuiltinRegistryTests
             "REPLACE", new BuiltinArgument.Text("a-b-c"), new BuiltinArgument.Text("-"), new BuiltinArgument.Hole(NVarChar50, HoleKind.UntypedParameter)));
 
         var ok = Assert.IsType<BuiltinFoldResult.Ok>(result);
+
         Assert.Equal(5, ok.Pieces.Count);
         Assert.Equal("a", ((TemplatePiece.Lit)ok.Pieces[0]).Text);
         Assert.IsType<TemplatePiece.Hole>(ok.Pieces[1]);
@@ -212,6 +214,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replicate_AllLiteral_RepeatsInputCountTimes()
     {
+
         var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(3)));
 
         Assert.Equal("ababab", OkText(result));
@@ -220,6 +223,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replicate_ZeroCount_ProducesEmptyString()
     {
+
         var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(0)));
 
         Assert.Equal(string.Empty, OkText(result));
@@ -228,6 +232,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Replicate_NegativeCount_Declines()
     {
+
         var result = BuiltinRegistry.Fold(Call("REPLICATE", new BuiltinArgument.Text("ab"), new BuiltinArgument.Number(-1)));
 
         Assert.Equal("non-literal-expression:replicate-negative-count", FailReason(result));
@@ -253,6 +258,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Reverse_AllLiteral_ReversesCharacterOrder()
     {
+
         var result = BuiltinRegistry.Fold(Call("REVERSE", new BuiltinArgument.Text("abc")));
 
         Assert.Equal("cba", OkText(result));
@@ -300,7 +306,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(258, hole.Type.Length);
     }
 
-[Theory]
+    [Theory]
     [InlineData("(", "(abc)")]
     [InlineData("<", "<abc>")]
     [InlineData("{", "{abc}")]
@@ -312,7 +318,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(expected, OkText(result));
     }
 
-[Theory]
+    [Theory]
     [InlineData("(", "a)b", "(a))b)")]
     [InlineData("<", "a>b", "<a>>b>")]
     [InlineData("{", "a}b", "{a}}b}")]
@@ -367,6 +373,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void Str_ConcreteFloatExpr_StillDeclines()
     {
+
         var result = BuiltinRegistry.Fold(Call("STR", new BuiltinArgument.Text("3.14")));
 
         Assert.Equal("non-literal-expression:function-call", FailReason(result));
@@ -392,7 +399,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(HoleKind.NonDeterministicTyped, hole.Kind);
     }
 
-[Fact]
+    [Fact]
     public void ServerProperty_ProducesEnvironmentDependentTypedHole()
     {
         var withArg = OkHole(BuiltinRegistry.Fold(Call("SERVERPROPERTY", new BuiltinArgument.Text("ServerName"))));
@@ -404,7 +411,7 @@ public sealed class BuiltinRegistryTests
         Assert.Equal(HoleKind.EnvironmentDependent, withoutArg.Kind);
     }
 
-[Theory]
+    [Theory]
     [InlineData("DB_NAME", 128)]
     [InlineData("USER_NAME", 128)]
     [InlineData("SUSER_SNAME", 128)]
@@ -453,6 +460,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_CharTarget_ConcreteSource_ShorterThanLength_BlankPadsToTarget()
     {
+
         var target = new SqlType(SqlTypeCategory.Char, Length: 5);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("ab"), Site);
@@ -463,6 +471,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_CharTarget_ConcreteSource_LongerThanLength_Truncates()
     {
+
         var target = new SqlType(SqlTypeCategory.Char, Length: 5);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("abcdef"), Site);
@@ -483,6 +492,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_CharTarget_ConcreteSource_NoExplicitLength_DeclinesRatherThanGuessingDefault()
     {
+
         var target = new SqlType(SqlTypeCategory.Char);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Text("ab"), Site);
@@ -505,6 +515,7 @@ public sealed class BuiltinRegistryTests
     [Fact]
     public void FoldCastOrConvert_VarCharTarget_UnresolvedSource_StillTransfersTargetTypeAnyway()
     {
+
         var target = new SqlType(SqlTypeCategory.VarChar, Length: 200);
 
         var result = BuiltinRegistry.FoldCastOrConvert(target, new BuiltinArgument.Unresolved("symbolic-value-in-function-argument", Site), Site);

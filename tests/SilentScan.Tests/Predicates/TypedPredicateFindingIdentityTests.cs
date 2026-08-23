@@ -25,6 +25,7 @@ public sealed class TypedPredicateFindingIdentityTests
     [Fact]
     public void ComputeFingerprint_TableNameVsColumnNameBoundaryShift_DoesNotCollide()
     {
+
         var columnA = Column("dbo.A", "BC");
         var columnB = Column("dbo.AB", "C");
         var other = new PredicateOperand.Value(new SqlType(SqlTypeCategory.Int));

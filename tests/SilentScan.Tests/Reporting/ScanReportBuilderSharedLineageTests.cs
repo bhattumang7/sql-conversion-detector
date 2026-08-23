@@ -20,6 +20,7 @@ public sealed class ScanReportBuilderSharedLineageTests
     [Fact]
     public async Task LayeredViewsWithAConversion_ProduceIdenticalReportsEitherWay()
     {
+
         var (withOwn, withShared) = await BuildBothWaysAsync(
             """
             CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL, Name NVARCHAR(100) NULL);
@@ -43,6 +44,7 @@ public sealed class ScanReportBuilderSharedLineageTests
     [Fact]
     public async Task CastInsideAViewLayer_ProducesIdenticalReportsEitherWay()
     {
+
         var (withOwn, withShared) = await BuildBothWaysAsync(
             """
             CREATE TABLE dbo.Orders (OrderRef INT NOT NULL);
@@ -63,6 +65,7 @@ public sealed class ScanReportBuilderSharedLineageTests
     [Fact]
     public async Task SyntacticAndDynamicSqlStreams_AreIdenticalEitherWay()
     {
+
         var (withOwn, withShared) = await BuildBothWaysAsync(
             """
             CREATE TABLE dbo.Events (Name VARCHAR(50) NOT NULL, CreatedAt DATETIME NOT NULL);
@@ -88,12 +91,12 @@ public sealed class ScanReportBuilderSharedLineageTests
         Converters = { new JsonStringEnumConverter() },
     };
 
-private static void AssertReportsEquivalent(ScanReport withOwn, ScanReport withShared) =>
+    private static void AssertReportsEquivalent(ScanReport withOwn, ScanReport withShared) =>
         Assert.Equal(
             JsonSerializer.Serialize(withOwn, ComparisonOptions),
             JsonSerializer.Serialize(withShared, ComparisonOptions));
 
-private static async Task<(ScanReport WithOwnLineage, ScanReport WithSharedLineage)> BuildBothWaysAsync(string sql)
+    private static async Task<(ScanReport WithOwnLineage, ScanReport WithSharedLineage)> BuildBothWaysAsync(string sql)
     {
         var databaseName = $"SilentScanTest_{Guid.NewGuid():N}";
         var provisioner = new DatabaseProvisioner(Options);

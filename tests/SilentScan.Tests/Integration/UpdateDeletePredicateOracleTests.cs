@@ -41,6 +41,7 @@ public sealed class UpdateDeletePredicateOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task UpdateWhereClause_VarcharColumnVsNVarcharParam_ConvertImplicitOnColumn() =>
+
         Assert.True(await HasColumnConversion(
             "DECLARE @p NVARCHAR(64) = N'x'; UPDATE dbo.Sessions SET IsExpired = 1 WHERE Token = @p;", "Token"));
 
@@ -51,6 +52,7 @@ public sealed class UpdateDeletePredicateOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task UpdateWhereClause_VarcharColumnVsVarcharParam_NoColumnConversion() =>
+
         Assert.False(await HasColumnConversion(
             "DECLARE @p VARCHAR(64) = 'x'; UPDATE dbo.Sessions SET IsExpired = 1 WHERE Token = @p;", "Token"));
 }

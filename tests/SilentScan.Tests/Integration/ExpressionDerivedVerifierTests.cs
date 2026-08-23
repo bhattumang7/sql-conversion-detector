@@ -66,6 +66,7 @@ public sealed class ExpressionDerivedVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_BareUnderlyingColumnQueriedDirectly_IsNotConfirmed()
     {
+
         var finding = Finding(
             "CustomerId",
             [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)],
@@ -108,6 +109,7 @@ public sealed class ExpressionDerivedVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_NoImmediateRelation_ReturnsNotProbeable()
     {
+
         var finding = Finding(
             "CustomerIdStr",
             [new UnderlyingBaseColumn("dbo.Orders", "CustomerId", Indexed: true)],

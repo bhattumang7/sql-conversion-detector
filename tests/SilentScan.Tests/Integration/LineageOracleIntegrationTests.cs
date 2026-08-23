@@ -66,6 +66,7 @@ public sealed class LineageOracleIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PlanXml_Probe_NeverExecutesAgainstData()
     {
+
         var capture = new PlanXmlCapture(_options);
         await capture.CaptureAsync(DatabaseName, "SELECT OrderId FROM dbo.Orders WHERE OrderId = 1;");
 

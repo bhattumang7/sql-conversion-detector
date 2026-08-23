@@ -76,6 +76,7 @@ public sealed class CatchAllPredicateScannerTests
     [Fact]
     public void CteSharesNameWithIndexedBaseTable_AttributesThroughToTheRealUnderlyingColumn()
     {
+
         var findings = Scan(
             """
             CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
@@ -104,6 +105,7 @@ public sealed class CatchAllPredicateScannerTests
     [Fact]
     public void DeclaredLocalVariable_NotAFormalParameter_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN DECLARE @p VARCHAR(20) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE (Code = @p OR @p IS NULL); END");
 
@@ -122,6 +124,7 @@ public sealed class CatchAllPredicateScannerTests
     [Fact]
     public void WrappedColumn_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE (UPPER(Code) = @p OR @p IS NULL); END");
 
@@ -149,6 +152,7 @@ public sealed class CatchAllPredicateScannerTests
     [Fact]
     public void NegatedCatchAllShape_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS BEGIN SELECT 1 FROM dbo.Customers WHERE NOT (Code = @p OR @p IS NULL); END");
 
@@ -186,6 +190,7 @@ public sealed class CatchAllPredicateScannerTests
     [Fact]
     public void AdHocBatchParameter_NoEnclosingProcedure_NeverFires()
     {
+
         var findings = Scan("DECLARE @p VARCHAR(20) = 'ABC'; SELECT 1 FROM dbo.Customers WHERE (Code = @p OR @p IS NULL);");
 
         Assert.Empty(findings);

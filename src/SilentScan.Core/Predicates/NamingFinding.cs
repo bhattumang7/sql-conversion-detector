@@ -4,13 +4,13 @@ namespace SilentScan.Core.Predicates;
 
 public enum NamingFindingKind
 {
-ReservedKeywordAsIdentifier,
+    ReservedKeywordAsIdentifier,
 
-SpPrefixOnUserRoutine,
+    SpPrefixOnUserRoutine,
 
-UnqualifiedCreate,
+    UnqualifiedCreate,
 
-RedundantTypeQualifier,
+    RedundantTypeQualifier,
 }
 
 public sealed record NamingFinding(

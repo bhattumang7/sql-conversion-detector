@@ -43,7 +43,7 @@ public sealed class MaxTypedColumnScannerTests
         Assert.Empty(findings);
     }
 
-[Theory]
+    [Theory]
     [InlineData("TEXT", "text")]
     [InlineData("NTEXT", "ntext")]
     [InlineData("IMAGE", "image")]

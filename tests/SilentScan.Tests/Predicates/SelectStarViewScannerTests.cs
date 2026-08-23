@@ -134,6 +134,7 @@ public sealed class SelectStarViewScannerTests
     [Fact]
     public void ConsumerReferencesViaInlineTvfCallSyntax_StillFires()
     {
+
         var findings = Scan(
             """
             CREATE TABLE dbo.T (A INT NOT NULL, B INT NOT NULL, C INT NOT NULL);
@@ -159,6 +160,7 @@ public sealed class SelectStarViewScannerTests
     [Fact]
     public void TwoConsumersOfTheSameViewOnOneLine_HaveDistinctColumns()
     {
+
         var findings = Scan(TwoLevelStarViewDdl, "SELECT v1.A FROM dbo.vOuter v1 UNION ALL SELECT v2.B FROM dbo.vOuter v2;");
 
         Assert.Equal(2, findings.Count);

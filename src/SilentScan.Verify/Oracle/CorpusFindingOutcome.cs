@@ -2,17 +2,17 @@ namespace SilentScan.Verify.Oracle;
 
 public enum CorpusFindingOutcome
 {
-Confirmed,
+    Confirmed,
 
-NotConfirmed,
+    NotConfirmed,
 
-NotProbeable,
+    NotProbeable,
 
-ProbeFailed,
+    ProbeFailed,
 
-ConfirmedUnindexed,
+    ConfirmedUnindexed,
 
-ConfirmedViaScratchIndex,
+    ConfirmedViaScratchIndex,
 
-NotApplicable,
+    NotApplicable,
 }

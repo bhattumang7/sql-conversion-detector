@@ -117,6 +117,7 @@ public static class ReadableDocumentRenderer
 
         for (var i = 0; i < cells.Count; i++)
         {
+
             builder.Append(i == cells.Count - 1 ? cells[i] : cells[i].PadRight(widths[i]));
 
             if (i != cells.Count - 1)
@@ -138,7 +139,7 @@ public static class ReadableDocumentRenderer
         }
     }
 
-private static string EscapeMarkdownCell(string cell) =>
+    private static string EscapeMarkdownCell(string cell) =>
         cell.Replace("|", "\\|", StringComparison.Ordinal)
             .Replace("\r\n", " ", StringComparison.Ordinal)
             .Replace("\n", " ", StringComparison.Ordinal)

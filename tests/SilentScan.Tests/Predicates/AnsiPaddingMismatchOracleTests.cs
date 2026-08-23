@@ -63,6 +63,7 @@ public sealed class AnsiPaddingMismatchOracleTests : OracleTestFixture
     [Fact]
     public async Task NonPaddedColumn_PlainEqualityAgainstPaddedColumnOrTrailingWhitespaceLiteral_StillMatches()
     {
+
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

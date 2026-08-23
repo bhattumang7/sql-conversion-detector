@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum IdentityRangeFindingKind
 {
-IdentitySeedOrIncrementAnomaly,
+    IdentitySeedOrIncrementAnomaly,
 
-IdentityRangeNearExhaustion,
+    IdentityRangeNearExhaustion,
 }
 
 public sealed record IdentityRangeFinding(

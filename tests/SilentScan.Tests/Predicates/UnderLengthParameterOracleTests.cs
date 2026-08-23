@@ -41,6 +41,7 @@ public sealed class UnderLengthParameterOracleTests : OracleTestFixture
     [Fact]
     public async Task ShorterVariableAssignedALikePattern_LosesTheWildcardAndChangesWhatMatches()
     {
+
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

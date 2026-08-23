@@ -63,114 +63,114 @@ public sealed class DatabaseCatalog
     private readonly Dictionary<string, IReadOnlyList<ProcedureParameterInfo>> _procedureParametersByQualifiedName =
         new(StringComparer.OrdinalIgnoreCase);
 
-private const int MaxSynonymHops = 8;
+    private const int MaxSynonymHops = 8;
 
     public IReadOnlyCollection<CatalogTable> Tables => _tablesByQualifiedName.Values;
 
-public IReadOnlyDictionary<string, SqlType> TypeAliases => _typeAliasesByQualifiedName;
+    public IReadOnlyDictionary<string, SqlType> TypeAliases => _typeAliasesByQualifiedName;
 
     public void AddTypeAlias(string qualifiedName, SqlType underlyingType) =>
         _typeAliasesByQualifiedName[qualifiedName] = underlyingType;
 
-public void AddScalarFunctionReturnType(string qualifiedName, SqlType? returnType) =>
+    public void AddScalarFunctionReturnType(string qualifiedName, SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName[qualifiedName] = returnType;
 
-public void RemoveScalarFunctionReturnType(string qualifiedName) =>
+    public void RemoveScalarFunctionReturnType(string qualifiedName) =>
         _scalarFunctionReturnTypesByQualifiedName.Remove(qualifiedName);
 
-public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
+    public bool TryGetScalarFunctionReturnType(string qualifiedName, out SqlType? returnType) =>
         _scalarFunctionReturnTypesByQualifiedName.TryGetValue(qualifiedName, out returnType);
 
-public void AddTableValuedFunctionKind(string qualifiedName, TableValuedFunctionKind kind) =>
+    public void AddTableValuedFunctionKind(string qualifiedName, TableValuedFunctionKind kind) =>
         _tableValuedFunctionKindsByQualifiedName[qualifiedName] = kind;
 
-public void RemoveTableValuedFunctionKind(string qualifiedName) =>
+    public void RemoveTableValuedFunctionKind(string qualifiedName) =>
         _tableValuedFunctionKindsByQualifiedName.Remove(qualifiedName);
 
-public bool TryGetTableValuedFunctionKind(string qualifiedName, out TableValuedFunctionKind kind) =>
+    public bool TryGetTableValuedFunctionKind(string qualifiedName, out TableValuedFunctionKind kind) =>
         _tableValuedFunctionKindsByQualifiedName.TryGetValue(qualifiedName, out kind);
 
-public void AddScalarUdfInfo(string qualifiedName, ScalarUdfInfo info) =>
+    public void AddScalarUdfInfo(string qualifiedName, ScalarUdfInfo info) =>
         _scalarUdfInfoByQualifiedName[qualifiedName] = info;
 
-public void RemoveScalarUdfInfo(string qualifiedName) =>
+    public void RemoveScalarUdfInfo(string qualifiedName) =>
         _scalarUdfInfoByQualifiedName.Remove(qualifiedName);
 
-public bool TryGetScalarUdfInfo(string qualifiedName, out ScalarUdfInfo? info) =>
+    public bool TryGetScalarUdfInfo(string qualifiedName, out ScalarUdfInfo? info) =>
         _scalarUdfInfoByQualifiedName.TryGetValue(qualifiedName, out info);
 
-public void AddSchemaExpression(SchemaExpressionReference reference) => _schemaExpressions.Add(reference);
+    public void AddSchemaExpression(SchemaExpressionReference reference) => _schemaExpressions.Add(reference);
 
     public IReadOnlyList<SchemaExpressionReference> SchemaExpressions => _schemaExpressions;
 
-public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
+    public void AddForeignKey(ForeignKeyRelationship relationship) => _foreignKeys.Add(relationship);
 
     public IReadOnlyList<ForeignKeyRelationship> ForeignKeys => _foreignKeys;
 
-public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
+    public void AddCheckConstraint(CatalogCheckConstraint constraint) => _checkConstraints.Add(constraint);
 
     public IReadOnlyList<CatalogCheckConstraint> CheckConstraints => _checkConstraints;
 
-public void AddSecurityPredicate(CatalogSecurityPredicate predicate) => _securityPredicates.Add(predicate);
+    public void AddSecurityPredicate(CatalogSecurityPredicate predicate) => _securityPredicates.Add(predicate);
 
     public IReadOnlyList<CatalogSecurityPredicate> SecurityPredicates => _securityPredicates;
 
-public void AddTriggerEvent(CatalogTriggerEvent triggerEvent) => _triggerEvents.Add(triggerEvent);
+    public void AddTriggerEvent(CatalogTriggerEvent triggerEvent) => _triggerEvents.Add(triggerEvent);
 
     public IReadOnlyList<CatalogTriggerEvent> TriggerEvents => _triggerEvents;
 
-public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
+    public void AddTemporalTablePair(TemporalTablePair pair) => _temporalTablePairs.Add(pair);
 
     public IReadOnlyList<TemporalTablePair> TemporalTablePairs => _temporalTablePairs;
 
-public void AddPartitionFilegroup(string schemeName, int partitionNumber, string filegroupName) =>
+    public void AddPartitionFilegroup(string schemeName, int partitionNumber, string filegroupName) =>
         _partitionFilegroupsBySchemeAndNumber[(schemeName.ToUpperInvariant(), partitionNumber)] = filegroupName;
 
-public string? FindPartitionFilegroup(string schemeName, int partitionNumber) =>
+    public string? FindPartitionFilegroup(string schemeName, int partitionNumber) =>
         _partitionFilegroupsBySchemeAndNumber.GetValueOrDefault((schemeName.ToUpperInvariant(), partitionNumber));
 
-public void AddIndexedView(string qualifiedName, IReadOnlyList<CatalogIndex> indexes) =>
+    public void AddIndexedView(string qualifiedName, IReadOnlyList<CatalogIndex> indexes) =>
         _indexedViewIndexesByQualifiedName[qualifiedName] = indexes;
 
     public bool IsIndexedView(string qualifiedName) => _indexedViewIndexesByQualifiedName.ContainsKey(qualifiedName);
 
-public void AddViewCompiledColumns(string qualifiedName, IReadOnlyList<string> columnNames) =>
+    public void AddViewCompiledColumns(string qualifiedName, IReadOnlyList<string> columnNames) =>
         _viewCompiledColumnsByQualifiedName[qualifiedName] = columnNames;
 
     public bool TryGetViewCompiledColumns(string qualifiedName, out IReadOnlyList<string> columnNames) =>
         _viewCompiledColumnsByQualifiedName.TryGetValue(qualifiedName, out columnNames!);
 
-public void AddModuleUsesQuotedIdentifier(string qualifiedName, bool usesQuotedIdentifier) =>
+    public void AddModuleUsesQuotedIdentifier(string qualifiedName, bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName[qualifiedName] = usesQuotedIdentifier;
 
     public bool TryGetModuleUsesQuotedIdentifier(string qualifiedName, out bool usesQuotedIdentifier) =>
         _moduleUsesQuotedIdentifierByQualifiedName.TryGetValue(qualifiedName, out usesQuotedIdentifier);
 
-public void AddModuleUsesAnsiNulls(string qualifiedName, bool usesAnsiNulls) =>
+    public void AddModuleUsesAnsiNulls(string qualifiedName, bool usesAnsiNulls) =>
         _moduleUsesAnsiNullsByQualifiedName[qualifiedName] = usesAnsiNulls;
 
     public bool TryGetModuleUsesAnsiNulls(string qualifiedName, out bool usesAnsiNulls) =>
         _moduleUsesAnsiNullsByQualifiedName.TryGetValue(qualifiedName, out usesAnsiNulls);
 
-public void AddModuleIsRecompiled(string qualifiedName, bool isRecompiled) =>
+    public void AddModuleIsRecompiled(string qualifiedName, bool isRecompiled) =>
         _moduleIsRecompiledByQualifiedName[qualifiedName] = isRecompiled;
 
     public bool TryGetModuleIsRecompiled(string qualifiedName, out bool isRecompiled) =>
         _moduleIsRecompiledByQualifiedName.TryGetValue(qualifiedName, out isRecompiled);
 
-public void AddModuleUsesDatabaseCollation(string qualifiedName, bool usesDatabaseCollation) =>
+    public void AddModuleUsesDatabaseCollation(string qualifiedName, bool usesDatabaseCollation) =>
         _moduleUsesDatabaseCollationByQualifiedName[qualifiedName] = usesDatabaseCollation;
 
     public bool TryGetModuleUsesDatabaseCollation(string qualifiedName, out bool usesDatabaseCollation) =>
         _moduleUsesDatabaseCollationByQualifiedName.TryGetValue(qualifiedName, out usesDatabaseCollation);
 
-public void AddModuleIsSchemaBound(string qualifiedName, bool isSchemaBound) =>
+    public void AddModuleIsSchemaBound(string qualifiedName, bool isSchemaBound) =>
         _moduleIsSchemaBoundByQualifiedName[qualifiedName] = isSchemaBound;
 
     public bool TryGetModuleIsSchemaBound(string qualifiedName, out bool isSchemaBound) =>
         _moduleIsSchemaBoundByQualifiedName.TryGetValue(qualifiedName, out isSchemaBound);
 
-public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters)
+    public void AddProcedureParameters(string qualifiedName, IReadOnlyList<ProcedureParameterInfo> parameters)
     {
         if (parameters.Count == 0 && _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out var existing) && existing.Count > 0)
         {
@@ -180,16 +180,16 @@ public void AddProcedureParameters(string qualifiedName, IReadOnlyList<Procedure
         _procedureParametersByQualifiedName[qualifiedName] = parameters;
     }
 
-public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
+    public bool TryGetProcedureParameters(string qualifiedName, out IReadOnlyList<ProcedureParameterInfo> parameters) =>
         _procedureParametersByQualifiedName.TryGetValue(qualifiedName, out parameters!);
 
-public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
+    public void AddSynonym(string qualifiedName, string targetQualifiedName) =>
         _synonymTargetsByQualifiedName[qualifiedName] = targetQualifiedName;
 
-public void RemoveSynonym(string qualifiedName) =>
+    public void RemoveSynonym(string qualifiedName) =>
         _synonymTargetsByQualifiedName.Remove(qualifiedName);
 
-public string ResolveSynonymName(string qualifiedName)
+    public string ResolveSynonymName(string qualifiedName)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var current = qualifiedName;
@@ -207,30 +207,30 @@ public string ResolveSynonymName(string qualifiedName)
         return current;
     }
 
-public string? CurrentDatabaseName { get; set; }
+    public string? CurrentDatabaseName { get; set; }
 
     public Collation? DefaultCollation { get; set; }
 
-public Collation? TempdbCollation { get; set; }
+    public Collation? TempdbCollation { get; set; }
 
-public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
+    public Collation? EffectiveTempdbCollation => TempdbCollation ?? DefaultCollation;
 
-public int? CompatibilityLevel { get; set; }
+    public int? CompatibilityLevel { get; set; }
 
-public bool? IsRecursiveTriggersEnabled { get; set; }
+    public bool? IsRecursiveTriggersEnabled { get; set; }
 
-public bool? IsNestedTriggersEnabled { get; set; }
+    public bool? IsNestedTriggersEnabled { get; set; }
 
     public bool? IsAutoCreateStatsOn { get; set; }
 
-public SkipLedger Skipped { get; } = new();
+    public SkipLedger Skipped { get; } = new();
 
-public void AddOrReplace(CatalogTable table) => AddOrReplace(table, scope: null);
+    public void AddOrReplace(CatalogTable table) => AddOrReplace(table, scope: null);
 
-public void AddOrReplace(CatalogTable table, string? scope) =>
+    public void AddOrReplace(CatalogTable table, string? scope) =>
         _tablesByQualifiedName[Key(table.QualifiedName, scope)] = table;
 
-public CatalogTable? Find(string qualifiedName)
+    public CatalogTable? Find(string qualifiedName)
     {
         if (_tablesByQualifiedName.TryGetValue(qualifiedName, out var table))
         {
@@ -242,7 +242,7 @@ public CatalogTable? Find(string qualifiedName)
             : null;
     }
 
-public CatalogTable? Find(string qualifiedName, string? scope)
+    public CatalogTable? Find(string qualifiedName, string? scope)
     {
         if (scope is not null && _tablesByQualifiedName.TryGetValue(Key(qualifiedName, scope), out var scoped))
         {
@@ -257,7 +257,7 @@ public CatalogTable? Find(string qualifiedName, string? scope)
         return Find(qualifiedName);
     }
 
-public (CatalogTable? Table, string? ActualScope) FindForMutation(string qualifiedName, string? scope)
+    public (CatalogTable? Table, string? ActualScope) FindForMutation(string qualifiedName, string? scope)
     {
         if (scope is not null && _tablesByQualifiedName.TryGetValue(Key(qualifiedName, scope), out var scoped))
         {
@@ -278,7 +278,7 @@ public (CatalogTable? Table, string? ActualScope) FindForMutation(string qualifi
         return qualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? qualifiedName[prefix.Length..] : null;
     }
 
-public void Remove(string qualifiedName, string? scope)
+    public void Remove(string qualifiedName, string? scope)
     {
         if (scope is not null)
         {
@@ -291,7 +291,7 @@ public void Remove(string qualifiedName, string? scope)
     private static string Key(string qualifiedName, string? scope) =>
         scope is null ? qualifiedName : $"{scope}::{qualifiedName}";
 
-public void MergeFileModeExtras(DatabaseCatalog fileModeCatalog)
+    public void MergeFileModeExtras(DatabaseCatalog fileModeCatalog)
     {
         foreach (var (key, table) in fileModeCatalog._tablesByQualifiedName)
         {

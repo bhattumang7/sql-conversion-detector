@@ -43,6 +43,7 @@ public static class DeadCodeScanner
 
         private void Analyze(string moduleName, IList<ProcedureParameter> parameters, StatementList? statementList)
         {
+
             if (statementList is null)
             {
                 return;
@@ -114,7 +115,7 @@ public static class DeadCodeScanner
                 : statementList.Statements;
     }
 
-private sealed class UsageCollector : TSqlFragmentVisitor
+    private sealed class UsageCollector : TSqlFragmentVisitor
     {
         public List<(string Name, int Line, int Column)> DeclaredVariables { get; } = [];
 
@@ -140,6 +141,7 @@ private sealed class UsageCollector : TSqlFragmentVisitor
 
         public override void ExplicitVisit(SetVariableStatement node)
         {
+
             if (node.AssignmentKind != AssignmentKind.Equals)
             {
                 node.Variable.Accept(this);
@@ -156,6 +158,7 @@ private sealed class UsageCollector : TSqlFragmentVisitor
 
         public override void ExplicitVisit(SelectSetVariable node)
         {
+
             node.Expression?.Accept(this);
         }
 
@@ -183,7 +186,7 @@ private sealed class UsageCollector : TSqlFragmentVisitor
             RedundantJumps.AddRange(FindRedundantJumps(node.Statements));
         }
 
-public static IEnumerable<(string Label, int Line, int Column)> FindRedundantJumps(IList<TSqlStatement> statements)
+        public static IEnumerable<(string Label, int Line, int Column)> FindRedundantJumps(IList<TSqlStatement> statements)
         {
             for (var i = 0; i < statements.Count - 1; i++)
             {
@@ -197,7 +200,7 @@ public static IEnumerable<(string Label, int Line, int Column)> FindRedundantJum
         }
     }
 
-private sealed class ReachabilityWalker(string moduleName, string sourcePath)
+    private sealed class ReachabilityWalker(string moduleName, string sourcePath)
     {
         public List<DeadCodeFinding> Findings { get; } = [];
 
@@ -224,7 +227,7 @@ private sealed class ReachabilityWalker(string moduleName, string sourcePath)
             return terminal;
         }
 
-private bool AnalyzeStatement(TSqlStatement statement)
+        private bool AnalyzeStatement(TSqlStatement statement)
         {
             switch (statement)
             {
@@ -246,6 +249,7 @@ private bool AnalyzeStatement(TSqlStatement statement)
                     return thenTerminal && elseTerminal;
 
                 case WhileStatement whileStatement:
+
                     AnalyzeSequential(ToStatementList(whileStatement.Statement));
                     return false;
 

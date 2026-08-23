@@ -9,7 +9,7 @@ public static class TryCastComputedColumnPredicateScanner
 {
     public readonly record struct Candidate(string DefinitionText, string SourcePath, int Line);
 
-public static IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> BuildCandidates(DatabaseCatalog catalog)
+    public static IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> BuildCandidates(DatabaseCatalog catalog)
     {
         var candidates = new Dictionary<(string, string), Candidate>();
 
@@ -38,7 +38,7 @@ public static IReadOnlyDictionary<(string TableQualifiedName, string ColumnName)
         return candidates;
     }
 
-private static bool DefinesTryCast(string definitionText)
+    private static bool DefinesTryCast(string definitionText)
     {
         var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
         if (result.HasErrors || result.Fragment is not TSqlScript script)
@@ -83,7 +83,7 @@ private static bool DefinesTryCast(string definitionText)
         ];
     }
 
-private sealed class Visitor(
+    private sealed class Visitor(
         string sourcePath, DatabaseCatalog catalog,
         IReadOnlyDictionary<(string TableQualifiedName, string ColumnName), Candidate> candidates) : TSqlFragmentVisitor
     {
@@ -189,7 +189,7 @@ private sealed class Visitor(
             }
         }
 
-private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
+        private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
         {
             public List<ColumnReferenceExpression> References { get; } = [];
 
@@ -197,10 +197,12 @@ private sealed class ColumnReferenceCollector : TSqlFragmentVisitor
 
             public override void ExplicitVisit(QuerySpecification node)
             {
+
             }
 
             public override void ExplicitVisit(ScalarSubquery node)
             {
+
             }
         }
     }

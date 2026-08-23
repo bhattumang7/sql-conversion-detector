@@ -6,11 +6,12 @@ namespace SilentScan.Core.Lineage;
 
 public static class TvfFenceMap
 {
-public static IReadOnlyDictionary<string, TvfFenceOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
+    public static IReadOnlyDictionary<string, TvfFenceOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
         var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
         {
+
             viewsByName[view.QualifiedName] = view;
         }
 
@@ -27,7 +28,7 @@ public static IReadOnlyDictionary<string, TvfFenceOrigin> Build(IReadOnlyList<Vi
             .ToDictionary(kv => kv.Key, kv => kv.Value!, StringComparer.OrdinalIgnoreCase);
     }
 
-private readonly record struct ResolutionContext(
+    private readonly record struct ResolutionContext(
         IReadOnlyDictionary<string, ViewDefinition> ViewsByName,
         DatabaseCatalog Catalog,
         Dictionary<string, TvfFenceOrigin?> Resolved,
@@ -54,7 +55,7 @@ private readonly record struct ResolutionContext(
         return found;
     }
 
-private static TvfFenceOrigin? TryResolveFunctionReference(ViewDefinition view, TvfLeafReference functionRef, ResolutionContext context)
+    private static TvfFenceOrigin? TryResolveFunctionReference(ViewDefinition view, TvfLeafReference functionRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(functionRef.Reference.SchemaObject));
         if (!context.Catalog.TryGetTableValuedFunctionKind(qualifiedName, out var kind))
@@ -72,7 +73,7 @@ private static TvfFenceOrigin? TryResolveFunctionReference(ViewDefinition view, 
             : null;
     }
 
-private static TvfFenceOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
+    private static TvfFenceOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedRef.SchemaObject));
         return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)

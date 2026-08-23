@@ -49,6 +49,7 @@ public static class OutputParameterScanner
 
             if (outputNames.Count == 0 || statementList is null)
             {
+
                 return;
             }
 
@@ -83,6 +84,7 @@ public static class OutputParameterScanner
         {
             foreach (var statement in statements)
             {
+
                 if (state.Declined)
                 {
                     return state;
@@ -97,6 +99,7 @@ public static class OutputParameterScanner
                 state = nextState;
                 if (terminal)
                 {
+
                     return state;
                 }
             }
@@ -125,6 +128,7 @@ public static class OutputParameterScanner
                     return (state with { Unassigned = [] }, true);
 
                 case ThrowStatement:
+
                     return (state with { Unassigned = [] }, true);
 
                 case GoToStatement:

@@ -6,7 +6,7 @@ namespace SilentScan.Verify.Oracle;
 
 public static class TvfFenceProbeBuilder
 {
-public static string? BuildFunctionProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? parameterTypes)
+    public static string? BuildFunctionProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? parameterTypes)
     {
         if (finding.Kind == TvfFenceFindingKind.InsertExec || finding.FunctionQualifiedName is not { } qualifiedName || parameterTypes is null)
         {
@@ -28,7 +28,7 @@ public static string? BuildFunctionProbe(TvfFenceFinding finding, IReadOnlyList<
         return $"SELECT * FROM {BracketQualifiedName(qualifiedName)}({string.Join(", ", arguments)});";
     }
 
-public static string? BuildInsertExecProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? resultColumns, IReadOnlyList<SqlType>? parameterTypes)
+    public static string? BuildInsertExecProbe(TvfFenceFinding finding, IReadOnlyList<SqlType>? resultColumns, IReadOnlyList<SqlType>? parameterTypes)
     {
         if (finding.Kind != TvfFenceFindingKind.InsertExec
             || finding.ReferencedObjectQualifiedName is not { } procedureQualifiedName
@@ -69,7 +69,7 @@ public static string? BuildInsertExecProbe(TvfFenceFinding finding, IReadOnlyLis
             """;
     }
 
-public static string? BuildExecDescribeProbe(string procedureQualifiedName, IReadOnlyList<SqlType> parameterTypes)
+    public static string? BuildExecDescribeProbe(string procedureQualifiedName, IReadOnlyList<SqlType> parameterTypes)
     {
         var arguments = new List<string>(parameterTypes.Count);
         foreach (var type in parameterTypes)

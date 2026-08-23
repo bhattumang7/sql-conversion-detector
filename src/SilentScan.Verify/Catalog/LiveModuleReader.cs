@@ -50,8 +50,11 @@ public sealed class LiveModuleReader
                 ObjectName: reader.GetString(1),
                 ObjectTypeCode: reader.GetString(2).Trim(),
                 Definition: reader.GetString(3),
+
                 UsesQuotedIdentifier: reader.GetBoolean(4),
+
                 UsesAnsiNulls: reader.GetBoolean(5),
+
                 IsSchemaBound: reader.GetBoolean(6),
                 IsRecompiled: reader.GetBoolean(7),
                 UsesDatabaseCollation: reader.GetBoolean(8)));
@@ -62,6 +65,7 @@ public sealed class LiveModuleReader
 
     private static async Task<List<UnanalyzableModule>> ReadEncryptedModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
+
         const string sql = """
             SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type
             FROM sys.sql_modules m
@@ -76,6 +80,7 @@ public sealed class LiveModuleReader
 
     private static async Task<List<UnanalyzableModule>> ReadClrModulesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
+
         const string sql = """
             SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type
             FROM sys.assembly_modules am
@@ -88,7 +93,7 @@ public sealed class LiveModuleReader
         return await ReadUnanalyzableAsync(connection, sql, UnanalyzableModuleReason.ClrAssemblyModule, cancellationToken);
     }
 
-private static async Task<List<UnanalyzableModule>> ReadNonStandardModuleTypesAsync(SqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<List<UnanalyzableModule>> ReadNonStandardModuleTypesAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT s.name AS schema_name, o.name AS object_name, o.type AS object_type
@@ -104,7 +109,7 @@ private static async Task<List<UnanalyzableModule>> ReadNonStandardModuleTypesAs
         return await ReadUnanalyzableAsync(connection, sql, UnanalyzableModuleReason.NonStandardModuleType, cancellationToken);
     }
 
-private static async Task<List<UnanalyzableModule>> ReadNumberedProcedureBodiesBeyondFirstAsync(SqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<List<UnanalyzableModule>> ReadNumberedProcedureBodiesBeyondFirstAsync(SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
             SELECT s.name AS schema_name, o.name AS object_name, np.procedure_number

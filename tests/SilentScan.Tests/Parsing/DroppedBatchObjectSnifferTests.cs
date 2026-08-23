@@ -62,6 +62,7 @@ public sealed class DroppedBatchObjectSnifferTests
     [Fact]
     public void Sniff_CreateWithNoNameFollowing_DegradesToUnidentified()
     {
+
         var (kind, name) = DroppedBatchObjectSniffer.Sniff("CREATE PROCEDURE");
 
         Assert.Equal(UnanalyzedObjectKind.Unidentified, kind);

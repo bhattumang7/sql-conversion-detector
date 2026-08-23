@@ -67,6 +67,7 @@ public sealed class WaitForScannerTests
     [Fact]
     public void WaitForReceive_NeverFires()
     {
+
         var findings = Scan("WAITFOR (RECEIVE TOP(1) * FROM dbo.SomeQueue), TIMEOUT 5000;");
 
         Assert.Empty(findings);

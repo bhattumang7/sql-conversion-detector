@@ -103,7 +103,7 @@ public sealed class TvfFenceScannerTests
         Assert.Empty(ScanFixture("NESTED_UNDER_VIEW_OR_TVF_clean.sql"));
     }
 
-[Fact]
+    [Fact]
     public void NestedUnderViewOrTvf_ViaInlineTvfFunctionCallSyntax_Fires()
     {
         var findings = ScanFixture("NESTED_UNDER_VIEW_OR_TVF_via_inline_tvf_fires.sql");

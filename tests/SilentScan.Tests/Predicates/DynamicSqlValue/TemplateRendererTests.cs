@@ -21,7 +21,8 @@ public sealed class TemplateRendererTests
         var span = rendered.SegmentMap.Map(innerLine: 1, innerColumn: 8);
         Assert.Equal("test.sql", span.SourcePath);
         Assert.Equal(1, span.Line);
-        Assert.Equal(14, span.Column);    }
+        Assert.Equal(14, span.Column);
+    }
 
     [Fact]
     public void Render_MultiLineLiteral_ResetsColumnAfterNewline()

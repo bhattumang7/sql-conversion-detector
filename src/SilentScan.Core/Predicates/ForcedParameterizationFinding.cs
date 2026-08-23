@@ -4,29 +4,29 @@ namespace SilentScan.Core.Predicates;
 
 public enum ForcedParameterizationFindingKind
 {
-LikePatternLiteral,
+    LikePatternLiteral,
 
-TopOrPagingLiteral,
+    TopOrPagingLiteral,
 
-SelectListLiteral,
+    SelectListLiteral,
 
-HavingLiteral,
+    HavingLiteral,
 
-OrderByExpressionLiteral,
+    OrderByExpressionLiteral,
 
-DoubleColonCallArgumentLiteral,
+    DoubleColonCallArgumentLiteral,
 
-TableSampleSizeLiteral,
+    TableSampleSizeLiteral,
 
-DmlOutputListLiteral,
+    DmlOutputListLiteral,
 
-ConvertStyleCodeLiteral,
+    ConvertStyleCodeLiteral,
 
-CheckSumArgumentLiteral,
+    CheckSumArgumentLiteral,
 
-ConstantFoldableExpressionLiteral,
+    ConstantFoldableExpressionLiteral,
 
-GroupByExpressionLiteral,
+    GroupByExpressionLiteral,
 }
 
 public sealed record ForcedParameterizationFinding(

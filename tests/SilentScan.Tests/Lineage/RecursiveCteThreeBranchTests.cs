@@ -20,6 +20,7 @@ public sealed class RecursiveCteThreeBranchTests
     [Fact]
     public void RecursiveCteWithTwoRecursiveMembers_ResolvesUsingTheTrueAnchorType()
     {
+
         var view = Build(
             "CREATE TABLE dbo.Categories (CategoryCode VARCHAR(20) NOT NULL, ParentCode VARCHAR(20) NULL);",
             """

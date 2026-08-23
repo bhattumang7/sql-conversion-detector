@@ -2,7 +2,7 @@ namespace SilentScan.Core.Predicates;
 
 public enum TransactionHygieneFindingKind
 {
-UnresolvedOnSomePath,
+    UnresolvedOnSomePath,
 }
 
 public sealed record TransactionHygieneFinding(

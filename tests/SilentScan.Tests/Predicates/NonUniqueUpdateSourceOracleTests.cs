@@ -89,6 +89,7 @@ public sealed class NonUniqueUpdateSourceOracleTests : OracleTestFixture
     [Fact]
     public async Task CompositeUniqueSuperset_JoinOnSubsetOnly_StillMultiMatches()
     {
+
         await using var connection = await OpenConnectionAsync();
 
         await using (var seed = new SqlCommand(

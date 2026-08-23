@@ -102,7 +102,7 @@ public static class TriggerCorrectnessScanner
             }
         }
 
-private static string? TryGetUnsafeAssignedVariable(TSqlStatement statement) => statement switch
+        private static string? TryGetUnsafeAssignedVariable(TSqlStatement statement) => statement switch
         {
             SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectSetVariable { AssignmentKind: AssignmentKind.Equals } setVar] } spec }
                 when IsUnsafeSourceQuery(spec) && !IsAggregateExpression(setVar.Expression)
@@ -134,16 +134,16 @@ private static string? TryGetUnsafeAssignedVariable(TSqlStatement statement) => 
         private static bool SelectListIsAggregateOnly(QuerySpecification spec) =>
             spec.SelectElements is [SelectScalarExpression { Expression: { } expr }] && IsAggregateExpression(expr);
 
-private static bool IsAggregateExpression(ScalarExpression expression) =>
+        private static bool IsAggregateExpression(ScalarExpression expression) =>
             expression is FunctionCall call && AggregateFunctionNames.Contains(call.FunctionName.Value);
 
-private static bool IsUnsafeSourceQuery(QuerySpecification spec) =>
+        private static bool IsUnsafeSourceQuery(QuerySpecification spec) =>
             spec.WhereClause is null
             && spec.TopRowFilter is null
             && spec.FromClause is { TableReferences: [NamedTableReference { SchemaObject.SchemaIdentifier: null } named] }
             && PseudoTableNames.Contains(named.SchemaObject.BaseIdentifier.Value);
 
-private static int? FindStraightLineKeyedDmlUse(IList<TSqlStatement> statements, int startIndex, string variableName)
+        private static int? FindStraightLineKeyedDmlUse(IList<TSqlStatement> statements, int startIndex, string variableName)
         {
             for (var i = startIndex; i < statements.Count; i++)
             {
@@ -190,7 +190,7 @@ private static int? FindStraightLineKeyedDmlUse(IList<TSqlStatement> statements,
                 FindingConfidence.Low));
         }
 
-private sealed class EarlyOutGuardCollector : TSqlFragmentVisitor
+        private sealed class EarlyOutGuardCollector : TSqlFragmentVisitor
         {
             public bool Found { get; private set; }
 
@@ -220,7 +220,7 @@ private sealed class EarlyOutGuardCollector : TSqlFragmentVisitor
                 && PseudoTableNames.Contains(named.SchemaObject.BaseIdentifier.Value);
         }
 
-private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> topLevelStatements)
+        private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName, TriggerStatementBody node, IList<TSqlStatement> topLevelStatements)
         {
             if (node.TriggerType != TriggerType.InsteadOf
                 || node.TriggerActions is not { } actions
@@ -259,7 +259,7 @@ private void InspectInsteadOfInsertFilteredReinsert(string triggerQualifiedName,
             }
         }
 
-private static bool IsFilteredReinsertFromInserted(QuerySpecification spec)
+        private static bool IsFilteredReinsertFromInserted(QuerySpecification spec)
         {
             if (spec.FromClause is not { TableReferences: { Count: > 0 } tableReferences })
             {
@@ -299,7 +299,7 @@ private static bool IsFilteredReinsertFromInserted(QuerySpecification spec)
             public override void ExplicitVisit(ThrowStatement node) => Found = true;
         }
 
-private void InspectUpdateFunctionWithoutValueComparison(string triggerQualifiedName, StatementList statementList)
+        private void InspectUpdateFunctionWithoutValueComparison(string triggerQualifiedName, StatementList statementList)
         {
             var collector = new IfPredicateCollector();
             statementList.Accept(collector);
@@ -326,7 +326,7 @@ private void InspectUpdateFunctionWithoutValueComparison(string triggerQualified
             }
         }
 
-private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName)
+        private static bool HasSameColumnValueComparison(BooleanExpression predicate, string columnName)
         {
             var collector = new SameColumnComparisonCollector(columnName);
             predicate.Accept(collector);
@@ -370,7 +370,7 @@ private static bool HasSameColumnValueComparison(BooleanExpression predicate, st
                 && string.Equals(last.Value, columnName, StringComparison.OrdinalIgnoreCase);
         }
 
-private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, StatementList statementList)
+        private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, StatementList statementList)
         {
             var collector = new HostNameGateCollector();
             statementList.Accept(collector);
@@ -440,6 +440,7 @@ private void InspectLogonTriggerHostNameGate(string triggerQualifiedName, Statem
         {
             if (catalog.IsRecursiveTriggersEnabled != true || statementList is null)
             {
+
                 return;
             }
 

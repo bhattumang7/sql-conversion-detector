@@ -17,6 +17,7 @@ public sealed class DynamicSqlTempTableDiscoveryTests
     [Fact]
     public void Discover_CreateTableBuiltEntirelyFromLiteralConcatenation_RegistersUnderCallingProcScope()
     {
+
         var catalog = DiscoverFrom("""
             CREATE PROCEDURE dbo.usp_BuildRuns AS
             BEGIN
@@ -40,6 +41,7 @@ public sealed class DynamicSqlTempTableDiscoveryTests
     [Fact]
     public void Discover_NoDynamicSql_ReturnsEmptyCatalog()
     {
+
         var catalog = DiscoverFrom("CREATE TABLE dbo.Orders (OrderId INT NOT NULL);");
 
         Assert.Empty(catalog.Tables);
@@ -48,6 +50,7 @@ public sealed class DynamicSqlTempTableDiscoveryTests
     [Fact]
     public void Discover_DynamicSqlWithoutCreateTable_DoesNotAttemptToParseIt()
     {
+
         var catalog = DiscoverFrom("""
             CREATE PROCEDURE dbo.usp_RunReport AS
             BEGIN
@@ -61,6 +64,7 @@ public sealed class DynamicSqlTempTableDiscoveryTests
     [Fact]
     public void Discover_CreateTableInsideUnfoldableDynamicSql_DeclinesRatherThanGuesses()
     {
+
         var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.T (Col NVARCHAR(MAX) NOT NULL);");
         Assert.False(ddlResult.HasErrors);
         var procResult = SqlScriptParser.ParseText("test.sql", """
@@ -81,6 +85,7 @@ public sealed class DynamicSqlTempTableDiscoveryTests
     [Fact]
     public void MergeFileModeExtras_DiscoveredSyntheticWrapperHasNoParameters_DoesNotClobberTheRealProcedureSCatalogedParameters()
     {
+
         var procSql = """
             CREATE PROCEDURE dbo.usp_BuildRuns @RunDate DATE, @Flag INT AS
             BEGIN

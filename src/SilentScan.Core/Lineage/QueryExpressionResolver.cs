@@ -24,7 +24,7 @@ public static class QueryExpressionResolver
             _ => ResolveUnsupported(queryExpression, sourcePath, ledger),
         };
 
-private static List<ResolvedColumn> ResolveUnsupported(QueryExpression queryExpression, string sourcePath, SkipLedger? ledger)
+    private static List<ResolvedColumn> ResolveUnsupported(QueryExpression queryExpression, string sourcePath, SkipLedger? ledger)
     {
         ledger?.Record(
             AnalysisPass.Lineage, sourcePath, queryExpression.StartLine, queryExpression.StartColumn,
@@ -46,6 +46,7 @@ private static List<ResolvedColumn> ResolveUnsupported(QueryExpression queryExpr
 
         if (first.Count != second.Count)
         {
+
             ledger?.Record(
                 AnalysisPass.Lineage, sourcePath, binary.StartLine, binary.StartColumn, "query expression",
                 $"UNION/EXCEPT/INTERSECT branches resolved different column counts ({first.Count} vs {second.Count}) - column identity can't be trusted");

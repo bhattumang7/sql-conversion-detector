@@ -74,6 +74,7 @@ public sealed class TypeMatrixGeneratorTests
     [Fact]
     public async Task GenerateAsync_TimestampColumnVsVarbinaryValue_ColumnConverts()
     {
+
         var generator = new TypeMatrixGenerator(Options);
 
         var (entries, _) = await generator.GenerateAsync([], [], [], [], binaryFamily: TypeMatrixGenerator.BinaryFamily);
@@ -89,6 +90,7 @@ public sealed class TypeMatrixGeneratorTests
     [Fact]
     public async Task GenerateAsync_BinaryColumnVsVarbinaryValue_SameComparisonTypeNeitherConverts()
     {
+
         var generator = new TypeMatrixGenerator(Options);
 
         var (entries, _) = await generator.GenerateAsync([], [], [], [], binaryFamily: TypeMatrixGenerator.BinaryFamily);

@@ -20,7 +20,7 @@ public sealed class DynamicSqlCfgTests
         return script.Batches[0].Statements;
     }
 
-private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, List<string> emittedLog) => (state, emit) =>
+    private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, List<string> emittedLog) => (state, emit) =>
     {
         if (emit)
         {
@@ -50,7 +50,8 @@ private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlSt
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
         Assert.Equal("c", LitText(result["@x"]));
-        Assert.Equal(3, emitted.Count);    }
+        Assert.Equal(3, emitted.Count);
+    }
 
     [Fact]
     public void EmissionIsSuppressedDuringFixpoint_AndRunsOnceInFinalPass()
@@ -75,7 +76,8 @@ private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlSt
         var xTemplate = Assert.IsType<SqlTextValue.Template>(result["@x"]);
         var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(xTemplate.Pieces));
         Assert.Equal(2, choice.Alternatives.Count);
-        Assert.Equal("after", LitText(result["@y"]));    }
+        Assert.Equal("after", LitText(result["@y"]));
+    }
 
     [Fact]
     public void IfStatement_VariableUntouchedByEitherBranch_MergesToItsOwnUnchangedValue()
@@ -101,7 +103,8 @@ private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlSt
 
         var xTemplate = Assert.IsType<SqlTextValue.Template>(result["@x"]);
         var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(xTemplate.Pieces));
-        Assert.True(choice.Alternatives.Count <= 3);        Assert.All(choice.Alternatives, alt => Assert.IsType<TemplatePiece.Lit>(Assert.Single(alt.Pieces)));
+        Assert.True(choice.Alternatives.Count <= 3);
+        Assert.All(choice.Alternatives, alt => Assert.IsType<TemplatePiece.Lit>(Assert.Single(alt.Pieces)));
     }
 
     [Fact]
@@ -138,6 +141,7 @@ private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlSt
     [Fact]
     public void TryCatch_VariableDeclaredOnlyInTry_IsVisibleInCatchAsTypedHole()
     {
+
         var statements = ParseStatements(
             "BEGIN TRY " +
             "DECLARE @errorContext NVARCHAR(200); " +
@@ -168,12 +172,14 @@ private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlSt
 
         var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
 
-        Assert.Equal("start", LitText(result["@x"]));        Assert.Equal("reached", LitText(result["@y"]));
+        Assert.Equal("start", LitText(result["@x"]));
+        Assert.Equal("reached", LitText(result["@y"]));
     }
 
     [Fact]
     public void ReturnStatement_ContributesItsOwnStateToTheFinalMergedState()
     {
+
         var statements = ParseStatements("SET @x = 'a'; IF 1 = 1 BEGIN SET @x = 'returned'; RETURN; END SET @x = 'fallthrough';");
         var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
 

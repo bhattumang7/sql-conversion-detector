@@ -47,6 +47,7 @@ public sealed class TvfFenceMapTests
         var outer = Assert.Contains("dbo.vw_Outer", map);
         Assert.Equal("dbo.fn_Fence", outer.FunctionQualifiedName);
         Assert.Equal(2, outer.Depth);
+
         Assert.Equal(inner.OriginSourcePath, outer.OriginSourcePath);
         Assert.Equal(inner.OriginLine, outer.OriginLine);
     }
@@ -89,6 +90,7 @@ public sealed class TvfFenceMapTests
     [Fact]
     public void CteSharingATvfFencingViewsName_DoesNotFalselyInheritTheFence()
     {
+
         var (catalog, views) = Build("""
             CREATE FUNCTION dbo.fn_Fence()
             RETURNS @T TABLE (Id INT)

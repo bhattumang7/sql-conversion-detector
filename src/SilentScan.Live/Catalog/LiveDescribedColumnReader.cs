@@ -5,7 +5,7 @@ namespace SilentScan.Live.Catalog;
 
 public static class LiveDescribedColumnReader
 {
-public static async Task<Dictionary<string, DescribedObject>> DescribeViewsAsync(
+    public static async Task<Dictionary<string, DescribedObject>> DescribeViewsAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -26,14 +26,14 @@ public static async Task<Dictionary<string, DescribedObject>> DescribeViewsAsync
         return await ReadDescribedObjectsAsync(reader, qualifiedNameColumns: (0, 1), cancellationToken);
     }
 
-public static Task<DescribedObject> DescribeFunctionAsync(
+    public static Task<DescribedObject> DescribeFunctionAsync(
         SqlConnection connection, string probeText, CancellationToken cancellationToken)
     {
         LiveReadOnlyGuard.AssertSelectOnly(probeText);
         return DescribeAsync(connection, probeText, cancellationToken);
     }
 
-public static async Task<DescribedResultSet> DescribeProcedureOrderedAsync(
+    public static async Task<DescribedResultSet> DescribeProcedureOrderedAsync(
         SqlConnection connection, string probeText, CancellationToken cancellationToken)
     {
         LiveReadOnlyGuard.AssertDescribeFirstResultSetProbeOnly(probeText);
@@ -109,7 +109,7 @@ public static async Task<DescribedResultSet> DescribeProcedureOrderedAsync(
         return errorNumber >= 0 ? DescribedObject.FromError(errorNumber, errorMessage) : DescribedObject.FromColumns(columns);
     }
 
-public static async Task<Dictionary<string, List<ProcedureParameterSpec>>> ReadProcedureParametersAsync(
+    public static async Task<Dictionary<string, List<ProcedureParameterSpec>>> ReadProcedureParametersAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -146,7 +146,7 @@ public static async Task<Dictionary<string, List<ProcedureParameterSpec>>> ReadP
         return byObject;
     }
 
-public static async Task<Dictionary<string, List<FunctionParameterSpec>>> ReadFunctionParametersAsync(
+    public static async Task<Dictionary<string, List<FunctionParameterSpec>>> ReadFunctionParametersAsync(
         SqlConnection connection, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -232,6 +232,7 @@ public static async Task<Dictionary<string, List<FunctionParameterSpec>>> ReadFu
     private static void AddColumnRow(
         SqlDataReader reader, int offset, Dictionary<string, LiveLineageParityChecker.ActualColumn> columns)
     {
+
         if (reader.IsDBNull(offset) || reader.IsDBNull(offset + 1))
         {
             return;

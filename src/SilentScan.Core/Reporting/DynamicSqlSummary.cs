@@ -10,10 +10,11 @@ public sealed record DynamicSqlSummary(
     IReadOnlyDictionary<string, int> UnanalyzableReasonCounts,
     int PartiallyAnalyzedCount = 0)
 {
-public double AnalyzedFraction => TotalCallSites == 0 ? 0d : (double)AnalyzedCount / TotalCallSites;
+    public double AnalyzedFraction => TotalCallSites == 0 ? 0d : (double)AnalyzedCount / TotalCallSites;
 
     public static DynamicSqlSummary From(IReadOnlyList<DynamicSqlFinding> findings)
     {
+
         var analyzedSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var unanalyzableSites = new HashSet<(string SourcePath, int Line, int Column)>();
         var innerParseFailedSites = new HashSet<(string SourcePath, int Line, int Column)>();

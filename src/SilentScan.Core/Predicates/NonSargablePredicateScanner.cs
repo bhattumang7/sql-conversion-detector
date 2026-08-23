@@ -11,22 +11,22 @@ namespace SilentScan.Core.Predicates;
 
 public static class NonSargablePredicateScanner
 {
-private static readonly HashSet<string> AggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> AggregateFunctionNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "SUM", "COUNT", "COUNT_BIG", "AVG", "MIN", "MAX",
         "STDEV", "STDEVP", "VAR", "VARP",
         "GROUPING", "GROUPING_ID", "STRING_AGG", "CHECKSUM_AGG", "APPROX_COUNT_DISTINCT",
     };
 
-public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult) =>
+    public static IReadOnlyList<SargabilityFinding> Scan(SqlParseResult parseResult) =>
         Scan(parseResult, new DatabaseCatalog(), new LineageCatalog(new Dictionary<string, ResolvedRelation>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase), new SkipLedger()));
 
-public static IReadOnlyList<SargabilityFinding> Scan(
+    public static IReadOnlyList<SargabilityFinding> Scan(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null) =>
         ScanFull(parseResult, catalog, lineage, enclosingScope, ledger, callerScopeByCalleeScope).Findings;
 
-public static (IReadOnlyList<SargabilityFinding> Findings, IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings) ScanFull(
+    public static (IReadOnlyList<SargabilityFinding> Findings, IReadOnlyList<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings) ScanFull(
         SqlParseResult parseResult, DatabaseCatalog catalog, LineageCatalog lineage, DynamicSqlScope? enclosingScope = null, SkipLedger? ledger = null,
         IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope = null)
     {
@@ -45,7 +45,7 @@ public static (IReadOnlyList<SargabilityFinding> Findings, IReadOnlyList<Tempora
     {
         private bool _inFilterContext;
 
-private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
+        private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
 
         private static readonly IReadOnlySet<TSqlFragment> EmptyDeadPredicateSet = new HashSet<TSqlFragment>();
 
@@ -60,7 +60,7 @@ private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
             return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
         }
 
-private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
             ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
             if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
@@ -85,7 +85,7 @@ private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
 
         public List<TemporalBoundaryPrecisionFinding> TemporalBoundaryFindings { get; } = [];
 
-public void SeedEnclosingScope(TSqlFragment rootFragment)
+        public void SeedEnclosingScope(TSqlFragment rootFragment)
         {
             if (enclosingScope?.TriggerTarget is { } target)
             {
@@ -93,7 +93,7 @@ public void SeedEnclosingScope(TSqlFragment rootFragment)
             }
         }
 
-public override void ExplicitVisit(QuerySpecification node)
+        public override void ExplicitVisit(QuerySpecification node)
         {
             ScopeStack.Push(FromScopeResolver.Resolve(node.FromClause, CurrentResolutionContext()));
 
@@ -124,7 +124,7 @@ public override void ExplicitVisit(QuerySpecification node)
             PopCteScope();
         }
 
-public override void ExplicitVisit(UpdateStatement node)
+        public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
             PushCteScope(node.WithCtesAndXmlNamespaces);
@@ -186,7 +186,7 @@ public override void ExplicitVisit(UpdateStatement node)
             _inFilterContext = previous;
         }
 
-public override void ExplicitVisit(QualifiedJoin node)
+        public override void ExplicitVisit(QualifiedJoin node)
         {
             node.FirstTableReference?.Accept(this);
             node.SecondTableReference?.Accept(this);
@@ -250,7 +250,7 @@ public override void ExplicitVisit(QualifiedJoin node)
             }
         }
 
-public override void Visit(InPredicate node)
+        public override void Visit(InPredicate node)
         {
             if (!_inFilterContext)
             {
@@ -290,8 +290,10 @@ public override void Visit(InPredicate node)
                     Add(SargabilityFindingKind.LeadingWildcardLike, columnName, literal.Value, node, columnRef);
                     break;
                 case StringLiteral:
+
                     break;
                 default:
+
                     Add(SargabilityFindingKind.LikePatternNotLiteral, columnName, detail: null, node, columnRef);
                     break;
             }
@@ -299,6 +301,7 @@ public override void Visit(InPredicate node)
 
         private void InspectSide(ScalarExpression expression)
         {
+
             while (expression is ParenthesisExpression parenthesized)
             {
                 expression = parenthesized.Expression;
@@ -344,6 +347,7 @@ public override void Visit(InPredicate node)
 
         private void InspectFunctionCall(FunctionCall functionCall, (ColumnReferenceExpression Ref, string Name) named)
         {
+
             if (JsonComputedColumnMatcher.IsJsonPathFunction(functionCall.FunctionName.Value)
                 && ResolveIndexInfo(named.Ref).TableQualifiedName is { } jsonTable
                 && JsonComputedColumnMatcher.HasIndexedMatchingComputedColumn(catalog, jsonTable, named.Name, functionCall))
@@ -396,7 +400,7 @@ public override void Visit(InPredicate node)
             }
         }
 
-private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumn(ScalarExpression expression) => expression switch
+        private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumn(ScalarExpression expression) => expression switch
         {
             ColumnReferenceExpression columnRef when ColumnName(columnRef) is { } name => (columnRef, name),
             ParenthesisExpression parenthesis => FindAnyColumn(parenthesis.Expression),
@@ -407,17 +411,19 @@ private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumn(Scala
             FunctionCall functionCall => functionCall.Parameters.Select(FindAnyColumn).FirstOrDefault(r => r is not null),
             CoalesceExpression coalesce => coalesce.Expressions.Select(FindAnyColumn).FirstOrDefault(r => r is not null),
             NullIfExpression nullIf => FindAnyColumn(nullIf.FirstExpression) ?? FindAnyColumn(nullIf.SecondExpression),
+
             IIfCall iif => FindAnyColumnInBoolean(iif.Predicate) ?? FindAnyColumn(iif.ThenExpression) ?? FindAnyColumn(iif.ElseExpression),
             SimpleCaseExpression simpleCase => FindAnyColumn(simpleCase.InputExpression)
                 ?? simpleCase.WhenClauses.Select(w => FindAnyColumn(w.ThenExpression)).FirstOrDefault(r => r is not null)
                 ?? (simpleCase.ElseExpression is { } elseExpr ? FindAnyColumn(elseExpr) : null),
+
             SearchedCaseExpression searchedCase => searchedCase.WhenClauses.Select(w => FindAnyColumnInBoolean(w.WhenExpression)).FirstOrDefault(r => r is not null)
                 ?? searchedCase.WhenClauses.Select(w => FindAnyColumn(w.ThenExpression)).FirstOrDefault(r => r is not null)
                 ?? (searchedCase.ElseExpression is { } elseExpr ? FindAnyColumn(elseExpr) : null),
             _ => null,
         };
 
-private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumnInBoolean(BooleanExpression expression) => expression switch
+        private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumnInBoolean(BooleanExpression expression) => expression switch
         {
             BooleanComparisonExpression comparison => FindAnyColumn(comparison.FirstExpression) ?? FindAnyColumn(comparison.SecondExpression),
             BooleanBinaryExpression binary => FindAnyColumnInBoolean(binary.FirstExpression) ?? FindAnyColumnInBoolean(binary.SecondExpression),
@@ -427,7 +433,7 @@ private static (ColumnReferenceExpression Ref, string Name)? FindAnyColumnInBool
             _ => null,
         };
 
-private static (ColumnReferenceExpression Ref, string Name)? FirstNamedColumn(IList<ScalarExpression> parameters)
+        private static (ColumnReferenceExpression Ref, string Name)? FirstNamedColumn(IList<ScalarExpression> parameters)
         {
             foreach (var parameter in parameters.OfType<ColumnReferenceExpression>())
             {
@@ -451,7 +457,7 @@ private static (ColumnReferenceExpression Ref, string Name)? FirstNamedColumn(IL
                 TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Common.FragmentTextRenderer.Render(node)));
         }
 
-private bool IsKnownNotNullColumn(ColumnReferenceExpression columnRef)
+        private bool IsKnownNotNullColumn(ColumnReferenceExpression columnRef)
         {
             var (tableQualifiedName, _, _) = ResolveIndexInfo(columnRef);
             if (tableQualifiedName is not { } table || ColumnName(columnRef) is not { } columnName)
@@ -463,7 +469,7 @@ private bool IsKnownNotNullColumn(ColumnReferenceExpression columnRef)
             return column is { IsNullable: false };
         }
 
-private bool TryAddCharindexOrLeftFinding(ScalarExpression candidateSide, ScalarExpression otherSide, BooleanComparisonType comparisonType)
+        private bool TryAddCharindexOrLeftFinding(ScalarExpression candidateSide, ScalarExpression otherSide, BooleanComparisonType comparisonType)
         {
             while (candidateSide is ParenthesisExpression parenthesized)
             {
@@ -522,7 +528,7 @@ private bool TryAddCharindexOrLeftFinding(ScalarExpression candidateSide, Scalar
             return true;
         }
 
-private void TryAddTemporalBoundaryFinding(BooleanTernaryExpression node)
+        private void TryAddTemporalBoundaryFinding(BooleanTernaryExpression node)
         {
             if (node.FirstExpression is not ColumnReferenceExpression columnRef || ColumnName(columnRef) is not { } columnName)
             {
@@ -570,7 +576,7 @@ private void TryAddTemporalBoundaryFinding(BooleanTernaryExpression node)
                 TableQualifiedName: tableQualifiedName, Indexed: indexed, PredicateFragmentText: Common.FragmentTextRenderer.Render(functionCall)));
         }
 
-private (string? TableQualifiedName, bool? Indexed, SqlType? Type) ResolveIndexInfo(ColumnReferenceExpression columnRef)
+        private (string? TableQualifiedName, bool? Indexed, SqlType? Type) ResolveIndexInfo(ColumnReferenceExpression columnRef)
         {
             if (ScopeStack.Count == 0)
             {
@@ -582,6 +588,7 @@ private (string? TableQualifiedName, bool? Indexed, SqlType? Type) ResolveIndexI
 
             return provenance switch
             {
+
                 ColumnProvenance.BaseColumn baseColumn => (
                     baseColumn.TableQualifiedName,
                     catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.IsIndexedColumn(baseColumn.ColumnName),

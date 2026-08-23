@@ -49,6 +49,7 @@ public sealed class ScanProgressTests
     [Fact]
     public void Advance_FromManyThreadsCountsEveryItemExactlyOnce()
     {
+
         const int total = 5_000;
         var writer = new StringWriter();
         var progress = new TextWriterScanProgress(writer);
@@ -109,6 +110,7 @@ public sealed class ScanProgressTests
     [Fact]
     public void Done_FormatsInvariantlyRegardlessOfAmbientCulture()
     {
+
         var original = CultureInfo.CurrentCulture;
         try
         {

@@ -75,6 +75,7 @@ public static class CodeMetricScanner
 
     private static string[] ReconstructedLines(TSqlFragment fragment)
     {
+
         if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
         {
             return [];
@@ -171,6 +172,7 @@ public static class CodeMetricScanner
             _nestingDepth++;
             if (_nestingDepth == thresholds.MaxNestingDepth + 1)
             {
+
                 Findings.Add(new CodeMetricFinding(
                     CodeMetricFindingKind.NestingTooDeep, sourcePath, sourcePath,
                     node.StartLine, node.StartColumn, _nestingDepth, thresholds.MaxNestingDepth));
@@ -200,6 +202,7 @@ public static class CodeMetricScanner
 
             if (statementList is null)
             {
+
                 return;
             }
 

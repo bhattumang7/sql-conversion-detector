@@ -22,6 +22,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task SingleCallerLiteral_SeedsCalleeParameter_DynamicSqlAnalyzedAndScanForced()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Orders (Status varchar(20) NOT NULL, INDEX IX_Status (Status));
             GO
@@ -47,6 +48,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task SingleCallerVariable_WithSingleUnconditionalLiteralAssignment_SeedsCalleeParameter_ScanForced()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Orders (Status varchar(20) NOT NULL, INDEX IX_Status (Status));
             GO
@@ -72,6 +74,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task TwoCallersWithDifferentLiterals_BothAssembliesAnalyzed()
     {
+
         const string SharedDdl = """
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
@@ -101,6 +104,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task NoKnownCaller_QuotedPlaceholderPosition_MediumConfidenceScanForced_ExcludedByDefault()
     {
+
         const string sql = """
             CREATE TABLE dbo.Orders (Status varchar(20) NOT NULL, INDEX IX_Status (Status));
             GO
@@ -124,6 +128,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task NoKnownCaller_ObjectIdentifierPosition_AnalyzedWithZeroFindings()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_DropStagingTable @TableName SYSNAME AS
             BEGIN
@@ -141,6 +146,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task NoKnownCaller_ObjectIdentifierPositionInsideFullStatementWithWhereClause_AnalyzedWithZeroFindings()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_SkipChecks @SchemaName SYSNAME, @TableName SYSNAME AS
             BEGIN
@@ -158,6 +164,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task NoKnownCaller_PlaceholderBareInPredicateValuePosition_AnalyzedButNoFindingFabricated()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_SkipChecks @SchemaName SYSNAME, @Flag SYSNAME AS
             BEGIN
@@ -175,6 +182,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task NoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_QuotedOnePredicateStillFolds()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Orders (Status VARCHAR(20) NOT NULL, INDEX IX_Status (Status));
             GO
@@ -197,6 +205,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task NoKnownCaller_TwoStatementsOnlyOneHasAPlaceholder_SiblingStatementGetsOrdinaryExtraction()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Customers (Name VARCHAR(20) NOT NULL, INDEX IX_Name (Name));
             GO
@@ -218,6 +227,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task CallerPassesVariableNotLiteral_ResolvableTypeFoldsToSymbolicPlaceholder()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByStatus @Status NVARCHAR(20) AS
             BEGIN
@@ -239,6 +249,7 @@ public sealed class DynamicSqlCrossCallEdgePipelineTests
     [Fact]
     public async Task SingleCallerOmitsArgument_DefaultBehavesExactlyLikeALiteralArgument()
     {
+
         const string body = """
             CREATE TABLE dbo.Small (Code varchar(20) NOT NULL, INDEX IX_Small_Code (Code));
             GO

@@ -171,6 +171,7 @@ public sealed class ForcedSerialScannerTests
     [Fact]
     public void Intrinsic_RowCount_NeverFires()
     {
+
         var findings = Scan("SELECT Id FROM dbo.T WHERE @@ROWCOUNT > 0;");
 
         Assert.Empty(findings);

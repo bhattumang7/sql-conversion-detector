@@ -26,6 +26,7 @@ public sealed class LivePlanCacheRankingTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_WithPlanCacheEvidence_ObservesRealExecutionsOfAConvertingPredicate()
     {
+
         const string executions = """
             EXEC dbo.usp_FindOrder @OrderCode = N'ABC123';
             EXEC dbo.usp_FindOrder @OrderCode = N'DEF456';

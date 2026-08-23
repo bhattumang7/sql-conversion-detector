@@ -9,7 +9,7 @@ public static class UndersizedDeclarationScanner
 {
     private const int MaxFlaggedLength = 2;
 
-public static IReadOnlyList<UndersizedDeclarationFinding> ScanCatalog(DatabaseCatalog catalog)
+    public static IReadOnlyList<UndersizedDeclarationFinding> ScanCatalog(DatabaseCatalog catalog)
     {
         var findings = new List<UndersizedDeclarationFinding>();
 
@@ -40,7 +40,7 @@ public static IReadOnlyList<UndersizedDeclarationFinding> ScanCatalog(DatabaseCa
         ];
     }
 
-public static IReadOnlyList<UndersizedDeclarationFinding> ScanDeclarations(SqlParseResult parseResult, DatabaseCatalog catalog)
+    public static IReadOnlyList<UndersizedDeclarationFinding> ScanDeclarations(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
         var visitor = new Visitor(parseResult.SourcePath, catalog);
         parseResult.Fragment.Accept(visitor);

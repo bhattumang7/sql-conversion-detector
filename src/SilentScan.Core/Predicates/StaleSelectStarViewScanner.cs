@@ -54,7 +54,7 @@ public static class StaleSelectStarViewScanner
         ];
     }
 
-private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
+    private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
         queryExpression switch
         {
             QueryParenthesisExpression parenthesis => FindOutermostStarLine(parenthesis.QueryExpression),
@@ -62,7 +62,7 @@ private static int? FindOutermostStarLine(QueryExpression queryExpression) =>
             _ => null,
         };
 
-private static string? FindSingleBaseTable(QueryExpression queryExpression, HashSet<string> cteNames) =>
+    private static string? FindSingleBaseTable(QueryExpression queryExpression, HashSet<string> cteNames) =>
         queryExpression switch
         {
             QueryParenthesisExpression parenthesis => FindSingleBaseTable(parenthesis.QueryExpression, cteNames),

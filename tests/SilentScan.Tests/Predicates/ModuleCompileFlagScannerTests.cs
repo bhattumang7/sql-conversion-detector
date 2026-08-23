@@ -54,6 +54,7 @@ public sealed class ModuleCompileFlagScannerTests
     [Fact]
     public void IsRecompiledUnknown_NeverGuessesFire()
     {
+
         var findings = Scan("CREATE PROCEDURE dbo.usp_Test AS BEGIN SELECT 1; END");
 
         Assert.Empty(findings);
@@ -73,6 +74,7 @@ public sealed class ModuleCompileFlagScannerTests
     [Fact]
     public void UsesDatabaseCollationTrue_SchemaBound_DoesNotFire()
     {
+
         var findings = Scan(
             "CREATE FUNCTION dbo.usp_Test() RETURNS @t TABLE (Val VARCHAR(50)) AS BEGIN RETURN; END",
             usesDatabaseCollation: true, isSchemaBound: true);

@@ -36,6 +36,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void HeapWithZeroIndexes_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "StagingImport", [Column("Id", IntType)], []));
 
@@ -74,6 +75,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void HeapOnMemoryOptimizedTable_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var hashIndex = new CatalogIndex("IX_Orders_CustomerId", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsClustered: false);
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [hashIndex], isMemoryOptimized: true));
@@ -86,6 +88,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void ClusteredColumnstoreTable_NeverReadAsHeap()
     {
+
         var catalog = new DatabaseCatalog();
         var cci = new CatalogIndex(null, CatalogIndexKind.Index, IsUnique: false, [], [], IsColumnstore: true, IsClustered: true);
         var secondaryIndex = new CatalogIndex("IX_Orders_CustomerId", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsClustered: false);
@@ -124,6 +127,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void ClusteredColumnstore_NeverFiresNonUniqueOrWideOrGuidKinds()
     {
+
         var catalog = new DatabaseCatalog();
         var cci = new CatalogIndex(null, CatalogIndexKind.Index, IsUnique: false, [], [], IsColumnstore: true, IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType)], [cci]));
@@ -151,6 +155,7 @@ public sealed class IndexDesignScannerTests
     public void WideClusteredKey_FiresOnByteWidth()
     {
         var catalog = new DatabaseCatalog();
+
         var wideString = new SqlType(SqlTypeCategory.NVarChar, Length: 20);
         var clustered = new CatalogIndex("CIX_Wide", CatalogIndexKind.Index, IsUnique: true, ["Code"], [], IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "Wide", [Column("Code", wideString)], [clustered]));
@@ -176,6 +181,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void WideClusteredKey_UnresolvedColumnType_NeverGuessesByteWidth()
     {
+
         var catalog = new DatabaseCatalog();
         var clustered = new CatalogIndex("CIX_Test", CatalogIndexKind.Index, IsUnique: true, ["A", "B"], [], IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "T", [Column("A", IntType), Column("B", type: null)], [clustered]));
@@ -203,6 +209,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void GuidClusteredKeyWithNewSequentialIdDefault_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", GuidType)], [clustered]));
@@ -229,6 +236,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void NonGuidClusteredKeyWithNewIdDefault_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType)], [clustered]));
@@ -260,6 +268,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void ViewsAndTempTables_NeverScanned()
     {
+
         var catalog = new DatabaseCatalog();
         var nonclustered = new CatalogIndex("IX", CatalogIndexKind.Index, IsUnique: false, ["A"], [], IsClustered: false);
         catalog.AddOrReplace(new CatalogTable("dbo", "SomeView", CatalogTableKind.TemporaryTable,
@@ -287,6 +296,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void DifferentUniquenessOrKind_NeverFiresDuplicate()
     {
+
         var catalog = new DatabaseCatalog();
         var unique = new CatalogIndex("UQ_A", CatalogIndexKind.UniqueConstraint, IsUnique: true, ["CustomerId"], []);
         var nonUnique = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], []);
@@ -300,6 +310,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void FilteredIndexes_NeverComparedForDuplicateOrSubsumed()
     {
+
         var catalog = new DatabaseCatalog();
         var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsFiltered: true);
         var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsFiltered: true);
@@ -340,6 +351,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void NonPrefixColumnOrder_NeverFiresSubsumed()
     {
+
         var catalog = new DatabaseCatalog();
         var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["OrderDate"], []);
         var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId", "OrderDate"], []);
@@ -353,6 +365,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void SubsumedIndexWithUncoveredInclude_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var narrow = new CatalogIndex("IX_Narrow", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Note"]);
         var wide = new CatalogIndex("IX_Wide", CatalogIndexKind.Index, IsUnique: false, ["CustomerId", "OrderDate"], []);
@@ -394,6 +407,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void HypotheticalIndex_FiresHypotheticalKindOnly_NeverDisabledToo()
     {
+
         var catalog = new DatabaseCatalog();
         var hypothetical = new CatalogIndex(
             "_dta_index_Orders_5_1234", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [],
@@ -469,6 +483,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void WideClusteredKey_NeverAlsoFiresManyKeyColumnsIndex()
     {
+
         var catalog = new DatabaseCatalog();
         var columns = Enumerable.Range(0, IndexDesignScanner.ManyKeyColumnsThreshold).Select(i => $"Col{i}").ToArray();
         var clustered = new CatalogIndex("CIX_Wide", CatalogIndexKind.Index, IsUnique: true, columns, [], IsClustered: true);
@@ -532,6 +547,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void ForeignKeyCoveredOnlyByFilteredIndex_StillFires()
     {
+
         var catalog = new DatabaseCatalog();
         var filteredIndex = new CatalogIndex("IX_Filtered", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [], IsFiltered: true);
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("Id", IntType), Column("CustomerId", IntType)], [filteredIndex]));
@@ -592,6 +608,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void TooFewColumns_NeverFiresRatioChecks_EvenAt100Percent()
     {
+
         var catalog = new DatabaseCatalog();
         var columns = new List<CatalogColumn>
         {
@@ -650,6 +667,7 @@ public sealed class IndexDesignScannerTests
     public void FilteredIndex_FilterColumnMissingFromKeyAndInclude_Fires()
     {
         var catalog = new DatabaseCatalog();
+
         var filtered = new CatalogIndex(
             "IX_Orders_Active", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], [],
             IsFiltered: true, FilterDefinition: "([IsActive]=(1))");
@@ -856,6 +874,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void NonclusteredKeyColumn_VarcharAtNonclusteredLimit_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var index = new CatalogIndex("IX_AtLimit", CatalogIndexKind.Index, IsUnique: false, ["Notes"], []);
         catalog.AddOrReplace(Table("dbo", "Docs", [Column("Notes", new SqlType(SqlTypeCategory.VarChar, Length: 1700))], [index]));
@@ -868,6 +887,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void ClusteredKeyColumn_VarcharOverClusteredButUnderNonclusteredLimit_Fires()
     {
+
         var catalog = new DatabaseCatalog();
         var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Code"], [], IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "Docs", [Column("Code", new SqlType(SqlTypeCategory.VarChar, Length: 901))], [index]));
@@ -880,6 +900,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void FixedLengthKeyColumn_CharOverLimit_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var index = new CatalogIndex("PK_Docs", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Code"], [], IsClustered: true);
         catalog.AddOrReplace(Table("dbo", "Docs", [Column("Code", new SqlType(SqlTypeCategory.Char, Length: 901))], [index]));
@@ -908,6 +929,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void TwoIndexes_SameKeyDifferentSortDirection_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"], KeyColumnIsDescendingRaw: [false]);
         var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Phone"], KeyColumnIsDescendingRaw: [true]);
@@ -924,6 +946,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void TwoIndexes_UnknownSortDirection_NeverGuessesMerge()
     {
+
         var catalog = new DatabaseCatalog();
         var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"]);
         var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Phone"]);
@@ -940,6 +963,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void TwoIndexes_SubsetInclude_NeverFiresMergeable()
     {
+
         var catalog = new DatabaseCatalog();
         var a = new CatalogIndex("IX_A", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email"], KeyColumnIsDescendingRaw: [false]);
         var b = new CatalogIndex("IX_B", CatalogIndexKind.Index, IsUnique: false, ["CustomerId"], ["Email", "Phone"], KeyColumnIsDescendingRaw: [false]);
@@ -982,6 +1006,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void ColumnstoreIndex_NoDmlTargetSetProvided_NeverFires()
     {
+
         var catalog = new DatabaseCatalog();
         var columnstore = new CatalogIndex("CCI_Facts", CatalogIndexKind.Index, IsUnique: false, [], [], IsClustered: true, IsColumnstore: true);
         catalog.AddOrReplace(Table("dbo", "Facts", [Column("Id", IntType)], [columnstore]));
@@ -1034,6 +1059,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void NonIdentityClusteredKey_NeverFiresMonotonic()
     {
+
         var catalog = new DatabaseCatalog();
         var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderCode"], [], IsClustered: true, OptimizeForSequentialKey: false);
         catalog.AddOrReplace(Table("dbo", "Orders", [Column("OrderCode", new SqlType(SqlTypeCategory.VarChar, Length: 20))], [clustered]));
@@ -1046,6 +1072,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void IdentityClusteredKey_NegativeIncrement_NeverFiresMonotonic()
     {
+
         var catalog = new DatabaseCatalog();
         var identityColumn = new CatalogColumn("Id", IntType, IsNullable: false, IsIdentity: true, IsComputed: false, IsPersisted: false, IdentitySeed: 1000, IdentityIncrement: -1);
         var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["Id"], [], IsClustered: true, OptimizeForSequentialKey: false);
@@ -1079,6 +1106,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void NonclusteredIndexOnSamePartitionScheme_KeyedOnDifferentColumn_Fires()
     {
+
         var catalog = new DatabaseCatalog();
         var clustered = new CatalogIndex(
             "PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderDate", "OrderId"], [],
@@ -1114,6 +1142,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void UnpartitionedTable_NeverFiresNonAligned()
     {
+
         var catalog = new DatabaseCatalog();
         var clustered = new CatalogIndex("PK_Orders", CatalogIndexKind.PrimaryKey, IsUnique: true, ["OrderId"], [], IsClustered: true);
         var nonclustered = new CatalogIndex("IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], []);
@@ -1127,6 +1156,7 @@ public sealed class IndexDesignScannerTests
     [Fact]
     public void PartitionedHeap_NeverFiresNonAligned()
     {
+
         var catalog = new DatabaseCatalog();
         var nonAligned = new CatalogIndex(
             "IX_Orders_Region", CatalogIndexKind.Index, IsUnique: false, ["Region"], [],

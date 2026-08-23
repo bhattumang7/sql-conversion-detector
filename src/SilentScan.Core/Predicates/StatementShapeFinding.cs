@@ -4,17 +4,17 @@ namespace SilentScan.Core.Predicates;
 
 public enum StatementShapeFindingKind
 {
-InsertWithoutColumnList,
+    InsertWithoutColumnList,
 
-OrdinalOrderBy,
+    OrdinalOrderBy,
 
-TopWithoutOrderBy,
+    TopWithoutOrderBy,
 
-TableWithNoPrimaryKey,
+    TableWithNoPrimaryKey,
 
-MissingSetNocountOn,
+    MissingSetNocountOn,
 
-BareSelectStar,
+    BareSelectStar,
 }
 
 public sealed record StatementShapeFinding(

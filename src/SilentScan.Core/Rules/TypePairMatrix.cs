@@ -26,16 +26,16 @@ public sealed class TypePairMatrix
         _byKey = entries.ToDictionary(e => (e.ColumnCategory, e.OtherCategory, e.CollationName));
     }
 
-public TypePairOutcome? TryGetOutcome(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string? collationName = null) =>
+    public TypePairOutcome? TryGetOutcome(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, string? collationName = null) =>
         _byKey.TryGetValue((columnCategory, otherCategory, collationName), out var outcome) ? outcome : null;
 
-public TypePairOutcome? TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory)
+    public TypePairOutcome? TryGetOutcomeAgreeingAcrossCollations(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory)
     {
         var variants = Entries.Where(e => e.ColumnCategory == columnCategory && e.OtherCategory == otherCategory && e.CollationName is not null).ToList();
         return TryGetAgreeingOutcome(variants);
     }
 
-public TypePairOutcome? TryGetOutcomeAgreeingWithinFamily(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, bool isSqlFamily)
+    public TypePairOutcome? TryGetOutcomeAgreeingWithinFamily(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, bool isSqlFamily)
     {
         var variants = Entries.Where(e =>
             e.ColumnCategory == columnCategory
@@ -45,7 +45,7 @@ public TypePairOutcome? TryGetOutcomeAgreeingWithinFamily(SqlTypeCategory column
         return TryGetAgreeingOutcome(variants);
     }
 
-public TypePairOutcome? TryGetOutcomeForColumnCollation(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, Collation? collation)
+    public TypePairOutcome? TryGetOutcomeForColumnCollation(SqlTypeCategory columnCategory, SqlTypeCategory otherCategory, Collation? collation)
     {
         if (collation is null)
         {

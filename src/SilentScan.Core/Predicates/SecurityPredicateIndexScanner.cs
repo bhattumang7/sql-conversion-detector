@@ -55,6 +55,7 @@ public static class SecurityPredicateIndexScanner
 
         if (boundColumns.Count == 0)
         {
+
             return;
         }
 
@@ -76,7 +77,7 @@ public static class SecurityPredicateIndexScanner
             table.SourceLine));
     }
 
-private static FunctionCall? TryParseFunctionCall(string definitionText)
+    private static FunctionCall? TryParseFunctionCall(string definitionText)
     {
         var result = SqlScriptParser.ParseText("security-predicate.sql", $"SELECT {definitionText};");
         if (result.HasErrors

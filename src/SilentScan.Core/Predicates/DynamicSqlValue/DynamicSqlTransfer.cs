@@ -25,19 +25,20 @@ public sealed record TransferContext(
 
 public static class DynamicSqlTransfer
 {
-public static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, IReadOnlyList<string> activeGuards, TransferContext context) => statement switch
+    public static Action<Dictionary<string, SqlTextValue>, bool> CompileLeaf(TSqlStatement statement, IReadOnlyList<string> activeGuards, TransferContext context) => statement switch
     {
         DeclareVariableStatement declare => (state, _) => CompileDeclare(declare, context, state),
         SetVariableStatement set => (state, _) => CompileAssignment(set.Variable.Name, set.AssignmentKind, set.Expression, set.FunctionCallExists, set, context, state),
         SelectStatement select => (state, _) => CompileSelectAssignment(select, context, state),
         ExecuteStatement exec => (state, emit) => CompileExecute(exec, activeGuards, context, state, emit),
         ProcedureStatementBodyBase { StatementList: not null } procOrFunc => (_, emit) => CompileScopedBody(procOrFunc, context, emit),
-        ProcedureStatementBodyBase => static (_, _) => { },        TriggerStatementBody { StatementList: not null } trigger => (_, emit) => CompileTriggerBody(trigger, context, emit),
+        ProcedureStatementBodyBase => static (_, _) => { },
+        TriggerStatementBody { StatementList: not null } trigger => (_, emit) => CompileTriggerBody(trigger, context, emit),
         TriggerStatementBody => static (_, _) => { },
         _ => CompileHavocDefault(statement, context),
     };
 
-private static void CompileScopedBody(ProcedureStatementBodyBase procOrFunc, TransferContext context, bool emit)
+    private static void CompileScopedBody(ProcedureStatementBodyBase procOrFunc, TransferContext context, bool emit)
     {
         if (!emit)
         {
@@ -64,7 +65,7 @@ private static void CompileScopedBody(ProcedureStatementBodyBase procOrFunc, Tra
         }
     }
 
-private static Dictionary<string, SqlTextValue> BuildParameterSeed(
+    private static Dictionary<string, SqlTextValue> BuildParameterSeed(
         string qualifiedName, IList<ProcedureParameter> formalParameters, TransferContext context)
     {
         var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase);
@@ -116,6 +117,7 @@ private static Dictionary<string, SqlTextValue> BuildParameterSeed(
             var argument = edge.Arguments.FirstOrDefault(a => string.Equals(a.FormalParameterName, paramName, StringComparison.OrdinalIgnoreCase));
             if (argument is null)
             {
+
                 var declaredType = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
                 seed[paramName] = formal.Value is { } defaultExpression
                     ? WidenForPossibleExternalCallers(
@@ -128,6 +130,7 @@ private static Dictionary<string, SqlTextValue> BuildParameterSeed(
 
             if (argument.FormalParameterIsOutput)
             {
+
                 seed[paramName] = SeedSymbolicOrTaint(formal, "parameter-not-seeded:output-argument", context);
                 continue;
             }
@@ -148,7 +151,7 @@ private static Dictionary<string, SqlTextValue> BuildParameterSeed(
     private static SqlTextValue WidenForPossibleExternalCallers(SqlTextValue seeded, ProcedureParameter formal, TransferContext context) =>
         SqlTextValue.Join(seeded, SeedSymbolicOrTaint(formal, "parameter-not-seeded:external-caller-possible", context), guardText: string.Empty, context.Cap, context.Span(formal));
 
-private static SqlTextValue SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, ProcedureParameter formal, TransferContext context)
+    private static SqlTextValue SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> edges, ProcedureParameter formal, TransferContext context)
     {
         var paramName = formal.VariableName.Value;
         var declaredType = SqlTypeReferenceResolver.Resolve(formal.DataType, columnCollation: null);
@@ -189,7 +192,7 @@ private static SqlTextValue SeedFromMultipleEdges(IReadOnlyList<ProcCallEdge> ed
         cfg.Solve(trigger.StatementList!.Statements, seed);
     }
 
-internal static void SeedBatchDeclaredVariables(IList<TSqlStatement> statements, TransferContext context, Dictionary<string, SqlTextValue> seed)
+    internal static void SeedBatchDeclaredVariables(IList<TSqlStatement> statements, TransferContext context, Dictionary<string, SqlTextValue> seed)
     {
         var collector = new BatchDeclaredVariableCollector();
         foreach (var statement in statements)
@@ -210,7 +213,7 @@ internal static void SeedBatchDeclaredVariables(IList<TSqlStatement> statements,
         }
     }
 
-private sealed class BatchDeclaredVariableCollector : TSqlFragmentVisitor
+    private sealed class BatchDeclaredVariableCollector : TSqlFragmentVisitor
     {
         public List<(string Name, DeclareVariableElement Element)> Declarations { get; } = [];
 
@@ -224,10 +227,12 @@ private sealed class BatchDeclaredVariableCollector : TSqlFragmentVisitor
 
         public override void ExplicitVisit(ProcedureStatementBodyBase node)
         {
+
         }
 
         public override void ExplicitVisit(TriggerStatementBody node)
         {
+
         }
     }
 
@@ -241,7 +246,7 @@ private sealed class BatchDeclaredVariableCollector : TSqlFragmentVisitor
     private static IList<ProcedureParameter>? ProcedureOrFunctionParameters(ProcedureStatementBodyBase procOrFunc) =>
         procOrFunc is ProcedureStatementBody proc ? proc.Parameters : null;
 
-private static void RecordOutputParameterSummaries(string qualifiedName, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> folded, TransferContext context)
+    private static void RecordOutputParameterSummaries(string qualifiedName, IList<ProcedureParameter> formalParameters, Dictionary<string, SqlTextValue> folded, TransferContext context)
     {
         foreach (var formal in formalParameters)
         {
@@ -285,6 +290,7 @@ private static void RecordOutputParameterSummaries(string qualifiedName, IList<P
             var site = context.Span(element);
             if (element.Value is null or NullLiteral)
             {
+
                 state[name] = declaredType is { } type
                     ? new SqlTextValue.Template([new TemplatePiece.Hole(type, site, HoleKind.UninitializedDeclare)]) { DeclaredType = type }
                     : new SqlTextValue.Tainted("no-initializer", site);
@@ -295,7 +301,7 @@ private static void RecordOutputParameterSummaries(string qualifiedName, IList<P
         }
     }
 
-private static SqlTextValue FoldByDeclaredType(
+    private static SqlTextValue FoldByDeclaredType(
         ScalarExpression expression, SqlType? declaredType, TransferContext context, Dictionary<string, SqlTextValue> state, SourceSpan site)
     {
         if (declaredType is { Category: SqlTypeCategory.TinyInt or SqlTypeCategory.SmallInt or SqlTypeCategory.Int or SqlTypeCategory.BigInt }
@@ -315,7 +321,7 @@ private static SqlTextValue FoldByDeclaredType(
         return folded with { DeclaredType = declaredType };
     }
 
-private static SqlTextValue? TryFoldScalarSubqueryFromSingleKnownTable(ScalarSubquery subquery, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static SqlTextValue? TryFoldScalarSubqueryFromSingleKnownTable(ScalarSubquery subquery, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         if (context.Catalog is not { } catalog
             || subquery.QueryExpression is not QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } spec
@@ -374,12 +380,12 @@ private static SqlTextValue? TryFoldScalarSubqueryFromSingleKnownTable(ScalarSub
         state[name] = FoldByDeclaredType(expression, declaredType, context, state, span);
     }
 
-private static SqlTextValue HavocOrTaint(string reason, SourceSpan span, SqlType? declaredType) =>
+    private static SqlTextValue HavocOrTaint(string reason, SourceSpan span, SqlType? declaredType) =>
         declaredType is { } type
             ? new SqlTextValue.Template([new TemplatePiece.Hole(type, span, HoleKind.HavocWrite)]) { DeclaredType = type }
             : new SqlTextValue.Tainted(reason, span);
 
-private static bool TryCompileSelfReferentialAppend(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static bool TryCompileSelfReferentialAppend(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         if (select.QueryExpression is not QuerySpecification { SelectElements: [SelectSetVariable { AssignmentKind: AssignmentKind.Equals } setVar] }
             || setVar.Expression is not BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add } binary
@@ -395,14 +401,14 @@ private static bool TryCompileSelfReferentialAppend(SelectStatement select, Tran
         return true;
     }
 
-private static bool IsLeftmostSelfReference(ScalarExpression expression, string name) => expression switch
+    private static bool IsLeftmostSelfReference(ScalarExpression expression, string name) => expression switch
     {
         VariableReference variable => string.Equals(variable.Name, name, StringComparison.OrdinalIgnoreCase),
         BinaryExpression { BinaryExpressionType: BinaryExpressionType.Add, FirstExpression: { } left } => IsLeftmostSelfReference(left, name),
         _ => false,
     };
 
-private static void CompileSelectAssignment(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static void CompileSelectAssignment(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         var assignedNames = new SelectSetVariableCollector();
         select.Accept(assignedNames);
@@ -434,7 +440,7 @@ private static void CompileSelectAssignment(SelectStatement select, TransferCont
         }
     }
 
-private static bool TryCompileSelectAssignmentFromSingleKnownTable(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static bool TryCompileSelectAssignmentFromSingleKnownTable(SelectStatement select, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         if (context.Catalog is not { } catalog
             || select.QueryExpression is not QuerySpecification { FromClause.TableReferences: [NamedTableReference namedTable] } spec
@@ -462,7 +468,7 @@ private static bool TryCompileSelectAssignmentFromSingleKnownTable(SelectStateme
         return true;
     }
 
-private static SqlTextValue.Template? TryFetchLiveScalar(ScalarExpression expression, CatalogTable table, WhereClause? whereClause, TransferContext context)
+    private static SqlTextValue.Template? TryFetchLiveScalar(ScalarExpression expression, CatalogTable table, WhereClause? whereClause, TransferContext context)
     {
         if (context.RowValueFetcher is not { } fetcher
             || expression is not ColumnReferenceExpression { MultiPartIdentifier.Identifiers: { Count: > 0 } selectedIdentifiers } selectedColumnRef
@@ -490,7 +496,7 @@ private static SqlTextValue.Template? TryFetchLiveScalar(ScalarExpression expres
         return combined as SqlTextValue.Template;
     }
 
-private static List<(string Column, string LiteralValue)> TryExtractLiteralEqualityKeys(WhereClause? whereClause, CatalogTable table)
+    private static List<(string Column, string LiteralValue)> TryExtractLiteralEqualityKeys(WhereClause? whereClause, CatalogTable table)
     {
         var keys = new List<(string, string)>();
         if (whereClause?.SearchCondition is { } condition)
@@ -523,6 +529,7 @@ private static List<(string Column, string LiteralValue)> TryExtractLiteralEqual
                 break;
 
             default:
+
                 break;
         }
     }
@@ -551,7 +558,7 @@ private static List<(string Column, string LiteralValue)> TryExtractLiteralEqual
         return true;
     }
 
-private static SqlTextValue? TryFoldWithColumnSplice(ScalarExpression expression, CatalogTable table, Dictionary<string, SqlTextValue> state, TransferContext context) => expression switch
+    private static SqlTextValue? TryFoldWithColumnSplice(ScalarExpression expression, CatalogTable table, Dictionary<string, SqlTextValue> state, TransferContext context) => expression switch
     {
         StringLiteral literal => new SqlTextValue.Template([new TemplatePiece.Lit(literal.Value, context.Span(literal), literal.IsNational ? 2 : 1)]),
         ParenthesisExpression paren => TryFoldWithColumnSplice(paren.Expression, table, state, context),
@@ -566,13 +573,14 @@ private static SqlTextValue? TryFoldWithColumnSplice(ScalarExpression expression
         _ => null,
     };
 
-private static void CompileExecute(ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
+    private static void CompileExecute(ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, Dictionary<string, SqlTextValue> state, bool emit)
     {
         switch (node.ExecuteSpecification.ExecutableEntity)
         {
             case ExecutableStringList stringList:
                 if (emit)
                 {
+
                     if (node.ExecuteSpecification.LinkedServer is { Value.Length: > 0 })
                     {
                         context.Findings.Add(Unanalyzable(node, context, "linked-server-execute-not-modeled"));
@@ -615,7 +623,7 @@ private static void CompileExecute(ExecuteStatement node, IReadOnlyList<string> 
         EmitScriptsOrFinding(combined, node, activeGuards, context, parameterDeclarationText: null, argumentBindings: null, isExecString: true);
     }
 
-private static readonly HashSet<string> ReservedArgumentNames = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> ReservedArgumentNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "@stmt", "@statement", "@params", "@parameters",
     };
@@ -662,7 +670,7 @@ private static readonly HashSet<string> ReservedArgumentNames = new(StringCompar
         return bindings;
     }
 
-private static string? ResolveParameterDeclarationText(ExecutableProcedureReference procRef, Dictionary<string, SqlTextValue> state, TransferContext context)
+    private static string? ResolveParameterDeclarationText(ExecutableProcedureReference procRef, Dictionary<string, SqlTextValue> state, TransferContext context)
     {
         var paramsArg = ResolveNamedOrPositionalArgument(procRef.Parameters, index: 1, "@params", "@parameters");
         if (paramsArg is null)
@@ -685,13 +693,14 @@ private static string? ResolveParameterDeclarationText(ExecutableProcedureRefere
         var assemblies = SqlTextValue.Expand(widenedTemplate, context.Cap);
         if (assemblies.Count != 1 || SqlTextValue.ContainsHole(assemblies[0]))
         {
+
             return null;
         }
 
         return string.Concat(assemblies[0].OfType<FlatPiece.Lit>().Select(l => l.Text));
     }
 
-private static ScalarExpression? ResolveNamedOrPositionalArgument(IList<ExecuteParameter> parameters, int index, params ReadOnlySpan<string> formalNames)
+    private static ScalarExpression? ResolveNamedOrPositionalArgument(IList<ExecuteParameter> parameters, int index, params ReadOnlySpan<string> formalNames)
     {
         foreach (var parameter in parameters)
         {
@@ -704,7 +713,7 @@ private static ScalarExpression? ResolveNamedOrPositionalArgument(IList<ExecuteP
         return index < parameters.Count ? parameters[index].ParameterValue : null;
     }
 
-private static void EmitScriptsOrFinding(
+    private static void EmitScriptsOrFinding(
         SqlTextValue value, ExecuteStatement node, IReadOnlyList<string> activeGuards, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
     {
         if (TryNarrowByActiveGuard(value, activeGuards) is { } narrowed)
@@ -764,7 +773,7 @@ private static void EmitScriptsOrFinding(
             .FirstOrDefault();
     }
 
-private static string? TryEmitFromValue(
+    private static string? TryEmitFromValue(
         SqlTextValue value, ExecuteStatement node, TransferContext context, string? parameterDeclarationText, IReadOnlyDictionary<string, string>? argumentBindings, bool isExecString)
     {
         var site = context.Span(node);
@@ -777,6 +786,7 @@ private static string? TryEmitFromValue(
         var widenedTemplate = (SqlTextValue.Template)widened;
         if (SqlTextValue.ExpandedPieceTotal(widenedTemplate) > SqlTextValue.MaxExpandedPieceTotal)
         {
+
             return SqlTextValue.ExpansionSizeCapReason;
         }
 
@@ -801,7 +811,7 @@ private static string? TryEmitFromValue(
         return null;
     }
 
-private static void TaintReferencedVariables(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static void TaintReferencedVariables(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         var seeded = SeedKnownOutputArguments(node, context, state);
         var span = context.Span(node);
@@ -839,7 +849,7 @@ private static void TaintReferencedVariables(ExecuteStatement node, TransferCont
         }
     }
 
-private static HashSet<string> SeedKnownOutputArguments(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
+    private static HashSet<string> SeedKnownOutputArguments(ExecuteStatement node, TransferContext context, Dictionary<string, SqlTextValue> state)
     {
         var seeded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (context.CallGraph is null || context.OutputSummaryIndex is null)
@@ -898,7 +908,7 @@ private static HashSet<string> SeedKnownOutputArguments(ExecuteStatement node, T
         public override void Visit(SelectSetVariable node) => Names.Add(node.Variable.Name);
     }
 
-private static Action<Dictionary<string, SqlTextValue>, bool> CompileHavocDefault(TSqlStatement statement, TransferContext context)
+    private static Action<Dictionary<string, SqlTextValue>, bool> CompileHavocDefault(TSqlStatement statement, TransferContext context)
     {
         var collector = new WrittenVariableCollector();
         statement.Accept(collector);

@@ -25,6 +25,7 @@ public sealed class DynamicSqlConcatDepthRegressionTests
         sb.AppendLine("DECLARE @out VARCHAR(MAX);");
         for (var v = 0; v < Vars; v++)
         {
+
             sb.Append(CultureInfo.InvariantCulture, $"IF @mode = {v * 100} SET @v{v} = 'p{v}a0 '; ");
             for (var a = 1; a < Arms; a++)
             {

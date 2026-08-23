@@ -39,6 +39,7 @@ public sealed class SqlFileDiscoveryTests
     [Fact]
     public void EnumerateSqlFiles_CustomExtension_FindsFilesSqlWouldMiss()
     {
+
         var tempDir = Directory.CreateTempSubdirectory("silentscan-discovery-");
         try
         {

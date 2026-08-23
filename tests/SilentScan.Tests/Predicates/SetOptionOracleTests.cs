@@ -88,6 +88,7 @@ public sealed class SetOptionOracleTests : OracleTestFixture
     [Fact]
     public async Task ArithAbortOff_FilteredIndexRemainsUsable_ConfirmingWhyItIsExcluded()
     {
+
         var planXml = await new PlanXmlCapture(Options).CaptureAsync(DatabaseName, Probe, ["SET ARITHABORT OFF;"]);
 
         Assert.Contains("PhysicalOp=\"Index Seek\"", planXml);

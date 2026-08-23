@@ -38,6 +38,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void ThreeLeafChain_ReportsOnceForWholeChain()
     {
+
         var findings = Scan("SELECT FirstName + ' ' + MiddleName + ' ' + LastName FROM dbo.Person;");
 
         Assert.Single(findings);
@@ -54,6 +55,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void CteSharesNameWithRealTable_ResolvesThroughCteToRealColumn_Fires()
     {
+
         var findings = Scan(
             "WITH Person AS (SELECT FirstName, MiddleName FROM dbo.Person WHERE MiddleName IS NOT NULL) " +
             "SELECT FirstName + ' ' + MiddleName FROM Person;");
@@ -66,6 +68,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void CteSharesNameWithRealTable_ButUnderlyingColumnNotNullable_NeverFires()
     {
+
         var findings = Scan(
             "WITH Person AS (SELECT FirstName, LastName FROM dbo.Person) " +
             "SELECT FirstName + ' ' + LastName FROM Person;");
@@ -100,6 +103,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void CoalesceExpression_NotAFunctionCall_StillGuardsBothChains()
     {
+
         var findings = Scan(
             "SELECT LTRIM(RTRIM(COALESCE(FirstName + ' ' + MiddleName + ' ' + LastName, FirstName + ' ' + LastName))) FROM dbo.Person;");
 
@@ -109,6 +113,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void NumericAddition_NeverFires()
     {
+
         var findings = Scan("SELECT Age + 1 FROM dbo.Person;");
 
         Assert.Empty(findings);
@@ -117,6 +122,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void UnresolvableOperand_DeclinesRatherThanGuesses()
     {
+
         var findings = Scan("DECLARE @suffix VARCHAR(10) = 'x'; SELECT FirstName + @suffix + MiddleName FROM dbo.Person;");
 
         Assert.Empty(findings);
@@ -134,6 +140,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void FromClauseCasingDiffersFromDdl_ReportsFromClauseCasing()
     {
+
         var findings = Scan("SELECT FirstName + ' ' + MiddleName FROM DBO.PERSON;");
 
         var finding = Assert.Single(findings);
@@ -151,6 +158,7 @@ public sealed class StringConcatNullScannerTests
     [Fact]
     public void ThroughView_NotAnalyzed()
     {
+
         var ddl = """
             CREATE TABLE dbo.Person (
                 Id INT NOT NULL PRIMARY KEY,

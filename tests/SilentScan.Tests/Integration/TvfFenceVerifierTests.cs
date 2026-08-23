@@ -71,6 +71,7 @@ public sealed class TvfFenceVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_MislabeledInlineTvf_IsNotConfirmed()
     {
+
         var finding = FunctionFinding(TvfFenceFindingKind.FromOrJoin, "dbo.itvf_NotAFence");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);
@@ -81,6 +82,7 @@ public sealed class TvfFenceVerifierTests : IAsyncLifetime
     [Fact]
     public async Task VerifyAsync_CorrelatedApplyKind_StillConfirmsViaDummyArguments()
     {
+
         var finding = FunctionFinding(TvfFenceFindingKind.CorrelatedApply, "dbo.fn_Fence");
 
         var result = await _verifier.VerifyAsync(DatabaseName, finding);

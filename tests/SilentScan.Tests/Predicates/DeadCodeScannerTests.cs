@@ -70,6 +70,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void IfWithOnlyOneBranchTerminal_NeverFiresUnreachable()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P @x INT AS BEGIN
                 IF @x = 1 RETURN;
@@ -84,6 +85,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void IfWithNoElse_NeverFiresUnreachableAfter()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P @x INT AS BEGIN
                 IF @x = 1 RETURN;
@@ -111,6 +113,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void WhileLoopIsNeverTerminal_CodeAfterNeverFiresUnreachable()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 WHILE 1 = 1
@@ -163,6 +166,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void RoutineContainingGoto_DeclinesUnreachableCodeAnalysisEntirely()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 RETURN;
@@ -278,6 +282,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void CompoundAssignmentReadsPriorValue_CountsAsUse()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT = 0;
@@ -291,6 +296,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void VariableUsedOnlyAsCursorFetchTarget_NeverFiresUnused()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS BEGIN
                 DECLARE @x INT;
@@ -332,6 +338,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void UnreferencedOutputParameter_NeverFiresUnusedParameter()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P @x INT OUTPUT AS BEGIN
                 SELECT 1;
@@ -375,6 +382,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void RedundantJumpAtRoutineTopLevel_StillFires()
     {
+
         var findings = Scan("""
             CREATE PROCEDURE dbo.P AS
             SELECT 1;
@@ -389,6 +397,7 @@ public sealed class DeadCodeScannerTests
     [Fact]
     public void FunctionBody_NeverAnalyzed()
     {
+
         var findings = Scan("""
             CREATE FUNCTION dbo.F(@x INT) RETURNS INT AS
             BEGIN

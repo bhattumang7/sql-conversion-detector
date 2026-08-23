@@ -6,9 +6,10 @@ namespace SilentScan.Core.Lineage;
 
 public static class ViewDependencyGraph
 {
-public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicViews) TopologicalSort(
+    public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicViews) TopologicalSort(
         IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
+
         var byName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
         {
@@ -40,6 +41,7 @@ public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicV
 
         if (state.PathSet.Contains(name))
         {
+
             var cycleStart = state.Path.IndexOf(name);
             for (var i = cycleStart; i < state.Path.Count; i++)
             {
@@ -79,6 +81,7 @@ public static (IReadOnlyList<ViewDefinition> Order, IReadOnlySet<string> CyclicV
 
         public override void Visit(NamedTableReference node)
         {
+
             if (node.SchemaObject.SchemaIdentifier is null && cteNames.Contains(node.SchemaObject.BaseIdentifier.Value))
             {
                 return;

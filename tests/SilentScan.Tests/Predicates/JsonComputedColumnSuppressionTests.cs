@@ -61,6 +61,7 @@ public sealed class JsonComputedColumnSuppressionTests : OracleTestFixture
     [Fact]
     public async Task MatchingIndexedComputedColumn_OracleConfirmsIndexSeek()
     {
+
         const string probe = "SELECT OrderId FROM dbo.Orders WHERE JSON_VALUE(Payload, '$.status') = 'ACTIVE';";
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
@@ -71,6 +72,7 @@ public sealed class JsonComputedColumnSuppressionTests : OracleTestFixture
     [Fact]
     public async Task MatchingIndexedComputedColumn_MaxTypedComparisonValue_StillSeeksButThroughGetRangeWithMismatchedTypes()
     {
+
         const string probe = "DECLARE @p NVARCHAR(MAX) = N'ACTIVE'; SELECT OrderId FROM dbo.Orders WHERE JSON_VALUE(Payload, '$.status') = @p;";
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);

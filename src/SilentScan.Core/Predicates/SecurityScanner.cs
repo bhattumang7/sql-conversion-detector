@@ -6,6 +6,7 @@ namespace SilentScan.Core.Predicates;
 
 public static partial class SecurityScanner
 {
+
     private static readonly string[] CredentialWords = ["password", "passwd", "secret"];
 
     [GeneratedRegex(@"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")]
@@ -69,7 +70,7 @@ public static partial class SecurityScanner
         ];
     }
 
-public static IReadOnlyList<SecurityFinding> FromDynamicSqlFindings(IReadOnlyList<DynamicSqlFinding> dynamicSqlFindings) =>
+    public static IReadOnlyList<SecurityFinding> FromDynamicSqlFindings(IReadOnlyList<DynamicSqlFinding> dynamicSqlFindings) =>
     [
         .. dynamicSqlFindings
             .Where(f => f.Outcome == DynamicSqlOutcome.Unanalyzable)

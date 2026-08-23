@@ -55,6 +55,7 @@ public sealed class IndexHintOracleTests : OracleTestFixture
     [Fact]
     public async Task HintForcesIndexWhoseLeadingColumnIsUnbound_DegradesToScan()
     {
+
         var planXml = await new PlanXmlCapture(Options).CaptureAsync(
             DatabaseName, "SELECT * FROM dbo.Orders WITH (INDEX(IX_Orders_Region)) WHERE Id = 5;");
 

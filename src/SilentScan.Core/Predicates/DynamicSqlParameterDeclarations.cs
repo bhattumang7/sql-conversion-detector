@@ -7,7 +7,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class DynamicSqlParameterDeclarations
 {
-public static IReadOnlyDictionary<string, SqlType?>? TryParse(string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null)
+    public static IReadOnlyDictionary<string, SqlType?>? TryParse(string declarationText, IReadOnlyDictionary<string, SqlType>? typeAliases = null)
     {
         if (string.IsNullOrWhiteSpace(declarationText))
         {

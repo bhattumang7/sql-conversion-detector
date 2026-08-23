@@ -24,6 +24,7 @@ public sealed class KnownGapCharacterizationTests
     [Fact]
     public async Task CrossDatabaseReference_GetsAKeyNothingPopulates_NoTypedFinding()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Shipments (TrackingNo varchar(30) NOT NULL, INDEX IX_TrackingNo (TrackingNo));
             GO

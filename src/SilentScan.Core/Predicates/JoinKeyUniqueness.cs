@@ -5,7 +5,7 @@ namespace SilentScan.Core.Predicates;
 
 internal static class JoinKeyUniqueness
 {
-public static List<string> EqualityColumnsQualifiedBy(BooleanExpression? searchCondition, string sourceAlias) =>
+    public static List<string> EqualityColumnsQualifiedBy(BooleanExpression? searchCondition, string sourceAlias) =>
         PredicateTreeWalker.FlattenAnd(searchCondition)
             .OfType<BooleanComparisonExpression>()
             .Where(c => c.ComparisonType == BooleanComparisonType.Equals)
@@ -16,7 +16,7 @@ public static List<string> EqualityColumnsQualifiedBy(BooleanExpression? searchC
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-public static bool IsProvenUniqueOver(CatalogTable table, IReadOnlyCollection<string> joinColumns) =>
+    public static bool IsProvenUniqueOver(CatalogTable table, IReadOnlyCollection<string> joinColumns) =>
         table.Indexes.Any(ix =>
             ix.IsUnique && !ix.IsFiltered && !ix.IsDisabled
             && ix.KeyColumns.Count > 0

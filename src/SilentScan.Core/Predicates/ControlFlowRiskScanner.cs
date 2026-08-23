@@ -113,6 +113,7 @@ public static class ControlFlowRiskScanner
         {
             if (node.CatchStatements.Statements.Count == 0)
             {
+
                 Findings.Add(new ControlFlowRiskFinding(
                     ControlFlowRiskFindingKind.EmptyCatchBlock,
                     _moduleName, sourcePath, node.StartLine, node.StartColumn,
@@ -267,7 +268,7 @@ public static class ControlFlowRiskScanner
             _cursorDefiningSelects.Clear();
         }
 
-private static string? ContainsNonDeterministicCall(ScalarExpression expression)
+        private static string? ContainsNonDeterministicCall(ScalarExpression expression)
         {
             var finder = new NonDeterministicCallFinder();
             expression.Accept(finder);
@@ -293,6 +294,7 @@ private static string? ContainsNonDeterministicCall(ScalarExpression expression)
 
         private void ReportDuplicatedArguments(IEnumerable<ScalarExpression?> arguments)
         {
+
             var nonLiteral = arguments.Where(a => a is not null and not Literal).Cast<ScalarExpression>().ToList();
 
             for (var i = 0; i < nonLiteral.Count; i++)
@@ -316,7 +318,7 @@ private static string? ContainsNonDeterministicCall(ScalarExpression expression)
             }
         }
 
-private static bool IsAssignmentOnlySelect(SelectStatement node)
+        private static bool IsAssignmentOnlySelect(SelectStatement node)
         {
             if (node.Into is not null)
             {
@@ -327,7 +329,7 @@ private static bool IsAssignmentOnlySelect(SelectStatement node)
                 && elements.All(e => e is SelectSetVariable);
         }
 
-private static int? TryCountSelectColumns(SelectStatement select) =>
+        private static int? TryCountSelectColumns(SelectStatement select) =>
             select.QueryExpression is QuerySpecification { SelectElements: { Count: > 0 } elements }
             && elements.All(e => e is SelectScalarExpression)
                 ? elements.Count

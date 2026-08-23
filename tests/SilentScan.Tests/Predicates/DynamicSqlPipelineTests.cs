@@ -59,10 +59,12 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var dynamicFinding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, dynamicFinding.Outcome);
         Assert.Equal(4, dynamicFinding.Line);
+
         var typedFinding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
         Assert.Equal("app.sql", typedFinding.SourcePath);
-        Assert.Equal(5, typedFinding.Line);        Assert.NotNull(typedFinding.DynamicSqlCallSite);
+        Assert.Equal(5, typedFinding.Line);
+        Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal(4, typedFinding.DynamicSqlCallSite!.Value.Line);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
@@ -72,6 +74,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecOfLiteralPredicateWithOptionalFilterFragmentAppended_PartiallyAnalyzesAndRemapsTheKnownPredicate_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var appSql =
@@ -95,10 +98,12 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         Assert.Equal(DynamicSqlOutcome.PartiallyAnalyzed, dynamicFinding.Outcome);
         Assert.Equal("optional-fragment-elided", dynamicFinding.Reason);
         Assert.Equal(6, dynamicFinding.Line);
+
         var typedFinding2 = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding2.Verdict);
         Assert.Equal("app.sql", typedFinding2.SourcePath);
-        Assert.Equal(5, typedFinding2.Line);        Assert.NotNull(typedFinding2.DynamicSqlCallSite);
+        Assert.Equal(5, typedFinding2.Line);
+        Assert.NotNull(typedFinding2.DynamicSqlCallSite);
         Assert.Equal(6, typedFinding2.DynamicSqlCallSite!.Value.Line);
 
         var results2 = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding2]);
@@ -108,6 +113,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecOfVariableDivergingAcrossIfElseIfBranches_BothBranchesScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -150,6 +156,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecBuiltFromSelectAssignmentSourceColumn_UsedInPredicate_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -183,6 +190,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_ExecBuiltFromCursorFetchedNvarcharVariable_UsedInPredicate_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var appSql = """
@@ -254,6 +262,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_SpExecuteSqlWithDeclaredNvarcharParam_VarcharColumn_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -280,6 +289,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_SpExecuteSqlWithoutParamsDeclaration_UndeclaredParameterIsUnknownNotGuessed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -298,6 +308,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public void Analyze_SpExecuteSqlWithNonLiteralParamsDeclaration_FallsBackToNoDeclaredTypes()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -319,6 +330,7 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
     [Fact]
     public async Task Analyze_TierCAccumulatedAcrossMultipleSourceLines_RemapsFindingToAssigningLine_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var appSql =
@@ -342,17 +354,19 @@ public sealed class DynamicSqlPipelineTests : OracleTestFixture
         var dynamicFinding = Assert.Single(result.Findings);
         Assert.Equal(DynamicSqlOutcome.AnalyzedLiteral, dynamicFinding.Outcome);
         Assert.Equal(6, dynamicFinding.Line);
+
         var typedFinding = Assert.Single(result.TypedFindings);
         Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
         Assert.Equal("app.sql", typedFinding.SourcePath);
-        Assert.Equal(5, typedFinding.Line);        Assert.NotNull(typedFinding.DynamicSqlCallSite);
+        Assert.Equal(5, typedFinding.Line);
+        Assert.NotNull(typedFinding.DynamicSqlCallSite);
         Assert.Equal(6, typedFinding.DynamicSqlCallSite!.Value.Line);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
-private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'", "''", StringComparison.Ordinal)}')";
+    private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'", "''", StringComparison.Ordinal)}')";
 
     private static string NestExecChain(string innermostSql, int levels)
     {
@@ -372,6 +386,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [InlineData(5)]
     public async Task Analyze_NestedExecChainWithinDepthLimit_FullyResolvesToScanForced_OracleConfirmed(int levels)
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var innermost = "SELECT Col FROM dbo.T WHERE Col = N'x'";
@@ -400,6 +415,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public void Analyze_NestedExecChain_RemapsTier1AndExpressionDerivedFindingsToo()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var innermostTier1 = "SELECT Col FROM dbo.T WHERE YEAR(CreatedAt) = 2020";
@@ -431,6 +447,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public void Analyze_NestedExecChainBeyondDepthLimit_ReportsMaxDepthExceededNotSilentlyDropped()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var innermost = "SELECT Col FROM dbo.T WHERE Col = N'x'";
@@ -471,6 +488,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public void Analyze_UnsubstitutedTemplatePlaceholderInLiteral_ReportsDistinctReasonNotRawParseError()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText("app.sql", "EXEC('UPDATE dbo.Foo SET Col = $Signature$ WHERE Id = 1');");
@@ -508,6 +526,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_LiteralWithCte_ResolvesCteColumnThroughToBaseTable_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -531,6 +550,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_LiteralThroughTwoNestedViewLayers_ResolvesToBaseColumnAtDepthTwo_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -545,7 +565,8 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
         Assert.Equal("dbo.T", typedFinding.Column.TableQualifiedName);
         Assert.Equal("Col", typedFinding.Column.ColumnName);
         Assert.True(typedFinding.Column.Indexed);
-        Assert.Equal(2, typedFinding.Column.Depth);        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
+        Assert.Equal(2, typedFinding.Column.Depth);
+        Assert.Equal(Verdict.ScanForced, typedFinding.Verdict);
 
         var results = await PipelineOracleVerification.VerifyAsync(Options, DatabaseName, [typedFinding]);
         PipelineOracleVerification.AssertAllConfirmed(results);
@@ -554,6 +575,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public void Analyze_LiteralWithCteShadowingRealTable_ResolvesToCteNotTheTable()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -567,9 +589,10 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
         Assert.Empty(result.TypedFindings);
     }
 
-[Fact]
+    [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_PlaceholderInsideNvarcharLiteral_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -596,6 +619,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_PlaceholderInsideVarcharLiteral_SeekPreserved_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -621,6 +645,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_PlaceholderTokenLengthDiffers_SameConfirmedVerdict()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var padding = new string('\n', 50);
@@ -642,7 +667,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
         PipelineOracleVerification.AssertAllConfirmed(results);
     }
 
-[Fact]
+    [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_UpperOfPlaceholderInsideVarcharLiteral_SeekPreserved_OracleConfirmed()
     {
         var (catalog, lineage) = BuildCatalog();
@@ -670,6 +695,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_CastOfPlaceholderInsideNvarcharLiteral_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -695,6 +721,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_NCharCrLfAndCoalesceSplicedIntoLiteral_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -722,6 +749,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_NewIdCastToStringInPredicate_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -747,6 +775,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_GetDateConvertedToStringInPredicate_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -772,6 +801,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_CatchBlockReferencesVariableDeclaredOnlyInTry_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -812,6 +842,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_ProcParamNoKnownCaller_MixedIdentifierAndQuotedPlaceholdersInOneStatement_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(
@@ -841,6 +872,7 @@ private static string WrapInExecLiteral(string sql) => $"EXEC('{sql.Replace("'",
     [Fact]
     public async Task Analyze_SymbolicColumnNameInOrderByPosition_StillFindsUnrelatedLiteralWherePredicate_ScanForced_OracleConfirmed()
     {
+
         var (catalog, lineage) = BuildCatalog();
 
         var parseResult = SqlScriptParser.ParseText(

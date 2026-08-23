@@ -43,6 +43,7 @@ public sealed class ColumnCollationDriftScannerTests
     [Fact]
     public void ColumnWithNoExplicitCollate_InheritsDatabaseDefault_NeverFires()
     {
+
         var findings = Scan("CREATE TABLE dbo.Customers (Code VARCHAR(20) NOT NULL);");
 
         Assert.Empty(findings);
@@ -67,6 +68,7 @@ public sealed class ColumnCollationDriftScannerTests
     [Fact]
     public void TempTableColumnDiffersFromTempdbCollation_Fires()
     {
+
         var findings = Scan(
             "CREATE TABLE #Staging (Code VARCHAR(20) COLLATE French_CI_AS NOT NULL);",
             databaseCollation: "SQL_Latin1_General_CP1_CI_AS",
@@ -81,6 +83,7 @@ public sealed class ColumnCollationDriftScannerTests
     [Fact]
     public void TempTableColumn_BaselinesAgainstTempdbNotDatabaseCollation()
     {
+
         var findings = Scan(
             "CREATE TABLE #Staging (Code VARCHAR(20) COLLATE French_CI_AS NOT NULL);",
             databaseCollation: "SQL_Latin1_General_CP1_CI_AS",
@@ -92,6 +95,7 @@ public sealed class ColumnCollationDriftScannerTests
     [Fact]
     public void TempTableColumn_TempdbCollationUnknown_FallsBackToDatabaseDefault()
     {
+
         var findings = Scan(
             "CREATE TABLE #Staging (Code VARCHAR(20) COLLATE French_CI_AS NOT NULL);",
             databaseCollation: "SQL_Latin1_General_CP1_CI_AS",

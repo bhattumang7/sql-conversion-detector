@@ -41,6 +41,7 @@ public sealed class SynonymResolutionTests
     [Fact]
     public async Task SynonymForView_Resolves_EvenThoughViewsAreNeverInDatabaseCatalog()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
@@ -60,6 +61,7 @@ public sealed class SynonymResolutionTests
     [Fact]
     public async Task ViewDefinedOverSynonymForAnotherView_GetsACorrectDependencyEdge()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Inventory (Sku varchar(40) NOT NULL, INDEX IX_Sku (Sku));
             GO
@@ -94,7 +96,7 @@ public sealed class SynonymResolutionTests
         Assert.Contains(report.SkippedConstructs, s => s.Reason.Contains("dbo.Stock", StringComparison.Ordinal) && s.Reason.Contains("has no known DDL", StringComparison.Ordinal));
     }
 
-private static ScanReport ScanParsedOnly(string sql)
+    private static ScanReport ScanParsedOnly(string sql)
     {
         var parseResult = SqlScriptParser.ParseText("synonym.sql", sql);
         Assert.Empty(parseResult.Errors);
@@ -105,6 +107,7 @@ private static ScanReport ScanParsedOnly(string sql)
     [Fact]
     public void SynonymCycle_FallsBackToTheOriginalNameRatherThanLooping()
     {
+
         var report = ScanParsedOnly("""
             CREATE SYNONYM dbo.A FOR dbo.B;
             GO
@@ -120,6 +123,7 @@ private static ScanReport ScanParsedOnly(string sql)
     [Fact]
     public void FourPartLinkedServerSynonym_IsLedgeredNotMisregistered()
     {
+
         var report = ScanParsedOnly("""
             CREATE SYNONYM dbo.RemoteStock FOR linkedserver.otherdb.dbo.RemoteInventory;
             GO

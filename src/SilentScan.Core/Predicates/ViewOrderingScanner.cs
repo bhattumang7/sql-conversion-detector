@@ -39,6 +39,7 @@ public static class ViewOrderingScanner
 
         private void InspectFunction(SchemaObjectName name, FunctionReturnType returnType)
         {
+
             if (returnType is SelectFunctionReturnType selectReturn)
             {
                 Inspect(SchemaObjectNameHelper.Qualify(name), selectReturn.SelectStatement.QueryExpression);
@@ -83,9 +84,11 @@ public static class ViewOrderingScanner
             {
                 QueryParenthesisExpression parenthesis => OutermostQuerySpecification(parenthesis.QueryExpression),
                 QuerySpecification spec => spec,
-                _ => null,            };
+                _ => null,
+            };
 
         private static bool IsLiteralValue(ScalarExpression expression, string value) =>
+
             Unwrap(expression) is IntegerLiteral { Value: var v } && v == value;
 
         private static ScalarExpression Unwrap(ScalarExpression expression) =>

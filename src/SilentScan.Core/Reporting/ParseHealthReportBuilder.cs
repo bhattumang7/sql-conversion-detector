@@ -17,10 +17,10 @@ public static class ParseHealthReportBuilder
         return new ParseHealthReport(files);
     }
 
-public static ParseHealthReport BuildFromParseResults(IReadOnlyList<SqlParseResult> fileParseResults) =>
+    public static ParseHealthReport BuildFromParseResults(IReadOnlyList<SqlParseResult> fileParseResults) =>
         new([.. fileParseResults.Select(ToFileParseHealth)]);
 
-internal static FileParseHealth ToFileParseHealth(SqlParseResult result)
+    internal static FileParseHealth ToFileParseHealth(SqlParseResult result)
     {
         var errors = result.Errors
             .Select(e => new ParseErrorInfo(e.Line, e.Column, e.Number, e.Message))

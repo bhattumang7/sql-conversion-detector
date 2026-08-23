@@ -36,6 +36,7 @@ public sealed class SystemDatabaseReferenceTests
     [Fact]
     public async Task ReferenceToGenuineExternalDatabase_StaysTheGenericNoKnownDdlReason()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Shipments (TrackingNo varchar(30) NOT NULL);
             GO

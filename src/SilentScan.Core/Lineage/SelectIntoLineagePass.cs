@@ -71,6 +71,7 @@ public static class SelectIntoLineagePass
             var existing = catalog.Find(qualifiedName, isTemp ? _currentScope : null);
             if (existing is null)
             {
+
                 catalog.Skipped.Record(
                     AnalysisPass.Lineage, sourcePath, select.StartLine, select.StartColumn, "SELECT INTO",
                     $"'{qualifiedName}' has no Pass-1 catalog entry to merge into - the SELECT INTO statement may not have reached CatalogBuilder");
@@ -82,6 +83,7 @@ public static class SelectIntoLineagePass
 
             if (existing.Columns.Count == 0 && resolved.Count > 0)
             {
+
                 var freshColumns = resolved
                     .Select(r => new CatalogColumn(r.Name, ColumnProvenanceAnalysis.TryGetScalarType(r.Provenance), IsNullable: true, IsIdentity: false, IsComputed: false, IsPersisted: false))
                     .ToList();

@@ -23,6 +23,7 @@ public static class QueryAntiPatternScanner
 
     public static IReadOnlyList<QueryAntiPatternFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
+
         var cteNameCollector = new Visitor.CteNameCollector();
         parseResult.Fragment.Accept(cteNameCollector);
 
@@ -269,6 +270,7 @@ public static class QueryAntiPatternScanner
             if (node.BinaryQueryExpressionType == BinaryQueryExpressionType.Union && !node.All
                 && !_consumedUnionChainNodes.Contains(node))
             {
+
                 MarkNestedUnionChain(node.FirstQueryExpression, _consumedUnionChainNodes);
                 MarkNestedUnionChain(node.SecondQueryExpression, _consumedUnionChainNodes);
                 InspectUnionDisjointness(node);
@@ -354,12 +356,14 @@ public static class QueryAntiPatternScanner
 
             if (SystemDatabaseNames.Contains(database.Value))
             {
+
                 return;
             }
 
             if (catalog.CurrentDatabaseName is not { Length: > 0 } currentDatabase
                 || string.Equals(database.Value, currentDatabase, StringComparison.OrdinalIgnoreCase))
             {
+
                 return;
             }
 
@@ -666,6 +670,7 @@ public static class QueryAntiPatternScanner
 
             if (source.FilegroupName is null || target.FilegroupName is null)
             {
+
                 return;
             }
 
@@ -727,6 +732,7 @@ public static class QueryAntiPatternScanner
         {
             if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
             {
+
                 return;
             }
 
@@ -763,6 +769,7 @@ public static class QueryAntiPatternScanner
         {
             if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
             {
+
                 return;
             }
 
@@ -794,6 +801,7 @@ public static class QueryAntiPatternScanner
         {
             if (partitionNumberExpression is null)
             {
+
                 return table.FilegroupName;
             }
 
@@ -1078,13 +1086,14 @@ public static class QueryAntiPatternScanner
             }
         }
 
-private sealed class LoopWriteAndReadCollector(
+        private sealed class LoopWriteAndReadCollector(
             List<VariableTableReference> readSites,
             HashSet<string> writtenVariables,
             HashSet<string> knownTableVariables) : TSqlFragmentVisitor
         {
             public override void ExplicitVisit(WhileStatement node)
             {
+
             }
 
             public override void ExplicitVisit(FromClause node)
@@ -1157,7 +1166,7 @@ private sealed class LoopWriteAndReadCollector(
             }
         }
 
-private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<string> loopVariables)
+        private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<string> loopVariables)
         {
             if (where?.SearchCondition is not BooleanComparisonExpression { ComparisonType: BooleanComparisonType.Equals } cmp)
             {
@@ -1188,6 +1197,7 @@ private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<
         {
             public override void ExplicitVisit(WhileStatement node)
             {
+
             }
 
             public override void ExplicitVisit(UpdateStatement node)
@@ -1498,6 +1508,7 @@ private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<
             var literalTexts = equalities.Select(e => LiteralText(e.Literal)).ToList();
             if (literalTexts.Any(t => t is null) || literalTexts.Distinct(StringComparer.OrdinalIgnoreCase).Count() != literalTexts.Count)
             {
+
                 return;
             }
 
@@ -1508,7 +1519,7 @@ private static string? SingleVariableEqualityColumn(WhereClause? where, HashSet<
                 FindingConfidence.Medium));
         }
 
-private static List<QuerySpecification>? FlattenUnionBranches(QueryExpression expression)
+        private static List<QuerySpecification>? FlattenUnionBranches(QueryExpression expression)
         {
             switch (expression)
             {

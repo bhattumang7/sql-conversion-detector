@@ -69,6 +69,7 @@ public sealed class LiveTableRowValueFetcher(SqlConnection connection) : ILiveRo
         }
         catch (SqlException)
         {
+
             return null;
         }
     }

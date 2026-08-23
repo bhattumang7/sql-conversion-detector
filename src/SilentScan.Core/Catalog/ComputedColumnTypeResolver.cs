@@ -6,7 +6,7 @@ namespace SilentScan.Core.Catalog;
 
 internal static class ComputedColumnTypeResolver
 {
-public static List<CatalogColumn> ResolveAll(
+    public static List<CatalogColumn> ResolveAll(
         List<CatalogColumn> columns, IReadOnlyDictionary<string, ScalarExpression> computedExpressions, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
         if (computedExpressions.Count == 0)
@@ -31,7 +31,7 @@ public static List<CatalogColumn> ResolveAll(
         return columns;
     }
 
-private static bool TryResolveOnePass(
+    private static bool TryResolveOnePass(
         List<CatalogColumn> columns, IReadOnlyDictionary<string, ScalarExpression> computedExpressions,
         Dictionary<string, SqlType?> typesByName, IReadOnlyDictionary<string, SqlType>? typeAliases, out List<CatalogColumn> result)
     {
@@ -61,7 +61,7 @@ private static bool TryResolveOnePass(
         return progressed;
     }
 
-private static SqlType? Resolve(
+    private static SqlType? Resolve(
         ScalarExpression expression, IReadOnlyDictionary<string, SqlType?> columnTypes, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
         TypeInference.ExpressionTypeInferencer.Resolve(expression, e => ResolveLeaf(e, columnTypes, typeAliases), typeAliases);
 

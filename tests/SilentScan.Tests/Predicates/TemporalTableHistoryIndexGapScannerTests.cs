@@ -59,6 +59,7 @@ public sealed class TemporalTableHistoryIndexGapScannerTests
     [Fact]
     public void ReversedKeyColumnOrderOnHistorySide_StillFires()
     {
+
         var current = Table("dbo", "WidgetB", Index("IX_WidgetB_Region_Code", CatalogIndexKind.Index, "Region", "Code"));
         var history = Table("dbo", "WidgetBHistory", Index("IX_WidgetBHistory_Code_Region", CatalogIndexKind.Index, "Code", "Region"));
         var catalog = CatalogWithPair(current, history);
@@ -70,6 +71,7 @@ public sealed class TemporalTableHistoryIndexGapScannerTests
     [Fact]
     public void PrimaryKeyIndex_NeverCompared()
     {
+
         var current = Table("dbo", "Widget", Index("PK_Widget", CatalogIndexKind.PrimaryKey, "WidgetId"));
         var history = Table("dbo", "WidgetHistory", Index("ix_WidgetHistory", CatalogIndexKind.Index, "ValidTo", "ValidFrom"));
         var catalog = CatalogWithPair(current, history);
@@ -80,6 +82,7 @@ public sealed class TemporalTableHistoryIndexGapScannerTests
     [Fact]
     public void UniqueConstraintIndex_NeverCompared()
     {
+
         var current = Table("dbo", "Widget", Index("UQ_Widget_Code", CatalogIndexKind.UniqueConstraint, "Code"));
         var history = Table("dbo", "WidgetHistory");
         var catalog = CatalogWithPair(current, history);

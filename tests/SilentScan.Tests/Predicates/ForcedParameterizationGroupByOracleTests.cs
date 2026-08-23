@@ -66,6 +66,7 @@ public sealed class ForcedParameterizationGroupByOracleTests : OracleTestFixture
         var normalized = cachedText.Replace(" ", string.Empty, StringComparison.Ordinal);
 
         Assert.Contains("Val>@", normalized, StringComparison.OrdinalIgnoreCase);
+
         Assert.Contains("groupby(Id+1)", normalized, StringComparison.OrdinalIgnoreCase);
     }
 

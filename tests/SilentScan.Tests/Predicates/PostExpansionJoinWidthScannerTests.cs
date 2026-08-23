@@ -101,6 +101,7 @@ public sealed class PostExpansionJoinWidthScannerTests
     [Fact]
     public void TwoWideningQueriesOnTheSameLine_HaveDistinctColumns()
     {
+
         var findings = Scan(FiveTableFanOutDdl, "SELECT Id FROM dbo.vWide UNION ALL SELECT Id FROM dbo.vWide;");
 
         Assert.Equal(2, findings.Count);

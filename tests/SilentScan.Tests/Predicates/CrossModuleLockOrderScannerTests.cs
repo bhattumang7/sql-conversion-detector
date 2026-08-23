@@ -69,6 +69,7 @@ public sealed class CrossModuleLockOrderScannerTests
     [Fact]
     public void ProcedureWritesRealTableThenAWriteableCteSharingAnotherTablesName_NeverMisattributedAsConflict()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.ProcA AS BEGIN "
             + "BEGIN TRANSACTION; "
@@ -90,6 +91,7 @@ public sealed class CrossModuleLockOrderScannerTests
     [Fact]
     public void OppositeOrderWrites_OutsideAnyExplicitTransaction_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.ProcA AS BEGIN "
             + "UPDATE dbo.T1 SET Id = Id; "
@@ -127,6 +129,7 @@ public sealed class CrossModuleLockOrderScannerTests
     [Fact]
     public void OppositeOrderWrites_ThroughTableVariable_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.ProcA AS BEGIN "
             + "DECLARE @t TABLE (Id INT); "
@@ -150,6 +153,7 @@ public sealed class CrossModuleLockOrderScannerTests
     [Fact]
     public void UnbalancedExtraCommit_DoesNotCorruptTransactionDepthForLaterWrites()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.ProcA AS BEGIN "
             + "BEGIN TRANSACTION; "

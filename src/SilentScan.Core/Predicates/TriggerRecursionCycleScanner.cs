@@ -7,12 +7,13 @@ namespace SilentScan.Core.Predicates;
 
 public static class TriggerRecursionCycleScanner
 {
-private const int MaxCycleDepth = 8;
+    private const int MaxCycleDepth = 8;
 
     public static IReadOnlyList<TriggerRecursionCycleFinding> Scan(IEnumerable<SqlParseResult> parseResults, DatabaseCatalog catalog)
     {
         if (catalog.IsNestedTriggersEnabled != true)
         {
+
             return [];
         }
 
@@ -45,7 +46,7 @@ private const int MaxCycleDepth = 8;
         return findings;
     }
 
-private readonly record struct CycleSearchContext(
+    private readonly record struct CycleSearchContext(
         string StartTable,
         IReadOnlyDictionary<string, IReadOnlyList<TriggerRecursionCycleHop>> Graph,
         HashSet<string> SeenCanonicalKeys,
@@ -63,6 +64,7 @@ private readonly record struct CycleSearchContext(
         {
             if (path.Count == 0 && string.Equals(edge.ToTableQualifiedName, context.StartTable, StringComparison.OrdinalIgnoreCase))
             {
+
                 continue;
             }
 
@@ -74,6 +76,7 @@ private readonly record struct CycleSearchContext(
 
             if (visited.Contains(edge.ToTableQualifiedName))
             {
+
                 continue;
             }
 
@@ -85,7 +88,7 @@ private readonly record struct CycleSearchContext(
         }
     }
 
-private static void RecordCycle(IReadOnlyList<TriggerRecursionCycleHop> hops, HashSet<string> seenCanonicalKeys, List<TriggerRecursionCycleFinding> findings)
+    private static void RecordCycle(IReadOnlyList<TriggerRecursionCycleHop> hops, HashSet<string> seenCanonicalKeys, List<TriggerRecursionCycleFinding> findings)
     {
         var tables = hops.Select(h => h.FromTableQualifiedName).ToList();
         var minIndex = 0;
@@ -125,6 +128,7 @@ private static void RecordCycle(IReadOnlyList<TriggerRecursionCycleHop> hops, Ha
 
         private void VisitTrigger(TriggerStatementBody node, SchemaObjectName name, TriggerObject triggerObject, StatementList? statementList)
         {
+
             if (triggerObject.Name is not { } targetTableName || statementList is null)
             {
                 return;
@@ -147,7 +151,7 @@ private static void RecordCycle(IReadOnlyList<TriggerRecursionCycleHop> hops, Ha
         }
     }
 
-private sealed class WriteTargetCollector(DatabaseCatalog catalog, string ownTargetQualifiedName) : TSqlFragmentVisitor
+    private sealed class WriteTargetCollector(DatabaseCatalog catalog, string ownTargetQualifiedName) : TSqlFragmentVisitor
     {
         private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
 

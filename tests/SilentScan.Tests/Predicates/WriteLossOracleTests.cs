@@ -58,6 +58,7 @@ public sealed class WriteLossOracleTests : OracleTestFixture
     [Fact]
     public async Task Insert_TooLongString_RaisesHardError_NotSilent()
     {
+
         await using var connection = new SqlConnection(Options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
 

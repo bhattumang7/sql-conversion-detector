@@ -6,6 +6,7 @@ namespace SilentScan.Core.Diagnostics;
 
 public sealed class ConstructCoverageCatalog
 {
+
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public static ConstructCoverageCatalog Instance { get; } = LoadEmbedded();

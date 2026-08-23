@@ -7,55 +7,55 @@ public enum QueryAntiPatternFindingKind
 {
     TableVariablePspSkip,
 
-TableVariableLowCompatEstimate,
+    TableVariableLowCompatEstimate,
 
-TableVariableStaleEstimateInLoop,
+    TableVariableStaleEstimateInLoop,
 
-RbarSingleRowLoopDml,
+    RbarSingleRowLoopDml,
 
-GlobalCursorDeclaration,
+    GlobalCursorDeclaration,
 
-CountStarVariableExistenceCheck,
+    CountStarVariableExistenceCheck,
 
-NonAggregateHavingPredicate,
+    NonAggregateHavingPredicate,
 
-UnionOfProvablyDisjointBranches,
+    UnionOfProvablyDisjointBranches,
 
-DistinctMaskingJoinFanout,
+    DistinctMaskingJoinFanout,
 
-UnqualifiedTableReference,
+    UnqualifiedTableReference,
 
-MergeMissingHoldlock,
+    MergeMissingHoldlock,
 
-MergeNonUniqueUsingSource,
+    MergeNonUniqueUsingSource,
 
-MergeUnconditionalDelete,
+    MergeUnconditionalDelete,
 
-RecursiveCteMissingMaxRecursion,
+    RecursiveCteMissingMaxRecursion,
 
-UnboundedTableWrite,
+    UnboundedTableWrite,
 
-LinkedServerOrCrossDatabaseReference,
+    LinkedServerOrCrossDatabaseReference,
 
-MultiRowInsertIgnoreDupKeyDrop,
+    MultiRowInsertIgnoreDupKeyDrop,
 
-AlterTableSwitchColumnMismatch,
+    AlterTableSwitchColumnMismatch,
 
-AlterTableSwitchIndexMismatch,
+    AlterTableSwitchIndexMismatch,
 
-AlterTableSwitchConstraintMismatch,
+    AlterTableSwitchConstraintMismatch,
 
-AlterTableSwitchTargetOnlyIndexRestriction,
+    AlterTableSwitchTargetOnlyIndexRestriction,
 
-AlterTableSwitchFilegroupMismatch,
+    AlterTableSwitchFilegroupMismatch,
 
-AlterTableSwitchTemporalMismatch,
+    AlterTableSwitchTemporalMismatch,
 
-AlterTableSwitchRuleConstraint,
+    AlterTableSwitchRuleConstraint,
 
-AlterTableSwitchCdcPartitionSwitch,
+    AlterTableSwitchCdcPartitionSwitch,
 
-AlterTableSwitchPartitionFilegroupMismatch,
+    AlterTableSwitchPartitionFilegroupMismatch,
 
     AlterTableSwitchFullTextIndexRestriction,
 }

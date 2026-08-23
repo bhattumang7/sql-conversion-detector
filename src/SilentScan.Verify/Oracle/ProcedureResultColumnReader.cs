@@ -14,7 +14,7 @@ public sealed class ProcedureResultColumnReader
         _options = options;
     }
 
-public async Task<IReadOnlyList<SqlType>?> TryDescribeResultColumnsAsync(
+    public async Task<IReadOnlyList<SqlType>?> TryDescribeResultColumnsAsync(
         string database, string execProbeText, CancellationToken cancellationToken = default)
     {
         const string sql = """
@@ -37,6 +37,7 @@ public async Task<IReadOnlyList<SqlType>?> TryDescribeResultColumnsAsync(
         {
             if (!await reader.IsDBNullAsync(0, cancellationToken))
             {
+
                 return null;
             }
 

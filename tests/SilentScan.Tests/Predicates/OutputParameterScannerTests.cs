@@ -102,6 +102,7 @@ public sealed class OutputParameterScannerTests
     [Fact]
     public void UnconditionalThrow_NeverFires_EvenThoughNeverAssigned()
     {
+
         var findings = Scan("THROW 50000, 'boom', 1;");
 
         Assert.Empty(findings);

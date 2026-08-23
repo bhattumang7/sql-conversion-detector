@@ -6,7 +6,7 @@ namespace SilentScan.Verify.Oracle;
 
 public static class ScalarUdfProbeBuilder
 {
-public static string? BuildInvocationProbe(ScalarUdfFinding finding, IReadOnlyList<SqlType>? parameterTypes, bool pinInlining)
+    public static string? BuildInvocationProbe(ScalarUdfFinding finding, IReadOnlyList<SqlType>? parameterTypes, bool pinInlining)
     {
         if (finding.Kind == ScalarUdfFindingKind.SchemaDependency || parameterTypes is null)
         {

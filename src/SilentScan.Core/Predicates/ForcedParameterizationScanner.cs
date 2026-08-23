@@ -136,6 +136,7 @@ public static class ForcedParameterizationScanner
         {
             foreach (var element in node.OrderByElements)
             {
+
                 if (element.Expression is Literal)
                 {
                     continue;
@@ -247,7 +248,7 @@ public static class ForcedParameterizationScanner
 
         private static string LiteralText(Literal literal) => literal.Value ?? "NULL";
 
-private sealed class LiteralFinder : TSqlFragmentVisitor
+        private sealed class LiteralFinder : TSqlFragmentVisitor
         {
             public Literal? Found { get; private set; }
 
@@ -264,7 +265,7 @@ private sealed class LiteralFinder : TSqlFragmentVisitor
             public override void ExplicitVisit(OdbcLiteral node) => Found ??= node;
         }
 
-private static IEnumerable<Literal> FindDirectComparisonLiterals(BooleanExpression expression)
+        private static IEnumerable<Literal> FindDirectComparisonLiterals(BooleanExpression expression)
         {
             switch (expression)
             {

@@ -4,9 +4,9 @@ namespace SilentScan.Core.Predicates;
 
 public enum WindowFrameFindingKind
 {
-ExplicitRangeFrame,
+    ExplicitRangeFrame,
 
-ImplicitDefaultRangeFrame,
+    ImplicitDefaultRangeFrame,
 }
 
 public sealed record WindowFrameFinding(

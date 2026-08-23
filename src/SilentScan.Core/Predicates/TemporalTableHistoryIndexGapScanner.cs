@@ -14,6 +14,7 @@ public static class TemporalTableHistoryIndexGapScanner
             var history = catalog.Find(pair.HistoryTableQualifiedName);
             if (current is null || history is null)
             {
+
                 continue;
             }
 
@@ -39,10 +40,10 @@ public static class TemporalTableHistoryIndexGapScanner
         ];
     }
 
-private static bool IsComparableIndex(CatalogIndex index) =>
+    private static bool IsComparableIndex(CatalogIndex index) =>
         index.Kind == CatalogIndexKind.Index && !index.IsFiltered && !index.IsColumnstore && !index.IsDisabled
         && index.KeyColumns.Count > 0;
 
-private static bool SameKeyColumns(CatalogIndex current, CatalogIndex candidate) =>
+    private static bool SameKeyColumns(CatalogIndex current, CatalogIndex candidate) =>
         current.KeyColumns.SequenceEqual(candidate.KeyColumns, StringComparer.OrdinalIgnoreCase);
 }

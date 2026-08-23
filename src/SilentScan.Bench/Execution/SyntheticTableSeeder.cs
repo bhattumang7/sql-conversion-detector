@@ -12,6 +12,7 @@ public static partial class SyntheticTableSeeder
 
     public static async Task SeedAsync(SqlConnection connection, TypePairScenario scenario, string tableName, int rowCount, CancellationToken cancellationToken = default)
     {
+
         if (!ValidIdentifier().IsMatch(tableName))
         {
             throw new ArgumentException($"'{tableName}' is not a safe SQL identifier for a synthetic table name.", nameof(tableName));

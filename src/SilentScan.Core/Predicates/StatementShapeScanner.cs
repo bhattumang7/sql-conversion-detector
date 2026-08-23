@@ -22,7 +22,7 @@ public static class StatementShapeScanner
         ];
     }
 
-public static IReadOnlyList<StatementShapeFinding> ScanCatalog(DatabaseCatalog catalog)
+    public static IReadOnlyList<StatementShapeFinding> ScanCatalog(DatabaseCatalog catalog)
     {
         var findings = new List<StatementShapeFinding>();
 
@@ -30,6 +30,7 @@ public static IReadOnlyList<StatementShapeFinding> ScanCatalog(DatabaseCatalog c
         {
             if (table.Kind != CatalogTableKind.Table)
             {
+
                 continue;
             }
 

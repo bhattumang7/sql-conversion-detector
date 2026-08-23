@@ -6,6 +6,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class DeprecatedSyntaxScanner
 {
+
     private static readonly HashSet<string> LegacyCompatibilityViewNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "sysaltfiles", "syscacheobjects", "syscharsets", "syscolumns", "syscomments", "sysconfigures",
@@ -27,7 +28,7 @@ public static class DeprecatedSyntaxScanner
         "sp_revokelogin", "sp_srvrolepermission",
     };
 
-public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
+    public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseResult, DatabaseCatalog? catalog = null)
     {
         var findings = new List<DeprecatedSyntaxFinding>();
 
@@ -105,7 +106,7 @@ public static IReadOnlyList<DeprecatedSyntaxFinding> Scan(SqlParseResult parseRe
         return false;
     }
 
-private static string? TryGetModuleQualifiedName(TSqlFragment fragment)
+    private static string? TryGetModuleQualifiedName(TSqlFragment fragment)
     {
         if (fragment is not TSqlScript script)
         {

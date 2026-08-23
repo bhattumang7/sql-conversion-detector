@@ -4,11 +4,11 @@ namespace SilentScan.Core.Predicates;
 
 public enum DynamicSqlOperandPosition
 {
-Value,
+    Value,
 
-Identifier,
+    Identifier,
 
-Ambiguous,
+    Ambiguous,
 }
 
 public static class DynamicSqlOperandPositionClassifier
@@ -32,7 +32,7 @@ public static class DynamicSqlOperandPositionClassifier
     private static bool Contains(TSqlFragment node, int offset) =>
         node.StartOffset <= offset && offset < node.StartOffset + node.FragmentLength;
 
-private sealed class LiteralSpanVisitor(int offset) : TSqlFragmentVisitor
+    private sealed class LiteralSpanVisitor(int offset) : TSqlFragmentVisitor
     {
         public Literal? Best { get; private set; }
 

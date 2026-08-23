@@ -53,6 +53,7 @@ public sealed class SameFamilyWideningOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task BitColumn_VsVarcharParameter_ConvertImplicitAppliesToTheParameterNotTheColumn() =>
+
         Assert.False(await HasColumnConversion("DECLARE @p VARCHAR(5) = '0'; SELECT PersonId FROM dbo.People WHERE IsPermittedToLogon = @p;"));
 
     [Fact]
@@ -62,6 +63,7 @@ public sealed class SameFamilyWideningOracleTests : IAsyncLifetime
 
     [Fact]
     public async Task DateColumn_VsVarcharParameter_ConvertImplicitAppliesToTheParameterNotTheColumn() =>
+
         Assert.False(await HasColumnConversion(
             "DECLARE @p VARCHAR(20) = '2024-01-01'; SELECT Id FROM dbo.PurchaseOrders WHERE ExpectedDeliveryDate >= @p;"));
 }

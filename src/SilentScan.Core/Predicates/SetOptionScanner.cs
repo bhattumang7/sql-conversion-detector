@@ -7,7 +7,7 @@ namespace SilentScan.Core.Predicates;
 
 public static class SetOptionScanner
 {
-private static readonly (SetOptions Flag, bool TriggerIsOn, SetOptionFindingKind Kind)[] SyntaxOnlyTriggers =
+    private static readonly (SetOptions Flag, bool TriggerIsOn, SetOptionFindingKind Kind)[] SyntaxOnlyTriggers =
     [
         (SetOptions.NumericRoundAbort, true, SetOptionFindingKind.NumericRoundabortOnBlocksIndexedFeature),
         (SetOptions.AnsiWarnings, false, SetOptionFindingKind.AnsiWarningsOffBlocksIndexedFeature),
@@ -28,6 +28,7 @@ private static readonly (SetOptions Flag, bool TriggerIsOn, SetOptionFindingKind
 
         if (!quotedIdentifierOff && !ansiNullsOff && visitor.MatchedStatements.Count == 0)
         {
+
             return findings;
         }
 
@@ -63,7 +64,7 @@ private static readonly (SetOptions Flag, bool TriggerIsOn, SetOptionFindingKind
         return findings;
     }
 
-private sealed class SetStatementVisitor : TSqlFragmentVisitor
+    private sealed class SetStatementVisitor : TSqlFragmentVisitor
     {
         public List<(PredicateSetStatement Statement, SetOptionFindingKind Kind)> MatchedStatements { get; } = [];
 

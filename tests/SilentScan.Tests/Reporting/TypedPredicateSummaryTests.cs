@@ -36,6 +36,7 @@ public sealed class TypedPredicateSummaryTests
     [Fact]
     public void From_MixedVerdicts_CountsEachBucketIncludingSeekPreserved()
     {
+
         var findings = new[]
         {
             Finding(Verdict.SeekPreserved),
@@ -61,6 +62,7 @@ public sealed class TypedPredicateSummaryTests
     [Fact]
     public void From_RepeatedIdenticalScanForcedFindings_DistinctCountCollapsesButRawCountDoesNot()
     {
+
         var findings = new[]
         {
             Finding(Verdict.ScanForced, "dbo.Documents", "CreatedByUser", line: 10),
@@ -78,6 +80,7 @@ public sealed class TypedPredicateSummaryTests
     [Fact]
     public void From_RepeatedFindingsAcrossVerdicts_DistinctTotalClassifiedUsesSameBasisAsDistinctScanForced()
     {
+
         var findings = new[]
         {
             Finding(Verdict.ScanForced, "dbo.Documents", "CreatedByUser", line: 10),

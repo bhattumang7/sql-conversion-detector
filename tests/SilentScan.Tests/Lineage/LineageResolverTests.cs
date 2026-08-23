@@ -10,6 +10,7 @@ public sealed class LineageResolverTests
 {
     private static (DatabaseCatalog Catalog, LineageCatalog Lineage) Build(params string[] batches)
     {
+
         var sql = string.Join("\nGO\n", batches);
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
@@ -38,6 +39,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CastOfStringColumnToStringType_PropagatesSourceCollation()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT CAST(OrderCode AS NVARCHAR(50)) AS OrderCodeWide FROM dbo.Orders;");
@@ -52,6 +54,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CastOfNonStringColumnToStringType_LeavesCollationNull()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT CAST(OrderId AS NVARCHAR(20)) AS OrderIdText FROM dbo.Orders;");
@@ -102,6 +105,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_UnionBranchesWithMismatchedColumnCounts_DegradesToUnknownAndLedgers()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.OrdersReal (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
             """
@@ -185,6 +189,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_BuiltinFixedReturnTypeFunctionCallInSelectList_ResolvesInferredType()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (CreatedAt DATETIME2 NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT YEAR(CreatedAt) AS CreatedYear FROM dbo.Orders;");
@@ -199,6 +204,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_MinOfTinyIntColumn_OracleVerified_PreservesExactArgumentType()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Qty TINYINT NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT MIN(Qty) AS MinQty FROM dbo.Orders;");
@@ -225,6 +231,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_SumOfTinyIntColumn_OracleVerified_WidensToInt()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Qty TINYINT NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT SUM(Qty) AS TotalQty FROM dbo.Orders;");
@@ -251,6 +258,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_SumOfMoneyColumn_OracleVerified_PreservesMoneyCategory()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Total MONEY NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT SUM(Total) AS TotalSum FROM dbo.Orders;");
@@ -264,6 +272,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DateAddOnDateColumn_OracleVerified_TakesThirdArgumentType()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (StartDate DATE NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT DATEADD(day, 1, StartDate) AS NextDate FROM dbo.Orders;");
@@ -277,6 +286,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DateAddDayTruncationIdiom_OracleVerified_ResolvesToDateTimeNotInt()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (Placed DATETIME NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT DATEADD(day, DATEDIFF(day, 0, Placed), 0) AS PlacedDate FROM dbo.Orders;");
@@ -290,6 +300,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DateAddOnStringLiteralBaseDate_OracleVerified_ResolvesToDateTimeNotVarChar()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Shifts (StartMinuteOfDay INT NOT NULL);",
             "CREATE VIEW dbo.vw_Shifts AS SELECT DATEADD(minute, StartMinuteOfDay, '12/30/1899') AS StartAsTime FROM dbo.Shifts;");
@@ -303,6 +314,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ScalarUdfCallInSelectList_ResolvesToExpressionWithNoInferredType()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (CreatedAt DATETIME2 NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT dbo.fn_FormatDate(CreatedAt) AS CreatedLabel FROM dbo.Orders;");
@@ -368,6 +380,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_InlineTvfCallingAnotherInlineTvf_DeclaredOuterFirst_StillResolvesToBaseColumn()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE FUNCTION dbo.fn_Outer() RETURNS TABLE AS RETURN SELECT Col FROM dbo.fn_Inner();",
@@ -437,6 +450,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ExplicitViewColumnListCountMismatch_DegradesEveryColumnToUnknownRatherThanMisattributing()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Known (KnownCol INT NOT NULL);",
             "CREATE VIEW dbo.vw_Mismatched (A, B, C) AS SELECT * FROM dbo.Unknown, dbo.Known;");
@@ -449,6 +463,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_DuplicateFromAliasAcrossSchemas_ResolvesAmbiguousRatherThanLastWins()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.T (Col INT NOT NULL);",
             "CREATE SCHEMA audit;",
@@ -479,6 +494,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ViewRedefinedAcrossFiles_LastDefinitionWinsRatherThanCrashing()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL, Notes VARCHAR(100) NOT NULL);",
             "CREATE VIEW dbo.vw_Orders AS SELECT OrderId, OrderCode FROM dbo.Orders;",
@@ -492,6 +508,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CteShadowsRealTableOfSameName_ResolvesToCte()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
             """
@@ -511,6 +528,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_NearMissWithoutCte_StillResolvesToRealTable()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, OrderCode VARCHAR(20) NOT NULL);",
             "CREATE VIEW dbo.vw_NoCte AS SELECT OrderCode AS Id FROM dbo.Orders;");
@@ -561,6 +579,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_RecursiveCte_AnchorTypeIsUsedDirectly_IndexClaimDropped()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Employees (EmployeeId INT NOT NULL, ManagerId INT NULL);",
             """
@@ -601,6 +620,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_AlterView_RedefinesTheViewResolvedFromCreate()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.T (Col VARCHAR(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);",
             "CREATE VIEW dbo.vw_T AS SELECT Col FROM dbo.T;",
@@ -643,6 +663,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ClrTableValuedFunction_ResolvesDeclaredReturnShapeLikeAnMstvf()
     {
+
         var (catalog, lineage) = Build("CREATE FUNCTION dbo.fn_Clr() RETURNS TABLE (Col INT NOT NULL) AS EXTERNAL NAME MyAssembly.[MyClass].[MyMethod];");
 
         var relation = lineage.AllRelations["dbo.fn_Clr"];
@@ -691,6 +712,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_FourPartLinkedServerReference_NeverCollidesWithLocalTableOfSameTail()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
             "CREATE VIEW dbo.vw_Local AS SELECT OrderId FROM dbo.Orders;",
@@ -706,6 +728,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ScalarSubqueryInSelectList_DoesNotAttributeInnerScopeColumnToOuterTable()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL, Amount DECIMAL(9,2) NOT NULL);",
             "CREATE TABLE dbo.Payments (PaymentId INT NOT NULL, Amount DECIMAL(9,2) NOT NULL);",
@@ -724,6 +747,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_CteSharingTheEnclosingViewsOwnName_NeverRecordsAFalseSelfCycle()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Orders (OrderId INT NOT NULL);",
             "CREATE VIEW dbo.Foo AS WITH Foo AS (SELECT OrderId FROM dbo.Orders) SELECT OrderId FROM Foo;");
@@ -736,6 +760,7 @@ public sealed class LineageResolverTests
     [Fact]
     public void Resolve_ParenthesizedRecursiveCte_ResolvesAnchorColumnsInsteadOfZero()
     {
+
         var (_, lineage) = Build(
             "CREATE TABLE dbo.Categories (CategoryCode VARCHAR(20) NOT NULL, ParentCode VARCHAR(20) NULL);",
             """

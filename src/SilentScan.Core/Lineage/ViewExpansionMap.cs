@@ -16,6 +16,7 @@ public static class ViewExpansionMap
         var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
         {
+
             viewsByName[view.QualifiedName] = view;
         }
 
@@ -88,7 +89,7 @@ public static class ViewExpansionMap
 
     private static readonly IReadOnlySet<string> NoBaseTables = new HashSet<string>();
 
-private static (IReadOnlySet<string> BaseTables, bool PartiallyUnexpanded, (string Name, ViewExpansionOrigin Origin)? Child) ResolveReference(
+    private static (IReadOnlySet<string> BaseTables, bool PartiallyUnexpanded, (string Name, ViewExpansionOrigin Origin)? Child) ResolveReference(
         string qualifiedName, ResolutionContext context)
     {
         if (context.ViewsByName.TryGetValue(qualifiedName, out var childView))

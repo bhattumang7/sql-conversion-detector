@@ -122,7 +122,7 @@ public sealed class ExplicitCollatePipelineTests : OracleTestFixture
         Assert.DoesNotContain(conversions, c => string.Equals(c.Column, "Code", StringComparison.OrdinalIgnoreCase));
     }
 
-private static ScanReport ScanParsedOnly(string sql)
+    private static ScanReport ScanParsedOnly(string sql)
     {
         var parseResult = SqlScriptParser.ParseText("collate.sql", sql);
         Assert.Empty(parseResult.Errors);
@@ -133,6 +133,7 @@ private static ScanReport ScanParsedOnly(string sql)
     [Fact]
     public void ColumnVsColumnDifferingCollations_NoExplicitCollateAnywhere_ReportsCollationConflict()
     {
+
         var report = ScanParsedOnly("""
             CREATE TABLE dbo.LocalCustomers (
                 Email varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
@@ -159,6 +160,7 @@ private static ScanReport ScanParsedOnly(string sql)
     [Fact]
     public void ConvertResultInheritingColumnCollation_VsDifferentlyCollatedColumn_IsOperandClash()
     {
+
         var report = ScanParsedOnly("""
             CREATE TABLE dbo.T (Code nvarchar(20) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO
@@ -174,6 +176,7 @@ private static ScanReport ScanParsedOnly(string sql)
     [Fact]
     public void CrossCategoryColumnVsColumn_DifferingCollations_ReportsCollationConflict()
     {
+
         var report = ScanParsedOnly("""
             CREATE TABLE dbo.CharSide (Code char(10) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, INDEX IX_Code (Code));
             GO

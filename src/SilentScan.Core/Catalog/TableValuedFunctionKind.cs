@@ -2,9 +2,9 @@ namespace SilentScan.Core.Catalog;
 
 public enum TableValuedFunctionKind
 {
-Inline,
+    Inline,
 
-MultiStatement,
+    MultiStatement,
 
-Clr,
+    Clr,
 }

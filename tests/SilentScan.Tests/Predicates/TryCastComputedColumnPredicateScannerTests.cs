@@ -85,6 +85,7 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     [Fact]
     public void PlainCastComputedColumn_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN SELECT Id FROM dbo.Events WHERE RoundedAmount = 5; END");
 
@@ -94,6 +95,7 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     [Fact]
     public void ComputedColumnWhoseDefinitionOnlyMentionsTryCastInAStringLiteral_NeverFires()
     {
+
         var ddl = """
             CREATE TABLE dbo.Labels (
                 Id INT NOT NULL PRIMARY KEY,
@@ -123,6 +125,7 @@ public sealed class TryCastComputedColumnPredicateScannerTests
     [Fact]
     public void CteSharesNameWithTheComputedColumnsRealTable_NeverFires()
     {
+
         var findings = Scan(
             "CREATE PROCEDURE dbo.usp_Find AS BEGIN " +
             "WITH Events AS (SELECT Id FROM dbo.Events) " +
@@ -131,7 +134,7 @@ public sealed class TryCastComputedColumnPredicateScannerTests
         Assert.Empty(findings);
     }
 
-[Fact]
+    [Fact]
     public async Task LiveDeployment_TryCastComputedColumnInPredicate_Fires()
     {
         var report = await EngineAuthoritativeScan.ScanAsync(

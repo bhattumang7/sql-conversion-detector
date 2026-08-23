@@ -29,6 +29,7 @@ public static class WindowFrameScanner
             {
                 if (node.WindowFrameClause is null)
                 {
+
                     Findings.Add(new WindowFrameFinding(
                         WindowFrameFindingKind.ImplicitDefaultRangeFrame, sourcePath, node.StartLine, node.StartColumn));
                 }

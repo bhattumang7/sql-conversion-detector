@@ -65,6 +65,7 @@ public sealed class DdlWhitelistDeploymentTests : IAsyncLifetime
         await using var connection = new SqlConnection(_options.BuildConnectionString(DatabaseName));
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
+
         command.CommandText = """
             SELECT OBJECT_ID('dbo.T'), OBJECT_ID('dbo.V'),
                 (SELECT index_id FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.T') AND name = 'IX_T_Code');
@@ -102,6 +103,7 @@ public sealed class DdlWhitelistDeploymentTests : IAsyncLifetime
     [Fact]
     public async Task DeployWhitelistedDdlWithRetryAsync_QuotedIdentifierOffInOneFile_DoesNotLeakIntoTheNextFile()
     {
+
         var scripts = new List<(string Label, string Script)>
         {
             ("fileA.sql", "SET QUOTED_IDENTIFIER OFF;"),

@@ -26,7 +26,7 @@ public sealed partial class ScriptDeployer
         }
     }
 
-public async Task<IReadOnlyList<string>> DeployWhitelistedDdlAsync(
+    public async Task<IReadOnlyList<string>> DeployWhitelistedDdlAsync(
         string script, string? initialDatabase = null, CancellationToken cancellationToken = default)
     {
         var parseResult = SqlScriptParser.ParseText(initialDatabase ?? "corpus-ddl", script);
@@ -81,7 +81,7 @@ public async Task<IReadOnlyList<string>> DeployWhitelistedDdlAsync(
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-public async Task<IReadOnlyList<string>> DeployWhitelistedDdlWithRetryAsync(
+    public async Task<IReadOnlyList<string>> DeployWhitelistedDdlWithRetryAsync(
         IReadOnlyList<(string Label, string Script)> scripts, string? initialDatabase = null, int maxPasses = 5,
         bool allowProcedureAndTriggerDefinitions = false, CancellationToken cancellationToken = default)
     {
@@ -100,7 +100,7 @@ public async Task<IReadOnlyList<string>> DeployWhitelistedDdlWithRetryAsync(
         return messages;
     }
 
-private static List<(string Label, string BatchText)> CollectWhitelistedBatches(
+    private static List<(string Label, string BatchText)> CollectWhitelistedBatches(
         IReadOnlyList<(string Label, string Script)> scripts, bool allowProcedureAndTriggerDefinitions, List<string> messages)
     {
         var pending = new List<(string Label, string BatchText)>();
@@ -140,7 +140,7 @@ private static List<(string Label, string BatchText)> CollectWhitelistedBatches(
         return pending;
     }
 
-private static async Task<List<(string Label, string BatchText)>> RunRetryPassesAsync(
+    private static async Task<List<(string Label, string BatchText)>> RunRetryPassesAsync(
         SqlConnection connection, List<(string Label, string BatchText)> pending, int maxPasses,
         Dictionary<(string Label, string BatchText), string> lastFailureByBatch, SharedConnectionSetState connectionState, CancellationToken cancellationToken)
     {
@@ -153,6 +153,7 @@ private static async Task<List<(string Label, string BatchText)>> RunRetryPasses
             {
                 try
                 {
+
                     await connectionState.ResetToDefaultsIfNewFileAsync(connection, item.Label, cancellationToken);
                     await ExecuteBatchAsync(connection, item.BatchText, cancellationToken);
                     progressed = true;
@@ -174,7 +175,7 @@ private static async Task<List<(string Label, string BatchText)>> RunRetryPasses
         return pending;
     }
 
-private sealed class SharedConnectionSetState
+    private sealed class SharedConnectionSetState
     {
         private string? _lastExecutedLabel;
 
@@ -197,7 +198,7 @@ private sealed class SharedConnectionSetState
         typeof(AlterProcedureStatement), typeof(AlterFunctionStatement), typeof(AlterTriggerStatement), typeof(AlterViewStatement),
     ];
 
-private static string RewriteAlterToCreateOrAlter(TSqlBatch batch, string batchText)
+    private static string RewriteAlterToCreateOrAlter(TSqlBatch batch, string batchText)
     {
         if (batch.Statements is not [{ } soleStatement] || !RewritableAlterStatementTypes.Contains(soleStatement.GetType()))
         {

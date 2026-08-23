@@ -20,10 +20,10 @@ public sealed class ProcCallGraph(IReadOnlyList<ProcCallEdge> edges)
     public IEnumerable<ProcCallEdge> EdgesCalling(string calleeQualifiedName) =>
         Edges.Where(e => string.Equals(e.CalleeQualifiedName, calleeQualifiedName, StringComparison.OrdinalIgnoreCase));
 
-public ProcCallEdge? EdgeAt(SourceSpan callSite) =>
+    public ProcCallEdge? EdgeAt(SourceSpan callSite) =>
         Edges.FirstOrDefault(e => e.CallSite == callSite);
 
-public ProcCallEdge? SingleCallSiteFor(string calleeQualifiedName)
+    public ProcCallEdge? SingleCallSiteFor(string calleeQualifiedName)
     {
         using var enumerator = EdgesCalling(calleeQualifiedName).GetEnumerator();
         if (!enumerator.MoveNext())

@@ -89,7 +89,7 @@ public static class FloatEqualityPredicateScanner
         private static List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChainOf(
             (IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered) resolved) => [resolved];
 
-private void InspectJoinOnClauses(
+        private void InspectJoinOnClauses(
             IList<TableReference>? tableReferences,
             IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
         {
@@ -144,7 +144,7 @@ private void InspectJoinOnClauses(
             }
         }
 
-private sealed class EqualityCollector : TSqlFragmentVisitor
+        private sealed class EqualityCollector : TSqlFragmentVisitor
         {
             public List<BooleanComparisonExpression> Comparisons { get; } = [];
 
@@ -160,6 +160,7 @@ private sealed class EqualityCollector : TSqlFragmentVisitor
 
             public override void ExplicitVisit(QuerySpecification node)
             {
+
             }
         }
     }

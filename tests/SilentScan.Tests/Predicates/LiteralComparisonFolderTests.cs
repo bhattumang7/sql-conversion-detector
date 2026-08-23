@@ -39,6 +39,7 @@ public sealed class LiteralComparisonFolderTests
     [InlineData("SELECT 1 WHERE 'abc' <> 'xyz';")]
     public void TryFoldComparison_DistinctStringLiterals_NeverFolds(string sql)
     {
+
         var comparison = ExtractComparison(sql);
 
         var result = LiteralComparisonFolder.TryFoldComparison(comparison.FirstExpression, comparison.SecondExpression, comparison.ComparisonType);
@@ -49,6 +50,7 @@ public sealed class LiteralComparisonFolderTests
     [Fact]
     public void TryFoldComparison_StringLiteralsDifferingOnlyByCase_DoesNotFold()
     {
+
         var comparison = ExtractComparison("SELECT 1 WHERE 'abc' = 'ABC';");
 
         var result = LiteralComparisonFolder.TryFoldComparison(comparison.FirstExpression, comparison.SecondExpression, comparison.ComparisonType);

@@ -35,6 +35,7 @@ public sealed class LiteralTypingOracleTests
     [Fact]
     public async Task IntMaxValuePlusOneIntegerValuedLiteral_TypesAsDecimalNotBigInt()
     {
+
         var (type, precision, scale) = await DescribeLiteralType("2147483648");
 
         Assert.Equal("numeric", type);
@@ -73,12 +74,14 @@ public sealed class LiteralTypingOracleTests
     [Fact]
     public async Task EmptyStringLiteral_TypesWithLengthOneNotZero()
     {
+
         Assert.Equal(1, await EmptyStringLiteralMaxLengthBytes("''"));
     }
 
     [Fact]
     public async Task EmptyNationalStringLiteral_TypesWithLengthOneNotZero()
     {
+
         Assert.Equal(2, await EmptyStringLiteralMaxLengthBytes("N''"));
     }
 }

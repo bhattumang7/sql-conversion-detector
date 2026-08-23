@@ -36,6 +36,7 @@ public static class LiteralTypeResolver
         var dotIndex = value.IndexOf('.', StringComparison.Ordinal);
         if (dotIndex < 0)
         {
+
             return new SqlType(SqlTypeCategory.Decimal, Precision: value.Length, Scale: 0);
         }
 

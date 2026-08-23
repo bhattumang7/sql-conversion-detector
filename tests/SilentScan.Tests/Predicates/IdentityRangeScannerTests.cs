@@ -55,6 +55,7 @@ public sealed class IdentityRangeScannerTests
     public void NearTypeCeiling_FiresExhaustion()
     {
         var catalog = new DatabaseCatalog();
+
         catalog.AddOrReplace(Table("dbo", "Orders", [IdentityColumn("Id", TinyIntType, seed: 0, increment: 1, currentValue: 250)]));
 
         var findings = IdentityRangeScanner.Scan(catalog);
@@ -67,6 +68,7 @@ public sealed class IdentityRangeScannerTests
     [Fact]
     public void LowValueFarFromCeiling_NeverFiresExhaustion()
     {
+
         var catalog = new DatabaseCatalog();
         catalog.AddOrReplace(Table("dbo", "Orders", [IdentityColumn("Id", IntType, seed: 1, increment: 1, currentValue: 400)]));
 
@@ -102,6 +104,7 @@ public sealed class IdentityRangeScannerTests
     public void DescendingIdentity_NearTypeFloor_FiresExhaustion()
     {
         var catalog = new DatabaseCatalog();
+
         catalog.AddOrReplace(Table("dbo", "Orders", [IdentityColumn("Id", TinyIntType, seed: 255, increment: -1, currentValue: 5)]));
 
         var findings = IdentityRangeScanner.Scan(catalog);

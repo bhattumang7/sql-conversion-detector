@@ -13,7 +13,7 @@ namespace SilentScan.Live;
 
 public static class LiveScanRunner
 {
-public static async Task<LiveScanResult> RunAsync(
+    public static async Task<LiveScanResult> RunAsync(
         string connectionString,
         bool includePlanCacheEvidence = false,
         FindingConfidence minimumConfidence = FindingConfidence.High,
@@ -144,6 +144,7 @@ public static async Task<LiveScanResult> RunAsync(
 
         using (var indexDesignStage = progress.Begin("checking clustered/heap index design"))
         {
+
             var dmlTargetTables = DmlTargetTableScanner.Scan(parseResultSource(), catalog);
             var indexDesignFindings = IndexDesignScanner.Scan(catalog, dmlTargetTables).Where(f => f.Confidence <= minimumConfidence).ToList();
             report = report with { IndexDesignFindings = indexDesignFindings };
@@ -188,6 +189,7 @@ public static async Task<LiveScanResult> RunAsync(
     private static List<RankedFinding> RankByPlanCacheEvidence(
         IReadOnlyList<TypedPredicateFinding> findings, PlanCacheEvidenceResult evidence)
     {
+
         return findings
             .Select(f =>
             {

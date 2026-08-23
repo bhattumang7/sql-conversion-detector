@@ -20,9 +20,10 @@ public static class LiteralComparisonFolder
         return null;
     }
 
-public static decimal? TryFoldToNumeric(ScalarExpression expression) => expression switch
+    public static decimal? TryFoldToNumeric(ScalarExpression expression) => expression switch
     {
-        NullLiteral => null,        IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
+        NullLiteral => null,
+        IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
         NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
         BinaryExpression binary => TryFoldArithmetic(binary),
         _ => null,
@@ -56,7 +57,7 @@ public static decimal? TryFoldToNumeric(ScalarExpression expression) => expressi
         _ => null,
     };
 
-private static bool? EvaluateExactStringMatch(BooleanComparisonType op, StringLiteral first, StringLiteral second)
+    private static bool? EvaluateExactStringMatch(BooleanComparisonType op, StringLiteral first, StringLiteral second)
     {
         if (!string.Equals(first.Value, second.Value, StringComparison.Ordinal))
         {

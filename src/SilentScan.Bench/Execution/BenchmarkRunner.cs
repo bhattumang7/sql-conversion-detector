@@ -57,6 +57,7 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
         }
         finally
         {
+
             await provisioner.DropIfExistsAsync(databaseName, cancellationToken);
         }
     }
@@ -91,7 +92,7 @@ public sealed class BenchmarkRunner(SqlServerOptions options)
             StaticVerdict(cell.Scenario, cell.Matched));
     }
 
-private static Verdict StaticVerdict(TypePairScenario scenario, bool matched)
+    private static Verdict StaticVerdict(TypePairScenario scenario, bool matched)
     {
         if (matched)
         {
@@ -103,7 +104,7 @@ private static Verdict StaticVerdict(TypePairScenario scenario, bool matched)
         return VerdictClassifier.Classify(columnType, otherType, otherIsLiteral: false, operatorText: "=");
     }
 
-private sealed record BenchmarkCell(TypePairScenario Scenario, string TableName, int RowCount, bool LegacyCardinalityEstimation, bool Matched, QuerySelectivity Selectivity);
+    private sealed record BenchmarkCell(TypePairScenario Scenario, string TableName, int RowCount, bool LegacyCardinalityEstimation, bool Matched, QuerySelectivity Selectivity);
 
     private static string BuildSingleRowQuery(TypePairScenario scenario, string tableName, int rowCount, bool matched, string paramTypeDdl)
     {
@@ -115,7 +116,7 @@ private sealed record BenchmarkCell(TypePairScenario Scenario, string TableName,
             $"N'@p {paramTypeDdl}', @p = {paramValue};";
     }
 
-private static string BuildRangeQuery(TypePairScenario scenario, string tableName, int rowCount, bool matched, string paramTypeDdl, double fraction)
+    private static string BuildRangeQuery(TypePairScenario scenario, string tableName, int rowCount, bool matched, string paramTypeDdl, double fraction)
     {
         var bandSize = Math.Max(1, (int)(rowCount * fraction));
         var startRow = Math.Max(0, (rowCount - bandSize) / 2);

@@ -9,11 +9,11 @@ namespace SilentScan.Core.Predicates;
 
 public static class DuplicationScanner
 {
-private const int MinCommentedCodeLength = 12;
+    private const int MinCommentedCodeLength = 12;
 
-private const int DuplicatedLiteralThreshold = 3;
+    private const int DuplicatedLiteralThreshold = 3;
 
-private const int MinDuplicatedLiteralLength = 3;
+    private const int MinDuplicatedLiteralLength = 3;
 
     public static IReadOnlyList<DuplicationFinding> Scan(SqlParseResult parseResult, DatabaseCatalog catalog)
     {
@@ -35,7 +35,7 @@ private const int MinDuplicatedLiteralLength = 3;
         ];
     }
 
-private static void ScanComments(SqlParseResult parseResult, List<DuplicationFinding> findings)
+    private static void ScanComments(SqlParseResult parseResult, List<DuplicationFinding> findings)
     {
         var fragment = parseResult.Fragment;
         if (fragment.ScriptTokenStream is null || fragment.LastTokenIndex < fragment.FirstTokenIndex)
@@ -87,14 +87,14 @@ private static void ScanComments(SqlParseResult parseResult, List<DuplicationFin
         return text;
     }
 
-private static readonly HashSet<string> RealStatementKeywords = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> RealStatementKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
         "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE",
         "DECLARE", "SET", "IF", "WHILE", "BEGIN", "PRINT", "RETURN", "THROW", "RAISERROR",
         "EXEC", "EXECUTE", "CREATE", "ALTER", "DROP", "WITH", "GRANT", "REVOKE", "DENY", "USE",
     };
 
-private static bool LooksLikeCode(string strippedText)
+    private static bool LooksLikeCode(string strippedText)
     {
         var firstWord = strippedText.TrimStart().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries) is [var word, ..]
             ? word
@@ -128,14 +128,14 @@ private static bool LooksLikeCode(string strippedText)
 
         private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteScopeStack = new();
 
         private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
             new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
 
-private readonly Stack<IReadOnlyDictionary<string, ScopeEntry>> _tableScopeStack = new();
+        private readonly Stack<IReadOnlyDictionary<string, ScopeEntry>> _tableScopeStack = new();
 
-private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
+        private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqualityComparer.Instance);
 
         public override void ExplicitVisit(CreateProcedureStatement node)
         {
@@ -225,6 +225,7 @@ private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqual
 
         public override void ExplicitVisit(AssignmentSetClause node)
         {
+
             if (node.Column is { } column && node.NewValue is ColumnReferenceExpression)
             {
                 var columnText = FragmentTextRenderer.Render(column);
@@ -321,6 +322,7 @@ private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqual
 
         public override void ExplicitVisit(BinaryExpression node)
         {
+
             if (node.BinaryExpressionType is BinaryExpressionType.Subtract or BinaryExpressionType.Divide or BinaryExpressionType.Modulo
                 && !BothLiterals(node.FirstExpression, node.SecondExpression)
                 && SameText(node.FirstExpression, node.SecondExpression))
@@ -343,6 +345,7 @@ private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqual
 
         public override void ExplicitVisit(BooleanNotExpression node)
         {
+
             var inner = Unwrap(node.Expression);
             if (inner is BooleanNotExpression)
             {
@@ -378,7 +381,7 @@ private readonly HashSet<IfStatement> _ifChainContinuations = new(ReferenceEqual
             base.ExplicitVisit(node);
         }
 
-public override void ExplicitVisit(IIfCall node)
+        public override void ExplicitVisit(IIfCall node)
         {
             if (node.ThenExpression is IIfCall)
             {
@@ -398,7 +401,7 @@ public override void ExplicitVisit(IIfCall node)
                 ? $"{schema.Value}.{name.BaseIdentifier.Value}"
                 : name.BaseIdentifier.Value;
 
-private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
+        private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
         {
             if (expression is not ColumnReferenceExpression columnRef)
             {
@@ -431,12 +434,12 @@ private bool CanClaimTautologyOrContradiction(ScalarExpression expression)
             return null;
         }
 
-private CatalogColumn? CatalogColumnOf(ScopeEntry entry, string columnName) =>
+        private CatalogColumn? CatalogColumnOf(ScopeEntry entry, string columnName) =>
             !entry.IsViewLayer && entry.Relation.QualifiedName is { } qualifiedName
                 ? catalog.Find(qualifiedName)?.FindColumn(columnName)
                 : null;
 
-private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>
+        private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>
             statements.Any(StatementAlwaysExits);
 
         private static bool StatementAlwaysExits(TSqlStatement statement) => statement switch
@@ -466,10 +469,11 @@ private static bool AlwaysExitsLoop(IList<TSqlStatement> statements) =>
 
             public override void ExplicitVisit(WhileStatement node)
             {
+
             }
         }
 
-private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression node)
+        private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression node)
         {
             if (LiteralComparisonFolder.TryFoldComparison(node.FirstExpression, node.SecondExpression, node.ComparisonType) is { } value)
             {
@@ -486,7 +490,7 @@ private void CheckAlwaysTrueOrFalseLiteralComparison(BooleanComparisonExpression
         private static BooleanExpression Unwrap(BooleanExpression expression) =>
             expression is BooleanParenthesisExpression parenthesis ? Unwrap(parenthesis.Expression) : expression;
 
-private void CheckNegatedComparison(BooleanNotExpression node, BooleanExpression inner)
+        private void CheckNegatedComparison(BooleanNotExpression node, BooleanExpression inner)
         {
             switch (inner)
             {
@@ -524,7 +528,7 @@ private void CheckNegatedComparison(BooleanNotExpression node, BooleanExpression
             }
         }
 
-private (List<(BooleanExpression Condition, TSqlStatement Body)> Branches, TSqlStatement? FinalElseBody) CollectIfChainBranches(IfStatement root)
+        private (List<(BooleanExpression Condition, TSqlStatement Body)> Branches, TSqlStatement? FinalElseBody) CollectIfChainBranches(IfStatement root)
         {
             var branches = new List<(BooleanExpression Condition, TSqlStatement Body)>();
             var current = root;
@@ -542,7 +546,7 @@ private (List<(BooleanExpression Condition, TSqlStatement Body)> Branches, TSqlS
             }
         }
 
-private void CheckDuplicateSiblingConditions(List<(BooleanExpression Condition, TSqlStatement Body)> branches)
+        private void CheckDuplicateSiblingConditions(List<(BooleanExpression Condition, TSqlStatement Body)> branches)
         {
             for (var i = 1; i < branches.Count; i++)
             {
@@ -558,7 +562,7 @@ private void CheckDuplicateSiblingConditions(List<(BooleanExpression Condition, 
             }
         }
 
-private void CheckIfChainBranchBodyIdentity(IfStatement root, List<(BooleanExpression Condition, TSqlStatement Body)> branches, TSqlStatement? finalElseBody)
+        private void CheckIfChainBranchBodyIdentity(IfStatement root, List<(BooleanExpression Condition, TSqlStatement Body)> branches, TSqlStatement? finalElseBody)
         {
             var allBodies = branches.Select(b => b.Body).ToList();
             if (finalElseBody is not null)
@@ -595,7 +599,7 @@ private void CheckIfChainBranchBodyIdentity(IfStatement root, List<(BooleanExpre
             }
         }
 
-private void CheckCollapsibleNestedIf(IfStatement node)
+        private void CheckCollapsibleNestedIf(IfStatement node)
         {
             if (node.ElseStatement is not null)
             {
@@ -663,7 +667,7 @@ private void CheckCollapsibleNestedIf(IfStatement node)
             }
         }
 
-private void CheckAndChainBounds(BooleanExpression condition)
+        private void CheckAndChainBounds(BooleanExpression condition)
         {
             var conjuncts = FlattenAnd(condition);
             if (conjuncts.Count < 2)
@@ -711,6 +715,7 @@ private void CheckAndChainBounds(BooleanExpression condition)
             }
             else if (later.Interval.IsSubsetOf(earlier.Interval))
             {
+
                 Add(DuplicationFindingKind.RedundantAndCondition, earlier.Operand, earlier.Fragment, FindingConfidence.Medium);
             }
             else if (earlier.Interval.IsSubsetOf(later.Interval))
@@ -740,7 +745,7 @@ private void CheckAndChainBounds(BooleanExpression condition)
             return result;
         }
 
-private static (string OperandText, BooleanComparisonType Op, decimal Literal)? TryExtractNumericBound(BooleanExpression expression)
+        private static (string OperandText, BooleanComparisonType Op, decimal Literal)? TryExtractNumericBound(BooleanExpression expression)
         {
             if (expression is not BooleanComparisonExpression comparison)
             {
@@ -768,7 +773,7 @@ private static (string OperandText, BooleanComparisonType Op, decimal Literal)? 
             return null;
         }
 
-private static decimal? TryGetDirectNumericLiteralValue(ScalarExpression expression) => expression switch
+        private static decimal? TryGetDirectNumericLiteralValue(ScalarExpression expression) => expression switch
         {
             IntegerLiteral integer when decimal.TryParse(integer.Value, out var value) => value,
             NumericLiteral numeric when decimal.TryParse(numeric.Value, out var value) => value,
@@ -784,7 +789,7 @@ private static decimal? TryGetDirectNumericLiteralValue(ScalarExpression express
             var other => other,
         };
 
-private readonly record struct NumericBound(decimal? Lower, bool LowerInclusive, decimal? Upper, bool UpperInclusive)
+        private readonly record struct NumericBound(decimal? Lower, bool LowerInclusive, decimal? Upper, bool UpperInclusive)
         {
             public static NumericBound? FromComparison(BooleanComparisonType comparisonType, decimal literal) => comparisonType switch
             {

@@ -53,6 +53,7 @@ public sealed class IsNullNotNullSuppressionTests : OracleTestFixture
     [Fact]
     public async Task NotNullColumn_WideningDefaultType_StillOracleConfirmsIndexSeek()
     {
+
         const string probe = "DECLARE @d BIGINT = 99999999999; SELECT OrderId FROM dbo.Orders WHERE ISNULL(Age, @d) = 0;";
 
         var planXml = await new SilentScan.Verify.Oracle.PlanXmlCapture(Options).CaptureAsync(DatabaseName, probe);
@@ -63,6 +64,7 @@ public sealed class IsNullNotNullSuppressionTests : OracleTestFixture
     [Fact]
     public void NullableColumn_DoesNotSuppress_FileModeCatalog()
     {
+
         const string sql = """
             CREATE TABLE dbo.NullableOrders (OrderId INT NOT NULL PRIMARY KEY, Age INT NULL);
             CREATE INDEX IX_NullableOrders_Age ON dbo.NullableOrders(Age);

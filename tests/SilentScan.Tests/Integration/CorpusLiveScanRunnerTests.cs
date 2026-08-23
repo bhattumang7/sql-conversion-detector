@@ -66,6 +66,7 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
     [Fact]
     public async Task RunAsync_TempTableInsideProcedureBody_ResolvedAsCatalogExtra()
     {
+
         WriteFile("Procedures/usp_BuildReport.sql", """
             CREATE PROCEDURE dbo.usp_BuildReport AS
             BEGIN
@@ -84,7 +85,7 @@ public sealed class CorpusLiveScanRunnerTests : IDisposable
         Assert.Equal("#Report", finding.Column.TableQualifiedName);
     }
 
-[Fact]
+    [Fact]
     public async Task RunAsync_ModuleParseHealth_IsIndependentOfFileLevelHealth()
     {
         WriteFile("Tables/Orders.sql", "CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY);");

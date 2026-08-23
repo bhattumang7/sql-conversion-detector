@@ -6,7 +6,7 @@ namespace SilentScan.Core.Lineage;
 
 public static class ScalarUdfMap
 {
-public static IReadOnlyDictionary<string, ScalarUdfOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
+    public static IReadOnlyDictionary<string, ScalarUdfOrigin> Build(IReadOnlyList<ViewDefinition> views, DatabaseCatalog catalog)
     {
         var viewsByName = new Dictionary<string, ViewDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var view in views)
@@ -64,7 +64,7 @@ public static IReadOnlyDictionary<string, ScalarUdfOrigin> Build(IReadOnlyList<V
         return found;
     }
 
-private static ScalarUdfOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
+    private static ScalarUdfOrigin? TryResolveNamedReference(NamedTableReference namedRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(namedRef.SchemaObject));
         return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
@@ -72,7 +72,7 @@ private static ScalarUdfOrigin? TryResolveNamedReference(NamedTableReference nam
             : null;
     }
 
-private static ScalarUdfOrigin? TryResolveFunctionReference(TvfLeafReference functionRef, ResolutionContext context)
+    private static ScalarUdfOrigin? TryResolveFunctionReference(TvfLeafReference functionRef, ResolutionContext context)
     {
         var qualifiedName = context.Catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(functionRef.Reference.SchemaObject));
         return context.ViewsByName.TryGetValue(qualifiedName, out var referencedView)
@@ -82,7 +82,7 @@ private static ScalarUdfOrigin? TryResolveFunctionReference(TvfLeafReference fun
 
     private static ScalarUdfOrigin? Inherit(ScalarUdfOrigin origin) => origin with { Depth = origin.Depth + 1 };
 
-private static ScalarUdfOrigin? Worse(ScalarUdfOrigin? direct, ScalarUdfOrigin? inherited)
+    private static ScalarUdfOrigin? Worse(ScalarUdfOrigin? direct, ScalarUdfOrigin? inherited)
     {
         if (direct is null)
         {
@@ -99,7 +99,7 @@ private static ScalarUdfOrigin? Worse(ScalarUdfOrigin? direct, ScalarUdfOrigin? 
             : direct;
     }
 
-private static ScalarUdfOrigin? FindWorstDirectCall(ViewDefinition view, DatabaseCatalog catalog)
+    private static ScalarUdfOrigin? FindWorstDirectCall(ViewDefinition view, DatabaseCatalog catalog)
     {
         var visitor = new DirectCallVisitor(view.SourcePath, catalog);
         view.SelectStatement.Accept(visitor);

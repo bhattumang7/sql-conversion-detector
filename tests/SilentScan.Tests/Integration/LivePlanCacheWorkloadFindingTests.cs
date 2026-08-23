@@ -20,6 +20,7 @@ public sealed class LivePlanCacheWorkloadFindingTests : OracleTestFixture
     [Fact]
     public async Task RunAsync_AdHocParameterizedQueryNeverInAModule_SurfacesAsWorkloadFinding()
     {
+
         const string adHocQueries = """
             DECLARE @p1 NVARCHAR(30) = N'ABC123';
             SELECT AccountId FROM dbo.Accounts WHERE Code = @p1;
@@ -66,6 +67,7 @@ public sealed class LivePlanCacheReaderPerConversionAttributionOracleTests : Ora
     [Fact]
     public async Task RunAsync_OnePlanWithBothRangeSeekAndScanForcedConversions_AttributesEachColumnIndependently()
     {
+
         const string seedRows = """
             INSERT INTO dbo.Probe (Id, WindowsColCol, SqlColCol)
             SELECT TOP (2000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)),

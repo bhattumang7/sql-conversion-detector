@@ -121,7 +121,7 @@ public static class ProcCallGraphBuilder
             Edges.Add(new ProcCallEdge(_currentScope, qualifiedName, new SourceSpan(sourcePath, node.StartLine, node.StartColumn), arguments));
         }
 
-private static List<ProcCallArgument> MatchArguments(
+        private static List<ProcCallArgument> MatchArguments(
             IList<ExecuteParameter> actualParameters, IReadOnlyList<ProcedureParameterInfo> formalParameters, string sourcePath,
             IList<TSqlStatement>? currentScopeStatements, ExecuteStatement callSite, IReadOnlyDictionary<string, SqlType?> variableTypes)
         {
@@ -161,7 +161,7 @@ private static List<ProcCallArgument> MatchArguments(
             return matched;
         }
 
-private static ProcCallLiteralArgument? TryGetDirectLiteralArgument(ScalarExpression parameterValue, string sourcePath) => parameterValue switch
+        private static ProcCallLiteralArgument? TryGetDirectLiteralArgument(ScalarExpression parameterValue, string sourcePath) => parameterValue switch
         {
             StringLiteral stringLiteral => ToLiteralArgument(stringLiteral, sourcePath),
             IntegerLiteral integerLiteral => ToIntegerLiteralArgument(integerLiteral, sourcePath),
@@ -174,7 +174,7 @@ private static ProcCallLiteralArgument? TryGetDirectLiteralArgument(ScalarExpres
                 ? TryResolveTopLevelLiteral(currentScopeStatements, callerVariableName, sourcePath, callSite)
                 : null;
 
-private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(
+        private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(
             IList<TSqlStatement> scopeStatements, string variableName, string sourcePath, ExecuteStatement callSite)
         {
             if (IsWrittenInsideConditional(scopeStatements, variableName))
@@ -186,7 +186,7 @@ private static ProcCallLiteralArgument? TryResolveTopLevelLiteral(
             return FindLastLiteralAssignmentBeforeCall(scopeStatements, variableName, sourcePath, callIndex);
         }
 
-private static int FindTopLevelStatementIndex(IList<TSqlStatement> scopeStatements, TSqlFragment target)
+        private static int FindTopLevelStatementIndex(IList<TSqlStatement> scopeStatements, TSqlFragment target)
         {
             for (var i = 0; i < scopeStatements.Count; i++)
             {
@@ -229,7 +229,7 @@ private static int FindTopLevelStatementIndex(IList<TSqlStatement> scopeStatemen
             return poisoned.Names.Contains(variableName);
         }
 
-private static ProcCallLiteralArgument? FindLastLiteralAssignmentBeforeCall(
+        private static ProcCallLiteralArgument? FindLastLiteralAssignmentBeforeCall(
             IList<TSqlStatement> scopeStatements, string variableName, string sourcePath, int callIndex)
         {
             ProcCallLiteralArgument? current = null;
@@ -249,7 +249,7 @@ private static ProcCallLiteralArgument? FindLastLiteralAssignmentBeforeCall(
             return everAssigned ? current : null;
         }
 
-private static bool TryGetAssignmentToVariable(TSqlStatement statement, string variableName, string sourcePath, out ProcCallLiteralArgument? literal)
+        private static bool TryGetAssignmentToVariable(TSqlStatement statement, string variableName, string sourcePath, out ProcCallLiteralArgument? literal)
         {
             literal = null;
             switch (statement)
@@ -282,10 +282,10 @@ private static bool TryGetAssignmentToVariable(TSqlStatement statement, string v
             return new ProcCallLiteralArgument(stringLiteral.Value, sourcePath, stringLiteral.StartLine, stringLiteral.StartColumn, prefixLength);
         }
 
-private static ProcCallLiteralArgument ToIntegerLiteralArgument(IntegerLiteral integerLiteral, string sourcePath) =>
+        private static ProcCallLiteralArgument ToIntegerLiteralArgument(IntegerLiteral integerLiteral, string sourcePath) =>
             new(integerLiteral.Value, sourcePath, integerLiteral.StartLine, integerLiteral.StartColumn, PrefixLength: 0);
 
-private sealed class ConditionallyWrittenVariableCollector : TSqlFragmentVisitor
+        private sealed class ConditionallyWrittenVariableCollector : TSqlFragmentVisitor
         {
             private int _conditionalDepth;
 

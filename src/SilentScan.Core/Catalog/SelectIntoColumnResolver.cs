@@ -36,6 +36,7 @@ internal static class SelectIntoColumnResolver
                     break;
 
                 case SelectScalarExpression { ColumnName.Value: { } aliasedName }:
+
                     columns.Add(new CatalogColumn(aliasedName, null, IsNullable: true, IsIdentity: false, IsComputed: false, IsPersisted: false));
                     break;
 
@@ -50,7 +51,7 @@ internal static class SelectIntoColumnResolver
         return columns;
     }
 
-private static HashSet<string> CteNamesOf(SelectStatement select) =>
+    private static HashSet<string> CteNamesOf(SelectStatement select) =>
         select.WithCtesAndXmlNamespaces is { CommonTableExpressions: { } ctes }
             ? new HashSet<string>(ctes.Select(cte => cte.ExpressionName.Value), StringComparer.OrdinalIgnoreCase)
             : [];
@@ -72,6 +73,7 @@ private static HashSet<string> CteNamesOf(SelectStatement select) =>
             {
                 if (leaf is not NamedTableReference named)
                 {
+
                     ordered.Add(null);
                     continue;
                 }

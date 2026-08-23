@@ -18,7 +18,7 @@ public sealed record LiveCorpusModuleSource(
 
 public static class LiveCorpusDeployer
 {
-public static async Task<LiveCorpusModuleSource> DeployAndReadAsync(
+    public static async Task<LiveCorpusModuleSource> DeployAndReadAsync(
         CorpusRepoEntry repo, string repoRoot, string databaseName, SqlServerOptions sqlOptions, CancellationToken cancellationToken)
     {
         var ddlFiles = CorpusFileResolver.ResolveDdlFiles(repo, repoRoot);
@@ -49,6 +49,7 @@ public static async Task<LiveCorpusModuleSource> DeployAndReadAsync(
             {
                 if (!provenance.TryGetValue(module.QualifiedName, out var sourcePath))
                 {
+
                     unmappedModules.Add(module.QualifiedName);
                     sourcePath = module.QualifiedName;
                 }
@@ -72,7 +73,7 @@ public static async Task<LiveCorpusModuleSource> DeployAndReadAsync(
         return SqlScriptParser.ParseText(path, text);
     }
 
-private static Dictionary<string, string> BuildProvenanceMap(IReadOnlyList<SqlParseResult> fileParseResults)
+    private static Dictionary<string, string> BuildProvenanceMap(IReadOnlyList<SqlParseResult> fileParseResults)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var result in fileParseResults)

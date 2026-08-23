@@ -4,7 +4,7 @@ namespace SilentScan.Core.Predicates;
 
 public enum IndexCoverageFindingKind
 {
-KeyLookupProneIndex,
+    KeyLookupProneIndex,
 }
 
 public sealed record IndexCoverageFinding(

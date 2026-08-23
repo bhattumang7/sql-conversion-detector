@@ -48,6 +48,7 @@ public sealed class DanglingObjectReferenceCheckerTests
     [Fact]
     public async Task ViewLeftBehindAfterItsBaseTableWasDropped_IsReportedAsAView()
     {
+
         var findings = await CheckAsync(
             """
             CREATE TABLE dbo.WidgetInventory (WidgetId INT NOT NULL);
@@ -67,6 +68,7 @@ public sealed class DanglingObjectReferenceCheckerTests
     [Fact]
     public async Task TriggerReferencingInsertedPseudoTable_IsNotReported()
     {
+
         var findings = await CheckAsync(
             """
             CREATE TABLE dbo.WidgetInventory (WidgetId INT NOT NULL);
@@ -83,6 +85,7 @@ public sealed class DanglingObjectReferenceCheckerTests
     [Fact]
     public async Task ProcedureCallingAnUnqualifiedProcedureName_IsCallerDependentAndNotReported()
     {
+
         var findings = await CheckAsync(
             """
             CREATE PROCEDURE dbo.RunReport AS

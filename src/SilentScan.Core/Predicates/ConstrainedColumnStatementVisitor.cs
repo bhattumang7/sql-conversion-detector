@@ -20,9 +20,9 @@ internal abstract class ConstrainedColumnStatementVisitor(string sourcePath, Dat
 
     protected DatabaseCatalog Catalog { get; } = catalog;
 
-private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+    private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
 
-protected abstract void InspectStatement(ConstrainedStatement statement);
+    protected abstract void InspectStatement(ConstrainedStatement statement);
 
     public override void ExplicitVisit(SelectStatement node)
     {

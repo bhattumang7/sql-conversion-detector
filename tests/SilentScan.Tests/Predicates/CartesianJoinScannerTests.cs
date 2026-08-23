@@ -57,6 +57,7 @@ public sealed class CartesianJoinScannerTests
     [Fact]
     public void UnqualifiedColumnReferenceInWhere_Declines()
     {
+
         var findings = Scan("SELECT * FROM dbo.A, dbo.B WHERE SomeFlag = 1;");
 
         Assert.Empty(findings);
@@ -73,6 +74,7 @@ public sealed class CartesianJoinScannerTests
     [Fact]
     public void FiveTableCommaJoin_AllTransitivelyConnectedThroughAThirdTable_NeverFires()
     {
+
         var findings = Scan("""
             SELECT *
             FROM dbo.A a, dbo.B b, dbo.C c, dbo.D d, dbo.E e
@@ -111,6 +113,7 @@ public sealed class CartesianJoinScannerTests
     [Fact]
     public void CountStarWildcardInsideNestedSubquery_NeverCrashes()
     {
+
         var findings = Scan("SELECT * FROM dbo.A, dbo.B WHERE (SELECT COUNT(*) FROM dbo.C) > 0;");
 
         Assert.Empty(findings);
@@ -119,6 +122,7 @@ public sealed class CartesianJoinScannerTests
     [Fact]
     public void NestedJoinOnOneSide_Declines()
     {
+
         var findings = Scan("SELECT * FROM (dbo.A a INNER JOIN dbo.B b ON a.Id = b.AId), dbo.C c;");
 
         Assert.Empty(findings);

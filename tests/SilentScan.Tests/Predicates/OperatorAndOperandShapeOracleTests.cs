@@ -31,6 +31,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     [Fact]
     public async Task VarCharColumnLikeNVarcharVariable_WindowsCollation_IsScanForced_OracleConfirmed()
     {
+
         var report = await Scan("""
             CREATE PROCEDURE dbo.usp_FindByPrefix @Prefix NVARCHAR(20)
             AS
@@ -50,6 +51,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     [Fact]
     public async Task VarCharColumnLikeNVarcharLiteralPattern_WindowsCollation_StillRangeSeek_OracleConfirmed()
     {
+
         var report = await Scan("SELECT Code FROM dbo.VarCharWin WHERE Code LIKE N'abc%';");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
@@ -66,6 +68,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     [InlineData("<=")]
     public async Task VarCharColumnRangeOperatorVsNVarcharVariable_WindowsCollation_StillRangeSeek_OracleConfirmed(string op)
     {
+
         var report = await Scan($"DECLARE @p NVARCHAR(20); SELECT Code FROM dbo.VarCharWin WHERE Code {op} @p;");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
@@ -78,6 +81,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     [Fact]
     public async Task VarCharColumnVsNVarcharColumn_WindowsCollation_JoinPredicate_OnlyOneSideIndexed_StillRangeSeek_OracleConfirmed()
     {
+
         var report = await Scan("""
             SELECT a.Code
             FROM dbo.VarCharWin a
@@ -95,6 +99,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     [Fact]
     public async Task VarCharColumnVsNVarcharColumn_WindowsCollation_SameTableWhereClause_StillRangeSeek_OracleConfirmed()
     {
+
         var report = await Scan("SELECT Code FROM dbo.VarCharWin WHERE Code = OtherCode;");
 
         var finding = Assert.Single(report.TypedFindings, f => f.Column.ColumnName == "Code" && f.Column.TableQualifiedName == "dbo.VarCharWin");
@@ -108,6 +113,7 @@ public sealed class OperatorAndOperandShapeOracleTests : OracleTestFixture
     [Fact]
     public async Task VarCharColumnOverFourThousandChars_VsNVarcharMaxVariable_WindowsCollation_IsScanForced_OracleConfirmed()
     {
+
         const string longNarrowDdl = "CREATE TABLE dbo.LongNarrow (Code VARCHAR(4001) COLLATE Latin1_General_CI_AS NOT NULL, INDEX IX_LongCode (Code));";
         var report = await EngineAuthoritativeScan.ScanAsync(
             longNarrowDdl + "\nGO\nDECLARE @p NVARCHAR(MAX); SELECT Code FROM dbo.LongNarrow WHERE Code = @p;",

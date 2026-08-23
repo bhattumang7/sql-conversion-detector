@@ -7,5 +7,5 @@ public enum Verdict
     ScanForced,
     Unknown,
 
-OperandClash,
+    OperandClash,
 }

@@ -81,6 +81,7 @@ public sealed record ScanReport(
     IReadOnlyList<AggregateDivisionColumnstoreFinding> AggregateDivisionColumnstoreFindings,
     IReadOnlyList<SecurityPredicateIndexFinding> SecurityPredicateIndexFindings,
     IReadOnlyList<DanglingObjectReferenceFinding> DanglingObjectReferenceFindings,
+
     IReadOnlyList<Predicates.ForcedParameterizationFinding> ForcedParameterizationFindings,
     IReadOnlyList<ColumnstoreUnsupportedColumnTypeFinding> ColumnstoreUnsupportedColumnTypeFindings,
     IReadOnlyList<AlwaysEncryptedOrderByFinding> AlwaysEncryptedOrderByFindings,
@@ -96,5 +97,5 @@ public sealed record ScanReport(
     DynamicSqlSummary DynamicSqlSummary,
     int SchemaVersion = ScanReport.CurrentSchemaVersion)
 {
-public const int CurrentSchemaVersion = 68;
+    public const int CurrentSchemaVersion = 68;
 }

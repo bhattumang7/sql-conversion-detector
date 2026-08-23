@@ -2,13 +2,13 @@ namespace SilentScan.Verify.Catalog;
 
 public enum UnanalyzableModuleReason
 {
-ClrAssemblyModule,
+    ClrAssemblyModule,
 
-Encrypted,
+    Encrypted,
 
-NonStandardModuleType,
+    NonStandardModuleType,
 
-NumberedProcedureBody,
+    NumberedProcedureBody,
 }
 
 public sealed record UnanalyzableModule(string SchemaName, string ObjectName, string ObjectTypeCode, UnanalyzableModuleReason Reason)

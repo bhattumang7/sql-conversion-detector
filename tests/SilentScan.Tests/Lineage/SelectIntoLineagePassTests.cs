@@ -43,6 +43,7 @@ public sealed class SelectIntoLineagePassTests
     [Fact]
     public async Task SelectIntoFromUnionSource_ResolvesInstead_OfGivingUp()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.CurrentOrders (OrderCode varchar(20) NOT NULL);
             GO
@@ -63,6 +64,7 @@ public sealed class SelectIntoLineagePassTests
     [Fact]
     public async Task AlterTableAddAfterSelectInto_SurvivesTheMerge()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL);
             GO
@@ -83,6 +85,7 @@ public sealed class SelectIntoLineagePassTests
     [Fact]
     public async Task CreateIndexAfterSelectInto_SurvivesTheMerge_ReportsIndexed()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL);
             GO
@@ -104,6 +107,7 @@ public sealed class SelectIntoLineagePassTests
     [Fact]
     public async Task SelectIntoFromBaseTable_UnaffectedByThePass()
     {
+
         var report = await Scan("""
             CREATE TABLE dbo.Employees (Badge varchar(20) NOT NULL, INDEX IX_Badge (Badge));
             GO

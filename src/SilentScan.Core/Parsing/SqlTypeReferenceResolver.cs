@@ -9,7 +9,7 @@ public static class SqlTypeReferenceResolver
 {
     private const string SysnameTypeName = "sysname";
 
-public static SqlType? Resolve(
+    public static SqlType? Resolve(
         DataTypeReference dataType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases = null,
         int? unsizedStringOrBinaryDefaultLength = null)
     {
@@ -25,6 +25,7 @@ public static SqlType? Resolve(
 
         if (dataType is not SqlDataTypeReference sqlDataType)
         {
+
             return null;
         }
 
@@ -48,7 +49,7 @@ public static SqlType? Resolve(
     private static bool IsFractionalSecondsFamily(SqlTypeCategory category) => category is
         SqlTypeCategory.Time or SqlTypeCategory.DateTime2 or SqlTypeCategory.DateTimeOffset;
 
-private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDataTypeReference sqlDataType)
+    private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDataTypeReference sqlDataType)
     {
         var scale = sqlDataType.Parameters.Count > 0 && sqlDataType.Parameters[0] is IntegerLiteral s
             ? int.Parse(s.Value, CultureInfo.InvariantCulture)
@@ -59,6 +60,7 @@ private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDat
 
     private static SqlType? ResolveUserType(UserDataTypeReference userType, Identifier? columnCollation, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
+
         if (string.Equals(userType.Name.BaseIdentifier.Value, SysnameTypeName, StringComparison.OrdinalIgnoreCase))
         {
             return ApplyColumnCollation(new SqlType(SqlTypeCategory.NVarChar, Length: 128), columnCollation);
@@ -75,7 +77,7 @@ private static SqlType ResolveFractionalSeconds(SqlTypeCategory category, SqlDat
             : null;
     }
 
-private static SqlType ApplyColumnCollation(SqlType type, Identifier? columnCollation) =>
+    private static SqlType ApplyColumnCollation(SqlType type, Identifier? columnCollation) =>
         type.IsStringFamily && columnCollation is { Value.Length: > 0 }
             ? type with { Collation = new Collation(columnCollation.Value) }
             : type;

@@ -7,7 +7,7 @@ namespace SilentScan.Tests.Support;
 
 public static class PipelineOracleVerification
 {
-public static async Task<IReadOnlyList<CorpusFindingResult>> VerifyAsync(
+    public static async Task<IReadOnlyList<CorpusFindingResult>> VerifyAsync(
         SqlServerOptions options,
         string databaseName,
         IReadOnlyList<TypedPredicateFinding> findings,
@@ -23,7 +23,7 @@ public static async Task<IReadOnlyList<CorpusFindingResult>> VerifyAsync(
         return results;
     }
 
-public static async Task<IReadOnlyList<CorpusFindingResult>> DeployAndVerifyAsync(
+    public static async Task<IReadOnlyList<CorpusFindingResult>> DeployAndVerifyAsync(
         SqlServerOptions options,
         string databaseName,
         string fixtureSql,
@@ -34,7 +34,7 @@ public static async Task<IReadOnlyList<CorpusFindingResult>> DeployAndVerifyAsyn
         return await VerifyAsync(options, databaseName, findings, cancellationToken);
     }
 
-public static void AssertAllConfirmed(IEnumerable<CorpusFindingResult> results)
+    public static void AssertAllConfirmed(IEnumerable<CorpusFindingResult> results)
     {
         foreach (var result in results)
         {

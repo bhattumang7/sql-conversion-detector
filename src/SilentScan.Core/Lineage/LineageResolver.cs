@@ -48,7 +48,7 @@ public static class LineageResolver
         return new ResolvedRelation(view.QualifiedName, [.. columnNames.Select(n => new ResolvedColumn(n, new ColumnProvenance.Unknown(reason)))]);
     }
 
-private static IReadOnlyList<string> TryInferOutputNames(SelectStatement selectStatement)
+    private static IReadOnlyList<string> TryInferOutputNames(SelectStatement selectStatement)
     {
         if (selectStatement.QueryExpression is not QuerySpecification { SelectElements: var elements })
         {
@@ -63,6 +63,7 @@ private static IReadOnlyList<string> TryInferOutputNames(SelectStatement selectS
 
     private static ResolvedRelation ResolveView(ViewDefinition view, DatabaseCatalog catalog, IReadOnlyDictionary<string, ResolvedRelation> resolvedViews, SkipLedger ledger)
     {
+
         var cteRelations = CteResolver.Resolve(view.SelectStatement.WithCtesAndXmlNamespaces, catalog, resolvedViews, view.SourcePath, ledger);
         var columns = QueryExpressionResolver.Resolve(view.SelectStatement.QueryExpression, catalog, resolvedViews, view.SourcePath, ledger, cteRelations);
 
@@ -74,6 +75,7 @@ private static IReadOnlyList<string> TryInferOutputNames(SelectStatement selectS
             }
             else
             {
+
                 ledger.Record(
                     AnalysisPass.Lineage, view.SourcePath, view.SourceLine, 0, "view column list",
                     $"'{view.QualifiedName}' declares {explicitNames.Count} column name(s) but its SELECT resolved {columns.Count} - column identity can't be trusted");

@@ -34,6 +34,7 @@ public sealed class DynamicSqlFixtureEndToEndTests
     [Fact]
     public void SpExecuteSqlWithParamTypes_ResolvesDisplayNameColumnSideConversion_ScanForced()
     {
+
         var finding = RunFixtureToSingleTypedFinding("sp_executesql_with_param_types.sql");
 
         Assert.Equal("DisplayName", finding.Column.ColumnName);
@@ -46,6 +47,7 @@ public sealed class DynamicSqlFixtureEndToEndTests
     [Fact]
     public void ExecStringConcatWithHavocBranch_TypedHoleFromUnmodeledWrite_ScanForced()
     {
+
         var finding = RunFixtureToSingleTypedFinding("exec_string_concat_with_havoc_branch.sql");
 
         Assert.Equal("DisplayName", finding.Column.ColumnName);
@@ -58,6 +60,7 @@ public sealed class DynamicSqlFixtureEndToEndTests
     [Fact]
     public void NestedDynamicSqlTwoLevels_RecursesIntoInnerExecScope_ScanForced()
     {
+
         var finding = RunFixtureToSingleTypedFinding("nested_dynamic_sql_two_levels.sql");
 
         Assert.Equal("DisplayName", finding.Column.ColumnName);
@@ -70,6 +73,7 @@ public sealed class DynamicSqlFixtureEndToEndTests
     [Fact]
     public void IfElseGuardedAlternativeRecovery_RecoversKnownSiblingBranch_ScanForced()
     {
+
         var finding = RunFixtureToSingleTypedFinding("if_else_guarded_alternative_recovery.sql");
 
         Assert.Equal("DisplayName", finding.Column.ColumnName);

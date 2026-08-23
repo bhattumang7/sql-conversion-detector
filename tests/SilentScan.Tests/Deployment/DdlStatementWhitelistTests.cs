@@ -132,6 +132,7 @@ public sealed class DdlStatementWhitelistTests
     [Fact]
     public void DisallowedStatementTypeNames_ExecInsideProcedureBody_StillRejectedEvenWhenOptedIn()
     {
+
         var batch = ParseSingleBatch("EXEC('DROP DATABASE master');");
 
         Assert.Contains("ExecuteStatement", DdlStatementWhitelist.DisallowedStatementTypeNames(batch, allowProcedureAndTriggerDefinitions: true));

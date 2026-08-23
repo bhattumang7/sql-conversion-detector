@@ -98,7 +98,7 @@ public sealed class ConstructCoverageCatalogTests
         Assert.True(unverified.Count == 0, $"Handled rows with no fixture/test reference: {string.Join(", ", unverified)}");
     }
 
-[Fact]
+    [Fact]
     public void LedgeredEntries_AlwaysCarryAVerifiedByReference()
     {
         var unverified = ConstructCoverageCatalog.Instance.Entries
@@ -109,7 +109,7 @@ public sealed class ConstructCoverageCatalogTests
         Assert.True(unverified.Count == 0, $"Ledgered rows with no fixture/test reference: {string.Join(", ", unverified)}");
     }
 
-private static readonly HashSet<string> DocumentedNonScriptDomConstructNames = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> DocumentedNonScriptDomConstructNames = new(StringComparer.Ordinal)
     {
         "MultiStatementTvfReturnVariable",
     };

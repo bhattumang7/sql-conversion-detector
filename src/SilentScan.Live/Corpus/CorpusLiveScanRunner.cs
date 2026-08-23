@@ -14,6 +14,7 @@ public static class CorpusLiveScanRunner
         CorpusRepoEntry repo, string repoRoot, SqlServerOptions sqlOptions,
         FindingConfidence minimumConfidence = FindingConfidence.High, CancellationToken cancellationToken = default)
     {
+
         var databaseName = $"{SanitizeDatabaseName(repo.Name)}_{Guid.NewGuid():N}";
         var provisioner = new DatabaseProvisioner(sqlOptions);
 

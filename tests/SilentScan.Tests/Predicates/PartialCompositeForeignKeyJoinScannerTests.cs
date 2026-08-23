@@ -13,7 +13,7 @@ public sealed class PartialCompositeForeignKeyJoinScannerTests
     private static CatalogColumn Col(string name, SqlTypeCategory category = SqlTypeCategory.Int) =>
         new(name, new SqlType(category), IsNullable: false, IsIdentity: false, IsComputed: false, IsPersisted: false);
 
-private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOrdersIndexes = null)
+    private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOrdersIndexes = null)
     {
         var ordersIndexes = new List<CatalogIndex>
         {
@@ -94,6 +94,7 @@ private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOr
     [Fact]
     public void CteSharesNameWithReferencedTable_JoinNeverFires()
     {
+
         var catalog = BuildCatalog();
         var findings = Scan(
             "WITH Orders AS (SELECT LineId AS OrderId FROM dbo.OrderLines) " +
@@ -116,6 +117,7 @@ private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOr
     [Fact]
     public void MissingColumnCoveredSeparatelyInWhereClause_NeverFires()
     {
+
         var catalog = BuildCatalog();
         var findings = Scan(
             "SELECT 1 FROM dbo.OrderLines ol JOIN dbo.Orders o ON ol.OrderId = o.OrderId WHERE ol.RevisionId = o.RevisionId;", catalog);
@@ -142,6 +144,7 @@ private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOr
     [Fact]
     public void UsedColumnSubsetCoveredByItsOwnUniqueIndexOnReferencedSide_Suppressed()
     {
+
         var catalog = BuildCatalog(extraOrdersIndexes:
         [
             new CatalogIndex("UX_Orders_OrderId", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["OrderId"], IncludedColumns: []),
@@ -156,6 +159,7 @@ private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOr
     [Fact]
     public void JoinMatchingNoneOfTheForeignKeyColumns_NeverFires()
     {
+
         var catalog = BuildCatalog();
         var findings = Scan(
             "SELECT 1 FROM dbo.OrderLines ol JOIN dbo.Orders o ON ol.LineId = o.OrderId;", catalog);
@@ -210,6 +214,7 @@ private static DatabaseCatalog BuildCatalog(IReadOnlyList<CatalogIndex>? extraOr
     [Fact]
     public void JoinAgainstUnrelatedThirdTable_NeverFires()
     {
+
         var catalog = BuildCatalog();
         catalog.AddOrReplace(Table("dbo", "Customers", [Col("OrderId")]));
         var findings = Scan(

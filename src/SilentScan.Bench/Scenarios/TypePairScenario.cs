@@ -15,7 +15,7 @@ public sealed record TypePairScenario(
     SqlTypeCategory MismatchedOtherCategory,
     Collation? Collation = null)
 {
-public static TypePairScenario VarCharVsNVarChar(string collation) => new(
+    public static TypePairScenario VarCharVsNVarChar(string collation) => new(
         Name: $"varchar_vs_nvarchar_{collation}",
         ColumnTypeDdl: $"VARCHAR(20) COLLATE {collation}",
         MatchedParamTypeDdl: "VARCHAR(20)",
@@ -27,7 +27,7 @@ public static TypePairScenario VarCharVsNVarChar(string collation) => new(
         MismatchedOtherCategory: SqlTypeCategory.NVarChar,
         Collation: new Collation(collation));
 
-public static TypePairScenario IntVsBigInt() => new(
+    public static TypePairScenario IntVsBigInt() => new(
         Name: "int_vs_bigint",
         ColumnTypeDdl: "INT",
         MatchedParamTypeDdl: "INT",

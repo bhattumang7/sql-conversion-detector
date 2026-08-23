@@ -6,7 +6,7 @@ namespace SilentScan.Core.Reporting;
 
 public sealed record RuleDefinition(string Id, string Rationale, string? FixGuidance = null, IReadOnlyList<string>? ExampleFixturePaths = null)
 {
-public IReadOnlyList<string> Examples => ExampleFixturePaths ?? [];
+    public IReadOnlyList<string> Examples => ExampleFixturePaths ?? [];
 }
 
 public static class RuleCatalog

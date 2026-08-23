@@ -7,6 +7,7 @@ public static class CsvReportWriter
 {
     public static string Write(IReadOnlyList<BenchmarkResult> results)
     {
+
         var builder = new StringBuilder();
         builder.Append("ScenarioName,RowCount,LegacyCardinalityEstimation,Matched,Selectivity,MedianLogicalReads,MedianCpuMs,MedianElapsedMs,StaticVerdict\n");
 

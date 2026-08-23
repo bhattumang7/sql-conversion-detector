@@ -6,7 +6,7 @@ namespace SilentScan.Core.Predicates;
 
 internal static class ComputedColumnMatcher
 {
-public static bool HasIndexedMatchingComputedColumn(
+    public static bool HasIndexedMatchingComputedColumn(
         DatabaseCatalog catalog, string tableQualifiedName, ScalarExpression predicateExpression)
     {
         var table = catalog.Find(tableQualifiedName);
@@ -35,7 +35,7 @@ public static bool HasIndexedMatchingComputedColumn(
         return false;
     }
 
-private static ScalarExpression? TryParseTopLevelExpression(string definitionText)
+    private static ScalarExpression? TryParseTopLevelExpression(string definitionText)
     {
         var result = SqlScriptParser.ParseText("schema-expression.sql", $"SELECT {definitionText};");
         if (result.HasErrors || result.Fragment is not TSqlScript { Batches: [{ Statements: [SelectStatement { QueryExpression: QuerySpecification { SelectElements: [SelectScalarExpression selectScalar] } } ] }] })
@@ -56,7 +56,7 @@ private static ScalarExpression? TryParseTopLevelExpression(string definitionTex
         return expression;
     }
 
-private static bool StructurallyEqual(ScalarExpression? a, ScalarExpression? b)
+    private static bool StructurallyEqual(ScalarExpression? a, ScalarExpression? b)
     {
         a = a is null ? null : Unwrap(a);
         b = b is null ? null : Unwrap(b);
@@ -78,6 +78,7 @@ private static bool StructurallyEqual(ScalarExpression? a, ScalarExpression? b)
             (FunctionCall fa, FunctionCall fb) => string.Equals(fa.FunctionName.Value, fb.FunctionName.Value, StringComparison.OrdinalIgnoreCase)
                 && fa.Parameters.Count == fb.Parameters.Count
                 && fa.Parameters.Zip(fb.Parameters, StructurallyEqual).All(equal => equal),
+
             (LeftFunctionCall la, LeftFunctionCall lb) => la.Parameters.Count == lb.Parameters.Count
                 && la.Parameters.Zip(lb.Parameters, StructurallyEqual).All(equal => equal),
             (CastCall casta, CastCall castb) => TypeEqual(casta.DataType, castb.DataType) && StructurallyEqual(casta.Parameter, castb.Parameter),
@@ -93,7 +94,7 @@ private static bool StructurallyEqual(ScalarExpression? a, ScalarExpression? b)
 
     private static readonly HashSet<string> DatePartSugarFunctions = new(StringComparer.OrdinalIgnoreCase) { "YEAR", "MONTH", "DAY" };
 
-private static FunctionCall? TryAsCanonicalDatePart(ScalarExpression? expression) =>
+    private static FunctionCall? TryAsCanonicalDatePart(ScalarExpression? expression) =>
         expression is FunctionCall { Parameters.Count: 1 } call && DatePartSugarFunctions.Contains(call.FunctionName.Value)
             ? new FunctionCall
             {

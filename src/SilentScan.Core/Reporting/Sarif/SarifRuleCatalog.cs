@@ -616,7 +616,7 @@ public static class SarifRuleCatalog
         _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, "Unhandled Verdict."),
     };
 
-private static readonly HashSet<string> DynamicSqlOutcomeRuleIds = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> DynamicSqlOutcomeRuleIds = new(StringComparer.Ordinal)
     {
         DynamicSqlAnalyzedRuleId,
         DynamicSqlUnanalyzableRuleId,
@@ -624,7 +624,7 @@ private static readonly HashSet<string> DynamicSqlOutcomeRuleIds = new(StringCom
         DynamicSqlPartiallyAnalyzedRuleId,
     };
 
-public static string RuleId(string baseRuleId, FindingConfidence confidence) => confidence switch
+    public static string RuleId(string baseRuleId, FindingConfidence confidence) => confidence switch
     {
         FindingConfidence.High => baseRuleId,
         FindingConfidence.Medium => $"{baseRuleId}/medium-confidence",

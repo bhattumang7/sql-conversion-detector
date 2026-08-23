@@ -50,6 +50,7 @@ public sealed class CorpusManifestLoaderTests
     [Fact]
     public void Parse_TemplateSubstitutions_RoundTrips()
     {
+
         var json = """
             {
               "repos": [

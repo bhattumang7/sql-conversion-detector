@@ -51,6 +51,7 @@ public sealed class ScalarUdfScannerTests
     [Fact]
     public void UnregisteredTwoPartCall_NeverFires()
     {
+
         var findings = ScanSql("""
             CREATE TABLE dbo.T (Id INT NOT NULL);
             GO

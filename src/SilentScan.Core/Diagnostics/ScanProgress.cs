@@ -5,29 +5,29 @@ namespace SilentScan.Core.Diagnostics;
 
 public interface IScanProgress
 {
-IScanStage Begin(string name, int? total = null);
+    IScanStage Begin(string name, int? total = null);
 
-void Done(TimeSpan elapsed);
+    void Done(TimeSpan elapsed);
 }
 
 public interface IScanStage : IDisposable
 {
-void Advance(int count = 1);
+    void Advance(int count = 1);
 
-void Complete(string detail);
+    void Complete(string detail);
 }
 
 public sealed class NullScanProgress : IScanProgress
 {
-public static readonly NullScanProgress Instance = new();
+    public static readonly NullScanProgress Instance = new();
 
     private NullScanProgress()
     {
     }
 
-public IScanStage Begin(string name, int? total = null) => NullScanStage.Shared;
+    public IScanStage Begin(string name, int? total = null) => NullScanStage.Shared;
 
-public void Done(TimeSpan elapsed)
+    public void Done(TimeSpan elapsed)
     {
     }
 
@@ -51,17 +51,17 @@ public void Done(TimeSpan elapsed)
 
 public sealed class TextWriterScanProgress : IScanProgress
 {
-private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
 
     private readonly TextWriter _writer;
     private readonly Lock _gate = new();
 
-public TextWriterScanProgress(TextWriter writer)
+    public TextWriterScanProgress(TextWriter writer)
     {
         _writer = writer;
     }
 
-public IScanStage Begin(string name, int? total = null)
+    public IScanStage Begin(string name, int? total = null)
     {
         lock (_gate)
         {
@@ -72,7 +72,7 @@ public IScanStage Begin(string name, int? total = null)
         return new Stage(this, total);
     }
 
-public void Done(TimeSpan elapsed)
+    public void Done(TimeSpan elapsed)
     {
         lock (_gate)
         {
@@ -102,6 +102,7 @@ public void Done(TimeSpan elapsed)
 
         public void Advance(int count = 1)
         {
+
             var done = Interlocked.Add(ref _advanced, count);
             if (_total is null || _stopwatch.Elapsed < HeartbeatInterval)
             {

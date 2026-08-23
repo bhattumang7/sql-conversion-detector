@@ -76,6 +76,7 @@ public sealed class LiveDescribeProbeBuilderTests
     [Fact]
     public void BuildFunctionProbe_ParameterWithUnrenderableSqlType_ReturnsNullWithAReasonNamingIt()
     {
+
         var parameters = new List<FunctionParameterSpec> { new("@tag", new SqlType(SqlTypeCategory.UserDefined), IsTableType: false) };
 
         var (probe, reason) = LiveDescribeProbeBuilder.BuildFunctionProbe("dbo.fn_Tagged", parameters);
@@ -96,6 +97,7 @@ public sealed class LiveDescribeProbeBuilderTests
     [Fact]
     public void BuildProcedureProbe_MultipleParameters_PositionalBareNullArguments()
     {
+
         var parameters = new List<ProcedureParameterSpec>
         {
             new("@id", IsTableType: false, IsOutput: false),

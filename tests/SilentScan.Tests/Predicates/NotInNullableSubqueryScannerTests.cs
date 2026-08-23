@@ -51,6 +51,7 @@ public sealed class NotInNullableSubqueryScannerTests
     [Fact]
     public void SubquerySourceIsACteSharingANameWithANullableRealTable_NeverFires()
     {
+
         var findings = Scan(
             "WITH ChildNullable AS (SELECT RefId FROM dbo.ChildNotNull) " +
             "SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM ChildNullable);");
@@ -85,6 +86,7 @@ public sealed class NotInNullableSubqueryScannerTests
     [Fact]
     public void SubqueryNotNullFilterOnlyReachableThroughOr_StillFires()
     {
+
         var findings = Scan(
             "SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId FROM dbo.ChildNullable WHERE RefId IS NOT NULL OR RefId = 1);");
 
@@ -112,6 +114,7 @@ public sealed class NotInNullableSubqueryScannerTests
     [Fact]
     public void SubqueryProjectsMultipleColumns_NeverFires()
     {
+
         var findings = Scan("SELECT Id FROM dbo.Parent WHERE Id NOT IN (SELECT RefId, RefId FROM dbo.ChildNullable);");
 
         Assert.Empty(findings);

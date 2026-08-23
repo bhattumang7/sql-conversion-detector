@@ -7,7 +7,7 @@ namespace SilentScan.Core.TypeInference;
 
 public static class ExpressionTypeInferencer
 {
-public static SqlType? Resolve(
+    public static SqlType? Resolve(
         ScalarExpression expression, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases) => expression switch
     {
         Literal literal => LiteralTypeResolver.Resolve(literal),
@@ -39,7 +39,7 @@ public static SqlType? Resolve(
         _ => resolveLeaf(expression),
     };
 
-private static SqlType? ResolveBinary(BinaryExpression binary, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
+    private static SqlType? ResolveBinary(BinaryExpression binary, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases)
     {
         var left = Resolve(binary.FirstExpression, resolveLeaf, typeAliases);
         var right = Resolve(binary.SecondExpression, resolveLeaf, typeAliases);
@@ -116,7 +116,7 @@ private static SqlType? ResolveBinary(BinaryExpression binary, Func<ScalarExpres
         _ => null,
     };
 
-private static SqlType? CombineStringConcat(SqlType left, SqlType right)
+    private static SqlType? CombineStringConcat(SqlType left, SqlType right)
     {
         if (left.Category != right.Category)
         {
@@ -155,11 +155,11 @@ private static SqlType? CombineStringConcat(SqlType left, SqlType right)
         return CombineBranches(branches, resolveLeaf, typeAliases);
     }
 
-private static SqlType? CombineBranches(
+    private static SqlType? CombineBranches(
         IEnumerable<ScalarExpression> branches, Func<ScalarExpression, SqlType?> resolveLeaf, IReadOnlyDictionary<string, SqlType>? typeAliases) =>
         CombineAll(branches.Where(e => e is not NullLiteral).Select(e => Resolve(e, resolveLeaf, typeAliases)));
 
-private static SqlType? CombineAll(IEnumerable<SqlType?> branchTypes)
+    private static SqlType? CombineAll(IEnumerable<SqlType?> branchTypes)
     {
         SqlType? result = null;
         var first = true;
@@ -178,7 +178,7 @@ private static SqlType? CombineAll(IEnumerable<SqlType?> branchTypes)
         return result;
     }
 
-private static SqlType? Combine(SqlType? left, SqlType? right)
+    private static SqlType? Combine(SqlType? left, SqlType? right)
     {
         if (left is null || right is null)
         {
@@ -194,7 +194,7 @@ private static SqlType? Combine(SqlType? left, SqlType? right)
         return winner.IsStringFamily ? new SqlType(winner.Category, Collation: winner.Collation, LengthKnown: false) : new SqlType(winner.Category);
     }
 
-private static SqlType? CombineSameCategoryStrings(SqlType left, SqlType right)
+    private static SqlType? CombineSameCategoryStrings(SqlType left, SqlType right)
     {
         if (left.Collation is not null && right.Collation is not null && left.Collation.Name != right.Collation.Name)
         {

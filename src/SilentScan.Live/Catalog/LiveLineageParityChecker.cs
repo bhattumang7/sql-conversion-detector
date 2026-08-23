@@ -19,6 +19,7 @@ public sealed class LiveLineageParityChecker
     public async Task<LiveLineageParityReport> CheckAsync(
         LineageCatalog lineage, CancellationToken cancellationToken = default)
     {
+
         var wanted = lineage.AllRelations.Keys
             .Where(name => name is not null && !lineage.CyclicViews.Contains(name))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -36,7 +37,7 @@ public sealed class LiveLineageParityChecker
         return Classify(lineage, actualByObject, described, unrenderable);
     }
 
-private static async Task<(Dictionary<string, DescribedObject> Described, Dictionary<string, string> Unrenderable)> DescribeProbeableObjectsAsync(
+    private static async Task<(Dictionary<string, DescribedObject> Described, Dictionary<string, string> Unrenderable)> DescribeProbeableObjectsAsync(
         SqlConnection connection, HashSet<string> wanted, Dictionary<string, ActualObject> actualByObject, CancellationToken cancellationToken)
     {
         var described = new Dictionary<string, DescribedObject>(StringComparer.OrdinalIgnoreCase);
@@ -85,6 +86,7 @@ private static async Task<(Dictionary<string, DescribedObject> Described, Dictio
         {
             if (qualifiedName is null || !actualByObject.TryGetValue(qualifiedName, out var actualObject))
             {
+
                 continue;
             }
 
@@ -163,7 +165,7 @@ private static async Task<(Dictionary<string, DescribedObject> Described, Dictio
         }
     }
 
-private sealed class ParityBuckets
+    private sealed class ParityBuckets
     {
         public List<LiveLineageParityMismatch> Mismatches { get; } = [];
 
@@ -182,7 +184,7 @@ private sealed class ParityBuckets
             [.. Unverified.OrderBy(m => m.QualifiedViewName, StringComparer.Ordinal).ThenBy(m => m.ColumnName, StringComparer.Ordinal)]);
     }
 
-private static async Task<Dictionary<string, ActualObject>> ReadAllColumnsAsync(
+    private static async Task<Dictionary<string, ActualObject>> ReadAllColumnsAsync(
         SqlConnection connection, HashSet<string> wanted, CancellationToken cancellationToken)
     {
         const string sql = """
@@ -225,7 +227,7 @@ private static async Task<Dictionary<string, ActualObject>> ReadAllColumnsAsync(
         return byObject;
     }
 
-private static (string Facet, string InferredValue, string ActualValue)? CompareFacets(SqlType inferredType, ActualColumn actual)
+    private static (string Facet, string InferredValue, string ActualValue)? CompareFacets(SqlType inferredType, ActualColumn actual)
     {
         var mappedCategory = LiveTypeMapper.Map(actual.TypeName);
         if (mappedCategory != inferredType.Category)
