@@ -224,4 +224,79 @@ public sealed class ExpressionEvaluatorTests
     {
         Assert.False(ExpressionEvaluator.FoldInteger(ParseExpression("@n"), new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase), SourcePath, Cap, out _));
     }
+
+    [Theory]
+    [InlineData("5 & 3", 1)]
+    [InlineData("5 | 2", 7)]
+    [InlineData("5 ^ 1", 4)]
+    public void FoldInteger_BitwiseOperators(string sql, int expected)
+    {
+        Assert.True(ExpressionEvaluator.FoldInteger(ParseExpression(sql), new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase), SourcePath, Cap, out var value));
+        Assert.Equal(expected, value);
+    }
+
+    [Fact]
+    public void GlobalVariable_KnownName_ReturnsEnvironmentDependentHole()
+    {
+        var template = Assert.IsType<SqlTextValue.Template>(Fold("@@TRANCOUNT"));
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.EnvironmentDependent, hole.Kind);
+    }
+
+    [Fact]
+    public void FunctionCall_GlobalVariableArgument_BecomesHoleArgument()
+    {
+        var result = Fold("UPPER(@@TRANCOUNT)");
+        Assert.IsType<SqlTextValue.Template>(result);
+    }
+
+    [Fact]
+    public void SearchedCase_KnownEqualsPredicate_DecidesBranchWithoutEvaluatingLater()
+    {
+        var state = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@x"] = new SqlTextValue.Template([new TemplatePiece.Lit("a", new SourceSpan(SourcePath, 1, 1), 1)]),
+        };
+
+        var result = Fold("CASE WHEN @x = 'a' THEN 'one' WHEN 1 = 2 THEN 'two' ELSE 'three' END", state);
+
+        Assert.Equal("one", LitText(result));
+    }
+
+    [Fact]
+    public void SearchedCase_KnownFalseNotEqualsPredicate_SkipsThatBranch()
+    {
+        var result = Fold("CASE WHEN 'a' <> 'a' THEN 'one' ELSE 'two' END");
+
+        Assert.Equal("two", LitText(result));
+    }
+
+    [Fact]
+    public void UnaryPositive_FoldsInnerExpression()
+    {
+        Assert.Equal(TaintReason(Fold("5")), TaintReason(Fold("+5")));
+    }
+
+    [Fact]
+    public void Cast_UnresolvableUserDataType_DeclinesCastTargetNotPinned()
+    {
+        Assert.Equal("non-literal-expression:cast-target-not-pinned", TaintReason(Fold("CAST('x' AS dbo.MyType)")));
+    }
+
+    [Fact]
+    public void SearchedCase_NonEqualityPredicate_StaysUndeterminedAndJoinsBranches()
+    {
+        var result = Fold("CASE WHEN 1 > 0 THEN 'one' ELSE 'two' END");
+
+        var template = Assert.IsType<SqlTextValue.Template>(result);
+        Assert.IsType<TemplatePiece.Choice>(Assert.Single(template.Pieces));
+    }
+
+    [Fact]
+    public void SearchedCase_PredicateOverCoalesce_ResolvesUsingFirstArgument()
+    {
+        var result = Fold("CASE WHEN COALESCE('a', 'b') = 'a' THEN 'one' WHEN 1 = 2 THEN 'two' ELSE 'three' END");
+
+        Assert.Equal("one", LitText(result));
+    }
 }
