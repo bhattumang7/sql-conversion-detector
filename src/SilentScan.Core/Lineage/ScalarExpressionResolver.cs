@@ -117,7 +117,6 @@ public static class ScalarExpressionResolver
 
         public override void Visit(ColumnReferenceExpression node)
         {
-
             if (node.MultiPartIdentifier is { Identifiers.Count: > 0 })
             {
                 References.Add(node);
@@ -126,7 +125,7 @@ public static class ScalarExpressionResolver
 
         public override void ExplicitVisit(ScalarSubquery node)
         {
-
+            _ = node;
         }
     }
 

@@ -469,7 +469,7 @@ public static class DuplicationScanner
 
             public override void ExplicitVisit(WhileStatement node)
             {
-
+                _ = node;
             }
         }
 

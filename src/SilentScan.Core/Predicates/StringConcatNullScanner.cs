@@ -231,12 +231,12 @@ public static class StringConcatNullScanner
 
             public override void ExplicitVisit(CoalesceExpression node)
             {
-
+                _ = node;
             }
 
             public override void ExplicitVisit(QuerySpecification node)
             {
-
+                _ = node;
             }
         }
     }

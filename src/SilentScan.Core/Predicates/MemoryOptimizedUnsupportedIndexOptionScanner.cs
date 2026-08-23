@@ -17,33 +17,7 @@ public static class MemoryOptimizedUnsupportedIndexOptionScanner
 
             foreach (var index in table.Indexes)
             {
-                if (index.IsColumnstore)
-                {
-                    continue;
-                }
-
-                var indexName = index.Name ?? "(unnamed)";
-
-                if (index.IsClustered)
-                {
-                    findings.Add(new MemoryOptimizedUnsupportedIndexOptionFinding(
-                        table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex,
-                        table.SourcePath, table.SourceLine));
-                }
-
-                if (index.IncludedColumns.Count > 0)
-                {
-                    findings.Add(new MemoryOptimizedUnsupportedIndexOptionFinding(
-                        table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns,
-                        table.SourcePath, table.SourceLine));
-                }
-
-                if (index.IsFiltered)
-                {
-                    findings.Add(new MemoryOptimizedUnsupportedIndexOptionFinding(
-                        table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex,
-                        table.SourcePath, table.SourceLine));
-                }
+                findings.AddRange(ScanIndex(table, index));
             }
         }
 
@@ -54,5 +28,36 @@ public static class MemoryOptimizedUnsupportedIndexOptionScanner
                 .ThenBy(f => f.IndexName, StringComparer.Ordinal)
                 .ThenBy(f => f.Kind),
         ];
+    }
+
+    private static IEnumerable<MemoryOptimizedUnsupportedIndexOptionFinding> ScanIndex(CatalogTable table, CatalogIndex index)
+    {
+        if (index.IsColumnstore)
+        {
+            yield break;
+        }
+
+        var indexName = index.Name ?? "(unnamed)";
+
+        if (index.IsClustered)
+        {
+            yield return new MemoryOptimizedUnsupportedIndexOptionFinding(
+                table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex,
+                table.SourcePath, table.SourceLine);
+        }
+
+        if (index.IncludedColumns.Count > 0)
+        {
+            yield return new MemoryOptimizedUnsupportedIndexOptionFinding(
+                table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns,
+                table.SourcePath, table.SourceLine);
+        }
+
+        if (index.IsFiltered)
+        {
+            yield return new MemoryOptimizedUnsupportedIndexOptionFinding(
+                table.QualifiedName, indexName, MemoryOptimizedUnsupportedIndexOptionKind.FilteredIndex,
+                table.SourcePath, table.SourceLine);
+        }
     }
 }

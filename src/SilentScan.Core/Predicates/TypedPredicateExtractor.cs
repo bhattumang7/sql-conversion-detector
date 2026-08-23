@@ -777,7 +777,7 @@ public static class TypedPredicateExtractor
 
         public override void Visit(BooleanIsNullExpression node)
         {
-
+            _ = node;
         }
 
         private static string? ToOperatorText(BooleanComparisonType comparisonType) => comparisonType switch

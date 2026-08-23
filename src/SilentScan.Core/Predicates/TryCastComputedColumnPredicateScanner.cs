@@ -197,12 +197,12 @@ public static class TryCastComputedColumnPredicateScanner
 
             public override void ExplicitVisit(QuerySpecification node)
             {
-
+                _ = node;
             }
 
             public override void ExplicitVisit(ScalarSubquery node)
             {
-
+                _ = node;
             }
         }
     }

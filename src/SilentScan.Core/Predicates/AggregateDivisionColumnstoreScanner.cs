@@ -141,7 +141,7 @@ public static class AggregateDivisionColumnstoreScanner
 
             public override void ExplicitVisit(QuerySpecification node)
             {
-
+                _ = node;
             }
         }
 

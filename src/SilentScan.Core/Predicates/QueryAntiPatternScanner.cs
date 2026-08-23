@@ -98,28 +98,6 @@ public static class QueryAntiPatternScanner
             base.ExplicitVisit(node);
         }
 
-        private void InspectTableValuedParameters(IList<ProcedureParameter> parameters)
-        {
-            if (catalog.CompatibilityLevel is not >= 170)
-            {
-                return;
-            }
-
-            foreach (var parameter in parameters)
-            {
-                if (parameter.DataType is not UserDataTypeReference userType
-                    || catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is not { Kind: CatalogTableKind.TableType })
-                {
-                    continue;
-                }
-
-                Findings.Add(new QueryAntiPatternFinding(
-                    QueryAntiPatternFindingKind.TableVariablePspSkip, sourcePath,
-                    parameter.StartLine, parameter.StartColumn, parameter.VariableName.Value,
-                    FindingConfidence.High));
-            }
-        }
-
         public override void ExplicitVisit(DeclareTableVariableStatement node)
         {
             _tableVariableNames.Add(node.Body.VariableName.Value);
@@ -277,6 +255,28 @@ public static class QueryAntiPatternScanner
             }
 
             base.ExplicitVisit(node);
+        }
+
+        private void InspectTableValuedParameters(IList<ProcedureParameter> parameters)
+        {
+            if (catalog.CompatibilityLevel is not >= 170)
+            {
+                return;
+            }
+
+            foreach (var parameter in parameters)
+            {
+                if (parameter.DataType is not UserDataTypeReference userType
+                    || catalog.Find(SchemaObjectNameHelper.Qualify(userType.Name)) is not { Kind: CatalogTableKind.TableType })
+                {
+                    continue;
+                }
+
+                Findings.Add(new QueryAntiPatternFinding(
+                    QueryAntiPatternFindingKind.TableVariablePspSkip, sourcePath,
+                    parameter.StartLine, parameter.StartColumn, parameter.VariableName.Value,
+                    FindingConfidence.High));
+            }
         }
 
         internal sealed class CteNameCollector : TSqlFragmentVisitor
@@ -854,7 +854,20 @@ public static class QueryAntiPatternScanner
                 return;
             }
 
-            var offendingName = source.HasFullTextIndex ? sourceQualifiedName : target.HasFullTextIndex ? targetQualifiedName : null;
+            string? offendingName;
+            if (source.HasFullTextIndex)
+            {
+                offendingName = sourceQualifiedName;
+            }
+            else if (target.HasFullTextIndex)
+            {
+                offendingName = targetQualifiedName;
+            }
+            else
+            {
+                offendingName = null;
+            }
+
             if (offendingName is null)
             {
                 return;
@@ -1093,7 +1106,7 @@ public static class QueryAntiPatternScanner
         {
             public override void ExplicitVisit(WhileStatement node)
             {
-
+                _ = node;
             }
 
             public override void ExplicitVisit(FromClause node)
@@ -1197,7 +1210,7 @@ public static class QueryAntiPatternScanner
         {
             public override void ExplicitVisit(WhileStatement node)
             {
-
+                _ = node;
             }
 
             public override void ExplicitVisit(UpdateStatement node)

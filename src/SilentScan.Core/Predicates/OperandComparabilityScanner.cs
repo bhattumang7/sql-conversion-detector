@@ -69,14 +69,14 @@ public static class OperandComparabilityScanner
                 }
             }
 
-            foreach (var scalar in node.SelectElements.OfType<SelectScalarExpression>())
+            foreach (var expression in node.SelectElements.OfType<SelectScalarExpression>().Select(scalar => scalar.Expression))
             {
                 if (node.UniqueRowFilter == UniqueRowFilter.Distinct)
                 {
-                    InspectMembership(scalar.Expression, scopeChain, OperandComparabilityContext.Distinct);
+                    InspectMembership(expression, scopeChain, OperandComparabilityContext.Distinct);
                 }
 
-                InspectExpressionTree(scalar.Expression, scopeChain);
+                InspectExpressionTree(expression, scopeChain);
             }
 
             base.ExplicitVisit(node);
@@ -320,6 +320,7 @@ public static class OperandComparabilityScanner
 
             public override void ExplicitVisit(QuerySpecification node)
             {
+                _ = node;
             }
         }
     }

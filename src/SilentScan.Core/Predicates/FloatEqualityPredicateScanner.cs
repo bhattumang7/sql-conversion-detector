@@ -160,7 +160,7 @@ public static class FloatEqualityPredicateScanner
 
             public override void ExplicitVisit(QuerySpecification node)
             {
-
+                _ = node;
             }
         }
     }

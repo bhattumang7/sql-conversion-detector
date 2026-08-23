@@ -227,12 +227,12 @@ public static class DynamicSqlTransfer
 
         public override void ExplicitVisit(ProcedureStatementBodyBase node)
         {
-
+            _ = node;
         }
 
         public override void ExplicitVisit(TriggerStatementBody node)
         {
-
+            _ = node;
         }
     }
 

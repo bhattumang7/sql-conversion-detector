@@ -1109,6 +1109,9 @@ public static class CatalogBuilder
 
             return [.. columns.Select(c => primaryKeyColumns.Contains(c.Name) ? c with { IsNullable = false } : c)];
         }
+
+        private static bool IsMemoryOptimizedTable(IList<TableOption> options) =>
+            options.OfType<MemoryOptimizedTableOption>().Any(o => o.OptionState == OptionState.On);
     }
 
     public static IReadOnlyList<CatalogColumn> BuildColumnsForExternalUse(
@@ -1251,9 +1254,6 @@ public static class CatalogBuilder
 
         return isNullable;
     }
-
-    private static bool IsMemoryOptimizedTable(IList<TableOption> options) =>
-        options.OfType<MemoryOptimizedTableOption>().Any(o => o.OptionState == OptionState.On);
 
     private static bool IsColumnstoreIndexType(IndexType? indexType) =>
         indexType?.IndexTypeKind is IndexTypeKind.ClusteredColumnStore or IndexTypeKind.NonClusteredColumnStore;

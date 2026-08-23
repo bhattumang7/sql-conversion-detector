@@ -105,7 +105,7 @@ public sealed class IndexDeploymentChecker
         }
         catch (SqlException)
         {
-
+            return;
         }
     }
 
