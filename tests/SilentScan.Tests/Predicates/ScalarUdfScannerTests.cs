@@ -12,12 +12,13 @@ namespace SilentScan.Tests.Predicates;
 /// </summary>
 public sealed class ScalarUdfScannerTests
 {
-    private static IReadOnlyList<ScalarUdfFinding> ScanSql(string sql)
+    private static IReadOnlyList<ScalarUdfFinding> ScanSql(string sql, int? compatibilityLevel = null)
     {
         var result = SqlScriptParser.ParseText("test.sql", sql);
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
 
         var catalog = CatalogBuilder.Build([result]);
+        catalog.CompatibilityLevel = compatibilityLevel;
         var (views, _) = ViewDefinitionExtractor.Extract([result], catalog.DefaultCollation, catalog.TypeAliases);
         var scalarUdfMap = ScalarUdfMap.Build(views, catalog);
         return ScalarUdfScanner.Scan(result, catalog, scalarUdfMap);
@@ -362,5 +363,82 @@ public sealed class ScalarUdfScannerTests
         var finding = Assert.Single(findings);
         Assert.Equal(ScalarUdfKind.Clr, finding.UdfKind);
         Assert.Equal(ScalarUdfInlineability.NotInlineable, finding.Inlineability);
+    }
+
+    [Fact]
+    public void CleanFunctionBody_AtCompatibilityLevel140_ReportsNotInlineableCompatBlocker()
+    {
+        var findings = ScanSql(
+            """
+            CREATE FUNCTION dbo.fn_Compute(@x INT) RETURNS INT AS BEGIN RETURN @x + 1; END;
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_Compute(Id) FROM dbo.T;
+            """,
+            compatibilityLevel: 140);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ScalarUdfInlineability.NotInlineable, finding.Inlineability);
+        Assert.Contains("140", finding.InlineabilityBlocker);
+    }
+
+    [Fact]
+    public void CleanFunctionBody_AtCompatibilityLevel150_ReportsUnknownInlineability()
+    {
+        var findings = ScanSql(
+            """
+            CREATE FUNCTION dbo.fn_Compute(@x INT) RETURNS INT AS BEGIN RETURN @x + 1; END;
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_Compute(Id) FROM dbo.T;
+            """,
+            compatibilityLevel: 150);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ScalarUdfInlineability.Unknown, finding.Inlineability);
+    }
+
+    [Fact]
+    public void FunctionReferencingFiftyTables_ReportsNotInlineableTableLimitBlocker()
+    {
+        var subqueries = string.Concat(Enumerable.Range(0, 50).Select(_ => " + (SELECT v FROM dbo.Source)"));
+        var findings = ScanSql(
+            $"""
+            CREATE FUNCTION dbo.fn_ManyTables(@x INT) RETURNS INT AS BEGIN RETURN @x{subqueries}; END;
+            GO
+            CREATE TABLE dbo.Source (v INT NOT NULL);
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_ManyTables(Id) FROM dbo.T;
+            """,
+            compatibilityLevel: 150);
+
+        var finding = Assert.Single(findings, f => f.FunctionQualifiedName == "dbo.fn_ManyTables");
+        Assert.Equal(ScalarUdfInlineability.NotInlineable, finding.Inlineability);
+        Assert.Contains("50", finding.InlineabilityBlocker!);
+        Assert.Contains("49", finding.InlineabilityBlocker!);
+    }
+
+    [Fact]
+    public void FunctionReferencingFortyNineTables_DoesNotFlagTableLimitBlocker()
+    {
+        var subqueries = string.Concat(Enumerable.Range(0, 49).Select(_ => " + (SELECT v FROM dbo.Source)"));
+        var findings = ScanSql(
+            $"""
+            CREATE FUNCTION dbo.fn_ManyTables(@x INT) RETURNS INT AS BEGIN RETURN @x{subqueries}; END;
+            GO
+            CREATE TABLE dbo.Source (v INT NOT NULL);
+            GO
+            CREATE TABLE dbo.T (Id INT NOT NULL);
+            GO
+            SELECT dbo.fn_ManyTables(Id) FROM dbo.T;
+            """,
+            compatibilityLevel: 150);
+
+        var finding = Assert.Single(findings, f => f.FunctionQualifiedName == "dbo.fn_ManyTables");
+        Assert.Equal(ScalarUdfInlineability.Unknown, finding.Inlineability);
     }
 }

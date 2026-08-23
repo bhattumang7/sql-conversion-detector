@@ -751,20 +751,13 @@ public static class CatalogBuilder
             VisitScopedBody(node, name);
         }
 
-        /// <summary>
-        /// A scalar UDF's own stream-specific catalog entry: T-SQL vs CLR (<see
-        /// cref="MethodSpecifier"/> presence - EXTERNAL NAME has no StatementList to blocker-scan),
-        /// <c>WITH SCHEMABINDING</c> (<see cref="FunctionOptionKind.SchemaBinding"/>), and the
-        /// static inlineability blocker scan (<see cref="ScalarUdfInlineabilityScanner"/>) run over
-        /// the body text this scan actually has. Engine-only fields (EngineIsInlineable,
-        /// ClrDataAccess) stay null here - file mode has no engine to ask; live mode overlays them
-        /// on merge (<see cref="DatabaseCatalog.MergeFileModeExtras"/>).
-        /// </summary>
         private void RegisterScalarUdfInfo(FunctionStatementBody node, string qualifiedName)
         {
             var isClr = node.MethodSpecifier is not null;
             var isSchemaBound = node.Options.Any(option => option.OptionKind == FunctionOptionKind.SchemaBinding);
-            var blocker = isClr ? null : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog, node.Parameters);
+            var (blocker, tableReferenceCount) = isClr
+                ? (null, 0)
+                : ScalarUdfInlineabilityScanner.FindBlocker(node.StatementList, qualifiedName, catalog, node.Parameters);
 
             catalog.AddScalarUdfInfo(
                 qualifiedName,
@@ -773,7 +766,8 @@ public static class CatalogBuilder
                     IsSchemaBound: isSchemaBound,
                     EngineIsInlineable: null,
                     InlineabilityBlocker: blocker,
-                    ClrDataAccess: null));
+                    ClrDataAccess: null,
+                    InlineabilityTableReferenceCount: isClr ? null : tableReferenceCount));
         }
 
         private void VisitCreateTypeAlias(CreateTypeUddtStatement createType)

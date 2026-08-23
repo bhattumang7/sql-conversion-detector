@@ -46,7 +46,7 @@ public static class SchemaDependencyScanner
                     continue;
                 }
 
-                var (inlineability, blocker) = ScalarUdfInlineabilityClassifier.Classify(info);
+                var (inlineability, blocker) = ScalarUdfInlineabilityClassifier.Classify(info, catalog.CompatibilityLevel);
 
                 findings.Add(new ScalarUdfFinding(
                     ScalarUdfFindingKind.SchemaDependency,

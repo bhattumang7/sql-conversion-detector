@@ -19,20 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **`ScalarUdfInlineabilityScanner` is missing two real engine gates and
-      can over-claim inlineability.** (1) Scalar-UDF inlining (FROID) is
-      itself gated behind database compatibility level >= 150 (SQL Server
-      2019) — a UDF the scanner marks inlineable on an older compat level
-      never actually inlines. (2) The engine caps the count of scalar
-      sub-expressions inlining would need to re-evaluate (documented default
-      threshold ~100); a UDF body whose branch count exceeds this can never
-      inline regardless of what other checks pass. Both gates are
-      catalog/source-decidable (`sys.databases.compatibility_level`, a static
-      branch count over the UDF body) and the scanner has no handling for
-      either today. Needs its own oracle matrix (compat 140 vs 150+ on an
-      otherwise-inlineable UDF; a UDF built to sit just under/over the
-      re-eval threshold) before scoping.
-
 - [ ] **New rule family: compile-time cardinality ceilings on
       `GROUPING SETS`/`CUBE`/`ROLLUP`.** Each has a fixed, documented,
       purely syntactic compile-time limit independent of any table's real

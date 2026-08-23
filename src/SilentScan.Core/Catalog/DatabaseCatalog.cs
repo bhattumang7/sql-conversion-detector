@@ -685,21 +685,14 @@ public sealed class DatabaseCatalog
             _tableValuedFunctionKindsByQualifiedName.TryAdd(qualifiedName, kind);
         }
 
-        // Unlike the TVF-kind merge above, this is a field-level merge, not a whole-record
-        // TryAdd: by the time this runs, `this` (the live catalog) may ALREADY hold an entry for
-        // the same name, registered straight from sys.sql_modules/OBJECTPROPERTYEX (engine-only
-        // fields: IsSchemaBound, EngineIsInlineable, ClrDataAccess) - but that live reader never
-        // parses a body, so it never populates InlineabilityBlocker. fileModeCatalog is exactly
-        // the reparse of that same module's text through CatalogBuilder (LiveModuleReader feeds
-        // FN bodies through it like any other module) and is the ONLY source of the blocker scan.
-        // So: keep every engine-sourced field from the live entry (it is strictly stronger truth
-        // than anything a text reparse could derive), but backfill Kind/InlineabilityBlocker from
-        // the file-mode entry when the live side never set them. A name live mode never
-        // independently touched is added as-is.
         foreach (var (qualifiedName, fileInfo) in fileModeCatalog._scalarUdfInfoByQualifiedName)
         {
             _scalarUdfInfoByQualifiedName[qualifiedName] = _scalarUdfInfoByQualifiedName.TryGetValue(qualifiedName, out var liveInfo)
-                ? liveInfo with { InlineabilityBlocker = liveInfo.InlineabilityBlocker ?? fileInfo.InlineabilityBlocker }
+                ? liveInfo with
+                {
+                    InlineabilityBlocker = liveInfo.InlineabilityBlocker ?? fileInfo.InlineabilityBlocker,
+                    InlineabilityTableReferenceCount = liveInfo.InlineabilityTableReferenceCount ?? fileInfo.InlineabilityTableReferenceCount,
+                }
                 : fileInfo;
         }
 
