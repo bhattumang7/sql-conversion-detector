@@ -1383,4 +1383,398 @@ public sealed class QueryAntiPatternScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchPartitionFilegroupMismatch);
     }
+
+    [Fact]
+    public void AlterTableSwitch_NeitherTableResolves_NoFindingsAndDoesNotThrow()
+    {
+        var findings = ScanSwitch(
+            "CREATE TABLE dbo.SwOther (Id INT NOT NULL);",
+            "ALTER TABLE dbo.NoSuchSrc SWITCH PARTITION 1 TO dbo.NoSuchTgt PARTITION 1;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceInReadOnlyFilegroup_Fires()
+    {
+        var findings = ScanSwitchFilegroups("FG_Orders", sourceReadOnly: true, "FG_Orders", targetReadOnly: false);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchFilegroupMismatch);
+        Assert.Contains("4979", finding.DetailText);
+        Assert.Contains("source table", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterTableSwitch_SourceIndexKeyColumnsDifferFromTarget_Fires()
+    {
+        var findings = ScanSwitchIndexes(
+            sourceIndexes: [new CatalogIndex("IX_SwSrc_Pct", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Pct"], IncludedColumns: [])],
+            targetIndexes: [new CatalogIndex("IX_SwTgt_Code", CatalogIndexKind.UniqueConstraint, IsUnique: true, KeyColumns: ["Code"], IncludedColumns: [])]);
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.AlterTableSwitchIndexMismatch);
+        Assert.Contains("4947", finding.DetailText);
+    }
+
+    [Fact]
+    public void AlterProcedure_TableValuedParameter_AtCompat170_FiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "ALTER PROCEDURE dbo.P @ids dbo.IdList READONLY AS SELECT 1;",
+            compatibilityLevel: 170);
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
+    [Fact]
+    public void CreateOrAlterProcedure_TableValuedParameter_AtCompat170_FiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "CREATE OR ALTER PROCEDURE dbo.P @ids dbo.IdList READONLY AS SELECT 1;",
+            compatibilityLevel: 170);
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
+    [Fact]
+    public void AlterFunction_TableValuedParameter_AtCompat170_FiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "ALTER FUNCTION dbo.F (@ids dbo.IdList READONLY) RETURNS INT AS BEGIN RETURN 1; END;",
+            compatibilityLevel: 170);
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
+    [Fact]
+    public void CreateOrAlterFunction_TableValuedParameter_AtCompat170_FiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "CREATE OR ALTER FUNCTION dbo.F (@ids dbo.IdList READONLY) RETURNS INT AS BEGIN RETURN 1; END;",
+            compatibilityLevel: 170);
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
+    [Fact]
+    public void ScalarParameter_AtCompat170_NeverFiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE PROCEDURE dbo.P @id INT AS SELECT @id;",
+            compatibilityLevel: 170);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
+    [Fact]
+    public void TableValuedParameterUsedInFromClause_BelowCompat150_NeverFiresLowCompatKind()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "CREATE PROCEDURE dbo.P @ids dbo.IdList READONLY AS SELECT Id FROM @ids;",
+            compatibilityLevel: 130);
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableLowCompatEstimate);
+    }
+
+    [Fact]
+    public void SetVariableAssignedFromCursorDefinition_WithoutLocal_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @c CURSOR; SET @c = CURSOR FOR SELECT Id FROM dbo.Big; OPEN @c; CLOSE @c; DEALLOCATE @c;");
+
+        var finding = Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.GlobalCursorDeclaration);
+        Assert.Equal("@c (no LOCAL/GLOBAL keyword, defaults to GLOBAL)", finding.DetailText);
+    }
+
+    [Fact]
+    public void MultiRowInsert_IntoUnresolvableTable_NeverFires()
+    {
+        var findings = Scan("INSERT INTO dbo.NoSuchTable (Id) VALUES (1), (2);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MultiRowInsertIgnoreDupKeyDrop);
+    }
+
+    [Fact]
+    public void ParenthesizedJoin_UnqualifiedTableReferenceInsideParentheses_Fires()
+    {
+        var findings = Scan("SELECT a.Id FROM (Big a JOIN dbo.A b ON a.Id = b.Id);");
+
+        Assert.Contains(findings, f => f.Kind == QueryAntiPatternFindingKind.UnqualifiedTableReference);
+    }
+
+    [Fact]
+    public void MergeTargetIsTableVariable_NeverFiresMissingHoldlock()
+    {
+        var findings = Scan(
+            "DECLARE @t TABLE (Id INT NOT NULL, AId INT NOT NULL); "
+            + "MERGE @t AS t USING dbo.B AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id, AId) VALUES (s.AId, s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeMissingHoldlock);
+    }
+
+    [Fact]
+    public void MergeUsingDerivedTableSource_NeverFiresNonUniqueUsingSource()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING (SELECT Id AS AId FROM dbo.C) AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeNonUniqueUsingSource);
+    }
+
+    [Fact]
+    public void MergeUsingUnresolvableTableSource_NeverFiresNonUniqueUsingSource()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING dbo.NoSuchSource AS s ON t.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeNonUniqueUsingSource);
+    }
+
+    [Fact]
+    public void MergeUsingSourceWithNoAliasQualifiedEqualityJoinColumn_NeverFiresNonUniqueUsingSource()
+    {
+        var findings = Scan(
+            "MERGE dbo.A AS t USING dbo.C AS s ON 1 = 1 "
+            + "WHEN MATCHED THEN UPDATE SET t.Id = t.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id) VALUES (s.AId);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.MergeNonUniqueUsingSource);
+    }
+
+    [Fact]
+    public void CreateFunction_TableValuedParameter_AtCompat170_FiresTableVariablePspSkip()
+    {
+        var findings = Scan(
+            "CREATE TYPE dbo.IdList AS TABLE (Id INT NOT NULL PRIMARY KEY);\nGO\n"
+            + "CREATE FUNCTION dbo.F (@ids dbo.IdList READONLY) RETURNS INT AS BEGIN RETURN 1; END;",
+            compatibilityLevel: 170);
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariablePspSkip);
+    }
+
+    [Fact]
+    public void TableVariableReadThroughParenthesizedJoinInLoop_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @t TABLE (Id INT); DECLARE @i INT = 0; DECLARE @c INT; "
+            + "WHILE @i < 5 BEGIN "
+            + "INSERT INTO @t SELECT Id FROM dbo.Big WHERE Id = @i; "
+            + "SELECT @c = COUNT(*) FROM (@t t JOIN dbo.A a ON t.Id = a.Id); "
+            + "SET @i = @i + 1; END;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop);
+    }
+
+    [Fact]
+    public void NestedWhileLoop_InnerLoopReadNotTraversedForOuterLoopAnalysis()
+    {
+        var findings = Scan(
+            "DECLARE @t TABLE (Id INT); DECLARE @i INT = 0; DECLARE @c INT; "
+            + "WHILE @i < 5 BEGIN "
+            + "INSERT INTO @t SELECT Id FROM dbo.Big WHERE Id = @i; "
+            + "WHILE 1 = 0 BEGIN SELECT @c = COUNT(*) FROM @t; BREAK; END; "
+            + "SET @i = @i + 1; END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop);
+    }
+
+    [Fact]
+    public void WhileLoopMergeIntoTableVariable_ReadOfSameVariable_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @t TABLE (Id INT NOT NULL, AId INT NOT NULL); DECLARE @i INT = 0; DECLARE @c INT; "
+            + "WHILE @i < 5 BEGIN "
+            + "MERGE @t AS tgt USING dbo.B AS s ON tgt.Id = s.AId "
+            + "WHEN MATCHED THEN UPDATE SET tgt.Id = tgt.Id "
+            + "WHEN NOT MATCHED THEN INSERT (Id, AId) VALUES (s.AId, s.AId); "
+            + "SELECT @c = COUNT(*) FROM @t; "
+            + "SET @i = @i + 1; END;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop);
+    }
+
+    [Fact]
+    public void WhileLoopUpdateOutputIntoTableVariable_ReadOfSameVariable_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @t TABLE (Id INT); DECLARE @i INT = 0; DECLARE @c INT; "
+            + "WHILE @i < 5 BEGIN "
+            + "UPDATE dbo.Big SET Col = 'x' OUTPUT inserted.Id INTO @t WHERE Id = @i; "
+            + "SELECT @c = COUNT(*) FROM @t; "
+            + "SET @i = @i + 1; END;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.TableVariableStaleEstimateInLoop);
+    }
+
+    [Fact]
+    public void WhileLoopUpdateWithVariableOnLeftOfComparison_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @i INT = 0; "
+            + "WHILE @i < 100 BEGIN "
+            + "UPDATE dbo.Big SET Col = 'x' WHERE @i = Id; "
+            + "SET @i = @i + 1; END;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.RbarSingleRowLoopDml);
+    }
+
+    [Fact]
+    public void NestedWhileLoop_InnerLoopDmlNotTraversedForOuterLoopAnalysis()
+    {
+        var findings = Scan(
+            "DECLARE @i INT = 0; "
+            + "WHILE @i < 100 BEGIN "
+            + "WHILE 1 = 0 BEGIN UPDATE dbo.Big SET Col = 'x' WHERE Id = @i; BREAK; END; "
+            + "SET @i = @i + 1; END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RbarSingleRowLoopDml);
+    }
+
+    [Fact]
+    public void WhileLoopUpdateComparingTwoColumns_NeverFires()
+    {
+        var findings = Scan(
+            "DECLARE @i INT = 0; "
+            + "WHILE @i < 100 BEGIN "
+            + "UPDATE dbo.C SET AId = 1 WHERE Id = AId; "
+            + "SET @i = @i + 1; END;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.RbarSingleRowLoopDml);
+    }
+
+    [Fact]
+    public void CountStarAssignedThenComparedInFollowingWhileLoop_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @cnt INT; SELECT @cnt = COUNT(*) FROM dbo.Big; WHILE @cnt > 0 BEGIN BREAK; END;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
+    }
+
+    [Fact]
+    public void CountStarAssignedThenComparedLessThanZero_NeverFires()
+    {
+        var findings = Scan(
+            "DECLARE @cnt INT; SELECT @cnt = COUNT(*) FROM dbo.Big; IF @cnt < 0 SELECT 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
+    }
+
+    [Theory]
+    [InlineData("IF 0 > @cnt SELECT 1;")]
+    [InlineData("IF 5 <= @cnt SELECT 1;")]
+    public void CountStarAssignedThenComparedLiteralFirst_VariousForms_NeverFire(string ifStatement)
+    {
+        var findings = Scan($"DECLARE @cnt INT; SELECT @cnt = COUNT(*) FROM dbo.Big; {ifStatement}");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
+    }
+
+    [Fact]
+    public void CountStarAssignedThenComparedLiteralFirstNotEqual_Fires()
+    {
+        var findings = Scan(
+            "DECLARE @cnt INT; SELECT @cnt = COUNT(*) FROM dbo.Big; IF 0 <> @cnt SELECT 1;");
+
+        Assert.Single(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
+    }
+
+    [Fact]
+    public void CountStarAssignedThenComparedAgainstAnotherVariable_NeverFires()
+    {
+        var findings = Scan(
+            "DECLARE @cnt INT; DECLARE @other INT = 0; SELECT @cnt = COUNT(*) FROM dbo.Big; IF @cnt > @other SELECT 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.CountStarVariableExistenceCheck);
+    }
+
+    [Fact]
+    public void HavingConditionWithNoColumnReferences_NeverFires()
+    {
+        var findings = Scan("SELECT Col, COUNT(*) FROM dbo.Big GROUP BY Col HAVING 1 = 1 AND COUNT(*) > 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
+    }
+
+    [Fact]
+    public void HavingConditionReferencesNonGroupByColumn_NeverFires()
+    {
+        var findings = Scan("SELECT Col, COUNT(*) FROM dbo.Big GROUP BY Col HAVING Id = 1 AND COUNT(*) > 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.NonAggregateHavingPredicate);
+    }
+
+    [Fact]
+    public void SelectDistinctJoinToDerivedTable_NeverFiresDistinctMaskingJoinFanout()
+    {
+        var findings = Scan(
+            "SELECT DISTINCT a.Id FROM dbo.A a JOIN (SELECT AId FROM dbo.C) c ON a.Id = c.AId;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
+    }
+
+    [Fact]
+    public void SelectDistinctJoinOnUnresolvableTable_NeverFiresDistinctMaskingJoinFanout()
+    {
+        var findings = Scan(
+            "SELECT DISTINCT a.Id FROM dbo.A a JOIN dbo.NoSuchTable n ON a.Id = n.AId;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
+    }
+
+    [Fact]
+    public void SelectDistinctJoinWithNoAliasQualifiedEqualityColumn_NeverFiresDistinctMaskingJoinFanout()
+    {
+        var findings = Scan(
+            "SELECT DISTINCT a.Id FROM dbo.A a JOIN dbo.C c ON 1 = 1;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.DistinctMaskingJoinFanout);
+    }
+
+    [Fact]
+    public void UnionBranchIsUnflattenableParenthesizedQuery_NeverFiresDisjointness()
+    {
+        var findings = Scan(
+            "SELECT Id FROM dbo.A WHERE Id = 1 "
+            + "UNION (SELECT Id FROM dbo.A WHERE Id = 2 UNION ALL SELECT Id FROM dbo.A WHERE Id = 3);");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches);
+    }
+
+    [Fact]
+    public void UnionBranchesFilterDifferentTables_NeverFiresDisjointness()
+    {
+        var findings = Scan(
+            "SELECT Id FROM dbo.A WHERE Id = 1 UNION SELECT Id FROM dbo.C WHERE AId = 2;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches);
+    }
+
+    [Fact]
+    public void UnionBranchHasMultiTableFrom_NeverFiresDisjointness()
+    {
+        var findings = Scan(
+            "SELECT a.Id FROM dbo.A a, dbo.C c WHERE a.Id = 1 UNION SELECT Id FROM dbo.A WHERE Id = 2;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches);
+    }
+
+    [Fact]
+    public void UnionBranchUsesNonEqualsComparison_NeverFiresDisjointness()
+    {
+        var findings = Scan(
+            "SELECT Id FROM dbo.A WHERE Id <> 1 UNION SELECT Id FROM dbo.A WHERE Id = 2;");
+
+        Assert.DoesNotContain(findings, f => f.Kind == QueryAntiPatternFindingKind.UnionOfProvablyDisjointBranches);
+    }
 }
