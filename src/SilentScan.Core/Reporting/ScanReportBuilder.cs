@@ -277,6 +277,27 @@ public static class ScanReportBuilder
             columnstoreBatchModeStage.Complete($"{columnstoreBatchModeDisqualifyingTypeFindings.Count:N0} findings");
         }
 
+        IReadOnlyList<MemoryOptimizedUnsupportedColumnTypeFinding> memoryOptimizedUnsupportedColumnTypeFindings;
+        using (var memoryOptimizedColumnTypeStage = progress.Begin("scanning memory-optimized unsupported column types"))
+        {
+            memoryOptimizedUnsupportedColumnTypeFindings = MemoryOptimizedUnsupportedColumnTypeScanner.Scan(catalog);
+            memoryOptimizedColumnTypeStage.Complete($"{memoryOptimizedUnsupportedColumnTypeFindings.Count:N0} findings");
+        }
+
+        IReadOnlyList<MemoryOptimizedUnsupportedIndexOptionFinding> memoryOptimizedUnsupportedIndexOptionFindings;
+        using (var memoryOptimizedIndexOptionStage = progress.Begin("scanning memory-optimized unsupported index options"))
+        {
+            memoryOptimizedUnsupportedIndexOptionFindings = MemoryOptimizedUnsupportedIndexOptionScanner.Scan(catalog);
+            memoryOptimizedIndexOptionStage.Complete($"{memoryOptimizedUnsupportedIndexOptionFindings.Count:N0} findings");
+        }
+
+        IReadOnlyList<MemoryOptimizedForeignKeyFinding> memoryOptimizedForeignKeyFindings;
+        using (var memoryOptimizedForeignKeyStage = progress.Begin("scanning memory-optimized foreign keys"))
+        {
+            memoryOptimizedForeignKeyFindings = MemoryOptimizedForeignKeyScanner.Scan(catalog);
+            memoryOptimizedForeignKeyStage.Complete($"{memoryOptimizedForeignKeyFindings.Count:N0} findings");
+        }
+
         IReadOnlyList<NonPersistedComputedColumnFinding> nonPersistedComputedColumnFindings;
         using (var nonPersistedComputedColumnStage = progress.Begin("scanning non-persisted computed columns"))
         {
@@ -1477,6 +1498,9 @@ public static class ScanReportBuilder
             triggerOrderFindings,
             missingStatisticsFindings,
             operandComparabilityFindings,
+            memoryOptimizedUnsupportedColumnTypeFindings,
+            memoryOptimizedUnsupportedIndexOptionFindings,
+            memoryOptimizedForeignKeyFindings,
             orderedSkippedConstructs, SkippedConstructSummary.From(orderedSkippedConstructs), typedPredicateSummary, dynamicSqlSummary);
     }
 

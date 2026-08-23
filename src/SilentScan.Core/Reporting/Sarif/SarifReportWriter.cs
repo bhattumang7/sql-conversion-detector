@@ -106,6 +106,9 @@ public static class SarifReportWriter
         results.AddRange(report.FloatEqualityFindings.Select(ToResult));
         results.AddRange(report.AlwaysEncryptedOrderByFindings.Select(ToResult));
         results.AddRange(report.OperandComparabilityFindings.Select(ToResult));
+        results.AddRange(report.MemoryOptimizedUnsupportedColumnTypeFindings.Select(ToResult));
+        results.AddRange(report.MemoryOptimizedUnsupportedIndexOptionFindings.Select(ToResult));
+        results.AddRange(report.MemoryOptimizedForeignKeyFindings.Select(ToResult));
         results.AddRange(report.QueryAntiPatternFindings.Select(ToResult));
         results.AddRange(report.IndexCoverageFindings.Select(ToResult));
         results.AddRange(report.TriggerCorrectnessFindings.Select(ToResult));
@@ -334,6 +337,43 @@ public static class SarifReportWriter
         var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.ColumnstoreUnsupportedColumnTypeRuleId, finding.Confidence);
         var level = FloorLevelForConfidence(LevelError, finding.Confidence);
         var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} and participates in columnstore index '{finding.IndexName}' - this does not deploy (Msg 35343: a SQL_VARIANT column cannot participate in a columnstore index).";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(MemoryOptimizedUnsupportedColumnTypeFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MemoryOptimizedUnsupportedColumnTypeRuleId, finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = $"'{finding.TableQualifiedName}.{finding.ColumnName}' is declared {finding.TypeDisplay} on memory-optimized table '{finding.TableQualifiedName}' - this type is not supported on a memory-optimized table at all (Msg 10794), so the statement does not deploy.";
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(MemoryOptimizedUnsupportedIndexOptionFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MemoryOptimizedUnsupportedIndexOptionRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => $"Index '{finding.IndexName}' on memory-optimized table '{finding.TableQualifiedName}' is a rowstore CLUSTERED index - not supported on a memory-optimized table (Msg 12317), so the statement does not deploy.",
+            MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns => $"Index '{finding.IndexName}' on memory-optimized table '{finding.TableQualifiedName}' declares INCLUDE columns - not supported on a memory-optimized table (Msg 10664), so the statement does not deploy.",
+            _ => $"Index '{finding.IndexName}' on memory-optimized table '{finding.TableQualifiedName}' uses an unsupported index option.",
+        };
+
+        return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
+    }
+
+    private static SarifResult ToResult(MemoryOptimizedForeignKeyFinding finding)
+    {
+        var ruleId = SarifRuleCatalog.RuleId(SarifRuleCatalog.MemoryOptimizedForeignKeyRuleId(finding.Kind), finding.Confidence);
+        var level = FloorLevelForConfidence(LevelError, finding.Confidence);
+        var message = finding.Kind switch
+        {
+            MemoryOptimizedForeignKeyFindingKind.CrossStorageForeignKey => $"Foreign key '{finding.ConstraintName}' spans '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}', where exactly one side is memory-optimized - foreign keys between memory-optimized and non-memory-optimized tables are not supported (Msg 10778), so the constraint does not deploy.",
+            MemoryOptimizedForeignKeyFindingKind.ReferentialAction => $"Foreign key '{finding.ConstraintName}' between memory-optimized tables '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' declares a referential action other than NO ACTION - not supported on a memory-optimized-to-memory-optimized foreign key (Msg 10794), so the constraint does not deploy.",
+            _ => $"Foreign key '{finding.ConstraintName}' between '{finding.ParentTableQualifiedName}' and '{finding.ReferencedTableQualifiedName}' is not supported on a memory-optimized table.",
+        };
 
         return BuildResult(ruleId, level, message, finding.SourcePath, finding.Line, startColumn: 1);
     }

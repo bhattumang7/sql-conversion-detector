@@ -19,16 +19,6 @@ Competitor tools are referred to generically; real identities are in
 
 ### Detections
 
-- [ ] **New rule family: unsupported type/constraint inside a memory-optimized
-      table or natively compiled module.** In-Memory OLTP tables reject a
-      documented set of column types, constraint shapes, and index options
-      that an ordinary table allows — a catalog-decidable structural fact
-      (`sys.tables.is_memory_optimized`) with the same shape as the already-
-      shipped MAX-typed-column/columnstore-unsupported-type rules. Needs its
-      own oracle matrix against a real memory-optimized table (unsupported
-      column type, unsupported constraint, a natively compiled module hitting
-      a row-layout limit) before scoping — not yet attempted.
-
 - [ ] **`ScalarUdfInlineabilityScanner` is missing two real engine gates and
       can over-claim inlineability.** (1) Scalar-UDF inlining (FROID) is
       itself gated behind database compatibility level >= 150 (SQL Server
@@ -309,15 +299,6 @@ Competitor tools are referred to generically; real identities are in
         check whether this boundary is already caught downstream.
       - `UNPIVOT` mixing source columns with incompatible types
         (`sys.columns`-decidable).
-      - New family: memory-optimized (Hekaton) compatibility — column
-        restrictions (prohibited flags, unsupported `GENERATED ALWAYS`
-        variant, type, size limit), constraint/index-option restrictions,
-        the fixed row-size ceiling (`0x1f7c` bytes), CLR UDT/function
-        binding inside a Hekaton/natively-compiled context, "deep type"/
-        unsupported-builtin binder rejection, and non-Unicode-with-UTF-8-
-        collation rejection in a native-compiled module — the survey
-        surfaced this same underlying restriction family from ~8 different
-        entry points; design once as a single Hekaton-compatibility rule.
       - `WITH SCHEMABINDING` referencing an alias user type (or an invalid
         parsed type name) is a documented restriction.
       - Full-text index DDL validation (unsupported column type, invalid

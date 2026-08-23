@@ -100,6 +100,9 @@ public static class ReadableScanReportWriter
         blocks.AddRange(TemporalBoundary(report, headingLevel, pathBase));
         blocks.AddRange(MaxTypedColumn(report, headingLevel, pathBase));
         blocks.AddRange(ColumnstoreUnsupportedColumnType(report, headingLevel, pathBase));
+        blocks.AddRange(MemoryOptimizedUnsupportedColumnType(report, headingLevel, pathBase));
+        blocks.AddRange(MemoryOptimizedUnsupportedIndexOption(report, headingLevel, pathBase));
+        blocks.AddRange(MemoryOptimizedForeignKey(report, headingLevel, pathBase));
         blocks.AddRange(NonPersistedComputedColumn(report, headingLevel, pathBase));
         blocks.AddRange(OversizedParameter(report, headingLevel, pathBase));
         blocks.AddRange(UnderLengthParameter(report, headingLevel, pathBase));
@@ -220,6 +223,9 @@ public static class ReadableScanReportWriter
         AddCount(counts, "MAX-typed columns (can never be an index key)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.MaxLength));
         AddCount(counts, "Legacy large-object columns (can never appear in any index)", report.MaxTypedColumnFindings.Count(f => f.Kind == NonIndexableColumnFindingKind.LegacyLargeObject));
         AddCount(counts, "SQL_VARIANT columns participating in a columnstore index (does not deploy)", report.ColumnstoreUnsupportedColumnTypeFindings.Count);
+        AddCount(counts, "Unsupported column type on a memory-optimized table (does not deploy)", report.MemoryOptimizedUnsupportedColumnTypeFindings.Count);
+        AddCount(counts, "Unsupported index option on a memory-optimized table (does not deploy)", report.MemoryOptimizedUnsupportedIndexOptionFindings.Count);
+        AddCount(counts, "Unsupported memory-optimized foreign key (does not deploy)", report.MemoryOptimizedForeignKeyFindings.Count);
         AddCount(counts, "Non-persisted computed columns", report.NonPersistedComputedColumnFindings.Count);
         AddCount(counts, "Predicates comparing a column against an oversized parameter/variable", report.OversizedParameterFindings.Count);
         AddCount(counts, "Predicates comparing a column against an under-length parameter/variable", report.UnderLengthParameterFindings.Count);
@@ -774,6 +780,82 @@ public static class ReadableScanReportWriter
                 $"{f.TableQualifiedName}.{f.ColumnName}",
                 f.TypeDisplay,
                 f.IndexName,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MemoryOptimizedUnsupportedColumnType(ScanReport report, int level, string? pathBase)
+    {
+        if (report.MemoryOptimizedUnsupportedColumnTypeFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unsupported column type on a memory-optimized table ({report.MemoryOptimizedUnsupportedColumnTypeFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact, not a plan-shape claim: xml, sql_variant, text, ntext, image, and timestamp/rowversion columns are not supported on a memory-optimized table at all - oracle-confirmed real DDL execution fails with Msg 10794.");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, ColumnHeader, "Type"],
+            [.. report.MemoryOptimizedUnsupportedColumnTypeFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                $"{f.TableQualifiedName}.{f.ColumnName}",
+                f.TypeDisplay,
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MemoryOptimizedUnsupportedIndexOption(ScanReport report, int level, string? pathBase)
+    {
+        if (report.MemoryOptimizedUnsupportedIndexOptionFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unsupported index option on a memory-optimized table ({report.MemoryOptimizedUnsupportedIndexOptionFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact: a rowstore CLUSTERED index, or an index with INCLUDE columns, is not supported on a memory-optimized table - oracle-confirmed real DDL execution fails (Msg 12317/10664 respectively).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Table", "Index", "Issue"],
+            [.. report.MemoryOptimizedUnsupportedIndexOptionFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.TableQualifiedName,
+                f.IndexName,
+                f.Kind switch
+                {
+                    MemoryOptimizedUnsupportedIndexOptionKind.ClusteredIndex => "rowstore CLUSTERED index",
+                    MemoryOptimizedUnsupportedIndexOptionKind.IncludedColumns => "INCLUDE columns",
+                    _ => "unsupported index option",
+                },
+            })]);
+    }
+
+    private static IEnumerable<ReadableBlock> MemoryOptimizedForeignKey(ScanReport report, int level, string? pathBase)
+    {
+        if (report.MemoryOptimizedForeignKeyFindings.Count == 0)
+        {
+            yield break;
+        }
+
+        yield return new ReadableBlock.Heading(level, $"Unsupported memory-optimized foreign key ({report.MemoryOptimizedForeignKeyFindings.Count})");
+        yield return new ReadableBlock.Paragraph(
+            "A structural catalog fact: a foreign key spanning a memory-optimized and a disk-based table, or a CASCADE/SET NULL/SET DEFAULT referential action between two memory-optimized tables, is not supported - oracle-confirmed real DDL execution fails (Msg 10778/10794 respectively).");
+
+        yield return new ReadableBlock.Table(
+            [WhereHeader, "Constraint", "Parent table", "Referenced table", "Issue"],
+            [.. report.MemoryOptimizedForeignKeyFindings.Select(f => new List<string>
+            {
+                Where(f.SourcePath, f.Line, dynamicSqlCallSite: null, pathBase, f.Confidence),
+                f.ConstraintName,
+                f.ParentTableQualifiedName,
+                f.ReferencedTableQualifiedName,
+                f.Kind switch
+                {
+                    MemoryOptimizedForeignKeyFindingKind.CrossStorageForeignKey => "spans memory-optimized and disk-based tables",
+                    MemoryOptimizedForeignKeyFindingKind.ReferentialAction => "non-NO ACTION referential action",
+                    _ => "unsupported foreign key shape",
+                },
             })]);
     }
 

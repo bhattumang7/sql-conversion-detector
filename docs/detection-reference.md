@@ -355,3 +355,45 @@ referencing DML on a plain disk-based, non-FILESTREAM, non-replicated table
 never triggered it: the Eager Spool/Sort still appeared in every case tried
 outside the literal-TOP(1) shape above. Not implemented - no catalog-decidable
 condition for it was found precise enough to gate on.
+
+## Memory-optimized (Hekaton) table structural restrictions
+
+Oracle-confirmed directly (Docker, SQL Server 2022, compat 160) against a
+real `WITH (MEMORY_OPTIMIZED = ON)` table.
+
+- **A rowstore CLUSTERED index (including the default for a bare `PRIMARY
+  KEY` with no explicit `NONCLUSTERED`/`CLUSTERED` keyword) always fails
+  (Msg 12317)** - a memory-optimized table has no on-disk heap/clustered
+  storage at all. A clustered COLUMNSTORE index is unaffected: it is a
+  legal, separate index kind on a memory-optimized table and must not be
+  flagged.
+- **INCLUDE columns on any index always fail (Msg 10664)**, independent of
+  the index otherwise being HASH or NONCLUSTERED.
+- **A filtered (`WHERE`) index is rejected by the T-SQL parser itself (Msg
+  46107, "Filtered indexes are not supported on memory optimized tables"),
+  not by the engine at deploy time.** A `.sql` file containing this shape
+  fails to parse at all - it never reaches a scannable catalog in either
+  file-parsing or a live database (the CREATE could never have deployed).
+  There is no live-catalog or parsed-DDL state this can ever be caught from
+  downstream; do not re-propose a catalog-level rule for it.
+- **A foreign key relationship between a memory-optimized table and a
+  non-memory-optimized table always fails (Msg 10778), in both directions**
+  (memory-optimized table referencing a disk-based table, and a disk-based
+  table referencing a memory-optimized one) - confirmed independently for
+  each direction, not inferred from one.
+- **`ON DELETE`/`ON UPDATE` `CASCADE`/`SET NULL`/`SET DEFAULT` on a foreign
+  key fails (Msg 10794) only when both the referencing and referenced table
+  are memory-optimized.** When either side is disk-based, the cross-storage
+  restriction above already fires first (a foreign key spanning storage
+  engines can never legally carry any referential action at all).
+- **Unsupported column types**: `xml`, `sql_variant`, `text`, `ntext`,
+  `image`, `timestamp`/`rowversion` (Msg 10794 for each). `VARCHAR(MAX)`/
+  `NVARCHAR(MAX)`/`VARBINARY(MAX)`, a `PERSISTED` computed column, and a
+  custom `IDENTITY` seed/increment other than `(1,1)` (a separate,
+  independently confirmed restriction, Msg 12339 - not yet built into a
+  rule) are all legal on a memory-optimized table; do not flag them.
+- `hierarchyid`/`geography`/`geometry` are also documented as unsupported on
+  a memory-optimized table, but this codebase's type resolver has no way to
+  distinguish them from an arbitrary CLR UDT (both resolve to an unresolved/
+  null `SqlType`) - not implemented for these three pending that modeling
+  gap, to avoid conflating them with a genuinely unrelated CLR UDT column.

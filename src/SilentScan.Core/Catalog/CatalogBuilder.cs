@@ -1102,7 +1102,8 @@ public static class CatalogBuilder
                 columns,
                 allIndexes,
                 sourcePath,
-                createTable.StartLine);
+                createTable.StartLine,
+                IsMemoryOptimized: IsMemoryOptimizedTable(createTable.Options));
 
             // A temp table (#t) is scoped to its declaring procedure, same as a table variable -
             // it's just as invisible outside that procedure. A batch-level temp table (declared
@@ -1558,6 +1559,9 @@ public static class CatalogBuilder
 
         return isNullable;
     }
+
+    private static bool IsMemoryOptimizedTable(IList<TableOption> options) =>
+        options.OfType<MemoryOptimizedTableOption>().Any(o => o.OptionState == OptionState.On);
 
     private static bool IsColumnstoreIndexType(IndexType? indexType) =>
         indexType?.IndexTypeKind is IndexTypeKind.ClusteredColumnStore or IndexTypeKind.NonClusteredColumnStore;
