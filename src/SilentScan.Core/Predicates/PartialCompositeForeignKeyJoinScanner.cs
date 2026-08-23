@@ -80,20 +80,6 @@ public static class PartialCompositeForeignKeyJoinScanner
             base.ExplicitVisit(node);
         }
 
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
-        }
-
         private void InspectFromClause(FromClause? fromClause, WhereClause? whereClause, IReadOnlyDictionary<string, ResolvedRelation> cteRelations)
         {
             if (fromClause is null)
@@ -112,7 +98,7 @@ public static class PartialCompositeForeignKeyJoinScanner
                 (byAlias, ordered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(whereClause?.SearchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog)))
             {
                 return;
             }

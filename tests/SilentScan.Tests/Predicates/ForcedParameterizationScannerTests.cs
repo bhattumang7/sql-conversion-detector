@@ -230,4 +230,63 @@ public sealed class ForcedParameterizationScannerTests
         var finding = Assert.Single(findings, f => f.Kind == ForcedParameterizationFindingKind.LikePatternLiteral);
         Assert.Equal("dbo.SearchOrders", finding.ModuleQualifiedName);
     }
+
+    [Fact]
+    public void ModuleQualifiedName_ReflectsEnclosingAlteredProcedure()
+    {
+        var findings = Scan("ALTER PROCEDURE dbo.SearchOrders AS SELECT * FROM dbo.T WHERE Name LIKE 'abc%';");
+
+        var finding = Assert.Single(findings, f => f.Kind == ForcedParameterizationFindingKind.LikePatternLiteral);
+        Assert.Equal("dbo.SearchOrders", finding.ModuleQualifiedName);
+    }
+
+    [Fact]
+    public void ModuleQualifiedName_ReflectsEnclosingFunction()
+    {
+        var findings = Scan(
+            "CREATE FUNCTION dbo.SearchOrders() RETURNS TABLE AS RETURN (SELECT * FROM dbo.T WHERE Name LIKE 'abc%');");
+
+        var finding = Assert.Single(findings, f => f.Kind == ForcedParameterizationFindingKind.LikePatternLiteral);
+        Assert.Equal("dbo.SearchOrders", finding.ModuleQualifiedName);
+    }
+
+    [Fact]
+    public void ModuleQualifiedName_ReflectsEnclosingAlteredFunction()
+    {
+        var findings = Scan(
+            "ALTER FUNCTION dbo.SearchOrders() RETURNS TABLE AS RETURN (SELECT * FROM dbo.T WHERE Name LIKE 'abc%');");
+
+        var finding = Assert.Single(findings, f => f.Kind == ForcedParameterizationFindingKind.LikePatternLiteral);
+        Assert.Equal("dbo.SearchOrders", finding.ModuleQualifiedName);
+    }
+
+    [Fact]
+    public void ModuleQualifiedName_ReflectsEnclosingTrigger()
+    {
+        var findings = Scan(
+            "CREATE TRIGGER dbo.trg_Orders ON dbo.T AFTER INSERT AS SELECT * FROM dbo.T WHERE Name LIKE 'abc%';");
+
+        var finding = Assert.Single(findings, f => f.Kind == ForcedParameterizationFindingKind.LikePatternLiteral);
+        Assert.Equal("dbo.trg_Orders", finding.ModuleQualifiedName);
+    }
+
+    [Fact]
+    public void ModuleQualifiedName_ReflectsEnclosingAlteredTrigger()
+    {
+        var findings = Scan(
+            "ALTER TRIGGER dbo.trg_Orders ON dbo.T AFTER INSERT AS SELECT * FROM dbo.T WHERE Name LIKE 'abc%';");
+
+        var finding = Assert.Single(findings, f => f.Kind == ForcedParameterizationFindingKind.LikePatternLiteral);
+        Assert.Equal("dbo.trg_Orders", finding.ModuleQualifiedName);
+    }
+
+    [Fact]
+    public void HavingLiteral_ThroughAndedAndParenthesizedComparisons_FindsBothLiterals()
+    {
+        var findings = Scan(
+            "SELECT Id, COUNT(*) FROM dbo.T GROUP BY Id HAVING (COUNT(*) > 2) AND (MIN(Id) < 100);");
+
+        var havingFindings = findings.Where(f => f.Kind == ForcedParameterizationFindingKind.HavingLiteral).ToList();
+        Assert.Equal(2, havingFindings.Count);
+    }
 }

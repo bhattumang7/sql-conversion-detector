@@ -56,7 +56,7 @@ public static class NonUniqueUpdateSourceScanner
                 (byAlias, ordered),
             };
 
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.WhereClause?.SearchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(spec.WhereClause?.SearchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog)))
             {
                 return;
             }
@@ -68,23 +68,7 @@ public static class NonUniqueUpdateSourceScanner
         }
 
         private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
-
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
-        }
+            PredicateVisitorSupport.ResolutionContext(withClause, sourcePath, catalog);
 
         private static string? AliasOf(TableReference reference) =>
             reference is NamedTableReference named ? named.Alias?.Value ?? named.SchemaObject.BaseIdentifier.Value : null;

@@ -27,23 +27,20 @@ public static class AggregateDivisionColumnstoreScanner
 
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly CteScopeTracker cteScope = new(sourcePath, catalog);
 
         public List<AggregateDivisionColumnstoreFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            cteScope.PushForSelect(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScopeStack.Pop();
+            cteScope.Pop();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
-            var context = new FromScopeResolver.ResolutionContext(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
+            var context = PredicateVisitorSupport.ResolutionContext(cteScope.Current, sourcePath, catalog);
             var (_, ordered) = FromScopeResolver.Resolve(node.FromClause, context);
             var tables = ordered
                 .Where(e => !e.IsViewLayer && e.Relation.QualifiedName is not null)

@@ -25,9 +25,20 @@ public static partial class StatisticsCapture
             command.CommandTimeout = 120;
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken));
 
-            while (await reader.NextResultAsync(cancellationToken));
+            bool hasRow;
+            do
+            {
+                hasRow = await reader.ReadAsync(cancellationToken);
+            }
+            while (hasRow);
+
+            bool hasResult;
+            do
+            {
+                hasResult = await reader.NextResultAsync(cancellationToken);
+            }
+            while (hasResult);
         }
         finally
         {

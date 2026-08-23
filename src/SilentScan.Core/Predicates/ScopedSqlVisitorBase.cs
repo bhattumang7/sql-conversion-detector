@@ -3,6 +3,7 @@ using SilentScan.Core.Catalog;
 using SilentScan.Core.Diagnostics;
 using SilentScan.Core.Lineage;
 using SilentScan.Core.Common;
+using SilentScan.Core.Predicates.Normalization;
 
 namespace SilentScan.Core.Predicates;
 
@@ -14,13 +15,49 @@ internal abstract class ScopedSqlVisitorBase(
     string? currentProcScope,
     IReadOnlyDictionary<string, IReadOnlyList<string>>? callerScopeByCalleeScope) : TSqlFragmentVisitor
 {
+    protected const string NormalizationEliminatedConstructKind = "predicate eliminated by normalization";
+
+    protected const string NormalizationEliminatedLedgerReason =
+        "this comparison lives inside a branch the engine's own normalize/simplify pass proves can never contribute a selected row (a same-column contradiction, or a tautology on a confirmed NOT NULL column) - never reaches a real Filter/Seek decision";
+
     private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyCteRelations = new Dictionary<string, ResolvedRelation>();
+
+    private static readonly IReadOnlySet<TSqlFragment> EmptyDeadPredicateSet = new HashSet<TSqlFragment>();
 
     private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> _cteStack = new();
 
     protected readonly Stack<(Dictionary<string, ScopeEntry> ByAlias, List<ScopeEntry> Ordered)> ScopeStack = new();
 
+    protected readonly Stack<IReadOnlySet<TSqlFragment>> DeadPredicateStack = new();
+
     protected string? CurrentProcScope { get; set; } = currentProcScope;
+
+    protected bool IsDeadPredicate(TSqlFragment node) => DeadPredicateStack.Count > 0 && DeadPredicateStack.Peek().Contains(node);
+
+    protected IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
+    {
+        if (searchCondition is null || ScopeStack.Count == 0)
+        {
+            return EmptyDeadPredicateSet;
+        }
+
+        var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
+        return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+    }
+
+    protected PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
+        ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
+    {
+        if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
+        {
+            return default;
+        }
+
+        var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName);
+        return new PredicateSurvivalAnalyzer.ColumnFacts(
+            catalogColumn is null ? null : !catalogColumn.IsNullable,
+            baseColumn.Type?.Collation?.IsCaseSensitive);
+    }
 
     protected void PushCteScope(WithCtesAndXmlNamespaces? withClause)
     {

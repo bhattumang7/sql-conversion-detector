@@ -484,6 +484,153 @@ public sealed class DynamicSqlScannerTests
     }
 
     [Fact]
+    public void Scan_SelectAssignmentWithFetcher_ParenthesizedEqualityWhereClause_StillPinsSingleEqualityKey()
+    {
+
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>
+        {
+            [("dbo.Templates", "Definition", "SettingName", "ReportSql")] = ["SELECT * FROM dbo.Reports"],
+        });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE (SettingName = 'ReportSql')
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_AndedEqualityWhereClause_CollectsBothKeysEvenWhenFetcherDeclines()
+    {
+
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Category VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>());
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = 'ReportSql' AND Category = 'Reports'
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Contains(fetcher.Calls, call => call.EqualityKeys.Count == 2);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_OrWhereClause_TreatsAsNoEqualityKeysRatherThanExtractingOne()
+    {
+
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var fetcher = new FakeRowValueFetcher(
+            new Dictionary<(string, string, string, string), IReadOnlyList<string>>(),
+            new Dictionary<(string, string), IReadOnlyList<string>> { [("dbo.Templates", "Definition")] = ["SELECT * FROM dbo.Reports"] });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE SettingName = 'A' OR SettingName = 'B'
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+        Assert.Contains(fetcher.Calls, call => call.EqualityKeys.Count == 0);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentWithFetcher_IntegerLiteralEqualityWhereClause_PinsKeyByItsIntegerText()
+    {
+
+        var ddlResult = SqlScriptParser.ParseText("ddl.sql", "CREATE TABLE dbo.Templates (Id INT NOT NULL, Definition VARCHAR(MAX) NOT NULL);");
+        Assert.False(ddlResult.HasErrors);
+        var catalog = CatalogBuilder.Build([ddlResult]);
+
+        var fetcher = new FakeRowValueFetcher(new Dictionary<(string, string, string, string), IReadOnlyList<string>>
+        {
+            [("dbo.Templates", "Definition", "Id", "5")] = ["SELECT * FROM dbo.Reports"],
+        });
+
+        var result = SqlScriptParser.ParseText("test.sql", """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.Templates WHERE Id = 5
+            EXEC (@sql)
+            """);
+        Assert.False(result.HasErrors);
+
+        var extraction = DynamicSqlScannerV2.Scan(result, callGraph: new ProcCallGraph([]), catalog: catalog, rowValueFetcher: fetcher);
+
+        Assert.Empty(extraction.Findings);
+        var script = Assert.Single(extraction.AnalyzableScripts);
+        Assert.Equal("SELECT * FROM dbo.Reports", script.InnerText);
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentFromTableNotInCatalog_HavocsRatherThanCrashing()
+    {
+
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);",
+            """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = Definition FROM dbo.NotInCatalog
+            EXEC (@sql)
+            """);
+
+        Assert.DoesNotContain(result.Findings, f => f.Reason == "non-literal-expression:sql-loaded-from-table");
+    }
+
+    [Fact]
+    public void Scan_DeclareInitializerAsScalarSubqueryFromTableNotInCatalog_DeclinesRatherThanCrashing()
+    {
+
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);",
+            """
+            DECLARE @sql VARCHAR(MAX) = (SELECT Definition FROM dbo.NotInCatalog)
+            EXEC (@sql)
+            """);
+
+        Assert.Contains(result.Findings, f => f.Reason == "non-literal-expression:sql-loaded-from-table");
+    }
+
+    [Fact]
+    public void Scan_SelectAssignmentFromSingleKnownTable_UnresolvableColumnSpliceExpression_HavocsRatherThanCrashing()
+    {
+
+        var result = ScanWithCatalog(
+            "CREATE TABLE dbo.Templates (SettingName VARCHAR(50) NOT NULL, Definition VARCHAR(MAX) NOT NULL);",
+            """
+            DECLARE @sql VARCHAR(MAX)
+            SELECT @sql = UPPER(Definition) FROM dbo.Templates
+            EXEC (@sql)
+            """);
+
+        Assert.DoesNotContain(result.Findings, f => f.Reason == "non-literal-expression:sql-loaded-from-table");
+    }
+
+    [Fact]
     public void Scan_SetAssignmentAsScalarSubqueryFilteredByTheSameVariableItAssigns_ResolvesToATypedHoleNotADecline()
     {
 
@@ -1404,6 +1551,16 @@ public sealed class DynamicSqlScannerTests
     {
 
         var result = Scan("CREATE PROCEDURE dbo.usp_Test AS EXTERNAL NAME Assembly.Class.Method;");
+
+        Assert.Empty(result.Findings);
+        Assert.Empty(result.AnalyzableScripts);
+    }
+
+    [Fact]
+    public void Scan_ExternalClrTrigger_NoStatementListBody_DoesNotThrow()
+    {
+
+        var result = Scan("CREATE TRIGGER dbo.trg_Test ON dbo.T AFTER INSERT AS EXTERNAL NAME Assembly.Class.Method;");
 
         Assert.Empty(result.Findings);
         Assert.Empty(result.AnalyzableScripts);

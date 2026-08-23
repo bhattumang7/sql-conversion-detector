@@ -234,4 +234,95 @@ public sealed class FormattingScannerTests
 
         Assert.DoesNotContain(findings, f => f.Kind == FormattingFindingKind.MissingFileHeaderComment);
     }
+
+    [Fact]
+    public void AlterProcedureBody_ScopesFindingsToTheProcedure()
+    {
+        var sql = "ALTER PROCEDURE dbo.P AS BEGIN SELECT 1; SELECT 2; END";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.MultipleStatementsOnSameLine);
+    }
+
+    [Fact]
+    public void CreateFunctionBody_ScopesFindingsToTheFunction()
+    {
+        var sql = "CREATE FUNCTION dbo.F() RETURNS INT AS BEGIN DECLARE @a INT, @b INT; RETURN 1; END";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.MultipleDeclarationsOnSameLine);
+    }
+
+    [Fact]
+    public void AlterFunctionBody_ScopesFindingsToTheFunction()
+    {
+        var sql = "ALTER FUNCTION dbo.F() RETURNS INT AS BEGIN DECLARE @a INT, @b INT; RETURN 1; END";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.MultipleDeclarationsOnSameLine);
+    }
+
+    [Fact]
+    public void CreateTriggerBody_ScopesFindingsToTheTrigger()
+    {
+        var sql = "CREATE TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS BEGIN SELECT 1; SELECT 2; END";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.MultipleStatementsOnSameLine);
+    }
+
+    [Fact]
+    public void AlterTriggerBody_ScopesFindingsToTheTrigger()
+    {
+        var sql = "ALTER TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS BEGIN SELECT 1; SELECT 2; END";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.MultipleStatementsOnSameLine);
+    }
+
+    [Fact]
+    public void UnqualifiedProcedureName_UsedAsModuleName()
+    {
+        var sql = "CREATE PROCEDURE P AS BEGIN SELECT 1; SELECT 2; END";
+        var findings = Scan(sql);
+
+        var finding = Assert.Single(findings, f => f.Kind == FormattingFindingKind.MultipleStatementsOnSameLine);
+        Assert.Equal("P", finding.ModuleQualifiedName);
+    }
+
+    [Fact]
+    public void ParenthesizedVariableReference_FiresRedundantParentheses()
+    {
+        var sql = "DECLARE @x INT = 1; SELECT (@x);";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.RedundantParentheses);
+    }
+
+    [Fact]
+    public void ParenthesizedLiteral_FiresRedundantParentheses()
+    {
+        var sql = "SELECT (1);";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.RedundantParentheses);
+    }
+
+    [Fact]
+    public void DoublyParenthesizedScalarExpression_FiresRedundantParentheses()
+    {
+        var sql = "SELECT ((Col1)) FROM dbo.T;";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.RedundantParentheses);
+    }
+
+    [Fact]
+    public void ElseKeywordPrecededByComment_StillFindsTheRealElseLine()
+    {
+        var sql = "IF 1 = 1\n    SELECT 1;\n/* trailing */\nELSE SELECT 2;";
+        var findings = Scan(sql);
+
+        Assert.Contains(findings, f => f.Kind == FormattingFindingKind.SingleLineConditionalBody && f.Line == 4);
+    }
 }

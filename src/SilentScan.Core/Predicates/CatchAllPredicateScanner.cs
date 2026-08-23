@@ -139,7 +139,7 @@ public static class CatchAllPredicateScanner
         }
 
         private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
+            PredicateVisitorSupport.ResolutionContext(withClause, sourcePath, catalog);
 
         private bool BeginStatementOptimizerHints(IList<OptimizerHint> hints)
         {
@@ -159,26 +159,12 @@ public static class CatchAllPredicateScanner
             }
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
+            var dead = PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog));
 
             foreach (var orClause in FlattenOr(searchCondition))
             {
                 InspectOrClause(orClause, scopeChain, dead);
             }
-        }
-
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
         }
 
         private static IEnumerable<IReadOnlyList<BooleanExpression>> FlattenOr(BooleanExpression expression)

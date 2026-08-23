@@ -15,6 +15,13 @@ public sealed class NonSargablePredicateScannerTests
         return NonSargablePredicateScanner.Scan(result);
     }
 
+    private static IReadOnlyList<SargabilityFinding> ScanSql(string sql)
+    {
+        var result = SqlScriptParser.ParseText("test.sql", sql);
+        Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
+        return NonSargablePredicateScanner.Scan(result);
+    }
+
     [Fact]
     public void FunctionWrappedColumn_YearOnColumn_Fires()
     {
@@ -387,6 +394,234 @@ public sealed class NonSargablePredicateScannerTests
     {
 
         var findings = ScanFixture("FUNCTION_WRAPPED_COLUMN_join_on_clean.sql");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FunctionWrappedColumn_InMergeMatchedFilter_Fires()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Notes VARCHAR(200) NOT NULL);
+            CREATE TABLE dbo.OrdersStaging (OrderId INT NOT NULL PRIMARY KEY, Notes VARCHAR(200) NOT NULL);
+            GO
+            MERGE dbo.Orders AS target
+            USING dbo.OrdersStaging AS source
+            ON target.OrderId = source.OrderId
+            WHEN MATCHED AND UPPER(target.Notes) = 'X' THEN
+                UPDATE SET Notes = source.Notes;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.CaseFoldOnColumn, finding.Kind);
+        Assert.Equal("Notes", finding.ColumnName);
+    }
+
+    [Fact]
+    public void BetweenPredicate_OutsideFilterContext_DoesNotFire()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Age INT NOT NULL);
+            GO
+            SELECT CASE WHEN CAST(Age AS BIGINT) BETWEEN 1 AND 10 THEN 1 ELSE 0 END FROM dbo.Orders;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void InPredicate_OutsideFilterContext_DoesNotFire()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Age INT NOT NULL);
+            GO
+            SELECT CASE WHEN CAST(Age AS BIGINT) IN (1, 2) THEN 1 ELSE 0 END FROM dbo.Orders;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void LikePredicate_OutsideFilterContext_DoesNotFire()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Notes VARCHAR(200) NOT NULL);
+            GO
+            SELECT CASE WHEN Notes LIKE '%X' THEN 1 ELSE 0 END FROM dbo.Orders;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void LikePredicate_FirstExpressionNotAColumnReference_DoesNotFireAsLikePattern()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Notes VARCHAR(200) NOT NULL);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE UPPER(Notes) LIKE '%X';
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind is SargabilityFindingKind.LeadingWildcardLike or SargabilityFindingKind.LikePatternNotLiteral);
+    }
+
+    [Fact]
+    public void BetweenPredicate_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Age INT NOT NULL);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE OrderId = 1 AND OrderId = 2 AND Age BETWEEN 1 AND 10;
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void InPredicate_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Age INT NOT NULL);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE OrderId = 1 AND OrderId = 2 AND CAST(Age AS BIGINT) IN (1, 2);
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void LikePredicate_InsideUnsatisfiableAndBranch_EliminatedByNormalization()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Notes VARCHAR(200) NOT NULL);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE OrderId = 1 AND OrderId = 2 AND Notes LIKE 'A%';
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_ParenthesizedColumnOperand_StillFinds()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice DECIMAL(10,2) NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE (UnitPrice) + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_UnaryNegatedColumnOperand_StillFinds()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice DECIMAL(10,2) NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE -UnitPrice + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_CastWrappedColumnOperand_StillFinds()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice INT NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE CAST(UnitPrice AS BIGINT) + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_ConvertWrappedColumnOperand_StillFinds()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice INT NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE CONVERT(BIGINT, UnitPrice) + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_NestedParenthesizedArithmeticOperand_StillFinds()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice INT NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE (UnitPrice + 1) + 2 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_SimpleCaseWrappedColumnOperand_StillFinds()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice INT NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE (CASE UnitPrice WHEN 1 THEN 2 ELSE 3 END) + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_IifPredicateAndOfComparisonAndIsNull_FindsColumnThroughIsNullBranch()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice INT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE IIF(1 = 1 AND UnitPrice IS NULL, ProductId, 0) + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("UnitPrice", finding.ColumnName);
+    }
+
+    [Fact]
+    public void ColumnArithmetic_IifPredicateNegatingAnUnmatchedShape_FallsThroughToThenExpression()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, UnitPrice INT NOT NULL);
+            GO
+            SELECT ProductId FROM dbo.Products WHERE IIF(NOT (1 BETWEEN 1 AND 2), ProductId, 0) + 1 > 5;
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(SargabilityFindingKind.ColumnArithmetic, finding.Kind);
+        Assert.Equal("ProductId", finding.ColumnName);
+    }
+
+    [Fact]
+    public void CharindexOrLeftOnColumn_LeftWithNonLiteralLength_DoesNotFire()
+    {
+        var findings = ScanSql("""
+            CREATE TABLE dbo.Products (ProductId INT NOT NULL PRIMARY KEY, Sku VARCHAR(50) NOT NULL);
+            GO
+            DECLARE @n INT = 3;
+            SELECT ProductId FROM dbo.Products WHERE LEFT(Sku, @n) = 'ABC';
+            """);
 
         Assert.Empty(findings);
     }

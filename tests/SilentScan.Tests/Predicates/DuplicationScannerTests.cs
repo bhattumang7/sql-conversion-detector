@@ -529,6 +529,123 @@ public sealed class DuplicationScannerTests
     }
 
     [Fact]
+    public void NotLessThan_FiresNegatedComparisonAsOpposite()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF NOT (@x < @y) PRINT 'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
+        Assert.Equal(">=", finding.DetailText);
+    }
+
+    [Fact]
+    public void NotGreaterThanOrEqualTo_FiresNegatedComparisonAsOpposite()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF NOT (@x >= @y) PRINT 'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
+        Assert.Equal("<", finding.DetailText);
+    }
+
+    [Fact]
+    public void NotLessThanOrEqualTo_FiresNegatedComparisonAsOpposite()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF NOT (@x <= @y) PRINT 'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
+        Assert.Equal(">", finding.DetailText);
+    }
+
+    [Fact]
+    public void NotNotEqualToBrackets_FiresNegatedComparisonAsOpposite()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @y INT = 2;
+                IF NOT (@x <> @y) PRINT 'x';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.NegatedComparisonAsOpposite);
+        Assert.Equal("=", finding.DetailText);
+    }
+
+    [Fact]
+    public void WhileBodyWithNestedBeginEndBlockThatAlwaysBreaks_FiresSingleIterationLoop()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                WHILE 1 = 1
+                BEGIN
+                    BEGIN
+                        BREAK;
+                    END
+                END
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.SingleIterationLoop);
+    }
+
+    [Fact]
+    public void WhileBodyWithTryCatchWhereBothBranchesAlwaysBreak_FiresSingleIterationLoop()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                WHILE 1 = 1
+                BEGIN
+                    BEGIN TRY
+                        BREAK;
+                    END TRY
+                    BEGIN CATCH
+                        BREAK;
+                    END CATCH
+                END
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.SingleIterationLoop);
+    }
+
+    [Fact]
+    public void WhileBodyWithTryCatchWhereOnlyTryAlwaysBreaks_NeverFiresSingleIterationLoop()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                WHILE 1 = 1
+                BEGIN
+                    BEGIN TRY
+                        BREAK;
+                    END TRY
+                    BEGIN CATCH
+                        PRINT 'handled';
+                    END CATCH
+                END
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.SingleIterationLoop);
+    }
+
+    [Fact]
     public void IsNotNullDirectly_NeverFiresNegatedComparisonAsOpposite()
     {
         var findings = Scan("""
@@ -942,6 +1059,73 @@ public sealed class DuplicationScannerTests
     }
 
     [Fact]
+    public void StricterBoundFollowsLooserBoundInAndChain_FiresRedundantAndConditionOnEarlierFragment()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 3 AND @x > 5 PRINT 'y';
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.RedundantAndCondition);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
+    public void AndChainWithNonComparisonConjunct_IsSkippedWithoutThrowing()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 5 AND @x < 20 AND @x IS NOT NULL PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind is DuplicationFindingKind.RedundantAndCondition or DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void AndChainWithUnsupportedComparisonOperator_IsSkippedWithoutThrowing()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF @x > 5 AND @x < 20 AND @x <> 7 PRINT 'y';
+            END
+            """);
+
+        Assert.DoesNotContain(findings, f => f.Kind is DuplicationFindingKind.RedundantAndCondition or DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void AndChainWithLiteralOnLeftOfComparison_StillDetectsMutuallyExclusiveBounds()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 10;
+                IF 20 < @x AND @x < 5 PRINT 'y';
+            END
+            """);
+
+        Assert.Contains(findings, f => f.Kind == DuplicationFindingKind.MutuallyExclusiveAndCondition);
+    }
+
+    [Fact]
+    public void CaseExpressionTwoOfThreeThenResultsIdentical_FiresIdenticalBranchBodies()
+    {
+        var findings = Scan("""
+            CREATE PROCEDURE dbo.P AS BEGIN
+                DECLARE @x INT = 1;
+                DECLARE @r INT = CASE WHEN @x = 1 THEN 10 WHEN @x = 2 THEN 20 WHEN @x = 3 THEN 10 END;
+            END
+            """);
+
+        var finding = Assert.Single(findings, f => f.Kind == DuplicationFindingKind.IdenticalBranchBodies);
+        Assert.Equal(FindingConfidence.Medium, finding.Confidence);
+    }
+
+    [Fact]
     public void DifferentIntegerLiteralsAlwaysFalseEquality_FiresAlwaysTrueOrFalse()
     {
         var findings = Scan("""
@@ -1044,5 +1228,95 @@ public sealed class DuplicationScannerTests
             """);
 
         Assert.DoesNotContain(findings, f => f.Kind == DuplicationFindingKind.AlwaysTrueOrFalseLiteralComparison);
+    }
+
+    [Fact]
+    public void AlterProcedure_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            ALTER PROCEDURE dbo.P AS BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void CreateOrAlterProcedure_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            CREATE OR ALTER PROCEDURE dbo.P AS BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void AlterFunction_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            ALTER FUNCTION dbo.F() RETURNS INT AS
+            BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+                RETURN 1;
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void CreateOrAlterFunction_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            CREATE OR ALTER FUNCTION dbo.F() RETURNS INT AS
+            BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+                RETURN 1;
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void AlterTrigger_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            ALTER TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS
+            BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
+    }
+
+    [Fact]
+    public void CreateOrAlterTrigger_StringLiteralRepeatedThreeTimes_FiresDuplicatedStringLiteral()
+    {
+        var findings = Scan("""
+            CREATE OR ALTER TRIGGER dbo.trg_T ON dbo.T AFTER INSERT AS
+            BEGIN
+                DECLARE @a VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @b VARCHAR(20) = 'PENDING_REVIEW';
+                DECLARE @c VARCHAR(20) = 'PENDING_REVIEW';
+            END
+            """);
+
+        Assert.Single(findings, f => f.Kind == DuplicationFindingKind.DuplicatedStringLiteral);
     }
 }

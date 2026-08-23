@@ -109,7 +109,7 @@ public sealed class DanglingObjectReferenceChecker
         }
         catch (SqlException ex) when (ex.Number == 2020)
         {
-            stillUnresolved = false;
+
         }
         catch (SqlException ex) when (ex.Number == 208)
         {

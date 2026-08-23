@@ -67,3 +67,9 @@ published. This holds regardless of scope changes above.
 ## Git commit
 Do not mention Claude in the commit message or as coauthor. Do not leak session info anywhere.
 Do not mention dates, numbers, or pass counts (e.g. "pass 1") that would have no meaning in the long run, in the commit message or in the code.
+
+## Sonar
+Run sonar-scan.ps1 and make sure that 0 issues are reported in all aspects. Also, 0 code duplication should be reached.
+
+### Sonar MCP
+If sonar MCP is enabled, get info about all issues and code duplication and then ask the user to disable the MCP to save tokens.

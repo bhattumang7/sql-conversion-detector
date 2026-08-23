@@ -1909,6 +1909,289 @@ public sealed class TypedPredicateExtractorTests
 
         Assert.Empty(result.FilteredIndexParameterMismatchFindings);
     }
+
+    [Theory]
+    [InlineData(">", "<=")]
+    [InlineData("<", ">=")]
+    [InlineData(">=", "<")]
+    [InlineData("<=", ">")]
+    [InlineData("!<", "<")]
+    [InlineData("!>", ">")]
+    public void Extract_NegatedComparisonOperator_AppliesCorrectNegation(string operatorText, string expectedNegatedOperator)
+    {
+
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            $"SELECT 1 FROM dbo.T WHERE NOT (Col {operatorText} 5);");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(expectedNegatedOperator, finding.Operator);
+    }
+
+    [Fact]
+    public void Extract_DeadBetweenWithInvertedBounds_NoFindingAndLedgeredAsNormalizationEliminated()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col BETWEEN 10 AND 5;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate eliminated by normalization");
+    }
+
+    [Fact]
+    public void Extract_NotBetweenNestedInsideCaseWithinWhere_LedgeredAsOperandPosition()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE (CASE WHEN Col NOT BETWEEN 1 AND 10 THEN 1 ELSE 0 END) = 1;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "comparison inside scalar expression");
+    }
+
+    [Fact]
+    public void Extract_DeadLikeAsSiblingOfContradictingConjuncts_LedgeredAsNormalizationEliminated()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL, Name VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col IS NULL AND Col IS NOT NULL AND Name LIKE 'x%';");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate eliminated by normalization" && s.Reason.Contains("contradiction", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_NotLikeNestedInsideCaseWithinWhere_LedgeredAsOperandPosition()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE (CASE WHEN Col NOT LIKE 'x%' THEN 1 ELSE 0 END) = 1;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "comparison inside scalar expression");
+    }
+
+    [Fact]
+    public void Extract_DeadInAsSiblingOfContradictingConjuncts_LedgeredAsNormalizationEliminated()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL, Name VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col IS NULL AND Col IS NOT NULL AND Name IN ('a', 'b');");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate eliminated by normalization" && s.Reason.Contains("contradiction", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_InPredicateOutsideAnyFromScope_LedgeredAsSkip()
+    {
+
+        var result = ExtractAll(
+            "CREATE PROCEDURE dbo.usp_Test @Id INT AS BEGIN IF @Id IN (1, 2, 3) BEGIN RETURN; END END;");
+
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "comparison outside FROM scope");
+    }
+
+    [Fact]
+    public void Extract_InPredicateNestedInsideCountCaseWithinSelectList_LedgeredWithoutOperandPositionReason()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT COUNT(CASE WHEN Col IN (1, 2) THEN 1 END) FROM dbo.T;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.DoesNotContain(result.SkippedConstructs, s => s.ConstructKind == "comparison inside scalar expression" && s.Reason.Contains("IN", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_InPredicateWithArithmeticLeftOperand_NoColumnOperandLedgered()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE (Col + 1) IN (1, 2, 3);");
+
+        Assert.Empty(result.TypedFindings);
+    }
+
+    [Fact]
+    public void Extract_InsertSelectIntoUnresolvedTargetColumn_DoesNotCrashAndReportsNoWriteLoss()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "INSERT INTO dbo.T (BadCol) SELECT 1;");
+
+        Assert.Empty(result.WriteLossFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "write target" && s.Reason.Contains("BadCol", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_DeadSubqueryComparisonAsSiblingOfContradictingConjuncts_LedgeredAsNormalizationEliminated()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL, Name VARCHAR(20) NOT NULL);",
+            "CREATE TABLE dbo.U (Code VARCHAR(20) NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col IS NULL AND Col IS NOT NULL AND Name = ANY (SELECT Code FROM dbo.U);");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate eliminated by normalization" && s.Reason.Contains("contradiction", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_SubqueryComparisonOutsideAnyFromScope_LedgeredAsSkip()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.U (Id INT NOT NULL);",
+            "CREATE PROCEDURE dbo.usp_Test @Id INT AS BEGIN IF @Id = ANY (SELECT Id FROM dbo.U) BEGIN RETURN; END END;");
+
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "comparison outside FROM scope");
+    }
+
+    [Fact]
+    public void Extract_SubqueryComparisonNestedInsideCountCaseWithinSelectList_NotAFinding()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE TABLE dbo.U (Id INT NOT NULL);",
+            "SELECT COUNT(CASE WHEN Col = ANY (SELECT Id FROM dbo.U) THEN 1 END) FROM dbo.T;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+    }
+
+    [Fact]
+    public void Extract_SubqueryComparisonWithArithmeticLeftOperand_NoFinding()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "CREATE TABLE dbo.U (Id INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE (Col + 1) = ANY (SELECT Id FROM dbo.U);");
+
+        Assert.Empty(result.TypedFindings);
+    }
+
+    [Fact]
+    public void Extract_SubqueryComparisonWhereSubqueryOutputTypeUnresolvable_LedgeredAsSkip()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Name VARCHAR(20) NOT NULL);",
+            "CREATE TABLE dbo.U (Id INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Name = ANY (SELECT CAST(Id AS dbo.UnknownAlias) FROM dbo.U);");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "subquery comparison predicate" && s.Reason.Contains("output column type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_LiteralOnLeftColumnOnRightComparison_StillResolvesAsAFinding()
+    {
+
+        var findings = Extract(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE 5 = Col;");
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("Col", finding.Column.ColumnName);
+    }
+
+    [Fact]
+    public void Extract_OrDisjunctWithFoldableArithmeticLiteralComparison_LedgeredAsFoldableNotArbitrary()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col > 5 OR 1 + 1 = 2;");
+
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "foldable literal comparison" && s.Reason.Contains("always true", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_LikeAgainstHexLiteralWithNoQuotes_DoesNotCrashAndIsNotAnsiPaddingMismatch()
+    {
+
+        var findings = ExtractAnsiPaddingMismatch(isAnsiPadded: false, "SELECT 1 FROM dbo.Customers WHERE Code LIKE 0x48656C6C6F;");
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void Extract_ComparisonAgainstNextValueForExpression_LedgersUnresolvedOperand()
+    {
+
+        var result = ExtractAll(
+            "CREATE SEQUENCE dbo.Seq AS INT;",
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col = NEXT VALUE FOR dbo.Seq;");
+
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("NextValueForExpression", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_ScalarUdfWithUnresolvableReturnType_LedgersUnresolvedOperand()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            """
+            CREATE FUNCTION dbo.Fn() RETURNS dbo.UnknownAlias
+            AS
+            BEGIN
+                RETURN NULL;
+            END
+            """,
+            "SELECT 1 FROM dbo.T WHERE Col = dbo.Fn();");
+
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("RETURNS type could not be resolved", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_CastToUnknownTypeAlias_LedgersUnresolvedOperand()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE Col = CAST(Col AS dbo.UnknownAlias);");
+
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("CAST/CONVERT target type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_UnionViewBranchesDisagreeOnType_LedgersInsteadOfGuessing()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.Recent (Id INT NOT NULL);",
+            "CREATE TABLE dbo.Archive (Id VARCHAR(20) NOT NULL);",
+            "CREATE VIEW dbo.vw_Combined AS SELECT Id FROM dbo.Recent UNION ALL SELECT Id FROM dbo.Archive;",
+            "SELECT 1 FROM dbo.vw_Combined WHERE Id = 5;");
+
+        Assert.Empty(result.TypedFindings);
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "predicate operand" && s.Reason.Contains("UNION view whose branches disagree", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Extract_SimpleCaseExpressionUsedAsComparisonOperand_DoesNotCrashAndIsNotAttributedToItsInputColumn()
+    {
+
+        var result = ExtractAll(
+            "CREATE TABLE dbo.T (Col INT NOT NULL);",
+            "SELECT 1 FROM dbo.T WHERE (CASE Col WHEN 1 THEN 1 ELSE 0 END) = 1;");
+
+        Assert.DoesNotContain(result.TypedFindings, f => f.Column.ColumnName == "Col");
+        Assert.Contains(result.SkippedConstructs, s => s.ConstructKind == "no column operand");
+    }
 }
 
 [Trait("Category", "Oracle")]
@@ -3194,4 +3477,5 @@ public sealed class TypedPredicateExtractorOracleTests : OracleTestFixture
         Assert.Contains("PhysicalOp=\"Index Seek\"", planXml);
         Assert.Contains("GetRangeWithMismatchedTypes", planXml);
     }
+
 }

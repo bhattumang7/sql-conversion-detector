@@ -80,6 +80,383 @@ public sealed class DynamicSqlCfgTests
     }
 
     [Fact]
+    public void IfConditionOnCallerSeededIntegerVariable_PrunesToTakenBranchInsteadOfMerging()
+    {
+        var statements = ParseStatements("IF @Flag = 1 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("then", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void IfConditionOnCallerSeededIntegerVariable_FalseBranchPrunesToElseValue()
+    {
+        var statements = ParseStatements("IF @Flag = 1 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("2", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("else", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void IfConditionOnUnseededVariable_DoesNotPrune_StillMergesBothBranches()
+    {
+        var statements = ParseStatements("SET @Flag = 1; IF @Flag = 1 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        var xTemplate = Assert.IsType<SqlTextValue.Template>(result["@x"]);
+        var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(xTemplate.Pieces));
+        Assert.Equal(2, choice.Alternatives.Count);
+    }
+
+    [Fact]
+    public void ParenthesizedConditionOnCallerSeededVariable_PrunesLikeUnparenthesized()
+    {
+        var statements = ParseStatements("IF (@Flag = 1) BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("then", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void NegatedConditionOnCallerSeededVariable_PrunesToOppositeBranch()
+    {
+        var statements = ParseStatements("IF NOT (@Flag = 1) BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("else", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void AndConditionWithBothCallerSeededVariablesTrue_PrunesToTakenBranch()
+    {
+        var statements = ParseStatements("IF @Flag = 1 AND @Other = 2 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag", "@Other" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+            ["@Other"] = new SqlTextValue.Template([new TemplatePiece.Lit("2", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("then", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void AndConditionWithOneCallerSeededVariableFalse_PrunesToElseBranch()
+    {
+        var statements = ParseStatements("IF @Flag = 1 AND @Other = 2 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag", "@Other" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+            ["@Other"] = new SqlTextValue.Template([new TemplatePiece.Lit("99", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("else", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void OrConditionWithOneCallerSeededVariableTrue_PrunesToTakenBranch()
+    {
+        var statements = ParseStatements("IF @Flag = 1 OR @Other = 2 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag", "@Other" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+            ["@Other"] = new SqlTextValue.Template([new TemplatePiece.Lit("99", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("then", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void OrConditionWithBothCallerSeededVariablesFalse_PrunesToElseBranch()
+    {
+        var statements = ParseStatements("IF @Flag = 1 OR @Other = 2 BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag", "@Other" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("9", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+            ["@Other"] = new SqlTextValue.Template([new TemplatePiece.Lit("99", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("else", LitText(result["@x"]));
+    }
+
+    [Theory]
+    [InlineData("<>")]
+    [InlineData("!=")]
+    [InlineData(">")]
+    [InlineData(">=")]
+    [InlineData("<")]
+    [InlineData("<=")]
+    [InlineData("!>")]
+    [InlineData("!<")]
+    public void ComparisonOperatorOnCallerSeededVariable_FoldsToTrue_AndPrunesToTakenBranch(string comparisonOperator)
+    {
+        var rhs = comparisonOperator switch
+        {
+            "<>" or "!=" => "2",
+            ">" => "2",
+            ">=" => "5",
+            "<" => "10",
+            "<=" => "5",
+            "!>" => "10",
+            "!<" => "2",
+            _ => throw new InvalidOperationException(),
+        };
+        var statements = ParseStatements($"IF @Flag {comparisonOperator} {rhs} BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("5", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("then", LitText(result["@x"]));
+    }
+
+    [Fact]
+    public void IfWithoutElse_ConditionFoldsFalse_HasNoElsePredecessorToPruneTo_StillContinuesNormally()
+    {
+        var statements = ParseStatements("IF @Flag = 1 BEGIN SET @x = 'then'; END SET @y = 'after';");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("2", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        Assert.Equal("after", LitText(result["@y"]));
+    }
+
+    [Fact]
+    public void IfConditionIsAnUnrecognizedShapeOnCallerSeededVariable_DoesNotFold_StillMergesBothBranches()
+    {
+        var statements = ParseStatements("IF @Flag IS NULL BEGIN SET @x = 'then'; END ELSE BEGIN SET @x = 'else'; END");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "@Flag" });
+
+        var seed = new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@Flag"] = new SqlTextValue.Template([new TemplatePiece.Lit("1", new SourceSpan("test.sql", 1, 1), PrefixLength: 1)]) { DeclaredType = NVarCharMax },
+        };
+
+        var result = cfg.Solve(statements, seed);
+
+        var xTemplate = Assert.IsType<SqlTextValue.Template>(result["@x"]);
+        var choice = Assert.IsType<TemplatePiece.Choice>(Assert.Single(xTemplate.Pieces));
+        Assert.Equal(2, choice.Alternatives.Count);
+    }
+
+    [Fact]
+    public void SelfTrimShapeGuardedByNonMatchingLenComparison_DoesNotRecognizeGuard_TaintsInstead()
+    {
+        var statements = ParseStatements("SET @sql = 'a,b,c,'; IF LEN(@sql) > 5 SET @sql = SUBSTRING(@sql, 1, LEN(@sql) - 1);");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeafWithTaintOnUnrecognizedSet(s));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.IsType<SqlTextValue.Tainted>(result["@sql"]);
+    }
+
+    private static Action<Dictionary<string, SqlTextValue>, bool> CompileLeafWithTaintOnUnrecognizedSet(TSqlStatement statement) => (state, emit) =>
+    {
+        if (statement is SetVariableStatement { Variable.Name: var litName, Expression: StringLiteral literal })
+        {
+            state[litName] = new SqlTextValue.Template([new TemplatePiece.Lit(literal.Value, new SourceSpan("test.sql", literal.StartLine, literal.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+        }
+        else if (statement is SetVariableStatement { Variable.Name: var taintedName })
+        {
+            state[taintedName] = new SqlTextValue.Tainted("unrecognized", new SourceSpan("test.sql", statement.StartLine, statement.StartColumn));
+        }
+    };
+
+    [Fact]
+    public void RecognizedTrailingCommaTrimGuardedBySelfLen_RestoresPriorValueInsteadOfTainting()
+    {
+        var statements = ParseStatements("SET @sql = 'a,b,c,'; IF LEN(@sql) > 0 SET @sql = SUBSTRING(@sql, 1, LEN(@sql) - 1);");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeafWithTaintOnUnrecognizedSet(s));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("a,b,c,", LitText(result["@sql"]));
+    }
+
+    [Fact]
+    public void EqualityGuardedReturnNarrowsVariableToTheGuardLiteralAfterTheIf()
+    {
+        var statements = ParseStatements("SET @x = 'default'; IF @x <> 'y' BEGIN RETURN; END SET @after = 'reached';");
+        string? observedXAtAfter = null;
+
+        Action<Dictionary<string, SqlTextValue>, bool> CompileLeafObservingX(TSqlStatement statement) => (state, emit) =>
+        {
+            if (statement is SetVariableStatement { Variable.Name: "@after" } afterStatement)
+            {
+                if (emit && state.TryGetValue("@x", out var xValue))
+                {
+                    observedXAtAfter = LitText(xValue);
+                }
+
+                state["@after"] = new SqlTextValue.Template([new TemplatePiece.Lit("reached", new SourceSpan("test.sql", afterStatement.StartLine, afterStatement.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+                return;
+            }
+
+            if (statement is SetVariableStatement { Variable.Name: var name, Expression: StringLiteral literal })
+            {
+                state[name] = new SqlTextValue.Template([new TemplatePiece.Lit(literal.Value, new SourceSpan("test.sql", literal.StartLine, literal.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+            }
+        };
+
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeafObservingX(s));
+
+        cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("y", observedXAtAfter);
+    }
+
+    [Fact]
+    public void LiteralFirstEqualityGuardedReturnNarrowsVariableToTheGuardLiteralAfterTheIf()
+    {
+        var statements = ParseStatements("SET @x = 'default'; IF 'y' <> @x BEGIN RETURN; END SET @after = 'reached';");
+        string? observedXAtAfter = null;
+
+        Action<Dictionary<string, SqlTextValue>, bool> CompileLeafObservingX(TSqlStatement statement) => (state, emit) =>
+        {
+            if (statement is SetVariableStatement { Variable.Name: "@after" } afterStatement)
+            {
+                if (emit && state.TryGetValue("@x", out var xValue))
+                {
+                    observedXAtAfter = LitText(xValue);
+                }
+
+                state["@after"] = new SqlTextValue.Template([new TemplatePiece.Lit("reached", new SourceSpan("test.sql", afterStatement.StartLine, afterStatement.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+                return;
+            }
+
+            if (statement is SetVariableStatement { Variable.Name: var name, Expression: StringLiteral literal })
+            {
+                state[name] = new SqlTextValue.Template([new TemplatePiece.Lit(literal.Value, new SourceSpan("test.sql", literal.StartLine, literal.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+            }
+        };
+
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeafObservingX(s));
+
+        cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("y", observedXAtAfter);
+    }
+
+    [Fact]
+    public void NeitherSideOfNotEqualGuardIsSelfLiteralShape_DoesNotNarrow_StillMergesAfterTheIf()
+    {
+        var statements = ParseStatements("SET @x = 'default'; IF @x <> @other BEGIN RETURN; END SET @after = 'reached';");
+        string? observedXAtAfter = null;
+
+        Action<Dictionary<string, SqlTextValue>, bool> CompileLeafObservingX(TSqlStatement statement) => (state, emit) =>
+        {
+            if (statement is SetVariableStatement { Variable.Name: "@after" } afterStatement)
+            {
+                if (emit && state.TryGetValue("@x", out var xValue))
+                {
+                    observedXAtAfter = LitText(xValue);
+                }
+
+                state["@after"] = new SqlTextValue.Template([new TemplatePiece.Lit("reached", new SourceSpan("test.sql", afterStatement.StartLine, afterStatement.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+                return;
+            }
+
+            if (statement is SetVariableStatement { Variable.Name: var name, Expression: StringLiteral literal })
+            {
+                state[name] = new SqlTextValue.Template([new TemplatePiece.Lit(literal.Value, new SourceSpan("test.sql", literal.StartLine, literal.StartColumn), PrefixLength: 1)]) { DeclaredType = NVarCharMax };
+            }
+        };
+
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeafObservingX(s));
+
+        cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("default", observedXAtAfter);
+    }
+
+    [Fact]
+    public void RecognizedTrailingCommaTrimGuardedBySelfLenGreaterThanOrEqualToOne_RestoresPriorValueInsteadOfTainting()
+    {
+        var statements = ParseStatements("SET @sql = 'a,b,c,'; IF LEN(@sql) >= 1 SET @sql = SUBSTRING(@sql, 1, LEN(@sql) - 1);");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeafWithTaintOnUnrecognizedSet(s));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("a,b,c,", LitText(result["@sql"]));
+    }
+
+    [Fact]
+    public void BreakInsideWhileLoop_ExitsLoopWithoutRepeatingBody()
+    {
+        var statements = ParseStatements("SET @x = 'start'; WHILE 1 = 1 BEGIN SET @x = 'looped'; BREAK; END SET @y = 'after';");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("after", LitText(result["@y"]));
+    }
+
+    [Fact]
+    public void ContinueInsideWhileLoop_JumpsBackToLoopHeaderInsteadOfFallingThrough()
+    {
+        var statements = ParseStatements("SET @x = 'start'; WHILE @i < 10 BEGIN IF @i = 1 CONTINUE; SET @x = 'looped'; SET @i = @i + 1; END SET @y = 'after';");
+        var cfg = new DynamicSqlCfg("test.sql", Cap, (s, _) => CompileLeaf(s, []));
+
+        var result = cfg.Solve(statements, new Dictionary<string, SqlTextValue>(StringComparer.OrdinalIgnoreCase));
+
+        Assert.Equal("after", LitText(result["@y"]));
+    }
+
+    [Fact]
     public void IfStatement_VariableUntouchedByEitherBranch_MergesToItsOwnUnchangedValue()
     {
         var statements = ParseStatements("SET @x = 'unchanged'; IF 1 = 1 BEGIN SET @y = 'then-only'; END ELSE BEGIN SET @z = 'else-only'; END");

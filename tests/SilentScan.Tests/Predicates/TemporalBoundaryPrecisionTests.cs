@@ -87,4 +87,22 @@ public sealed class TemporalBoundaryPrecisionTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void UpperBoundNotAStringLiteral_NeverFires()
+    {
+
+        const string sql = """
+            CREATE TABLE dbo.Events (Id INT NOT NULL PRIMARY KEY, OccurredAt DATETIME2(7) NOT NULL);
+            SELECT Id FROM dbo.Events WHERE OccurredAt BETWEEN '2024-01-01' AND GETDATE();
+            """;
+        var parseResult = SqlScriptParser.ParseText("nonliteral_bound.sql", sql);
+        Assert.False(parseResult.HasErrors);
+        var catalog = CatalogBuilder.Build([parseResult]);
+        var lineage = LineageResolver.Resolve(catalog, [parseResult]);
+
+        var findings = NonSargablePredicateScanner.ScanFull(parseResult, catalog, lineage).TemporalBoundaryFindings;
+
+        Assert.Empty(findings);
+    }
 }

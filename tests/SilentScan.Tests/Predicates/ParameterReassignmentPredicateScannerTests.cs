@@ -306,4 +306,202 @@ public sealed class ParameterReassignmentPredicateScannerTests
 
         Assert.Empty(findings);
     }
+
+    [Fact]
+    public void AlterProcedure_AnalyzedTheSameAsCreate()
+    {
+        var findings = Scan(
+            """
+            ALTER PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void CreateOrAlterProcedure_AnalyzedTheSameAsCreate()
+    {
+        var findings = Scan(
+            """
+            CREATE OR ALTER PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void CreateFunction_AnalyzedTheSameAsProcedure()
+    {
+        var findings = Scan(
+            """
+            CREATE FUNCTION dbo.udf_Find(@p VARCHAR(20)) RETURNS TABLE AS
+            RETURN (
+                SELECT 1 AS X FROM dbo.Customers WHERE Code = @p
+            );
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void AlterFunction_AnalyzedTheSameAsProcedure()
+    {
+        var findings = Scan(
+            """
+            ALTER FUNCTION dbo.udf_Find(@p VARCHAR(20)) RETURNS TABLE AS
+            RETURN (
+                SELECT 1 AS X FROM dbo.Customers WHERE Code = @p
+            );
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CreateOrAlterFunction_AnalyzedTheSameAsProcedure()
+    {
+        var findings = Scan(
+            """
+            CREATE OR ALTER FUNCTION dbo.udf_Find(@p VARCHAR(20)) RETURNS TABLE AS
+            RETURN (
+                SELECT 1 AS X FROM dbo.Customers WHERE Code = @p
+            );
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ProcedureWithNoParameters_NeverAnalyzed()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find AS
+            BEGIN
+                SELECT 1 FROM dbo.Customers WHERE Code = 'A';
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ReturnStatement_ResetsReassignedStateForStatementsAfterIt()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20), @flag INT AS
+            BEGIN
+                IF @flag = 1
+                BEGIN
+                    SET @p = 'OVERWRITTEN';
+                    RETURN;
+                END
+                SELECT 1 FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void DeleteStatement_PredicateSiteRecognized()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                DELETE FROM dbo.Customers WHERE Code = @p;
+            END
+            """);
+
+        Assert.Single(findings);
+    }
+
+    [Fact]
+    public void DeleteStatement_OptionRecompile_Suppresses()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                DELETE FROM dbo.Customers WHERE Code = @p OPTION (RECOMPILE);
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void UpdateStatement_OptionRecompile_Suppresses()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                UPDATE dbo.Customers SET Region = 'X' WHERE Code = @p OPTION (RECOMPILE);
+            END
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void NotEqualOperator_Brackets_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers WHERE Code <> @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("<>", finding.Operator);
+    }
+
+    [Fact]
+    public void NotEqualOperator_Exclamation_Fires()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20) AS
+            BEGIN
+                SET @p = 'OVERWRITTEN';
+                SELECT 1 FROM dbo.Customers WHERE Code != @p;
+            END
+            """);
+
+        var finding = Assert.Single(findings);
+        Assert.Equal("<>", finding.Operator);
+    }
+
+    [Fact]
+    public void AndedAndParenthesizedComparisons_BothFire()
+    {
+        var findings = Scan(
+            """
+            CREATE PROCEDURE dbo.usp_Find @p VARCHAR(20), @q VARCHAR(20) AS
+            BEGIN
+                SET @p = 'A';
+                SET @q = 'B';
+                SELECT 1 FROM dbo.Customers WHERE (Code = @p) AND (Region = @q);
+            END
+            """);
+
+        Assert.Equal(2, findings.Count);
+    }
 }

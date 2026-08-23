@@ -291,18 +291,8 @@ public static class QueryAntiPatternScanner
         }
 
         private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
-        }
+            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain) =>
+            PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog);
 
         private void InspectSiteIfNamedTable(TableReference? tableReference)
         {
@@ -728,12 +718,12 @@ public static class QueryAntiPatternScanner
                 FindingConfidence.High));
         }
 
-        private void InspectAlterTableSwitchCdcPartitionSwitch(AlterTableSwitchStatement node)
+        private (string SourceQualifiedName, string TargetQualifiedName, CatalogTable Source, CatalogTable Target)? ResolveSwitchTables(
+            AlterTableSwitchStatement node)
         {
             if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
             {
-
-                return;
+                return null;
             }
 
             var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
@@ -742,8 +732,20 @@ public static class QueryAntiPatternScanner
             var target = catalog.Find(targetQualifiedName);
             if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
             {
+                return null;
+            }
+
+            return (sourceQualifiedName, targetQualifiedName, source, target);
+        }
+
+        private void InspectAlterTableSwitchCdcPartitionSwitch(AlterTableSwitchStatement node)
+        {
+            if (ResolveSwitchTables(node) is not { } tables)
+            {
                 return;
             }
+
+            var (sourceQualifiedName, targetQualifiedName, source, target) = tables;
 
             if (target.CdcPartitionSwitchDisallowed)
             {
@@ -767,20 +769,12 @@ public static class QueryAntiPatternScanner
 
         private void InspectAlterTableSwitchPartitionFilegroupMismatch(AlterTableSwitchStatement node)
         {
-            if (node.SourcePartitionNumber is null && node.TargetPartitionNumber is null)
-            {
-
-                return;
-            }
-
-            var sourceQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.SchemaObjectName));
-            var targetQualifiedName = catalog.ResolveSynonymName(SchemaObjectNameHelper.Qualify(node.TargetTable));
-            var source = catalog.Find(sourceQualifiedName);
-            var target = catalog.Find(targetQualifiedName);
-            if (source is not { Kind: CatalogTableKind.Table } || target is not { Kind: CatalogTableKind.Table })
+            if (ResolveSwitchTables(node) is not { } tables)
             {
                 return;
             }
+
+            var (sourceQualifiedName, targetQualifiedName, source, target) = tables;
 
             var sourceFilegroup = ResolveSwitchSideFilegroup(source, node.SourcePartitionNumber);
             var targetFilegroup = ResolveSwitchSideFilegroup(target, node.TargetPartitionNumber);

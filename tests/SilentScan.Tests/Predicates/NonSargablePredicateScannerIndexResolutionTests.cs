@@ -159,4 +159,43 @@ public sealed class NonSargablePredicateScannerIndexResolutionTests
         Assert.Null(finding.TableQualifiedName);
         Assert.Null(finding.Indexed);
     }
+
+    [Fact]
+    public void CastOnColumn_MatchingIndexedComputedColumn_IsSuppressed()
+    {
+        var findings = ScanWithCatalog("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Code INT NOT NULL, CodeStr AS CAST(Code AS VARCHAR(10)));
+            CREATE INDEX IX_Orders_CodeStr ON dbo.Orders(CodeStr);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CAST(Code AS VARCHAR(10)) = '5';
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void ConvertOnColumn_MatchingIndexedComputedColumn_IsSuppressed()
+    {
+        var findings = ScanWithCatalog("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Code INT NOT NULL, CodeStr AS CONVERT(VARCHAR(10), Code));
+            CREATE INDEX IX_Orders_CodeStr ON dbo.Orders(CodeStr);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE CONVERT(VARCHAR(10), Code) = '5';
+            """);
+
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void CharindexOrLeftOnColumn_LeftMatchingIndexedComputedColumn_IsSuppressed()
+    {
+        var findings = ScanWithCatalog("""
+            CREATE TABLE dbo.Orders (OrderId INT NOT NULL PRIMARY KEY, Sku VARCHAR(50) NOT NULL, SkuPrefix AS LEFT(Sku, 3));
+            CREATE INDEX IX_Orders_SkuPrefix ON dbo.Orders(SkuPrefix);
+            GO
+            SELECT OrderId FROM dbo.Orders WHERE LEFT(Sku, 3) = 'ABC';
+            """);
+
+        Assert.Empty(findings);
+    }
 }

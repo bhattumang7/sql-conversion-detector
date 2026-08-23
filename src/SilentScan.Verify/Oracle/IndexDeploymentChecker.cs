@@ -86,7 +86,7 @@ public sealed class IndexDeploymentChecker
         }
     }
 
-    public async Task DropIndexIfExistsAsync(
+    public async Task<bool> DropIndexIfExistsAsync(
         string database, string schemaQualifiedTable, string indexName, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqlConnection(_options.BuildConnectionString(database));
@@ -102,10 +102,11 @@ public sealed class IndexDeploymentChecker
         try
         {
             await command.ExecuteNonQueryAsync(cancellationToken);
+            return true;
         }
         catch (SqlException)
         {
-            return;
+            return false;
         }
     }
 

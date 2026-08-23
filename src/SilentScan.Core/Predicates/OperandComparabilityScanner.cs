@@ -23,23 +23,20 @@ public static class OperandComparabilityScanner
 
     private sealed class Visitor(string sourcePath, DatabaseCatalog catalog) : TSqlFragmentVisitor
     {
-        private static readonly IReadOnlyDictionary<string, ResolvedRelation> EmptyResolvedViews = new Dictionary<string, ResolvedRelation>();
-
-        private readonly Stack<IReadOnlyDictionary<string, ResolvedRelation>> cteScopeStack = new();
+        private readonly CteScopeTracker cteScope = new(sourcePath, catalog);
 
         public List<OperandComparabilityFinding> Findings { get; } = [];
 
         public override void ExplicitVisit(SelectStatement node)
         {
-            cteScopeStack.Push(CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null));
+            cteScope.PushForSelect(node.WithCtesAndXmlNamespaces);
             base.ExplicitVisit(node);
-            cteScopeStack.Pop();
+            cteScope.Pop();
         }
 
         public override void ExplicitVisit(QuerySpecification node)
         {
-            var cteRelations = cteScopeStack.Count > 0 ? cteScopeStack.Peek() : EmptyResolvedViews;
-            var scopeChain = ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, ResolutionContext(cteRelations)));
+            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.Resolve(node.FromClause, PredicateVisitorSupport.ResolutionContext(cteScope.Current, sourcePath, catalog)));
 
             if (node.WhereClause?.SearchCondition is { } whereCondition)
             {
@@ -51,7 +48,7 @@ public static class OperandComparabilityScanner
                 InspectSearchCondition(havingCondition, scopeChain);
             }
 
-            InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain);
+            PredicateVisitorSupport.InspectJoinOnClauses(node.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
 
             if (node.GroupByClause is { } groupBy)
             {
@@ -85,15 +82,15 @@ public static class OperandComparabilityScanner
         public override void ExplicitVisit(UpdateStatement node)
         {
             var spec = node.UpdateSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var scopeChain = ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, PredicateVisitorSupport.EmptyResolvedViews, sourcePath, ledger: null);
+            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, PredicateVisitorSupport.ResolutionContext(cteRelations, sourcePath, catalog)));
 
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
                 InspectSearchCondition(whereCondition, scopeChain);
             }
 
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain);
+            PredicateVisitorSupport.InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
 
             base.ExplicitVisit(node);
         }
@@ -101,41 +98,17 @@ public static class OperandComparabilityScanner
         public override void ExplicitVisit(DeleteStatement node)
         {
             var spec = node.DeleteSpecification;
-            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, EmptyResolvedViews, sourcePath, ledger: null);
-            var scopeChain = ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, ResolutionContext(cteRelations)));
+            var cteRelations = CteResolver.Resolve(node.WithCtesAndXmlNamespaces, catalog, PredicateVisitorSupport.EmptyResolvedViews, sourcePath, ledger: null);
+            var scopeChain = PredicateVisitorSupport.ScopeChainOf(FromScopeResolver.ResolveForDataModification(spec.Target, spec.FromClause, PredicateVisitorSupport.ResolutionContext(cteRelations, sourcePath, catalog)));
 
             if (spec.WhereClause?.SearchCondition is { } whereCondition)
             {
                 InspectSearchCondition(whereCondition, scopeChain);
             }
 
-            InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain);
+            PredicateVisitorSupport.InspectJoinOnClauses(spec.FromClause?.TableReferences, scopeChain, InspectSearchCondition);
 
             base.ExplicitVisit(node);
-        }
-
-        private FromScopeResolver.ResolutionContext ResolutionContext(IReadOnlyDictionary<string, ResolvedRelation> cteRelations) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, cteRelations, ProcScope: null);
-
-        private static List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> ScopeChainOf(
-            (IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered) resolved) => [resolved];
-
-        private void InspectJoinOnClauses(
-            IList<TableReference>? tableReferences,
-            IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (tableReferences is null)
-            {
-                return;
-            }
-
-            foreach (var reference in tableReferences)
-            {
-                foreach (var join in PredicateTreeWalker.FlattenJoinNodes(reference).Where(j => j.SearchCondition is not null))
-                {
-                    InspectSearchCondition(join.SearchCondition!, scopeChain);
-                }
-            }
         }
 
         private void InspectSearchCondition(

@@ -65,21 +65,7 @@ public static class NotInNullableSubqueryScanner
         }
 
         private FromScopeResolver.ResolutionContext ResolutionContext(WithCtesAndXmlNamespaces? withClause) =>
-            new(catalog, EmptyResolvedViews, sourcePath, Ledger: null, CteResolver.Resolve(withClause, catalog, EmptyResolvedViews, sourcePath, ledger: null), ProcScope: null);
-
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
-        }
+            PredicateVisitorSupport.ResolutionContext(withClause, sourcePath, catalog);
 
         private void InspectSearchCondition(
             BooleanExpression? searchCondition, IReadOnlyDictionary<string, ScopeEntry> byAlias, IReadOnlyList<ScopeEntry> ordered)
@@ -90,7 +76,7 @@ public static class NotInNullableSubqueryScanner
             }
 
             var scopeChain = new List<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> { (byAlias, ordered) };
-            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain)))
+            if (PredicateSurvivalAnalyzer.IsUnsatisfiable(searchCondition, columnRef => PredicateVisitorSupport.ResolveColumnFacts(columnRef, scopeChain, sourcePath, catalog)))
             {
                 return;
             }

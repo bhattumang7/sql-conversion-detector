@@ -74,42 +74,6 @@ public static class TypedPredicateExtractor
 
         private PredicatePosition _position;
 
-        private readonly Stack<IReadOnlySet<TSqlFragment>> _deadPredicateStack = new();
-
-        private static readonly IReadOnlySet<TSqlFragment> EmptyDeadPredicateSet = new HashSet<TSqlFragment>();
-
-        private IReadOnlySet<TSqlFragment> ComputeDeadPredicates(BooleanExpression? searchCondition)
-        {
-            if (searchCondition is null || ScopeStack.Count == 0)
-            {
-                return EmptyDeadPredicateSet;
-            }
-
-            var scopeChain = ScopeStack.Select(s => ((IReadOnlyDictionary<string, ScopeEntry>)s.ByAlias, (IReadOnlyList<ScopeEntry>)s.Ordered)).ToList();
-            return PredicateSurvivalAnalyzer.FindDeadComparisons(searchCondition, columnRef => ResolveColumnFacts(columnRef, scopeChain));
-        }
-
-        private PredicateSurvivalAnalyzer.ColumnFacts ResolveColumnFacts(
-            ColumnReferenceExpression columnRef, IReadOnlyList<(IReadOnlyDictionary<string, ScopeEntry> ByAlias, IReadOnlyList<ScopeEntry> Ordered)> scopeChain)
-        {
-            if (ScalarExpressionResolver.ResolveColumnReference(columnRef, scopeChain, sourcePath, ledger: null) is not ColumnProvenance.BaseColumn baseColumn)
-            {
-                return default;
-            }
-
-            var catalogColumn = catalog.Find(baseColumn.TableQualifiedName, CurrentProcScope)?.FindColumn(baseColumn.ColumnName);
-            return new PredicateSurvivalAnalyzer.ColumnFacts(
-                catalogColumn is null ? null : !catalogColumn.IsNullable,
-                baseColumn.Type?.Collation?.IsCaseSensitive);
-        }
-
-        private bool IsDeadPredicate(TSqlFragment node) => _deadPredicateStack.Count > 0 && _deadPredicateStack.Peek().Contains(node);
-
-        private const string NormalizationEliminatedConstructKind = "predicate eliminated by normalization";
-
-        private const string NormalizationEliminatedLedgerReason =
-            "this comparison lives inside a branch the engine's own normalize/simplify pass proves can never contribute a selected row (a same-column contradiction, or a tautology on a confirmed NOT NULL column) - never reaches a real Filter/Seek decision";
-
         private bool _negated;
 
         private TSqlFragment? _currentPredicateFragment;
@@ -237,9 +201,9 @@ public static class TypedPredicateExtractor
         {
             var previous = _position;
             _position = PredicatePosition.Seekable;
-            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
+            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.AcceptChildren(this);
-            _deadPredicateStack.Pop();
+            DeadPredicateStack.Pop();
             _position = previous;
         }
 
@@ -247,9 +211,9 @@ public static class TypedPredicateExtractor
         {
             var previous = _position;
             _position = PredicatePosition.Seekable;
-            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
+            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.AcceptChildren(this);
-            _deadPredicateStack.Pop();
+            DeadPredicateStack.Pop();
             _position = previous;
         }
 
@@ -260,9 +224,9 @@ public static class TypedPredicateExtractor
 
             var previous = _position;
             _position = PredicatePosition.Seekable;
-            _deadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
+            DeadPredicateStack.Push(ComputeDeadPredicates(node.SearchCondition));
             node.SearchCondition?.Accept(this);
-            _deadPredicateStack.Pop();
+            DeadPredicateStack.Pop();
             _position = previous;
         }
 

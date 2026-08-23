@@ -1389,6 +1389,66 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Build_SpRename_ObjectForm_UnqualifiedName_ResolvesAgainstDefaultSchema()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            EXEC sp_rename 'Orders', 'PurchaseOrders';
+            """);
+
+        Assert.Null(catalog.Find("dbo.Orders"));
+        Assert.NotNull(catalog.Find("dbo.PurchaseOrders"));
+    }
+
+    [Fact]
+    public void Build_SpRename_ObjectForm_ThreePartName_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            EXEC sp_rename 'somedb.dbo.Orders', 'PurchaseOrders';
+            """);
+
+        Assert.NotNull(catalog.Find("dbo.Orders"));
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename" && e.Reason.Contains("three-part", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpRename_ObjectForm_UnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("EXEC sp_rename 'dbo.NeverSeen', 'Whatever';");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpRename_ColumnForm_UnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("EXEC sp_rename 'dbo.NeverSeen.OrderCode', 'OrderNumber', 'COLUMN';");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (COLUMN)" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpRename_IndexForm_UnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("EXEC sp_rename 'dbo.NeverSeen.IX_Old', 'IX_New', 'INDEX';");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename (INDEX)" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_SpRename_UnmodeledObjectType_RecordsSkippedEntryAndKeepsOriginalDefinition()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL, CONSTRAINT PK_Orders PRIMARY KEY (OrderCode));
+            EXEC sp_rename 'PK_Orders', 'PK_Orders_New', 'CONSTRAINT';
+            """);
+
+        Assert.NotNull(catalog.Find("dbo.Orders"));
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "sp_rename" && e.Reason.Contains("'CONSTRAINT'", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Build_SpRename_NonLiteralArgument_LedgersAndKeepsOriginalDefinition()
     {
         var catalog = BuildFrom("""
@@ -1506,4 +1566,103 @@ public sealed class CatalogBuilderTests
         Assert.False(result.HasErrors, string.Join("; ", result.Errors.Select(e => e.Message)));
         return result;
     }
+
+    [Fact]
+    public void Build_AlterIndexOnUnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("ALTER INDEX IX_X ON dbo.NeverSeen DISABLE;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "ALTER INDEX" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DropIndexLegacySyntax_TableColumnNoLongerCountsAsIndexed()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            CREATE INDEX IX_Orders_OrderCode ON dbo.Orders(OrderCode);
+            DROP INDEX dbo.Orders.IX_Orders_OrderCode;
+            """);
+
+        var table = catalog.Find("dbo.Orders")!;
+        Assert.False(table.IsIndexedColumn("OrderCode"));
+    }
+
+    [Fact]
+    public void Build_DropIndexOnUnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("DROP INDEX IX_X ON dbo.NeverSeen;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "DROP INDEX" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_DropIndexNotInCatalog_RecordsSkippedEntryAndLeavesExistingIndexesIntact()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            CREATE INDEX IX_Orders_OrderCode ON dbo.Orders(OrderCode);
+            DROP INDEX IX_NeverCreated ON dbo.Orders;
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "DROP INDEX" && e.Reason.Contains("IX_NeverCreated", StringComparison.Ordinal));
+        Assert.True(catalog.Find("dbo.Orders")!.IsIndexedColumn("OrderCode"));
+    }
+
+    [Fact]
+    public void Build_DropSynonym_SynonymNoLongerResolves()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            CREATE SYNONYM dbo.OrdersAlias FOR dbo.Orders;
+            DROP SYNONYM dbo.OrdersAlias;
+            """);
+
+        Assert.Equal("dbo.OrdersAlias", catalog.ResolveSynonymName("dbo.OrdersAlias"));
+    }
+
+    [Fact]
+    public void Build_AlterColumnOnUnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("ALTER TABLE dbo.NeverSeen ALTER COLUMN Col INT NOT NULL;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "ALTER TABLE ALTER COLUMN" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_AlterColumnOnUnknownColumn_RecordsSkippedEntryAndLeavesTableIntact()
+    {
+        var catalog = BuildFrom("""
+            CREATE TABLE dbo.Orders (OrderCode VARCHAR(20) NOT NULL);
+            ALTER TABLE dbo.Orders ALTER COLUMN NeverExisted INT NOT NULL;
+            """);
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "ALTER TABLE ALTER COLUMN" && e.Reason.Contains("NeverExisted", StringComparison.Ordinal));
+        Assert.Equal(SqlTypeCategory.VarChar, catalog.Find("dbo.Orders")!.FindColumn("OrderCode")!.Type!.Category);
+    }
+
+    [Fact]
+    public void Build_DropColumnOnUnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("ALTER TABLE dbo.NeverSeen DROP COLUMN Col;");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "ALTER TABLE DROP" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateIndexOnUnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("CREATE INDEX IX_X ON dbo.NeverSeen(Col);");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE INDEX" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Build_CreateColumnstoreIndexOnUnresolvedTable_RecordsSkippedEntry()
+    {
+        var catalog = BuildFrom("CREATE COLUMNSTORE INDEX IX_X ON dbo.NeverSeen(Col);");
+
+        Assert.Contains(catalog.Skipped.Entries, e => e.ConstructKind == "CREATE COLUMNSTORE INDEX" && e.Reason.Contains("dbo.NeverSeen", StringComparison.Ordinal));
+    }
+
 }

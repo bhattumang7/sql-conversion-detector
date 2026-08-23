@@ -150,6 +150,16 @@ public sealed class DynamicSqlTransferTests
     }
 
     [Fact]
+    public void SelectAssignment_WithFromClause_SelfAddWhereVariableIsNotLeftmostOperand_IsNotRecognizedAsSelfReferentialAppend()
+    {
+        var result = Run("DECLARE @x NVARCHAR(50) = 'a'; SELECT @x = 'literal' + @x FROM sys.tables;");
+
+        var template = Assert.IsType<SqlTextValue.Template>(result["@x"]);
+        var hole = Assert.IsType<TemplatePiece.Hole>(Assert.Single(template.Pieces));
+        Assert.Equal(HoleKind.HavocWrite, hole.Kind);
+    }
+
+    [Fact]
     public void FetchIntoVariable_UnmodeledStatement_HavocsToTypedHoleWhenDeclaredTypeKnown()
     {
         var result = Run(
@@ -249,6 +259,30 @@ public sealed class DynamicSqlTransferTests
         var script = Assert.Single(scripts);
         Assert.Equal("@Id INT", script.ParameterDeclarationText);
         Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void SpExecuteSql_NamedArgumentsOutOfPositionalOrder_StillResolvesStatementAndParamsByName()
+    {
+        Run(
+            "EXEC sp_executesql @params = N'@Id INT', @stmt = N'SELECT * FROM Users WHERE Id = @Id';",
+            out var findings, out var scripts);
+
+        var script = Assert.Single(scripts);
+        Assert.Equal("SELECT * FROM Users WHERE Id = @Id", script.InnerText);
+        Assert.Equal("@Id INT", script.ParameterDeclarationText);
+        Assert.Empty(findings);
+    }
+
+    [Fact]
+    public void FetchCursorStatement_WithoutIntoClause_HavocsNoVariables()
+    {
+        var result = Run(
+            "DECLARE @x NVARCHAR(50) = 'unchanged'; " +
+            "DECLARE cur CURSOR FOR SELECT name FROM sys.tables; " +
+            "FETCH NEXT FROM cur;");
+
+        Assert.Equal("unchanged", LitText(result["@x"]));
     }
 
     [Fact]
